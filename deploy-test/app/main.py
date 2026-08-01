@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 
 APP_NAME = "deploy-test"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.1.1"
 
 app = FastAPI(
     title="Estoma Deploy Test",
