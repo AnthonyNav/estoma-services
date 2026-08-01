@@ -20,3 +20,19 @@ Monorepo for Estoma microservices.
 ## Services
 
 - `infra-test`: minimal FastAPI service used to validate CI, GHCR, GitOps, Traefik, and K3s.
+- `deploy-test`: minimal FastAPI service used to validate path-scoped CI/CD and GitOps automation.
+
+## CI/CD Automation
+
+Service workflows are scoped by path. A change under one service directory should only trigger that service workflow.
+
+On pushes to `develop`, each service workflow:
+
+1. Runs that service's tests.
+2. Builds and pushes only that service image to GHCR.
+3. Updates only that service's `develop` overlay tag in `estoma-infra`.
+4. Lets Argo CD deploy the updated image.
+
+The cross-repository update requires repository secret `ESTOMA_INFRA_TOKEN` in this repository. The token must allow `contents: write` on `AnthonyNav/estoma-infra`.
+
+Pushes to `main` build images but do not automatically update `staging` or `production` overlays. Those environments should be promoted explicitly from `estoma-infra`.

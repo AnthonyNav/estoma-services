@@ -1,0 +1,163 @@
+name: service-ci
+
+on:
+  workflow_call:
+    inputs:
+      service-name:
+        required: true
+        type: string
+      image-name:
+        required: true
+        type: string
+      infra-overlay-path:
+        required: true
+        type: string
+    secrets:
+      ESTOMA_INFRA_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.service-name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: ${{ inputs.service-name }}/pyproject.toml
+
+      - name: Install dependencies
+        run: pip install -e '.[test]'
+
+      - name: Run tests
+        run: pytest
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push'
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set image tag
+        id: meta
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          branch="${GITHUB_REF_NAME//\//-}"
+          echo "tag=${branch}-${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ inputs.service-name }}
+          push: true
+          tags: |
+            ${{ inputs.image-name }}:${{ steps.meta.outputs.tag }}
+            ${{ inputs.image-name }}:${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.title=${{ inputs.service-name }}
+
+  update-develop-infra:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref_name == 'develop'
+    concurrency:
+      group: estoma-infra-develop-update
+      cancel-in-progress: false
+    steps:
+      - name: Require estoma-infra token
+        env:
+          ESTOMA_INFRA_TOKEN: ${{ secrets.ESTOMA_INFRA_TOKEN }}
+        run: |
+          if [ -z "$ESTOMA_INFRA_TOKEN" ]; then
+            echo "::error::Missing repository secret ESTOMA_INFRA_TOKEN. It must allow contents:write on AnthonyNav/estoma-infra."
+            exit 1
+          fi
+
+      - name: Checkout estoma-infra
+        uses: actions/checkout@v5
+        with:
+          repository: AnthonyNav/estoma-infra
+          token: ${{ secrets.ESTOMA_INFRA_TOKEN }}
+          ref: main
+          path: estoma-infra
+
+      - name: Update develop image tag
+        env:
+          IMAGE_NAME: ${{ inputs.image-name }}
+          IMAGE_TAG: ${{ needs.build.outputs.tag }}
+          OVERLAY_PATH: ${{ inputs.infra-overlay-path }}
+        working-directory: estoma-infra
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          image_name = os.environ["IMAGE_NAME"]
+          image_tag = os.environ["IMAGE_TAG"]
+          overlay_path = Path(os.environ["OVERLAY_PATH"])
+
+          lines = overlay_path.read_text().splitlines(keepends=True)
+          changed = False
+          for index, line in enumerate(lines):
+              if line.strip() != f"- name: {image_name}":
+                  continue
+
+              cursor = index + 1
+              while cursor < len(lines) and not lines[cursor].lstrip().startswith("- name:"):
+                  if lines[cursor].strip().startswith("newTag:"):
+                      indent = lines[cursor][: len(lines[cursor]) - len(lines[cursor].lstrip())]
+                      lines[cursor] = f"{indent}newTag: {image_tag}\n"
+                      changed = True
+                      break
+                  cursor += 1
+              break
+
+          if not changed:
+              raise SystemExit(f"Could not update {image_name} in {overlay_path}")
+
+          overlay_path.write_text("".join(lines))
+          PY
+
+      - name: Commit and push estoma-infra update
+        env:
+          SERVICE_NAME: ${{ inputs.service-name }}
+          IMAGE_TAG: ${{ needs.build.outputs.tag }}
+        working-directory: estoma-infra
+        run: |
+          if git diff --quiet; then
+            echo "No infra changes needed."
+            exit 0
+          fi
+
+          git config user.name "estoma-ci"
+          git config user.email "estoma-ci@users.noreply.github.com"
+          git add "${{ inputs.infra-overlay-path }}"
+          git commit -m "chore(deploy): update ${SERVICE_NAME} develop image to ${IMAGE_TAG}"
+          git push origin main

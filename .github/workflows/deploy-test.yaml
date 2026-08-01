@@ -1,0 +1,29 @@
+name: deploy-test
+
+on:
+  pull_request:
+    paths:
+      - "deploy-test/**"
+      - ".github/workflows/deploy-test.yaml"
+      - ".github/workflows/service-ci.yaml"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "deploy-test/**"
+      - ".github/workflows/deploy-test.yaml"
+      - ".github/workflows/service-ci.yaml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  service-ci:
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service-name: deploy-test
+      image-name: ghcr.io/anthonynav/deploy-test
+      infra-overlay-path: apps/deploy-test/overlays/develop/kustomization.yaml
+    secrets: inherit
