@@ -1,19 +1,26 @@
-FROM python:3.13-slim
+FROM eclipse-temurin:25-jdk AS build
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+WORKDIR /workspace
+
+COPY .mvn .mvn
+COPY mvnw mvnw
+COPY deploy-test/pom.xml deploy-test/pom.xml
+COPY deploy-test/src deploy-test/src
+
+RUN chmod +x ./mvnw && ./mvnw -B -f deploy-test/pom.xml package -DskipTests
+
+FROM eclipse-temurin:25-jre
+
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0"
 
 WORKDIR /app
 
-RUN addgroup --system app && adduser --system --ingroup app app
-
-COPY pyproject.toml ./
-COPY app ./app
-
-RUN pip install --no-cache-dir . && chown -R app:app /app
+RUN groupadd --system app && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app
+COPY --from=build /workspace/deploy-test/target/*.jar /app/app.jar
+RUN chown -R app:app /app
 
 USER app
 
 EXPOSE 8080
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

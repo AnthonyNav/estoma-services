@@ -4,16 +4,22 @@ on:
   pull_request:
     paths:
       - "infra-test/**"
+      - ".mvn/**"
       - ".github/workflows/infra-test.yaml"
       - ".github/workflows/service-ci.yaml"
+      - "mvnw"
+      - "mvnw.cmd"
   push:
     branches:
       - develop
       - main
     paths:
       - "infra-test/**"
+      - ".mvn/**"
       - ".github/workflows/infra-test.yaml"
       - ".github/workflows/service-ci.yaml"
+      - "mvnw"
+      - "mvnw.cmd"
 
 permissions:
   contents: read
