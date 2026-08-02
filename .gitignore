@@ -10,4 +10,4 @@ __pycache__/
 .pytest_cache/
 .venv/
 target/
-.mvn/wrapper/maven-wrapper.jar
+**/.mvn/wrapper/maven-wrapper.jar

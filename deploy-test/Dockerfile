@@ -4,10 +4,10 @@ WORKDIR /workspace
 
 COPY .mvn .mvn
 COPY mvnw mvnw
-COPY deploy-test/pom.xml deploy-test/pom.xml
-COPY deploy-test/src deploy-test/src
+COPY pom.xml pom.xml
+COPY src src
 
-RUN chmod +x ./mvnw && ./mvnw -B -f deploy-test/pom.xml package -DskipTests
+RUN chmod +x ./mvnw && ./mvnw -B package -DskipTests
 
 FROM eclipse-temurin:25-jre
 
@@ -16,7 +16,7 @@ ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0"
 WORKDIR /app
 
 RUN groupadd --system app && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app
-COPY --from=build /workspace/deploy-test/target/*.jar /app/app.jar
+COPY --from=build /workspace/target/*.jar /app/app.jar
 RUN chown -R app:app /app
 
 USER app

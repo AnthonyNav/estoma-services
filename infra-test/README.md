@@ -16,18 +16,18 @@ Minimal Spring Boot microservice used to validate the Estoma platform pipeline.
 ## Local Run
 
 ```bash
-API_KEY=local-key ../mvnw spring-boot:run -f pom.xml
+API_KEY=local-key ./mvnw spring-boot:run
 ```
 
 ## Test
 
 ```bash
-../mvnw clean verify -f pom.xml
+./mvnw clean verify
 ```
 
 ## Container
 
 ```bash
-docker build -f infra-test/Dockerfile -t infra-test .
+docker build -t infra-test .
 docker run --rm -e API_KEY=local-key -p 8080:8080 infra-test
 ```

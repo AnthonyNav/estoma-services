@@ -14,18 +14,18 @@ Minimal Spring Boot service used to validate path-scoped CI/CD and GitOps deploy
 ## Local Run
 
 ```bash
-../mvnw spring-boot:run -f pom.xml
+./mvnw spring-boot:run
 ```
 
 ## Test
 
 ```bash
-../mvnw clean verify -f pom.xml
+./mvnw clean verify
 ```
 
 ## Container
 
 ```bash
-docker build -f deploy-test/Dockerfile -t deploy-test .
+docker build -t deploy-test .
 docker run --rm -p 8080:8080 deploy-test
 ```

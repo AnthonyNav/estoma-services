@@ -7,7 +7,7 @@ Monorepo for Estoma microservices.
 - Each microservice lives in a top-level directory.
 - No shared `libs/` or cross-service imports.
 - Each microservice owns its dependencies, tests, and Dockerfile.
-- Services use Java 25, Spring Boot 4.1.x, and Maven Wrapper.
+- Spring Boot services use Java 25 and keep their own Maven Wrapper inside the service directory.
 - GitHub Actions live under `.github/workflows/` and are scoped by path.
 - Deployment manifests live in `estoma-infra`, not in this repository.
 
@@ -38,22 +38,24 @@ The domain services and BFF currently have Spring Boot code skeletons only. Add 
 
 ## Local Development
 
-Run tests for one service from the repository root:
+Run tests for one service:
 
 ```bash
-./mvnw -B -f <service-name>/pom.xml clean verify
+cd <service-name>
+./mvnw -B clean verify
 ```
 
 Run a service locally:
 
 ```bash
-./mvnw -f <service-name>/pom.xml spring-boot:run
+cd <service-name>
+./mvnw spring-boot:run
 ```
 
 Build a service container from the repository root:
 
 ```bash
-docker build -f <service-name>/Dockerfile -t <service-name> .
+docker build -t <service-name> ./<service-name>
 ```
 
 ## CI/CD Automation
