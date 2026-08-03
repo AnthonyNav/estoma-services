@@ -5,9 +5,6 @@ import com.estoma.users.domain.Person;
 import com.estoma.users.domain.PersonRejectedException;
 import com.estoma.users.domain.PersonStatus;
 import com.estoma.users.domain.RejectionCode;
-import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
@@ -79,9 +76,9 @@ class JdbcPersonRepository implements PersonRepository {
           .param("phone", person.phone())
           .param("status", person.status().name())
           .param("version", person.version())
-          .param("createdAt", toTimestamp(person.createdAt()))
-          .param("updatedAt", toTimestamp(person.updatedAt()))
-          .param("deactivatedAt", toTimestamp(person.deactivatedAt()))
+          .param("createdAt", Timestamps.toTimestamp(person.createdAt()))
+          .param("updatedAt", Timestamps.toTimestamp(person.updatedAt()))
+          .param("deactivatedAt", Timestamps.toTimestamp(person.deactivatedAt()))
           .update();
     } catch (DuplicateKeyException e) {
       throw translateInsertConflict(e);
@@ -111,7 +108,7 @@ class JdbcPersonRepository implements PersonRepository {
           .param("emailNormalized", updated.email().normalized())
           .param("phone", updated.phone())
           .param("newVersion", updated.version())
-          .param("updatedAt", toTimestamp(updated.updatedAt()))
+          .param("updatedAt", Timestamps.toTimestamp(updated.updatedAt()))
           .param("personId", updated.personId())
           .param("expectedVersion", expectedVersion)
           .update();
@@ -136,23 +133,13 @@ class JdbcPersonRepository implements PersonRepository {
               AND status = CAST(:expectedCurrentStatus AS person_status)
             """)
         .param("newStatus", updated.status().name())
-        .param("deactivatedAt", toTimestamp(updated.deactivatedAt()))
+        .param("deactivatedAt", Timestamps.toTimestamp(updated.deactivatedAt()))
         .param("newVersion", updated.version())
-        .param("updatedAt", toTimestamp(updated.updatedAt()))
+        .param("updatedAt", Timestamps.toTimestamp(updated.updatedAt()))
         .param("personId", updated.personId())
         .param("expectedVersion", expectedVersion)
         .param("expectedCurrentStatus", expectedCurrentStatus.name())
         .update();
-  }
-
-  /**
-   * The PostgreSQL JDBC driver cannot infer a SQL type for a bare {@link
-   * Instant} parameter ("Can't infer the SQL type to use for an instance
-   * of java.time.Instant"); {@link OffsetDateTime} maps to {@code
-   * timestamptz} natively.
-   */
-  private static OffsetDateTime toTimestamp(Instant instant) {
-    return instant == null ? null : instant.atOffset(ZoneOffset.UTC);
   }
 
   private static PersonRejectedException translateInsertConflict(DuplicateKeyException e) {

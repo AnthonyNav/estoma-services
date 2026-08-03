@@ -2,9 +2,6 @@ package com.estoma.users.persistence;
 
 import com.estoma.users.application.port.PersonStatusHistoryRepository;
 import com.estoma.users.domain.PersonStatusChange;
-import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -36,11 +33,7 @@ class JdbcPersonStatusHistoryRepository implements PersonStatusHistoryRepository
         .param("newStatus", change.newStatus().name())
         .param("changedByAccountId", change.changedByAccountId())
         .param("correlationId", change.correlationId())
-        .param("changedAt", toTimestamp(change.changedAt()))
+        .param("changedAt", Timestamps.toTimestamp(change.changedAt()))
         .update();
-  }
-
-  private static OffsetDateTime toTimestamp(Instant instant) {
-    return instant == null ? null : instant.atOffset(ZoneOffset.UTC);
   }
 }
