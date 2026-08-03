@@ -185,6 +185,11 @@ public class JdbcOutboxRepository implements OutboxPort {
         .single();
   }
 
+  /** Count of rows currently PENDING only (used by the outbox pending gauge). */
+  public long countPending() {
+    return jdbc.sql("SELECT count(*) FROM outbox_messages WHERE status = 'PENDING'").query(Long.class).single();
+  }
+
   /** Count of rows currently PROCESSING (used by the "stuck" metric). */
   public long countProcessing() {
     return jdbc.sql("SELECT count(*) FROM outbox_messages WHERE status = 'PROCESSING'")

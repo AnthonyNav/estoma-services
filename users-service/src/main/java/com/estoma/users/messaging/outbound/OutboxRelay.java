@@ -6,6 +6,7 @@ import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.messaging.OutboxMetadata;
+import com.estoma.users.observability.OutboxMetrics;
 import com.estoma.users.persistence.JdbcOutboxRepository;
 import com.estoma.users.persistence.OutboxRecord;
 import java.util.ArrayList;
@@ -42,18 +43,21 @@ public class OutboxRelay {
   private final RabbitTemplate rabbitTemplate;
   private final EnvelopeJsonCodec codec;
   private final OutboxProperties properties;
+  private final OutboxMetrics metrics;
 
   public OutboxRelay(
       JdbcOutboxRepository outboxRepository,
       RoutingKeyResolver routingKeyResolver,
       RabbitTemplate rabbitTemplate,
       EnvelopeJsonCodec codec,
-      OutboxProperties properties) {
+      OutboxProperties properties,
+      OutboxMetrics metrics) {
     this.outboxRepository = outboxRepository;
     this.routingKeyResolver = routingKeyResolver;
     this.rabbitTemplate = rabbitTemplate;
     this.codec = codec;
     this.properties = properties;
+    this.metrics = metrics;
   }
 
   @Scheduled(fixedDelay = 2_000)
@@ -69,9 +73,11 @@ public class OutboxRelay {
       try {
         publish(record);
         published.add(record.messageId());
+        metrics.published();
       } catch (Exception e) {
         log.error("failed to publish outbox message {} ({}): {}", record.messageId(), record.messageType(), e.toString());
         failed.add(record.messageId());
+        metrics.failedPublish();
       }
     }
 

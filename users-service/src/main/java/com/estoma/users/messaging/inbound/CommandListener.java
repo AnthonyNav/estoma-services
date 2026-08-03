@@ -1,11 +1,17 @@
 package com.estoma.users.messaging.inbound;
 
+import com.estoma.users.application.CommandOutcome;
 import com.estoma.users.application.PersonCommandDispatcher;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
+import com.estoma.users.observability.ConsumerMetrics;
+import com.estoma.users.observability.ConsumerNames;
+import com.estoma.users.observability.LogContext;
 import com.rabbitmq.client.Channel;
 import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
@@ -29,18 +35,21 @@ public class CommandListener {
   private final PersonCommandDispatcher dispatcher;
   private final TransientFailureClassifier classifier;
   private final FailureRouter failureRouter;
+  private final ConsumerMetrics metrics;
 
   public CommandListener(
       EnvelopeJsonCodec codec,
       EnvelopeValidator validator,
       PersonCommandDispatcher dispatcher,
       TransientFailureClassifier classifier,
-      FailureRouter failureRouter) {
+      FailureRouter failureRouter,
+      ConsumerMetrics metrics) {
     this.codec = codec;
     this.validator = validator;
     this.dispatcher = dispatcher;
     this.classifier = classifier;
     this.failureRouter = failureRouter;
+    this.metrics = metrics;
   }
 
   @RabbitListener(
@@ -49,6 +58,7 @@ public class CommandListener {
       containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
+    metrics.received();
 
     // (1) decode + structural validation. Any failure here is PERMANENT.
     MessageEnvelope envelope;
@@ -57,14 +67,20 @@ public class CommandListener {
       validator.validate(envelope);
     } catch (Exception e) {
       log.error("invalid message on {}: {}", AmqpNames.QUEUE_COMMANDS, e.toString());
+      metrics.invalidMessage();
+      metrics.deadLettered();
       failureRouter.toDlq(message, e);
       channel.basicAck(deliveryTag, false);
       return;
     }
 
-    // (2) business processing: exactly one local transaction inside dispatch().
+    LogContext.putEnvelopeContext(envelope, ConsumerNames.COMMANDS);
+    Instant start = Instant.now();
     try {
-      dispatcher.dispatch(envelope);
+      // (2) business processing: exactly one local transaction inside dispatch().
+      CommandOutcome outcome = dispatcher.dispatch(envelope);
+      recordOutcome(outcome);
+      log.info("command {} processed: {}", envelope.messageType(), describe(outcome));
       // (3) commit already happened; result + event rows are durable.
       channel.basicAck(deliveryTag, false); // ◀ the ACK. After commit. Nothing else here.
     } catch (Exception e) {
@@ -75,8 +91,36 @@ public class CommandListener {
           envelope.messageId(),
           transientFailure,
           e.toString());
+      if (transientFailure) {
+        metrics.technicalFailure();
+        metrics.retried();
+      } else {
+        metrics.deadLettered();
+      }
       failureRouter.routeAfterFailure(message, e, transientFailure);
       channel.basicAck(deliveryTag, false);
+    } finally {
+      metrics.recordProcessingTime(Duration.between(start, Instant.now()));
+      LogContext.clear();
     }
+  }
+
+  private void recordOutcome(CommandOutcome outcome) {
+    switch (outcome) {
+      case CommandOutcome.Succeeded succeeded -> metrics.succeeded();
+      case CommandOutcome.Rejected rejected -> {
+        LogContext.putErrorCode(rejected.code().name());
+        metrics.rejected();
+      }
+      case CommandOutcome.Duplicate duplicate -> metrics.duplicate();
+    }
+  }
+
+  private static String describe(CommandOutcome outcome) {
+    return switch (outcome) {
+      case CommandOutcome.Succeeded succeeded -> "succeeded, aggregateVersion=" + succeeded.aggregateVersion();
+      case CommandOutcome.Rejected rejected -> "rejected, code=" + rejected.code();
+      case CommandOutcome.Duplicate duplicate -> "duplicate";
+    };
   }
 }

@@ -56,6 +56,9 @@ spring:
         default-requeue-rejected: false
 
 estoma:
+  # The deployment environment name, read by EstomaJsonLogFormatter for
+  # the mandatory "environment" log field (security-observability.md:446-469).
+  environment: ${ESTOMA_ENVIRONMENT:local}
   messaging:
     allowed-producers: bff
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
@@ -69,6 +72,14 @@ estoma:
 
 server:
   port: 8080
+
+logging:
+  structured:
+    format:
+      # Custom formatter, not one of Boot's built-in formats: none of
+      # ECS/GELF/Logstash match the mandatory 9-field snake_case schema
+      # (docs/system-contract.md §11) -- see EstomaJsonLogFormatter.
+      console: com.estoma.users.observability.EstomaJsonLogFormatter
 
 management:
   endpoints:

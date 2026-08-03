@@ -12,6 +12,7 @@ import com.estoma.users.contract.result.SucceededPayload;
 import com.estoma.users.domain.PersonRejectedException;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.messaging.OutboxMetadata;
+import com.estoma.users.observability.ConsumerNames;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -40,8 +41,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class PersonCommandDispatcher {
 
-  private static final String CONSUMER_NAME = "users-service.commands";
-
   private final InboxPort inbox;
   private final OutboxPort outbox;
   private final PersonAuthorizationPolicy authorizationPolicy;
@@ -65,7 +64,7 @@ public class PersonCommandDispatcher {
   @Transactional
   public CommandOutcome dispatch(MessageEnvelope envelope) {
     // (a) Consumer Inbox — the FIRST statement in the transaction.
-    boolean inserted = inbox.tryInsert(CONSUMER_NAME, envelope.messageId(), envelope.correlationId());
+    boolean inserted = inbox.tryInsert(ConsumerNames.COMMANDS, envelope.messageId(), envelope.correlationId());
     if (!inserted) {
       return new CommandOutcome.Duplicate();
     }
