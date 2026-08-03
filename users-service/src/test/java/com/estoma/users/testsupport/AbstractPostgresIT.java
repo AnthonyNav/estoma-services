@@ -33,7 +33,13 @@ public abstract class AbstractPostgresIT {
       new PostgreSQLContainer("postgres:16-alpine")
           .withDatabaseName("users_db")
           .withUsername("users_service")
-          .withPassword("users_service");
+          .withPassword("users_service")
+          // Bounds how long any JDBC call can hang against a wedged
+          // connection (e.g. a paused/frozen container) -- matches the
+          // same socketTimeout/connectTimeout added to the production
+          // datasource URL in application.yml.
+          .withUrlParam("socketTimeout", "10")
+          .withUrlParam("connectTimeout", "10");
 
   static {
     POSTGRES.start();

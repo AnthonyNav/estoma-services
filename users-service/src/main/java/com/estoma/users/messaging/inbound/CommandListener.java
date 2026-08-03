@@ -43,7 +43,10 @@ public class CommandListener {
     this.failureRouter = failureRouter;
   }
 
-  @RabbitListener(queues = AmqpNames.QUEUE_COMMANDS, containerFactory = "manualAckContainerFactory")
+  @RabbitListener(
+      id = "commandListener", // referenced by CommandConsumerHealthIndicator
+      queues = AmqpNames.QUEUE_COMMANDS,
+      containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
 

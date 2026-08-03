@@ -100,6 +100,15 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- Only needed for TestRestTemplate: HealthEndpointsIT / EndpointExposureIT /
+           HttpSecurityIT drive the app's own HTTP surface in tests. Production code
+           makes no outbound HTTP calls (see docs/system-contract.md), so
+           spring-boot-starter-restclient is never a compile/runtime dependency. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-restclient-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-testcontainers</artifactId>
       <scope>test</scope>

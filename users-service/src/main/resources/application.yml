@@ -6,6 +6,17 @@ spring:
     url: ${USERS_DB_URL:jdbc:postgresql://localhost:5432/users_db}
     username: ${USERS_DB_RUNTIME_USER:users_service}
     password: ${USERS_DB_RUNTIME_PASSWORD:users_service}
+    hikari:
+      # Bounds how long a query can hang against a wedged connection (a
+      # network partition, a frozen peer) rather than relying on the OS's
+      # TCP keepalive, which can take minutes to notice. Set at the pool
+      # level (not baked into the JDBC URL) so it applies regardless of
+      # what USERS_DB_URL is provided.
+      connection-timeout: 10000
+      validation-timeout: 5000
+      data-source-properties:
+        socketTimeout: 10
+        connectTimeout: 10
 
   flyway:
     enabled: true
@@ -60,15 +71,38 @@ server:
   port: 8080
 
 management:
+  endpoints:
+    # Deny-by-default, then opt in explicitly below (docs/system-contract.md §11).
+    access:
+      default: none
+    web:
+      base-path: /
+      exposure:
+        include: health,info,prometheus
+      path-mapping:
+        prometheus: metrics
   endpoint:
     health:
+      access: read-only
       probes:
         enabled: true
       show-details: never
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
+      show-components: never
+      group:
+        startup:
+          include: db, schemaVersion
+        readiness:
+          include: db, commandConsumer, outboxRelay
+        liveness:
+          # Deliberately excludes db/commandConsumer/outboxRelay: liveness
+          # must never run an expensive check, and a temporarily degraded
+          # dependency must not trigger a restart loop
+          # (security-observability.md:711, docs/system-contract.md §11).
+          include: livenessState
+    info:
+      access: read-only
+    prometheus:
+      access: read-only
   info:
     env:
       enabled: true
