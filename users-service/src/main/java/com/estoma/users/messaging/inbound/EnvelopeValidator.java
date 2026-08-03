@@ -59,6 +59,15 @@ public class EnvelopeValidator {
     if (envelope.operationId() == null) {
       throw new InvalidMessageException("commands require operationId for result correlation");
     }
+    if (envelope.actor() == null || envelope.actor().accountId() == null) {
+      // A command with no identified actor is treated as structurally
+      // invalid, not as a business authorization failure — none of the
+      // four commands has a rejection code for "no actor" (there is no
+      // authorization-service yet to even define one against;
+      // docs/system-contract.md §10 D5). This guarantees every command
+      // PersonCommandDispatcher ever sees has a usable actor.
+      throw new InvalidMessageException("commands require actor.accountId");
+    }
   }
 
   private static void requireNonNull(Object value, String fieldName) {

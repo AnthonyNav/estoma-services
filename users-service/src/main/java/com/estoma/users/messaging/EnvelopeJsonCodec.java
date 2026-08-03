@@ -46,4 +46,14 @@ public class EnvelopeJsonCodec {
   public String writeValueAsString(Object value) {
     return mapper.writeValueAsString(value);
   }
+
+  /** Parses a raw JSON string (e.g. an {@code outbox_messages.payload::text} column) into a {@link JsonNode}. */
+  public JsonNode parseJson(String json) {
+    return mapper.readTree(json);
+  }
+
+  /** Parses a raw JSON string into a specific type (e.g. {@link OutboxMetadata}). */
+  public <T> T readValue(String json, Class<T> type) {
+    return mapper.readValue(json, type);
+  }
 }

@@ -1,0 +1,158 @@
+package com.estoma.users.application;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+
+import com.estoma.users.application.command.ActivatePersonCommand;
+import com.estoma.users.application.command.CreatePersonCommand;
+import com.estoma.users.application.command.DeactivatePersonCommand;
+import com.estoma.users.application.command.UpdatePersonCommand;
+import com.estoma.users.contract.Actor;
+import com.estoma.users.contract.MessageEnvelope;
+import com.estoma.users.contract.MessageKind;
+import com.estoma.users.contract.MessageTypes;
+import com.estoma.users.messaging.AmqpNames;
+import com.estoma.users.messaging.EnvelopeJsonCodec;
+import com.estoma.users.testsupport.AbstractMessagingIT;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.AmqpAdmin;
+import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageProperties;
+import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import tools.jackson.databind.JsonNode;
+
+/**
+ * The producer-side obligation behind the consumer version ladder
+ * (events.md:193-205, docs/system-contract.md §5): {@code
+ * aggregateVersion} must be correct and gapless per {@code personId}.
+ * {@code users-service} consumes zero events itself, so it cannot be an
+ * out-of-order *consumer* — this instead proves the contract it emits is
+ * *sufficient* for a downstream consumer's out-of-order handling, by
+ * feeding the four events back through that exact ladder, deliberately
+ * shuffled.
+ */
+class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
+
+  @Autowired private RabbitTemplate rabbitTemplate;
+  @Autowired private AmqpAdmin amqpAdmin;
+  @Autowired private EnvelopeJsonCodec codec;
+  @Autowired private TopicExchange eventsExchange;
+
+  @Test
+  void fourSequentialCommandsProduceFourEventsWithGaplessAggregateVersions() {
+    UUID personId = UUID.randomUUID();
+    Queue eventsQueue = amqpAdmin.declareQueue();
+    amqpAdmin.declareBinding(BindingBuilder.bind(eventsQueue).to(eventsExchange).with("identity.person.*"));
+
+    try {
+      send(MessageTypes.CREATE_PERSON, codec.toJsonNode(
+          new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null)));
+      MessageEnvelope created = awaitNextEvent(eventsQueue, "PersonCreated");
+
+      send(MessageTypes.UPDATE_PERSON, codec.toJsonNode(
+          new UpdatePersonCommand(personId, 1, "Augusta", "Lovelace", null, "ada." + personId + "@example.edu", null)));
+      MessageEnvelope updated = awaitNextEvent(eventsQueue, "PersonUpdated");
+
+      send(MessageTypes.DEACTIVATE_PERSON, codec.toJsonNode(new DeactivatePersonCommand(personId, 2)));
+      MessageEnvelope deactivated = awaitNextEvent(eventsQueue, "PersonDeactivated");
+
+      send(MessageTypes.ACTIVATE_PERSON, codec.toJsonNode(new ActivatePersonCommand(personId, 3)));
+      MessageEnvelope activated = awaitNextEvent(eventsQueue, "PersonActivated");
+
+      assertThat(created.aggregateVersion()).isEqualTo(1);
+      assertThat(updated.aggregateVersion()).isEqualTo(2);
+      assertThat(deactivated.aggregateVersion()).isEqualTo(3);
+      assertThat(activated.aggregateVersion()).isEqualTo(4);
+
+      // Feed the four events back through the documented version ladder,
+      // deliberately shuffled, and confirm a downstream projection would
+      // still converge on version 4 -- the actual point of this contract.
+      List<MessageEnvelope> shuffled = new ArrayList<>(List.of(activated, created, deactivated, updated));
+      Collections.shuffle(shuffled);
+      int converged = applyVersionLadder(shuffled);
+      assertThat(converged).isEqualTo(4);
+    } finally {
+      amqpAdmin.deleteQueue(eventsQueue.getName());
+    }
+  }
+
+  /**
+   * events.md:193-205's consumer version ladder. A real consumer buffers
+   * an out-of-order event (a "gap") and re-checks its buffer whenever it
+   * successfully advances, rather than giving up on that event forever —
+   * so this keeps sweeping the pending set until a full pass makes no
+   * progress, correctly simulating eventual convergence once all four
+   * events are available (as they are here, just shuffled).
+   */
+  private static int applyVersionLadder(List<MessageEnvelope> events) {
+    List<MessageEnvelope> pending = new ArrayList<>(events);
+    int localVersion = 0;
+    boolean progressMadeThisPass = true;
+    while (progressMadeThisPass && !pending.isEmpty()) {
+      progressMadeThisPass = false;
+      var iterator = pending.iterator();
+      while (iterator.hasNext()) {
+        int received = iterator.next().aggregateVersion();
+        if (received <= localVersion) {
+          iterator.remove(); // stale or duplicate: ignore
+          progressMadeThisPass = true;
+        } else if (received == localVersion + 1) {
+          localVersion = received; // apply
+          iterator.remove();
+          progressMadeThisPass = true;
+        }
+        // else: still a gap relative to the current localVersion --
+        // leave it in pending and re-check on the next pass.
+      }
+    }
+    return localVersion;
+  }
+
+  private MessageEnvelope awaitNextEvent(Queue queue, String expectedType) {
+    Message[] holder = new Message[1];
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> {
+              Message message = rabbitTemplate.receive(queue.getName());
+              assertThat(message).isNotNull();
+              holder[0] = message;
+            });
+    MessageEnvelope envelope = codec.decode(holder[0].getBody());
+    assertThat(envelope.messageType()).isEqualTo(expectedType);
+    return envelope;
+  }
+
+  private void send(String messageType, JsonNode payload) {
+    MessageEnvelope envelope =
+        new MessageEnvelope(
+            UUID.randomUUID(),
+            messageType,
+            1,
+            MessageKind.COMMAND,
+            "bff",
+            Instant.now(),
+            UUID.randomUUID(),
+            null,
+            UUID.randomUUID(),
+            "users-service",
+            null,
+            null,
+            new Actor(UUID.randomUUID()),
+            payload);
+    MessageProperties props = new MessageProperties();
+    props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+    rabbitTemplate.send(
+        AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(codec.encode(envelope), props));
+  }
+}

@@ -68,6 +68,21 @@ class EnvelopeValidatorTest {
   }
 
   @Test
+  void rejectsMissingActor() {
+    MessageEnvelope missingActor = withActor(validCommand(), null);
+
+    assertThatThrownBy(() -> validator.validate(missingActor)).isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsActorWithoutAccountId() {
+    MessageEnvelope actorWithoutAccountId = withActor(validCommand(), new Actor(null));
+
+    assertThatThrownBy(() -> validator.validate(actorWithoutAccountId))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
   void rejectsMissingMessageId() {
     assertThatThrownBy(() -> validator.validate(withMessageId(validCommand(), null)))
         .isInstanceOf(InvalidMessageException.class);
@@ -161,5 +176,12 @@ class EnvelopeValidatorTest {
         e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
         correlationId, e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
+  }
+
+  private MessageEnvelope withActor(MessageEnvelope e, Actor actor) {
+    return new MessageEnvelope(
+        e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
+        e.correlationId(), e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        e.aggregateVersion(), actor, e.payload());
   }
 }

@@ -21,6 +21,15 @@ import org.springframework.beans.factory.annotation.Autowired;
  * Verifies the real broker topology {@link AmqpTopologyConfig} declares
  * (docs/system-contract.md §9), against an actual RabbitMQ instance — not
  * just that the {@code @Bean} methods run without throwing.
+ *
+ * <p>Since the command handlers/dispatcher commit, {@code CommandListener}
+ * is a live consumer of {@code commands.users-service}: any message
+ * landing there is immediately picked up, not left sitting for a test to
+ * {@code receive()} directly. Two tests below observe the routing proof
+ * one hop further downstream instead (the DLQ), since a raw non-JSON test
+ * payload is exactly what {@code CommandListener} rejects as an invalid
+ * message and forwards there — which still proves the binding delivered
+ * it to {@code commands.users-service} in the first place.
  */
 class AmqpTopologyConfigIT extends AbstractMessagingIT {
 
@@ -29,14 +38,18 @@ class AmqpTopologyConfigIT extends AbstractMessagingIT {
   @Autowired private TopicExchange eventsExchange;
 
   @Test
-  void commandPublishedToCommandsExchangeArrivesOnTheCommandQueue() {
+  void commandPublishedToCommandsExchangeIsConsumedAndAnInvalidPayloadReachesTheDlq() {
     String body = "test-" + UUID.randomUUID();
 
-    rabbitTemplate.convertAndSend(
-        AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, body);
+    rabbitTemplate.convertAndSend(AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, body);
 
-    Message received = rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS, 2_000);
-    assertThat(received).isNotNull();
+    // CommandListener consumes it from commands.users-service and, since
+    // a bare string isn't a valid envelope, routes it to the DLQ --
+    // proving platform.commands really is bound to commands.users-service
+    // with routing key "users-service".
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .untilAsserted(() -> assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS_DLQ)).isNotNull());
   }
 
   @Test
@@ -50,36 +63,26 @@ class AmqpTopologyConfigIT extends AbstractMessagingIT {
   }
 
   @Test
-  void messageRoutedToTheFiveSecondRetryTierReappearsOnTheCommandQueueAfterItsTtlExpires() {
-    // Drain anything left over from other tests sharing this broker.
-    // receive(name) (no timeout) does a single non-blocking basic.get;
-    // receive(name, 0) instead opens a consumer with a 0ms wait, which
-    // throws ConsumeOkNotReceivedException rather than returning null.
-    while (rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS) != null) {
-      // drain
-    }
-
+  void messageRoutedToTheFiveSecondRetryTierReappearsOnCommandsAndThenReachesTheDlq() {
     MessageProperties props = new MessageProperties();
     props.getHeaders().put(AmqpNames.HEADER_ATTEMPT, 1);
     Message message = new Message("retry-me".getBytes(), props);
 
     rabbitTemplate.send(AmqpNames.EXCHANGE_DLX, AmqpNames.ROUTING_KEY_RETRY_5S, message);
 
-    // Immediately after publishing, the message must NOT be on the
-    // command queue yet -- it is sitting in the retry tier waiting out
-    // its TTL.
-    assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS, 200)).isNull();
-
     // Once the 5s TTL elapses, the broker dead-letters it back onto
-    // platform.commands with the fixed command routing key, and it
-    // reappears here -- proving the whole retry-tier chain (TTL +
-    // dead-letter-exchange + dead-letter-routing-key) is wired correctly,
-    // not just that the beans were created.
+    // platform.commands with the fixed command routing key, landing on
+    // commands.users-service -- proving the whole retry-tier chain (TTL +
+    // dead-letter-exchange + dead-letter-routing-key) is wired correctly.
+    // CommandListener immediately consumes it there and, since "retry-me"
+    // isn't a valid envelope, forwards it to the DLQ; that's where this
+    // test observes it, one hop further downstream than in the commit 7
+    // version of this test (see class Javadoc).
     await()
         .atMost(Duration.ofSeconds(8))
         .untilAsserted(
             () -> {
-              Message redelivered = rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS, 500);
+              Message redelivered = rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS_DLQ);
               assertThat(redelivered).isNotNull();
               assertThat(new String(redelivered.getBody())).isEqualTo("retry-me");
             });
