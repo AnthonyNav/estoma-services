@@ -15,7 +15,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 class EnvelopeValidatorTest {
 
-  private final EnvelopeValidator validator = new EnvelopeValidator(new MessagingProperties(Set.of("bff")));
+  private final EnvelopeValidator validator =
+      new EnvelopeValidator(new MessagingProperties(Set.of("bff"), true, 3));
   private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
@@ -81,7 +82,7 @@ class EnvelopeValidatorTest {
   @Test
   void allowsASecondConfiguredProducer() {
     EnvelopeValidator twoProducerValidator =
-        new EnvelopeValidator(new MessagingProperties(Set.of("bff", "student-import-process")));
+        new EnvelopeValidator(new MessagingProperties(Set.of("bff", "student-import-process"), true, 3));
 
     assertThatCode(
             () -> twoProducerValidator.validate(withProducer(validCommand(), "student-import-process")))

@@ -23,6 +23,39 @@ spring:
     placeholders:
       runtime_role: ${USERS_DB_RUNTIME_USER:users_service}
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    # Required for RabbitConfig's RabbitTemplate confirm/return callbacks
+    # to actually fire (docs/system-contract.md §7: publisher confirms on
+    # every publish).
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        # Broker-side TTL retry tiers handle backoff, not Spring AMQP's
+        # in-process retry (docs/system-contract.md §9) -- it would block
+        # the consumer thread for the whole backoff and lose the attempt
+        # count on pod restart.
+        retry:
+          enabled: false
+        default-requeue-rejected: false
+
+estoma:
+  messaging:
+    allowed-producers: bff
+    topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
+    command-max-attempts: 3
+  outbox:
+    claim-batch-size: 20
+    lease: 30s
+    max-attempts: 10
+    published-retention: 7d
+    inbox-retention: 30d
+
 server:
   port: 8080
 
