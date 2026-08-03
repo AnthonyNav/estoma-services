@@ -559,11 +559,13 @@ migrations, verified by the repository integration tests.
 
 ## 15. Operations runbook
 
-**Outbox stuck in `PROCESSING`:** check
-`outbox_pending_stuck_processing` metric; `OutboxSweeper` should clear
-these automatically once the lease (`estoma.outbox.lease`) expires. If it
-doesn't clear, check whether the relay pod is crash-looping before the
-mark step ever runs.
+**Outbox stuck in `PROCESSING`:** check the `estoma_outbox_stuck_processing`
+gauge (`OutboxMetrics`, refreshed every 10s — see §11). `OutboxSweeper`
+should clear these automatically once the lease (`estoma.outbox.lease`,
+default 30s) expires. If it doesn't clear, check whether the relay pod is
+crash-looping before the mark step ever runs, and check
+`estoma_outbox_pending`/`estoma_outbox_oldest_pending_age_seconds` for
+whether the relay is keeping up at all.
 
 **DLQ replay:** inspect `commands.users-service.dlq` in the RabbitMQ
 management UI; each dead-lettered message carries `x-estoma-attempt` and
@@ -572,6 +574,14 @@ here are either permanently invalid messages or exhausted transient
 failures, never functional rejections (those never reach the DLQ, by
 design — §7).
 
-**Local development:** see `README.md` for `./mvnw spring-boot:run` with
-`estoma.messaging.topology.declare=true`, which makes the application
-self-provision the full topology in §9 against a local RabbitMQ.
+**Reading the logs for one operation:** every structured log line carries
+`correlation_id` (the whole flow), `message_id` (this specific message),
+and `causation_id` (what produced it) — filter by `correlation_id` to see
+a command's full path through validation, dispatch, and the derived
+result/event. A rejection additionally carries `error_code`.
+
+**Local development:** see `README.md` — `docker compose up -d` starts a
+local PostgreSQL and RabbitMQ that match the service's own defaults (no
+env vars required), then `./mvnw spring-boot:run` self-provisions the
+full topology in §9 against them (`estoma.messaging.topology-declare`
+defaults to `true`).
