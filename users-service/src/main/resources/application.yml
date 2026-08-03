@@ -2,6 +2,27 @@ spring:
   application:
     name: users-service
 
+  datasource:
+    url: ${USERS_DB_URL:jdbc:postgresql://localhost:5432/users_db}
+    username: ${USERS_DB_RUNTIME_USER:users_service}
+    password: ${USERS_DB_RUNTIME_PASSWORD:users_service}
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+    baseline-on-migrate: false
+    # Separate migration credentials, per
+    # security-observability.md:235. Defaults to the runtime credentials
+    # so a single-user local/dev database still works; estoma-infra
+    # supplies distinct migration credentials in staging/prod.
+    url: ${USERS_DB_URL:jdbc:postgresql://localhost:5432/users_db}
+    user: ${USERS_DB_MIGRATION_USER:users_service}
+    password: ${USERS_DB_MIGRATION_PASSWORD:users_service}
+    placeholders:
+      runtime_role: ${USERS_DB_RUNTIME_USER:users_service}
+
 server:
   port: 8080
 

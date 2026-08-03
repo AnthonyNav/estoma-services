@@ -79,7 +79,7 @@ CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_
 CREATE FUNCTION prevent_person_id_change() RETURNS trigger AS $$
 BEGIN
     IF NEW.person_id <> OLD.person_id THEN
-        RAISE EXCEPTION 'person_id is immutable';
+        RAISE EXCEPTION 'person_id is immutable' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
 END;
