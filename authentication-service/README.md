@@ -30,6 +30,9 @@ This service is in scaffold stage. It only exposes operational endpoints and doc
 ## Initial Endpoints
 
 - `GET /health`
+- `GET /health/startup`
+- `GET /health/readiness`
+- `GET /health/liveness`
 - `GET /version`
 - `GET /actuator/health`
 - `GET /actuator/health/liveness`

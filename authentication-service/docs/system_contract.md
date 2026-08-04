@@ -206,4 +206,6 @@ PR1 is complete when:
 - this system contract is present;
 - the phased execution plan is present;
 - pending decisions are explicitly documented;
+- operational health endpoints are available for startup, readiness, and liveness checks;
+- canonical enum/constant names exist for already-defined commands, RPC operations, events, login types, account statuses, exchanges, and queues;
 - no authentication logic, token logic, password hashing, RabbitMQ consumers, or database migrations are implemented prematurely.

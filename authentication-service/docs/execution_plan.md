@@ -21,6 +21,8 @@ Scope:
 - add this execution plan;
 - add `docs/pending_decisions.md`;
 - add a migrations placeholder if needed;
+- add operational health endpoints for startup, readiness, and liveness;
+- add canonical enum/constant names for defined commands, RPC operations, events, login types, account statuses, exchanges, and queues;
 - update the service README with documentation links.
 
 Out of scope:
@@ -29,6 +31,7 @@ Out of scope:
 - password hashing;
 - token generation;
 - RabbitMQ consumers;
+- RabbitMQ publishers;
 - database migrations with real tables;
 - Outbox Relay implementation.
 
@@ -36,6 +39,7 @@ Acceptance criteria:
 
 - service builds and tests continue passing;
 - docs describe the system boundary and future phases;
+- code only exposes safe foundation constants and operational endpoints;
 - pending decisions remain explicit.
 
 ## PR2: Runtime Infrastructure Shell
