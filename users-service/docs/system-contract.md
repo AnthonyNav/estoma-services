@@ -257,19 +257,79 @@ CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_
   `UPDATE ... WHERE person_id = ? AND version = ?` with a rows-affected
   check. **Not** JPA `@Version` — see §13.
 
+### Publisher confirms are synchronous from the relay's point of view (Round 1)
+
+**`RabbitTemplate.send(...)` returning does NOT mean a message was
+published.** The publisher confirm arrives asynchronously; an unconfirmed
+or NACKed publish, or one returned as unroutable, must never be treated
+as success. `ConfirmedRabbitPublisher` is the single place this
+distinction is made — both `OutboxRelay` and `FailureRouter` publish
+through it and block until the outcome is known, never on a bare `send()`
+followed immediately by marking something as done.
+
+Two publication modes, matching whether the destination MUST be routable:
+
+|  | `mandatory` | Success requires |
+|---|---|---|
+| RESULT / retry tier / DLQ (`publishRequiredRoute`) | `true` | publisher confirm ACK **and** no `basic.return` |
+| EVENT (`publishEvent`) | `false` | publisher confirm ACK only |
+
+EVENT consumers own their own queues/bindings; a still-missing binding
+must not fail this service's Outbox (`platform.events` risk R1/R9 — §14).
+RESULT, retry, and DLQ publications, by contrast, are only correct if
+they actually land in a queue — an unroutable RESULT is a real failure
+(`PUBLISH_RETURNED`), not something to log and ignore.
+
+Each publication gets its own random `publishAttemptId`, used only for
+`CorrelationData` and diagnostics — never the wire `messageId`, which
+stays stable across republications. A stale worker can legitimately
+republish the same `messageId` after losing its Outbox lease (see §8);
+reusing that id as the correlation id would risk crossing two in-flight
+confirms.
+
+**The command's original delivery is ACKed only after its retry/DLQ
+republication is itself confirmed** — never on a bare `send()`.
+`CommandListener` calls `basicAck` after `FailureRouter` returns
+successfully; if the republication cannot be confirmed
+(`RabbitPublishException`), the original is NACKed with `requeue=true`
+instead of being silently dropped or acknowledged. If even that NACK
+fails (the channel is already closed), the exception is allowed to
+escape uncaught — no ACK is attempted, and RabbitMQ redelivers once the
+connection recovers. No sleep, no local blocking retry.
+
+Known limitation: if retry/DLQ stays unroutable, this NACK-and-requeue
+can produce a tight redelivery loop. Conserving the message is
+prioritized over avoiding that loop for this round; it is observable via
+`technical_failures` and the `PUBLISH_*` logs below.
+
+Sanitized technical failure codes (`OutboxFailureCode`), the only thing
+ever persisted in `outbox_messages.last_error_code` or logged as
+`error_code` — never a payload, a stack trace, or `exception.getMessage()`:
+
+```
+PUBLISH_NACK  PUBLISH_TIMEOUT  PUBLISH_RETURNED  PUBLISH_CONNECTION_FAILURE
+PUBLISH_INTERRUPTED  PUBLISH_UNEXPECTED_ERROR  LEASE_EXPIRED
+```
+
+`CLAIM_LOST_BEFORE_MARK` is deliberately **not** one of these — see §8.
+
 End-to-end pseudocode (representative of all four commands; `CreatePerson`
 shown):
 
 ```
 ═══ AMQP delivery thread — NO transaction open ═══
 onMessage:
-  decode + validate structure         → invalid ⇒ straight to DLQ, ACK
+  decode + validate structure   → invalid ⇒ toDlq (confirmed) ⇒ ACK
+                                            not confirmed ⇒ NACK(requeue=true)
   outcome = dispatcher.handle(envelope)   // the ONE @Transactional call
-    catch transient failure  → retry tier, or DLQ if attempts exhausted, ACK
-    catch anything else      → DLQ, ACK
+    catch failure → routeAfterFailure (retry tier, or DLQ if attempts exhausted)
+                    confirmed     ⇒ ACK
+                    not confirmed ⇒ NACK(requeue=true)
   metrics.record(outcome)
-  channel.basicAck(deliveryTag)       // ◀ after commit; nothing else here
-  // No AMQP publish happens on this thread — the OutboxRelay owns that.
+  channel.basicAck(deliveryTag)       // ◀ after commit AND after any
+                                       //   republication is confirmed
+  // No AMQP publish happens on this thread except retry/DLQ republication
+  // -- the OutboxRelay owns RESULT/EVENT publishing.
 
 ═══ dispatcher.handle — @Transactional ═══
 BEGIN
@@ -287,6 +347,15 @@ BEGIN
     return Rejected(r.code)          // NO rethrow → COMMIT → ACK → never DLQ
 COMMIT
 ```
+
+**Crash after publish, before mark:** RabbitMQ can confirm a publication
+that this service then never gets to record as `PUBLISHED` (a hard
+crash, a lost lease). Recovery republishes the exact same wire
+`messageId` once the lease is reclaimed (§8) — correctness then depends
+entirely on the consumer's own `(messageId, consumerName)` deduplication,
+not on this service ever guaranteeing exactly-once delivery. This is the
+explicit AT_LEAST_ONCE trade-off, demonstrated end to end by
+`OutboxCrashAfterPublishIT`.
 
 ---
 
@@ -307,20 +376,54 @@ proposed upstream — §10):
 1. `outbox_messages.metadata jsonb NULL` — carries `destination`,
    `operationId`, `actor`, none of which are derivable from `payload` alone
    at relay time.
-2. `ix_outbox_pending` is a **partial** index
-   (`WHERE status IN ('PENDING','PROCESSING')`) instead of a plain
-   `(status, available_at)` index — same purpose, smaller and cheaper as
-   `PUBLISHED` rows accumulate.
+2. `ix_outbox_pending` is a **partial** index (`WHERE status = 'PENDING'`)
+   instead of a plain `(status, available_at)` index — same purpose,
+   smaller and cheaper as `PUBLISHED` rows accumulate.
+3. **(Round 1)** `claim_token uuid`, `lease_until timestamptz`,
+   `last_error_code varchar(80)`, `last_error_at timestamptz`, plus
+   `ix_outbox_processing_lease` and constraint `ck_outbox_claim_state` —
+   see "Fencing" below.
 
-`available_at` is deliberately overloaded: it means "do not touch this row
-before this instant," serving as PENDING backoff *and* as the PROCESSING
-lease deadline. This keeps the table shape identical to `data-model.md`
-§4 — important because four more shared services will copy this table.
+The outbox primary key **is** the wire `messageId`, generated inside the
+originating transaction. Republishing after a lost mark reuses the same
+`messageId`, which is what makes downstream `(messageId, consumerName)`
+dedup work.
 
-**Outbox relay claim** uses `FOR UPDATE SKIP LOCKED` across three separate
-transactions (claim → publish outside any transaction → mark), because a
-transaction must never stay open across an external call
-(`data-consistency-architecture.md:108-116`):
+### `available_at` is no longer overloaded (Round 1)
+
+Before this round, `available_at` doubled as both the PENDING backoff
+deadline and the PROCESSING lease deadline. That coupling is what let an
+expired-lease worker collide with a new claim (see "Fencing" below), so
+it has been split:
+
+- **`available_at`** — the next instant a `PENDING` row may be reclaimed.
+  Nothing else.
+- **`lease_until`** — the deadline of the current `PROCESSING` claim.
+- **`claim_token`** — the identity of that claim.
+
+### Presupuesto del lease (Round 1)
+
+The relay publishes one row at a time and blocks on its confirm, so a
+batch's worst case takes `claimBatchSize × publisherConfirmTimeout`. The
+lease must cover that plus a safety margin, or the sweeper legitimately
+reclaims rows the relay is still working on — fencing prevents state
+corruption in that case, but still produces needless duplicate
+publications and `CLAIM_LOST_BEFORE_MARK` noise. `OutboxLeaseBudgetValidator`
+enforces this at startup:
+
+```
+lease >= claimBatchSize × publisherConfirmTimeout + LEASE_SAFETY_MARGIN (30s)
+```
+
+Defaults: `claim-batch-size: 10`, `publisher-confirm-timeout: 5s`,
+`lease: 2m` → required `80s ≤ 120s`. The application refuses to start if
+this budget isn't met. No paralellization or lease renewal in this round
+— the relay stays single-threaded and sequential.
+
+**Outbox relay claim** uses `FOR UPDATE SKIP LOCKED` across separate
+transactions (claim → publish each row outside any transaction, one at a
+time → mark each row individually), because a transaction must never stay
+open across an external call (`data-consistency-architecture.md:108-116`):
 
 ```sql
 WITH claimed AS (
@@ -329,23 +432,84 @@ WITH claimed AS (
   ORDER BY available_at, occurred_at
   FOR UPDATE SKIP LOCKED LIMIT :batchSize)
 UPDATE outbox_messages o
-   SET status = 'PROCESSING', attempts = o.attempts + 1, available_at = now() + :lease
+   SET status = 'PROCESSING', attempts = o.attempts + 1,
+       claim_token = :claimToken, lease_until = now() + :lease
   FROM claimed c WHERE o.message_id = c.message_id
 RETURNING o.*;
--- COMMIT; publish each with publisher confirm (no transaction open); then
--- a second transaction marks PUBLISHED or releases back to PENDING.
+-- COMMIT; publish each row individually with a confirmed publish (no
+-- transaction open); then a second transaction, fenced by claim_token,
+-- marks that one row PUBLISHED / releases it for retry / marks it FAILED.
 ```
 
 `attempts` increments at *claim* time, not publish time, so a hard crash
-still counts the attempt and a poison row cannot loop forever.
-`OutboxSweeper` returns expired `PROCESSING` leases to `PENDING` — this is
-the "messages stuck in PROCESSING" metric the platform docs mandate
-(`security-observability.md:547-554`).
+still counts the attempt and a poison row cannot loop forever. One
+`claimToken` is shared by the whole batch — safe because every
+transition below also filters by `message_id`.
 
-The outbox primary key **is** the wire `messageId`, generated inside the
-originating transaction. Republishing after a lost mark reuses the same
-`messageId`, which is what makes downstream `(messageId, consumerName)`
-dedup work.
+### Fencing (Round 1)
+
+Every transition out of `PROCESSING` requires the exact `claimToken` the
+row was claimed with:
+
+```sql
+-- markPublished
+UPDATE outbox_messages
+   SET status = 'PUBLISHED', published_at = :publishedAt,
+       claim_token = NULL, lease_until = NULL,
+       last_error_code = NULL, last_error_at = NULL      -- clears any stale error
+ WHERE message_id = :messageId AND status = 'PROCESSING' AND claim_token = :claimToken
+
+-- releaseForRetry
+UPDATE outbox_messages
+   SET status = 'PENDING', available_at = :nextAvailableAt,
+       claim_token = NULL, lease_until = NULL,
+       last_error_code = :errorCode, last_error_at = :now
+ WHERE message_id = :messageId AND status = 'PROCESSING' AND claim_token = :claimToken
+
+-- markFailed
+UPDATE outbox_messages
+   SET status = 'FAILED', claim_token = NULL, lease_until = NULL,
+       last_error_code = :errorCode, last_error_at = :now
+ WHERE message_id = :messageId AND status = 'PROCESSING' AND claim_token = :claimToken
+```
+
+If a transition affects **zero rows**, this worker's claim was already
+reclaimed by someone else (its lease expired and the sweeper — or
+another relay pass — took over). That worker must not retry the
+transition and must not write anything onto the row: this is logged as
+`CLAIM_LOST_BEFORE_MARK` and counted by `estoma.outbox.claim_lost`, never
+persisted as a `last_error_code` (§11) and never counted as
+`failed_publish` — RabbitMQ may well have confirmed the publication; the
+only failure was local claim bookkeeping.
+
+A worker that lost its lease **can** still end up publishing after
+losing the claim race — fencing stops it from corrupting the row's
+state, not from talking to RabbitMQ. That is compatible with
+AT_LEAST_ONCE and is exactly what downstream `(messageId, consumerName)`
+deduplication exists for (see "Crash after publish" in §7).
+
+`OutboxSweeper` reclaims expired leases one row at a time, through these
+same fenced transitions, applying the backoff policy below — this is the
+"messages stuck in PROCESSING" recovery path the platform docs mandate
+(`security-observability.md:547-554`; see the corrected metric in §11).
+
+### Backoff (Round 1)
+
+`OutboxBackoffPolicy.delayForAttempt(attempts)` indexes a configured
+ladder, reusing the last value for any attempt beyond its length. No
+jitter in this round — the interface allows adding it later without
+touching `OutboxRelay` or `OutboxSweeper`.
+
+```yaml
+estoma.outbox.retry-delays: [5s, 30s, 2m, 5m, 10m, 15m]
+```
+
+`releaseForRetry` **never** sets `available_at = now()` — the caller
+(the relay's failure handler, or the sweeper) always computes
+`now + delayForAttempt(attempts)` first. When a failed publish attempt's
+`attempts >= maxAttempts`, the row goes straight to `FAILED` instead of
+another retry — this happens inline in `OutboxRelay`/`OutboxSweeper`,
+not only via the defensive `failExhaustedPending` backstop.
 
 ---
 
@@ -394,6 +558,16 @@ Rules:
   (`true` in dev/test where the app self-provisions; `false` in
   staging/prod where `estoma-infra` provisions it and the runtime AMQP
   user has no `configure` permission).
+- **(Round 1) Two `RabbitTemplate` beans, not one with a global
+  `mandatory` flag:** `requiredRouteRabbitTemplate` (`mandatory=true`,
+  for RESULT/retry/DLQ) and `eventRabbitTemplate` (`mandatory=false`, for
+  EVENT). `DefaultConfirmedRabbitPublisher` selects between them by
+  explicit `@Qualifier`, never by relying on which one Spring happens to
+  autowire — `requiredRouteRabbitTemplate` is `@Primary` only so
+  pre-existing tests that autowire `RabbitTemplate` by type keep working.
+  The success/failure decision for a publication lives exclusively in
+  `ConfirmedRabbitPublisher` (§7); the confirm/return callbacks on both
+  templates exist for log-level observability only.
 
 **What `users-service` must NOT declare:** `results.bff`,
 `events.bff-projections`, or any other consumer's queue/binding — those
@@ -430,6 +604,21 @@ Health groups (Actuator, `management.endpoint.health.group.*`):
 - `liveness` → `livenessState` **only** — no DB, no RabbitMQ. Liveness must
   never run an expensive query (`security-observability.md:711`).
 
+**(Round 1) `outboxRelay` readiness measures overdue-ness, not age since
+creation.** A row created an hour ago that just finished a legitimate
+15-minute backoff must not look identical to a row the relay has
+genuinely stopped processing. Two independent signals, either enough to
+go DOWN, both requiring a grace period rather than mere existence:
+
+```
+overduePendingAge  = now - (oldest PENDING row with available_at <= now)
+expiredLeaseAge    = now - (oldest PROCESSING row with an expired lease_until)
+DOWN when either age > 5 minutes
+```
+
+The momentary existence of one overdue row must not flap readiness — the
+sweeper runs every 30s, so a brief lease expiry is normal.
+
 Structured logs — mandatory snake_case fields
 (`security-observability.md:446-469`), written by a custom
 `EstomaJsonLogFormatter` rather than remapping a built-in format's keys
@@ -446,13 +635,39 @@ Never logged: passwords, hashes, tokens, secrets, full sensitive payloads.
 Mandatory metrics (`security-observability.md:509-554`,
 `messaging-architecture.md:596-604`):
 
-- **Outbox**: pending count, age of oldest pending, successful publishes,
-  failed publishes, retry count, messages stuck in `PROCESSING`. Backed by
+- **Outbox**: pending count, age of oldest overdue pending row, successful
+  publishes, failed publishes, retry count, messages stuck in
+  `PROCESSING`, plus **(Round 1)** `estoma.outbox.claim_lost`. Backed by
   an `AtomicLong` refreshed every 10s by a scheduled query — **a
   Prometheus scrape must never trigger a query** against
   `outbox_messages`.
+  - `estoma.outbox.stuck_processing` counts **only** `PROCESSING` rows
+    whose `lease_until` has already passed — never every `PROCESSING`
+    row; one mid-flight in a live relay batch is normal.
+  - `estoma.outbox.claim_lost` increments whenever a fenced transition
+    (`markPublished`/`releaseForRetry`/`markFailed`) affects zero rows
+    because the claim was already reclaimed by someone else (§8). It is
+    **never** bundled into `failed_publish` (RabbitMQ may have confirmed
+    the publication; the failure was purely local claim bookkeeping), and
+    the triggering event (`CLAIM_LOST_BEFORE_MARK`) is **never**
+    persisted as a `last_error_code` — log-and-count only.
 - **Consumer**: received, processed, duplicates detected, retries,
-  technical failures, functional rejections, processing latency.
+  technical failures, invalid messages, functional rejections, processing
+  latency. `invalid_messages` increments the moment a message is
+  classified invalid, even if its DLQ republication then fails to
+  confirm; `retries`/`dead_lettered` increment only after their
+  republication is confirmed (§7).
+
+**(Round 1) Never persist a stack trace, a full exception message, a
+payload, or a secret** in `outbox_messages.last_error_code`/
+`last_error_at` — only one of the sanitized `OutboxFailureCode` constants
+listed in §7. Internal logs may include a stack trace for diagnosis, but
+never a payload or a credential:
+
+```
+log.error("outbox publication failed; messageId={} publishAttemptId={} errorCode={}",
+    messageId, publishAttemptId, failureCode, exception);
+```
 
 Correlation: every log line and outbound message propagates
 `correlation_id`; `causation_id` links a message to whatever produced it.

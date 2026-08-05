@@ -144,6 +144,112 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   }
 
   @Test
+  void ckOutboxClaimStateRejectsProcessingWithoutAClaimToken() {
+    assertThatThrownBy(
+            () ->
+                insertOutboxRow(
+                    r -> {
+                      r.status = "PROCESSING";
+                      r.claimToken = null;
+                      r.leaseUntil = OffsetDateTime.now().plusMinutes(2);
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_outbox_claim_state");
+  }
+
+  @Test
+  void ckOutboxClaimStateRejectsProcessingWithoutALeaseUntil() {
+    assertThatThrownBy(
+            () ->
+                insertOutboxRow(
+                    r -> {
+                      r.status = "PROCESSING";
+                      r.claimToken = UUID.randomUUID();
+                      r.leaseUntil = null;
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_outbox_claim_state");
+  }
+
+  @Test
+  void ckOutboxClaimStateRejectsPendingWithAClaimToken() {
+    assertThatThrownBy(
+            () ->
+                insertOutboxRow(
+                    r -> {
+                      r.status = "PENDING";
+                      r.claimToken = UUID.randomUUID();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_outbox_claim_state");
+  }
+
+  @Test
+  void ckOutboxClaimStateRejectsPendingWithALeaseUntil() {
+    assertThatThrownBy(
+            () ->
+                insertOutboxRow(
+                    r -> {
+                      r.status = "PENDING";
+                      r.leaseUntil = OffsetDateTime.now().plusMinutes(2);
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_outbox_claim_state");
+  }
+
+  @Test
+  void ckOutboxClaimStateRejectsPublishedWithAClaimToken() {
+    assertThatThrownBy(
+            () ->
+                insertOutboxRow(
+                    r -> {
+                      r.status = "PUBLISHED";
+                      r.claimToken = UUID.randomUUID();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_outbox_claim_state");
+  }
+
+  @Test
+  void ckOutboxClaimStateRejectsPublishedWithALeaseUntil() {
+    assertThatThrownBy(
+            () ->
+                insertOutboxRow(
+                    r -> {
+                      r.status = "PUBLISHED";
+                      r.leaseUntil = OffsetDateTime.now().plusMinutes(2);
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_outbox_claim_state");
+  }
+
+  @Test
+  void ckOutboxClaimStateRejectsFailedRetainingAClaimToken() {
+    assertThatThrownBy(
+            () ->
+                insertOutboxRow(
+                    r -> {
+                      r.status = "FAILED";
+                      r.claimToken = UUID.randomUUID();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_outbox_claim_state");
+  }
+
+  @Test
+  void ckOutboxClaimStateAcceptsEveryValidStatusShape() {
+    insertOutboxRow(r -> r.status = "PENDING");
+    insertOutboxRow(
+        r -> {
+          r.status = "PROCESSING";
+          r.claimToken = UUID.randomUUID();
+          r.leaseUntil = OffsetDateTime.now().plusMinutes(2);
+        });
+    insertOutboxRow(r -> r.status = "PUBLISHED");
+    insertOutboxRow(r -> r.status = "FAILED");
+  }
+
+  @Test
   void personIdIsImmutable() {
     UUID personId = UUID.randomUUID();
     insertPerson(personId, p -> {});
@@ -203,5 +309,49 @@ class FlywayMigrationIT extends AbstractPostgresIT {
     String status = "ACTIVE";
     int version = 1;
     OffsetDateTime deactivatedAt = null;
+  }
+
+  private void insertOutboxRow(java.util.function.Consumer<TestOutboxRow> customizer) {
+    TestOutboxRow row = new TestOutboxRow();
+    customizer.accept(row);
+
+    jdbc.sql(
+            """
+            INSERT INTO outbox_messages (
+              message_id, message_type, message_version, message_kind,
+              aggregate_id, aggregate_version, correlation_id, causation_id,
+              payload, metadata, status, attempts, claim_token, lease_until,
+              last_error_code, last_error_at, occurred_at, available_at, published_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), NULL, ?::outbox_status, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """)
+        .params(
+            UUID.randomUUID(),
+            "PersonCreated",
+            1,
+            "EVENT",
+            UUID.randomUUID(),
+            1,
+            UUID.randomUUID(),
+            (UUID) null,
+            "{}",
+            row.status,
+            0,
+            row.claimToken,
+            row.leaseUntil,
+            (String) null,
+            (OffsetDateTime) null,
+            OffsetDateTime.now(),
+            OffsetDateTime.now(),
+            (OffsetDateTime) null)
+        .update();
+  }
+
+  /** Mutable bag of column values for one ck_outbox_claim_state test row. */
+  private static final class TestOutboxRow {
+    String status = "PENDING";
+    UUID claimToken = null;
+    OffsetDateTime leaseUntil = null;
   }
 }

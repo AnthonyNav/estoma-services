@@ -1,5 +1,6 @@
 package com.estoma.users.config;
 
+import java.time.Duration;
 import java.util.Set;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -23,9 +24,24 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * <p>{@code commandMaxAttempts} is the number of retry tiers
  * (5s/30s/300s) a redelivered command passes through before
  * {@code FailureRouter} sends it to the DLQ instead.
+ *
+ * <p>{@code publisherConfirmTimeout} bounds how long {@code
+ * ConfirmedRabbitPublisher} waits for a publisher confirm before treating
+ * the publication as failed (docs/system-contract.md §7). Also the input
+ * to the Outbox lease budget ({@code OutboxLeaseBudgetValidator}) — see
+ * {@code OutboxProperties.lease}.
  */
 @ConfigurationProperties("estoma.messaging")
 public record MessagingProperties(
     @DefaultValue("bff") Set<String> allowedProducers,
     @DefaultValue("true") boolean topologyDeclare,
-    @DefaultValue("3") int commandMaxAttempts) {}
+    @DefaultValue("3") int commandMaxAttempts,
+    @DefaultValue("5s") Duration publisherConfirmTimeout) {
+
+  public MessagingProperties {
+    if (publisherConfirmTimeout == null || publisherConfirmTimeout.isNegative() || publisherConfirmTimeout.isZero()) {
+      throw new IllegalArgumentException(
+          "estoma.messaging.publisher-confirm-timeout must be a positive duration, was " + publisherConfirmTimeout);
+    }
+  }
+}

@@ -28,6 +28,10 @@ final class OutboxRowMapper implements RowMapper<OutboxRecord> {
         rs.getString("metadata"),
         OutboxStatus.valueOf(rs.getString("status")),
         rs.getInt("attempts"),
+        rs.getObject("claim_token", UUID.class),
+        toInstant(rs, "lease_until"),
+        rs.getString("last_error_code"),
+        toInstant(rs, "last_error_at"),
         toInstant(rs, "occurred_at"),
         toInstant(rs, "available_at"),
         toInstant(rs, "published_at"));

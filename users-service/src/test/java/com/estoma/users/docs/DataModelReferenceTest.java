@@ -59,6 +59,28 @@ class DataModelReferenceTest {
         .containsExactlyInAnyOrderElementsOf(fromMigrations);
   }
 
+  /**
+   * The object-name check above does not look inside {@code CREATE TABLE}
+   * bodies, so it would not catch a column added to the migration but
+   * forgotten in the reference doc (or vice versa). Deliberately not a
+   * general SQL parser — just a targeted, named check for the Round 1
+   * Outbox fencing columns and objects (docs/system-contract.md §8),
+   * since those are exactly the ones this round touches.
+   */
+  @Test
+  void dataModelSqlAndTheOutboxMigrationBothDeclareTheRound1FencingColumns() {
+    String migration = readMigration("V5__outbox_messages.sql");
+    String referenceDoc = readReferenceDoc();
+
+    List<String> round1Objects =
+        List.of("claim_token", "lease_until", "last_error_code", "last_error_at", "ix_outbox_processing_lease", "ck_outbox_claim_state");
+
+    for (String object : round1Objects) {
+      assertThat(migration).as("V5__outbox_messages.sql should declare " + object).contains(object);
+      assertThat(referenceDoc).as("docs/data-model.sql should declare " + object).contains(object);
+    }
+  }
+
   private static Set<String> extractObjectNames(String sql) {
     Set<String> names = new LinkedHashSet<>();
     for (Pattern pattern : OBJECT_PATTERNS) {

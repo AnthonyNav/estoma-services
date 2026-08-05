@@ -7,6 +7,7 @@ import com.estoma.users.config.MessagingProperties;
 import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -16,7 +17,7 @@ import tools.jackson.databind.json.JsonMapper;
 class EnvelopeValidatorTest {
 
   private final EnvelopeValidator validator =
-      new EnvelopeValidator(new MessagingProperties(Set.of("bff"), true, 3));
+      new EnvelopeValidator(new MessagingProperties(Set.of("bff"), true, 3, Duration.ofSeconds(5)));
   private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
@@ -97,7 +98,8 @@ class EnvelopeValidatorTest {
   @Test
   void allowsASecondConfiguredProducer() {
     EnvelopeValidator twoProducerValidator =
-        new EnvelopeValidator(new MessagingProperties(Set.of("bff", "student-import-process"), true, 3));
+        new EnvelopeValidator(
+            new MessagingProperties(Set.of("bff", "student-import-process"), true, 3, Duration.ofSeconds(5)));
 
     assertThatCode(
             () -> twoProducerValidator.validate(withProducer(validCommand(), "student-import-process")))

@@ -166,17 +166,48 @@ CREATE TABLE outbox_messages (
     status                     outbox_status NOT NULL DEFAULT 'PENDING',
     attempts                    integer NOT NULL DEFAULT 0,
 
-    occurred_at                  timestamptz NOT NULL,
-    available_at                  timestamptz NOT NULL,
-    published_at                   timestamptz
+    -- DELTA from data-model.md, Round 1 (durable command processing
+    -- hardening, system-contract.md §8): fences Outbox relay workers
+    -- against each other. `available_at` now means ONLY "the next instant
+    -- a PENDING row may be reclaimed" -- it is no longer overloaded as the
+    -- PROCESSING lease deadline. `lease_until` is that deadline instead;
+    -- `claim_token` is the current claim's identity. Every transition out
+    -- of PROCESSING must present the token it was claimed with, or it
+    -- affects zero rows.
+    claim_token                 uuid,
+    lease_until                  timestamptz,
+
+    -- DELTA, Round 1: the sanitized technical reason (OutboxFailureCode)
+    -- the last publish attempt failed, cleared back to NULL the moment a
+    -- row reaches PUBLISHED. Never a payload, a stack trace, or a raw
+    -- exception message.
+    last_error_code               varchar(80),
+    last_error_at                  timestamptz,
+
+    occurred_at                      timestamptz NOT NULL,
+    available_at                      timestamptz NOT NULL,
+    published_at                       timestamptz,
+
+    -- DELTA, Round 1: ties claim columns to status so a transition can
+    -- never leave them mismatched.
+    CONSTRAINT ck_outbox_claim_state CHECK (
+        (status = 'PROCESSING' AND claim_token IS NOT NULL AND lease_until IS NOT NULL)
+        OR
+        (status <> 'PROCESSING' AND claim_token IS NULL AND lease_until IS NULL)
+    )
 );
 
 -- DELTA from data-model.md: the document specifies a plain (status,
--- available_at) index. This is a partial-index refinement of the same idea:
--- it excludes PUBLISHED rows, so the relay's hot index does not grow
--- unbounded as history accumulates. Functionally equivalent for the relay's
--- claim query; smaller and cheaper to maintain.
+-- available_at) index. This is a partial-index refinement of the same
+-- idea, now covering only PENDING rows (PROCESSING has its own index
+-- below) so the relay's hot index does not grow unbounded as history
+-- accumulates.
 CREATE INDEX ix_outbox_pending ON outbox_messages (available_at, occurred_at)
-    WHERE status IN ('PENDING', 'PROCESSING');
+    WHERE status = 'PENDING';
+
+-- DELTA, Round 1: the sweeper's and the stuck_processing metric's index --
+-- PROCESSING rows whose lease has expired (system-contract.md §8, §11).
+CREATE INDEX ix_outbox_processing_lease ON outbox_messages (lease_until)
+    WHERE status = 'PROCESSING';
 
 CREATE INDEX ix_outbox_aggregate ON outbox_messages (aggregate_id);

@@ -63,12 +63,23 @@ estoma:
     allowed-producers: bff
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     command-max-attempts: 3
+    # Bounds ConfirmedRabbitPublisher's wait for a publisher confirm
+    # (docs/system-contract.md §7). Also the input to the Outbox lease
+    # budget below (OutboxLeaseBudgetValidator).
+    publisher-confirm-timeout: 5s
   outbox:
-    claim-batch-size: 20
-    lease: 30s
+    # The relay publishes one row at a time and waits for its confirm, so
+    # a batch's worst case is claim-batch-size x publisher-confirm-timeout
+    # (10 x 5s = 50s). `lease` must cover that plus a safety margin
+    # (OutboxLeaseBudgetValidator enforces >= 80s at startup) or the
+    # sweeper reclaims rows the relay is still working on
+    # (docs/system-contract.md §8).
+    claim-batch-size: 10
+    lease: 2m
     max-attempts: 10
     published-retention: 7d
     inbox-retention: 30d
+    retry-delays: [5s, 30s, 2m, 5m, 10m, 15m]
 
 server:
   port: 8080

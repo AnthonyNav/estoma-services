@@ -5,6 +5,7 @@ import com.estoma.users.application.PersonCommandDispatcher;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
+import com.estoma.users.messaging.outbound.RabbitPublishException;
 import com.estoma.users.observability.ConsumerMetrics;
 import com.estoma.users.observability.ConsumerNames;
 import com.estoma.users.observability.LogContext;
@@ -24,6 +25,14 @@ import org.springframework.stereotype.Component;
  * transaction), and then decides ACK / retry-tier / DLQ. Nothing it does
  * after the dispatcher returns can roll back the commit
  * (docs/system-contract.md §7).
+ *
+ * <p>The original delivery is ACKed only after its retry/DLQ
+ * republication is itself confirmed by RabbitMQ (docs/system-contract.md
+ * §7, Round 1) — never on a bare {@code send()}. If the republication
+ * cannot be confirmed, the original is NACKed with requeue instead of
+ * being silently dropped or acknowledged; if even that NACK fails (e.g.
+ * the channel is already closed), the exception is allowed to escape so
+ * the broker redelivers once the connection recovers.
  */
 @Component
 public class CommandListener {
@@ -67,10 +76,17 @@ public class CommandListener {
       validator.validate(envelope);
     } catch (Exception e) {
       log.error("invalid message on {}: {}", AmqpNames.QUEUE_COMMANDS, e.toString());
+      // Counted the moment the message is classified invalid, even if the
+      // DLQ republication below cannot be confirmed.
       metrics.invalidMessage();
-      metrics.deadLettered();
-      failureRouter.toDlq(message, e);
-      channel.basicAck(deliveryTag, false);
+      try {
+        failureRouter.toDlq(message, e);
+        metrics.deadLettered(); // only after the DLQ publication is confirmed
+        channel.basicAck(deliveryTag, false);
+      } catch (RabbitPublishException publishException) {
+        metrics.technicalFailure();
+        nackRequeue(channel, deliveryTag);
+      }
       return;
     }
 
@@ -91,18 +107,42 @@ public class CommandListener {
           envelope.messageId(),
           transientFailure,
           e.toString());
-      if (transientFailure) {
+      try {
+        FailureRoute route = failureRouter.routeAfterFailure(message, e, transientFailure);
+        if (route == FailureRoute.RETRY) {
+          metrics.technicalFailure();
+          metrics.retried(); // only after the retry-tier publication is confirmed
+        } else {
+          metrics.deadLettered(); // only after the DLQ publication is confirmed
+        }
+        channel.basicAck(deliveryTag, false);
+      } catch (RabbitPublishException publishException) {
         metrics.technicalFailure();
-        metrics.retried();
-      } else {
-        metrics.deadLettered();
+        nackRequeue(channel, deliveryTag);
       }
-      failureRouter.routeAfterFailure(message, e, transientFailure);
-      channel.basicAck(deliveryTag, false);
     } finally {
       metrics.recordProcessingTime(Duration.between(start, Instant.now()));
       LogContext.clear();
     }
+  }
+
+  /**
+   * The republication that would have justified acknowledging the
+   * original delivery could not be confirmed — conserve the original by
+   * NACKing it with requeue instead of ACKing or silently dropping it.
+   * If the channel is already closed and even this fails, the exception
+   * is allowed to escape uncaught: no ACK is attempted, and RabbitMQ
+   * redelivers once the connection recovers. No sleep, no local blocking
+   * retry.
+   *
+   * <p>Known limitation of this round: if retry/DLQ stays unroutable, the
+   * requeue can produce a tight redelivery loop. Conserving the message
+   * is prioritized over avoiding that loop; it is observable via {@code
+   * technical_failures} and the {@code PUBLISH_*} logs
+   * (docs/system-contract.md §7).
+   */
+  private static void nackRequeue(Channel channel, long deliveryTag) throws IOException {
+    channel.basicNack(deliveryTag, false, true);
   }
 
   private void recordOutcome(CommandOutcome outcome) {

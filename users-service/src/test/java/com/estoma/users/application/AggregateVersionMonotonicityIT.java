@@ -57,17 +57,17 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
     try {
       send(MessageTypes.CREATE_PERSON, codec.toJsonNode(
           new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null)));
-      MessageEnvelope created = awaitNextEvent(eventsQueue, "PersonCreated");
+      MessageEnvelope created = awaitNextEvent(eventsQueue, "PersonCreated", personId);
 
       send(MessageTypes.UPDATE_PERSON, codec.toJsonNode(
           new UpdatePersonCommand(personId, 1, "Augusta", "Lovelace", null, "ada." + personId + "@example.edu", null)));
-      MessageEnvelope updated = awaitNextEvent(eventsQueue, "PersonUpdated");
+      MessageEnvelope updated = awaitNextEvent(eventsQueue, "PersonUpdated", personId);
 
       send(MessageTypes.DEACTIVATE_PERSON, codec.toJsonNode(new DeactivatePersonCommand(personId, 2)));
-      MessageEnvelope deactivated = awaitNextEvent(eventsQueue, "PersonDeactivated");
+      MessageEnvelope deactivated = awaitNextEvent(eventsQueue, "PersonDeactivated", personId);
 
       send(MessageTypes.ACTIVATE_PERSON, codec.toJsonNode(new ActivatePersonCommand(personId, 3)));
-      MessageEnvelope activated = awaitNextEvent(eventsQueue, "PersonActivated");
+      MessageEnvelope activated = awaitNextEvent(eventsQueue, "PersonActivated", personId);
 
       assertThat(created.aggregateVersion()).isEqualTo(1);
       assertThat(updated.aggregateVersion()).isEqualTo(2);
@@ -118,19 +118,31 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
     return localVersion;
   }
 
-  private MessageEnvelope awaitNextEvent(Queue queue, String expectedType) {
-    Message[] holder = new Message[1];
+  /**
+   * Drains {@code queue} until a message matching both {@code
+   * expectedType} and {@code personId} arrives, discarding anything else.
+   * The wildcard binding ({@code identity.person.*}) only isolates this
+   * test from unrelated aggregate types by routing key shape, not from
+   * background activity in the shared broker touching a DIFFERENT
+   * {@code personId} of the same event type (e.g. another test's Outbox
+   * relay retry landing here in the same short window) -- filtering by
+   * aggregateId as well as messageType is what actually pins this loop
+   * to the four events this test itself produced.
+   */
+  private MessageEnvelope awaitNextEvent(Queue queue, String expectedType, UUID personId) {
+    MessageEnvelope[] holder = new MessageEnvelope[1];
     await()
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(
             () -> {
               Message message = rabbitTemplate.receive(queue.getName());
               assertThat(message).isNotNull();
-              holder[0] = message;
+              MessageEnvelope envelope = codec.decode(message.getBody());
+              assertThat(envelope.messageType()).isEqualTo(expectedType);
+              assertThat(envelope.aggregateId()).isEqualTo(personId);
+              holder[0] = envelope;
             });
-    MessageEnvelope envelope = codec.decode(holder[0].getBody());
-    assertThat(envelope.messageType()).isEqualTo(expectedType);
-    return envelope;
+    return holder[0];
   }
 
   private void send(String messageType, JsonNode payload) {
