@@ -41,7 +41,7 @@ class OutboxSweeperIT extends AbstractPostgresIT {
         .update();
     sleepPastLease();
 
-    sweeper.releaseExpiredLeases();
+    sweepUntilReclaimed(messageId);
 
     assertThat(statusOf(messageId)).isEqualTo("FAILED");
     assertThat(lastErrorCodeOf(messageId)).isEqualTo("LEASE_EXPIRED");
@@ -57,7 +57,7 @@ class OutboxSweeperIT extends AbstractPostgresIT {
     claimWithAnAlreadyExpiredLease(messageId);
     sleepPastLease();
 
-    sweeper.releaseExpiredLeases();
+    sweepUntilReclaimed(messageId);
 
     assertThat(statusOf(messageId)).isEqualTo("PENDING");
     assertThat(lastErrorCodeOf(messageId)).isEqualTo("LEASE_EXPIRED");
@@ -69,6 +69,27 @@ class OutboxSweeperIT extends AbstractPostgresIT {
         .filter(r -> r.messageId().equals(messageId))
         .findFirst()
         .orElseThrow();
+  }
+
+  /**
+   * {@code releaseExpiredLeases()} only reclaims the oldest {@code
+   * claim-batch-size} expired-lease rows per call (ORDER BY lease_until
+   * LIMIT :limit, {@code JdbcOutboxRepository.findExpiredLeases}).
+   * {@code AbstractPostgresIT} shares one Postgres instance and one
+   * Spring context across every {@code *IT} in the suite, and several
+   * other classes (e.g. {@code OutboxFencingIT}, {@code
+   * ConcurrentRepublishIT}) deliberately leave PROCESSING rows with
+   * expired leases behind. Under a full {@code mvn verify} run that
+   * backlog can exceed the batch size by the time this test runs,
+   * starving this test's own (freshly claimed, so newest-leased) row out
+   * of a single pass -- not a fencing bug, just batch-size contention on
+   * shared state. Looping drains the backlog instead of assuming one
+   * call is enough, without weakening what the test actually asserts.
+   */
+  private void sweepUntilReclaimed(UUID messageId) {
+    for (int i = 0; i < 50 && "PROCESSING".equals(statusOf(messageId)); i++) {
+      sweeper.releaseExpiredLeases();
+    }
   }
 
   /** A real (short) sleep, so a 1ms lease is unambiguously in the past by the time the sweeper looks for it. */

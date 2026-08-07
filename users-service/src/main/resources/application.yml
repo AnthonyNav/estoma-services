@@ -119,7 +119,7 @@ management:
           # Deliberately excludes db/commandConsumer/outboxRelay: liveness
           # must never run an expensive check, and a temporarily degraded
           # dependency must not trigger a restart loop
-          # (security-observability.md:711, docs/system-contract.md §11).
+          # (security-observability.md:683-707, docs/system-contract.md §11).
           include: livenessState
     info:
       access: read-only

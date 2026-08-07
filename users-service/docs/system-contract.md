@@ -212,11 +212,11 @@ CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_
   deactivated person still owns their institutional identity; excluding
   them would let a re-registration create a second `Person` for the same
   human, which is exactly the invariant this rule protects.
-- Does not violate the one hard constraint the docs place on the rule:
-  "no debe impedir varias cuentas o roles permitidos para la misma
-  Persona" (`README.md:221`) — accounts and roles live in other services
-  keyed by `personId`; this only prevents two *Person* rows claiming the
-  same mailbox.
+- Does not violate this service's own invariant for the rule: accounts
+  and roles must remain assignable independently of Person identity —
+  accounts and roles live in other services keyed by `personId`; this
+  only prevents two *Person* rows claiming the same mailbox, never
+  multiple accounts against one Person.
 - `CreatePerson` against an email owned by an `INACTIVE` person →
   `DUPLICATE_PERSON`. The caller should issue `ActivatePerson` instead of
   retrying `CreatePerson`.
@@ -583,7 +583,7 @@ line that says so, and states when to revisit.
 
 | # | Decision | Fills doc gap | Revisit trigger |
 |---|---|---|---|
-| D1 | Routing key scheme (§9) | `messaging-architecture.md:210,685`, `README.md:93` list routing keys as pending in 6 places | When the companion platform ADR (§14) is ratified or a second service needs a conflicting scheme |
+| D1 | Routing key scheme (§9) | `messaging-architecture.md:210,731` ("routing keys concretas" under "Decisiones Pendientes"); `data-model.md:312` ("La topología física de publicación queda pendiente") | When the companion platform ADR (§14) is ratified or a second service needs a conflicting scheme |
 | D2 | `DUPLICATE_PERSON` = unique index on normalized email (§6) | `data-model.md:247-251` | When mass-import matching strategy is decided (`data-model.md:386`) |
 | D3 | Health paths served by Actuator groups, not custom controllers (§11) | doc specifies `/health/*` paths; code skeleton used bare Actuator paths | N/A — this is a genuine conflict resolution, not a placeholder |
 | D4 | Rejected payload shape `{errorCode, message, details[]}` (§4) | `commands.md:321` lists "formato común para resultados de rechazo" as pending | When ratified platform-wide in the docs repo |
@@ -601,8 +601,11 @@ Health groups (Actuator, `management.endpoint.health.group.*`):
 
 - `startup` → `db`, `schemaVersion` (Flyway at expected version).
 - `readiness` → `db`, `commandConsumer`, `outboxRelay`.
-- `liveness` → `livenessState` **only** — no DB, no RabbitMQ. Liveness must
-  never run an expensive query (`security-observability.md:711`).
+- `liveness` → `livenessState` **only** — no DB, no RabbitMQ. A temporarily
+  degraded dependency should not force restarts
+  (`security-observability.md:683-707`, "Salud de componentes"); keeping
+  the liveness check itself cheap on top of that is this service's own
+  operational choice.
 
 **(Round 1) `outboxRelay` readiness measures overdue-ness, not age since
 creation.** A row created an hour ago that just finished a legitimate
@@ -758,6 +761,12 @@ migrations, verified by the repository integration tests.
   `apps/users-service/overlays/develop/kustomization.yaml` overlay. The
   `update-develop-infra` CI job fails hard if that overlay doesn't already
   contain the image entry, so infra must land first.
+- **`Clock` bean not yet threaded through call sites.** `ClockConfig`
+  exposes an injectable `Clock`, but the four command handlers and the
+  JDBC repositories still call `Instant.now()` directly. Deliberately
+  deferred (a mechanical refactor across many files for marginal benefit
+  now) rather than done partially — do it in one pass when deterministic
+  timestamp assertions are actually needed in a test.
 
 ### Open risks to track
 
@@ -777,7 +786,7 @@ migrations, verified by the repository integration tests.
 **Outbox stuck in `PROCESSING`:** check the `estoma_outbox_stuck_processing`
 gauge (`OutboxMetrics`, refreshed every 10s — see §11). `OutboxSweeper`
 should clear these automatically once the lease (`estoma.outbox.lease`,
-default 30s) expires. If it doesn't clear, check whether the relay pod is
+default 2m — see §8) expires. If it doesn't clear, check whether the relay pod is
 crash-looping before the mark step ever runs, and check
 `estoma_outbox_pending`/`estoma_outbox_oldest_pending_age_seconds` for
 whether the relay is keeping up at all.
