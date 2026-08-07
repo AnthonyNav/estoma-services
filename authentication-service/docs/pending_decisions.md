@@ -2,84 +2,23 @@
 
 ## Purpose
 
-This file tracks decisions that are not safe to infer during implementation. A future PR must either resolve an item with a documented decision or keep the behavior out of scope.
+This file tracks what is genuinely still open after Phase 1 (PR1). Everything this service had authority to decide on its own — password hashing, token format, session/lockout/recovery policy, migration tooling, Outbox operational policy, observability parameter names — was resolved in `docs/system_contract.md` during Phase 1 and is no longer listed here.
 
-## Security And Credentials
+## Deferred To Phase 3
 
-- Password hash algorithm.
-- Password hash parameters: cost, memory, iterations, output length, and upgrade strategy.
-- Password policy: minimum length, complexity, reuse rules, and blocked values.
-- Temporary password format.
-- Temporary password expiration.
-- Whether temporary password usage revokes previous sessions immediately or after password change.
-- Policy for `mustChangePassword` after temporary login.
+These require agreement with other services' teams before they can be finalized. Phase 2 proceeds using the conceptual payloads already documented in this service's own `events.md`/`data-model.md`/`commands.md`; Phase 3 formalizes and reconciles them.
 
-## Sessions And Tokens
+- Exact payload contract for `PersonCreated`, `PersonActivated`, `PersonDeactivated` as actually published by `users-service`.
+- Exact payload contract for `StudentNumberCorrected` as actually published by `academic-service`.
+- Final durable command envelopes expected from the BFF (`CreateAccount`, `ActivateAccount`, `DeactivateAccount`, `ChangeLoginIdentifier`, `RevokeAllAccountSessions`, `RequestPasswordRecovery`) — actor data, `Idempotency-Key`, `correlationId` conventions.
+- Whether `PasswordChanged` (and related credential events) should trigger an email notification — depends on the finalized `communications-service` contract.
+- Concrete routing keys, final result envelopes, and event versioning at the platform level.
 
-- Access token format.
-- Signing algorithm and key management.
-- Access token lifetime.
-- Refresh token lifetime.
-- Refresh token rotation strategy.
-- Grace window, if any, after a lost refresh response.
-- Maximum concurrent sessions per account.
-- Session device metadata to store.
-- Session retention after expiration or revocation.
-- Revocation policy after password change.
+## Out Of This Service's Control
 
-## Lockout And Rate Limits
+Owned by `estoma-infra` / the platform team. Not a blocker for Phase 2.
 
-- Failed login attempt limit.
-- Lock duration.
-- Whether lock duration escalates after repeated failures.
-- Recovery-code attempt limit.
-- RPC and command rate limit policy.
-
-## Password Recovery
-
-- Recovery token or code format.
-- Recovery expiration.
-- Secure delivery strategy for recovery secret.
-- Exact contract with `communications-service` for recovery.
-- Whether password change notifications are required.
-- Retention for recovery requests.
-
-## Messaging Contracts
-
-- Concrete routing keys for commands, results, events, and RPC.
-- Final command envelopes.
-- Final result envelopes.
-- Final RPC request and response payloads.
-- Final event versions and payload details.
-- Producer permissions by operation.
-- Consumer permissions by queue.
-- RabbitMQ prefetch, retry, and DLQ policy for durable consumers.
-- TTL and timeout values for ephemeral security RPC.
-
-## Database And Consistency
-
-- Physical migration tool and conventions.
-- Isolation level per critical operation.
-- Locking strategy for refresh token rotation.
-- Outbox Relay claim strategy.
-- Outbox retry policy.
-- Inbox retention policy.
-- Retention for `security_rpc_idempotency_records`.
-- Retention for sessions, audit records, and events.
-
-## Observability And Audit
-
-- Audit storage mechanism.
-- Audit retention.
-- Security event detail allowed for failed authentication.
-- Metrics names and labels.
-- Log redaction rules and implementation library.
-- Trace propagation conventions.
-
-## Deployment
-
-- Resource requests and limits.
-- HPA metrics.
 - Secret management strategy beyond raw Kubernetes Secrets.
+- Resource requests/limits and HPA metrics.
 - Database user and database creation workflow.
-- Environment-specific RabbitMQ topology ownership.
+- Physical RabbitMQ topology ownership per environment.
