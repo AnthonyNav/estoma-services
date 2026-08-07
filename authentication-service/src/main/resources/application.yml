@@ -1,21 +1,96 @@
 spring:
   application:
     name: authentication-service
+
+  datasource:
+    url: ${AUTH_DB_URL:jdbc:postgresql://localhost:5432/authentication_db}
+    username: ${AUTH_DB_RUNTIME_USER:authentication_service}
+    password: ${AUTH_DB_RUNTIME_PASSWORD:authentication_service}
+    hikari:
+      # Bounds how long a query can hang against a wedged connection (a
+      # network partition, a frozen peer) rather than relying on the OS's
+      # TCP keepalive, which can take minutes to notice. Set at the pool
+      # level (not baked into the JDBC URL) so it applies regardless of
+      # what AUTH_DB_URL is provided.
+      connection-timeout: 10000
+      validation-timeout: 5000
+      data-source-properties:
+        socketTimeout: 10
+        connectTimeout: 10
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+    baseline-on-migrate: false
+    # Separate migration credentials, per
+    # security-observability.md:235. Defaults to the runtime credentials so
+    # a single-user local/dev database still works; estoma-infra supplies
+    # distinct migration credentials in staging/prod.
+    url: ${AUTH_DB_URL:jdbc:postgresql://localhost:5432/authentication_db}
+    user: ${AUTH_DB_MIGRATION_USER:authentication_service}
+    password: ${AUTH_DB_MIGRATION_PASSWORD:authentication_service}
+    placeholders:
+      runtime_role: ${AUTH_DB_RUNTIME_USER:authentication_service}
+
+estoma:
+  # The deployment environment name, read by EstomaJsonLogFormatter for the
+  # mandatory "environment" log field (system_contract.md "Observability
+  # Parameters").
+  environment: ${ESTOMA_ENVIRONMENT:local}
+
 server:
   port: 8080
+
+logging:
+  structured:
+    format:
+      # Custom formatter, not one of Boot's built-in formats: none of
+      # ECS/GELF/Logstash match the field set fixed in
+      # system_contract.md "Observability Parameters" -- see
+      # EstomaJsonLogFormatter.
+      console: com.estoma.authentication.infrastructure.observability.EstomaJsonLogFormatter
+
 management:
+  endpoints:
+    # Deny-by-default, then opt in explicitly below (system_contract.md
+    # "Operational HTTP Interface").
+    access:
+      default: none
+    web:
+      base-path: /
+      exposure:
+        include: health,info,prometheus
+      path-mapping:
+        prometheus: metrics
   endpoint:
     health:
+      access: read-only
       probes:
         enabled: true
       show-details: never
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
+      show-components: never
+      group:
+        startup:
+          include: db, schemaVersion
+        readiness:
+          include: db
+          # commandConsumer / outboxRelay join this group once the
+          # messaging tramo lands.
+        liveness:
+          # Deliberately excludes db: liveness must never run an expensive
+          # check, and a temporarily degraded dependency must not trigger a
+          # restart loop (security-observability.md:683-707).
+          include: livenessState
+    info:
+      access: read-only
+    prometheus:
+      access: read-only
   info:
     env:
       enabled: true
+
 info:
   app:
     name: authentication-service
