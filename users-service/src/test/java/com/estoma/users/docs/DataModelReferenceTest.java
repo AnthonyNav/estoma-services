@@ -34,7 +34,9 @@ class DataModelReferenceTest {
           "V2__persons.sql",
           "V3__person_status_history.sql",
           "V4__processed_messages.sql",
-          "V5__outbox_messages.sql");
+          "V5__outbox_messages.sql",
+          "V7__idempotency_records.sql",
+          "V8__person_status_history_reason.sql");
 
   private static final Pattern[] OBJECT_PATTERNS = {
     Pattern.compile("CREATE TABLE (\\w+)"),

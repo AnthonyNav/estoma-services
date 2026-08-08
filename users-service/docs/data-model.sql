@@ -2,10 +2,10 @@
 --
 -- NON-AUTHORITATIVE. This file exists so the schema can be read in one place
 -- without reconstructing it from Flyway migrations. The authoritative source
--- is src/main/resources/db/migration/V1__enums.sql .. V5__outbox_messages.sql.
--- DataModelReferenceIT asserts this file stays byte-equivalent to the
--- concatenation of those migrations (V6 is excluded: it grants runtime
--- privileges and carries no shape).
+-- is src/main/resources/db/migration/V1__enums.sql .. V8__person_status_history_reason.sql.
+-- DataModelReferenceTest asserts this file declares the same named objects
+-- (tables, types, indexes, constraints, triggers) as those migrations (V6 is
+-- excluded: it only grants runtime privileges and carries no shape).
 --
 -- Source of truth for the shape: estomatologia-platform-docs
 --   03-services/shared/users-service/data-model.md
@@ -101,12 +101,31 @@ CREATE TABLE person_status_history (
     previous_status         person_status,
     new_status              person_status NOT NULL,
 
+    -- DELTA, V8: reasonCode/reasonDetail (commands.md §7.1), only meaningful
+    -- for a deactivation (new_status = INACTIVE). varchar, not a Postgres
+    -- enum -- data-model.md §5 fixes these exact column types and leaves the
+    -- catalog-membership CHECK to the migration.
+    reason_code              varchar(40),
+    reason_detail            varchar(500),
+
     -- Logical reference to an authentication-service Account. No physical FK:
     -- data-model.md §7 forbids one, since accounts live in another database.
     changed_by_account_id   uuid,
     correlation_id           uuid,
 
-    changed_at               timestamptz NOT NULL
+    changed_at               timestamptz NOT NULL,
+
+    -- DELTA, V8, all three added NOT VALID (existing rows grandfathered in,
+    -- not backfilled with an invented reason):
+    CONSTRAINT ck_person_status_history_reason_required_for_inactive
+        CHECK (new_status <> 'INACTIVE' OR reason_code IS NOT NULL),
+    CONSTRAINT ck_person_status_history_reason_detail_required_for_other
+        CHECK (reason_code <> 'OTHER' OR (reason_detail IS NOT NULL AND btrim(reason_detail) <> '')),
+    CONSTRAINT ck_person_status_history_reason_code_catalog
+        CHECK (
+            reason_code IS NULL
+            OR reason_code IN ('DUPLICATE', 'CREATED_BY_ERROR', 'IDENTITY_CORRECTION', 'ADMINISTRATIVE_REQUEST', 'OTHER')
+        )
 );
 
 CREATE INDEX ix_person_status_history ON person_status_history (person_id, changed_at);
@@ -158,7 +177,9 @@ CREATE TABLE outbox_messages (
     -- envelope requires them on RESULT messages and the actor is useful
     -- context on EVENT messages too. `payload` stays the pure contract
     -- payload; `metadata` carries transport/routing concerns:
-    --   { "destination": "bff", "operationId": "uuid", "actor": {"accountId": "uuid"} }
+    --   { "destination": "bff", "operationId": "uuid",
+    --     "actor": {"type": "ACCOUNT", "accountId": "uuid"} }
+    -- (or {"type": "SYSTEM", "service": "academic"} for a technical actor)
     -- Proposed upstream for the other four shared services in the companion
     -- ADR (see system-contract.md §10).
     metadata                  jsonb,
@@ -211,3 +232,65 @@ CREATE INDEX ix_outbox_processing_lease ON outbox_messages (lease_until)
     WHERE status = 'PROCESSING';
 
 CREATE INDEX ix_outbox_aggregate ON outbox_messages (aggregate_id);
+
+-- ---------------------------------------------------------------------------
+-- idempotency_records — functional idempotency for durable commands.
+--
+-- Not defined by data-model.md (no table there for it); messaging-
+-- architecture.md §10.1 and commands.md §9 mandate that a repeated
+-- intention (same producer + idempotencyKey) must not reapply its
+-- durable effect, but leave the storage mechanism to each service. This
+-- is that mechanism -- a gap-filling decision (system-contract.md §1),
+-- not a platform contract.
+--
+-- Distinct from processed_messages (Consumer Inbox, keyed by messageId,
+-- protects delivery of one specific message): this table protects the
+-- FUNCTIONAL INTENTION, keyed by (producer, idempotency_key), and
+-- recognizes a retry that arrives under a brand-new messageId. Stores
+-- only the terminal OUTCOME needed to reconstruct a Result, never the
+-- Result itself.
+-- ---------------------------------------------------------------------------
+
+CREATE TYPE idempotency_status AS ENUM ('IN_PROGRESS', 'SUCCEEDED', 'REJECTED');
+
+CREATE TABLE idempotency_records (
+    producer                 varchar(120) NOT NULL,
+    idempotency_key           varchar(200) NOT NULL,
+
+    message_type               varchar(80) NOT NULL,
+    aggregate_id                 uuid NOT NULL,
+    -- request_fingerprint tells a retry (same intention) apart from a
+    -- different intention that happens to reuse the same key -- a SHA-256
+    -- hex digest over the command's own functional fields, in a fixed
+    -- order, excluding delivery/tracing metadata (messageId, operationId,
+    -- correlationId, causationId, occurredAt).
+    request_fingerprint         varchar(64) NOT NULL,
+
+    claimed_by_message_id        uuid NOT NULL,
+
+    terminal_status                idempotency_status NOT NULL DEFAULT 'IN_PROGRESS',
+    aggregate_version                integer,
+    error_code                         varchar(80),
+
+    created_at                            timestamptz NOT NULL,
+    completed_at                           timestamptz,
+
+    PRIMARY KEY (producer, idempotency_key),
+
+    -- Ties the terminal fields to terminal_status, mirroring
+    -- ck_outbox_claim_state.
+    CONSTRAINT ck_idempotency_terminal_fields CHECK (
+        (terminal_status = 'IN_PROGRESS'
+            AND aggregate_version IS NULL AND error_code IS NULL AND completed_at IS NULL)
+        OR
+        (terminal_status = 'SUCCEEDED'
+            AND aggregate_version IS NOT NULL AND error_code IS NULL AND completed_at IS NOT NULL)
+        OR
+        (terminal_status = 'REJECTED'
+            AND aggregate_version IS NULL AND error_code IS NOT NULL AND completed_at IS NOT NULL)
+    )
+);
+
+-- Supports a future retention purge job, mirroring
+-- ix_processed_messages_processed_at.
+CREATE INDEX ix_idempotency_completed_at ON idempotency_records (completed_at);

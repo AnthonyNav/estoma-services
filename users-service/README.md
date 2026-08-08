@@ -23,8 +23,10 @@ Spring Boot service that manages personal identity for people in the Estoma plat
 This service exposes no business REST API. Every business operation
 (create/update/activate/deactivate a Person) arrives as a durable command
 over RabbitMQ; every confirmed fact leaves as a durable result or event
-over RabbitMQ. See `docs/system-contract.md` and `docs/asyncapi.yaml` for
-the full contract.
+over RabbitMQ. `academic-service` may also resolve a `personId` from an
+institutional email via the `ResolvePersonByInstitutionalEmail` query
+(side-effect-free, its own queue). See `docs/system-contract.md` and
+`docs/asyncapi.yaml` for the full contract.
 
 ## Operational endpoints
 
@@ -53,7 +55,8 @@ docker compose up -d
 
 The service self-provisions its own AMQP topology on startup
 (`estoma.messaging.topology-declare` defaults to `true`) — commands,
-DLQ, and retry tiers all appear automatically. Verify:
+queries, their DLQs, and their retry tiers all appear automatically.
+Verify:
 
 ```bash
 curl localhost:8080/health/readiness
