@@ -38,6 +38,13 @@ estoma:
   # mandatory "environment" log field (system_contract.md "Observability
   # Parameters").
   environment: ${ESTOMA_ENVIRONMENT:local}
+  communications:
+    email:
+      # v1 resolves every senderCode to this single configured sender
+      # (ConfiguredEmailSenderDirectory); the definitive senderCode catalog
+      # is a pending decision (docs/pending_decisions.md).
+      default-sender-name: ${COMM_EMAIL_DEFAULT_SENDER_NAME:Estoma}
+      default-sender-address: ${COMM_EMAIL_DEFAULT_SENDER_ADDRESS:no-reply@estoma.edu}
 
 server:
   port: 8080
