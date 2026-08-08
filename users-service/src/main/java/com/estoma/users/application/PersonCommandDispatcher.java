@@ -186,16 +186,17 @@ public class PersonCommandDispatcher {
   private CommandOutcome reconstructOutcome(MessageEnvelope envelope, IdempotencyRecord claim) {
     if (claim.terminalStatus() == IdempotencyStatus.SUCCEEDED) {
       appendReconstructedResult(
-          envelope, claim.aggregateId(), ResultPayload.succeeded(new SucceededPayload(
+          envelope, claim.aggregateId(), claim.aggregateVersion(), ResultPayload.succeeded(new SucceededPayload(
               claim.aggregateId(), claim.aggregateVersion())));
       return new CommandOutcome.Succeeded(claim.aggregateVersion());
     }
     RejectionCode code = RejectionCode.valueOf(claim.errorCode());
-    appendReconstructedResult(envelope, claim.aggregateId(), ResultPayload.rejected(claim.errorCode()));
+    appendReconstructedResult(envelope, claim.aggregateId(), null, ResultPayload.rejected(claim.errorCode()));
     return new CommandOutcome.Rejected(code);
   }
 
-  private void appendReconstructedResult(MessageEnvelope envelope, UUID aggregateId, ResultPayload payload) {
+  private void appendReconstructedResult(
+      MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, ResultPayload payload) {
     String resultSuffix = payload.status() == ResultStatus.SUCCEEDED ? "Succeeded" : "Rejected";
     String resultType = envelope.messageType() + resultSuffix;
     OutboxMetadata metadata = new OutboxMetadata(envelope.producer(), envelope.operationId(), envelope.actor());
@@ -207,7 +208,7 @@ public class PersonCommandDispatcher {
             1,
             MessageKind.RESULT.name(),
             aggregateId,
-            null, // reconstructed rows never claim a fresh aggregateVersion of their own
+            aggregateVersion,
             envelope.correlationId(),
             envelope.messageId(), // causationId: THIS retry's messageId
             codec.writeValueAsString(payload),

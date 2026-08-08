@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.estoma.users.application.command.CreatePersonCommand;
+import com.estoma.users.application.command.UpdatePersonCommand;
 import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
+import com.estoma.users.contract.result.ResultPayload;
+import com.estoma.users.contract.result.SucceededPayload;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.testsupport.AbstractMessagingIT;
@@ -96,7 +99,50 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
     }
   }
 
+  @Test
+  void replayedCreateResultKeepsItsOriginalAggregateVersionAfterALaterUpdate() {
+    UUID personId = UUID.randomUUID();
+    UUID originalCorrelationId = UUID.randomUUID();
+    UUID originalMessageId = UUID.randomUUID();
+    String idempotencyKey = UUID.randomUUID().toString();
+    Queue resultsQueue = amqpAdmin.declareQueue();
+    amqpAdmin.declareBinding(
+        BindingBuilder.bind(resultsQueue).to(new org.springframework.amqp.core.DirectExchange(AmqpNames.EXCHANGE_RESULTS)).with("bff"));
+
+    try {
+      publishCreatePersonCommand(
+          personId, originalCorrelationId, UUID.randomUUID(), originalMessageId, idempotencyKey);
+      MessageEnvelope originalResult = codec.decode(awaitMessage(resultsQueue, originalCorrelationId).getBody());
+      assertThat(originalResult.aggregateVersion()).isEqualTo(1);
+
+      UUID updateCorrelationId = UUID.randomUUID();
+      publishUpdatePersonCommand(personId, updateCorrelationId);
+      MessageEnvelope updateResult = codec.decode(awaitMessage(resultsQueue, updateCorrelationId).getBody());
+      assertThat(updateResult.aggregateVersion()).isEqualTo(2);
+
+      UUID retryCorrelationId = UUID.randomUUID();
+      publishCreatePersonCommand(
+          personId, retryCorrelationId, UUID.randomUUID(), UUID.randomUUID(), idempotencyKey);
+      MessageEnvelope replayedResult = codec.decode(awaitMessage(resultsQueue, retryCorrelationId).getBody());
+
+      assertThat(replayedResult.messageType()).isEqualTo("CreatePersonSucceeded");
+      assertThat(replayedResult.aggregateId()).isEqualTo(personId);
+      assertThat(replayedResult.aggregateVersion()).isEqualTo(1);
+      ResultPayload payload = codec.convertPayload(replayedResult, ResultPayload.class);
+      SucceededPayload data = codec.readValue(codec.writeValueAsString(payload.data()), SucceededPayload.class);
+      assertThat(data.personId()).isEqualTo(personId);
+      assertThat(data.version()).isEqualTo(1);
+    } finally {
+      amqpAdmin.deleteQueue(resultsQueue.getName());
+    }
+  }
+
   private void publishCreatePersonCommand(UUID personId, UUID correlationId, UUID operationId, UUID messageId) {
+    publishCreatePersonCommand(personId, correlationId, operationId, messageId, UUID.randomUUID().toString());
+  }
+
+  private void publishCreatePersonCommand(
+      UUID personId, UUID correlationId, UUID operationId, UUID messageId, String idempotencyKey) {
     CreatePersonCommand command =
         new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
     MessageEnvelope envelope =
@@ -110,7 +156,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
             correlationId,
             null,
             operationId,
-            UUID.randomUUID().toString(),
+            idempotencyKey,
             personId,
             null,
             new Actor.Account(UUID.randomUUID()),
@@ -120,5 +166,44 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
     Message message = new Message(codec.encode(envelope), props);
     rabbitTemplate.send(AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, message);
+  }
+
+  private void publishUpdatePersonCommand(UUID personId, UUID correlationId) {
+    UpdatePersonCommand command =
+        new UpdatePersonCommand(personId, 1, "Augusta", "Lovelace", null, "ada." + personId + "@example.edu", null);
+    MessageEnvelope envelope =
+        new MessageEnvelope(
+            UUID.randomUUID(),
+            MessageTypes.UPDATE_PERSON,
+            1,
+            MessageKind.COMMAND,
+            "bff",
+            Instant.now(),
+            correlationId,
+            null,
+            UUID.randomUUID(),
+            UUID.randomUUID().toString(),
+            personId,
+            null,
+            new Actor.Account(UUID.randomUUID()),
+            codec.toJsonNode(command));
+    MessageProperties props = new MessageProperties();
+    props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+    rabbitTemplate.send(
+        AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(codec.encode(envelope), props));
+  }
+
+  private Message awaitMessage(Queue queue, UUID correlationId) {
+    Message[] holder = new Message[1];
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> {
+              Message message = rabbitTemplate.receive(queue.getName());
+              assertThat(message).isNotNull();
+              assertThat(codec.decode(message.getBody()).correlationId()).isEqualTo(correlationId);
+              holder[0] = message;
+            });
+    return holder[0];
   }
 }

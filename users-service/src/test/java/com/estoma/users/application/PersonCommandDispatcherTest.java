@@ -191,10 +191,14 @@ class PersonCommandDispatcherTest {
 
     OutboxAppendRequest reconstructed = capturedResultRowsInOrder().get(1);
     assertThat(reconstructed.messageType()).isEqualTo("UpdatePersonSucceeded");
+    assertThat(reconstructed.aggregateVersion()).isEqualTo(2);
     assertThat(reconstructed.causationId()).isEqualTo(retry.messageId());
     assertThat(reconstructed.correlationId()).isEqualTo(retry.correlationId());
     ResultPayload reconstructedPayload = codec.readValue(reconstructed.payloadJson(), ResultPayload.class);
     assertThat(reconstructedPayload.status()).isEqualTo(ResultStatus.SUCCEEDED);
+    SucceededPayload reconstructedData =
+        codec.readValue(codec.writeValueAsString(reconstructedPayload.data()), SucceededPayload.class);
+    assertThat(reconstructedData.version()).isEqualTo(2);
   }
 
   @Test
