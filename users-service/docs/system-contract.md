@@ -112,9 +112,9 @@ Rules:
 
 ## 3. Commands (received on `commands.users-service`)
 
-Every command carries a mandatory `idempotencyKey` (§2, §7) and, for the
-three operations on an existing Person, an `aggregateId` that must equal
-the payload's `personId` — see "Envelope/payload consistency" below.
+Every command carries a mandatory `idempotencyKey` (§2, §7) and an
+`aggregateId` that must equal the payload's `personId` — see
+"Envelope/payload consistency" below.
 
 ### Producer/operation authorization matrix
 
@@ -122,9 +122,9 @@ A producer being technically trusted at all does not imply it may issue
 every command (`commands.md` §8). `EnvelopeValidator` checks the
 `(producer, messageType)` pair against a configured matrix
 (`application.yml`, `estoma.messaging.command-producers`) — a purely
-technical check; the functional authorization itself is resolved
-upstream, by the producer, before publishing (`commands.md` §8), and
-this service never re-validates it:
+technical check; broad functional authorization is resolved upstream, by
+the producer, before publishing (`commands.md` §8). The producer-specific
+field contract of `UpdatePerson` is enforced locally below:
 
 | Producer | Authorized operations |
 |---|---|
@@ -133,13 +133,13 @@ this service never re-validates it:
 
 ### Envelope/payload consistency
 
-For `UpdatePerson`, `ActivatePerson`, `DeactivatePerson`, the envelope's
-`aggregateId` must equal the payload's `personId`; `CreatePerson` carries
-the same equality by construction (the producer sets both to the
-`personId` it generates, `commands.md` §4). When both are present and
-differ, the command is rejected `INVALID_MESSAGE` — a controlled
-functional Result, never a DLQ'd message (`commands.md` §2.1, §3).
-Checked once, centrally, for all four commands — not a per-handler rule.
+For all four commands, `aggregateId` and payload `personId` are mandatory:
+the producer sets both to the same Person identifier. A missing
+`aggregateId`, missing `personId`, or non-UUID `personId` is structurally
+invalid and goes to the DLQ. When both values are present but differ, the
+command is rejected `INVALID_MESSAGE` — a controlled functional Result,
+never a DLQ'd message (`commands.md` §2.1, §3). Checked once, centrally,
+for all four commands — not a per-handler rule.
 
 ### `CreatePerson`
 
@@ -162,6 +162,15 @@ docs, fixed here):
 
 Same payload plus `expectedVersion`. Never modifies accounts, roles, or
 academic information (`commands.md:117`).
+
+- `bff` may update the complete profile: names, `institutionalEmail`, and
+  `phone`, subject to the normal validation and duplicate rules.
+- `academic` (`student-import-process`) may update only `firstName`,
+  `paternalSurname`, and `maternalSurname`. Its `institutionalEmail` is
+  normalized only to verify it matches the existing Person; it is never
+  modified. `phone` is outside the import contract and must be absent; the
+  existing phone is always preserved. A different email or present phone is
+  rejected as `INVALID_MESSAGE`.
 
 Rejections, in precedence order: `PERSON_NOT_FOUND` >
 `PERSON_VERSION_CONFLICT` > `INVALID_PERSON_DATA` > `DUPLICATE_PERSON`
@@ -204,8 +213,9 @@ Full JSON Schemas: `asyncapi.yaml`.
 
 `ResolvePersonByInstitutionalEmail` (`queries.md` §2) resolves a
 `personId` from an `institutionalEmail` for `academic-service`'s
-`student-import-process` — the only authorized requester in V1 (least
-privilege: this Query resolves identity using personal information).
+`student-import-process`. This operation requires producer `academic` and
+`actor: { type: "SYSTEM", service: "academic" }` (least privilege: this
+Query resolves identity using personal information).
 Side-effect-free: no Consumer Inbox, no domain mutation, no Event. A
 redelivery simply re-evaluates the lookup.
 
@@ -221,7 +231,8 @@ normalized` is globally unique regardless of status):
 
 - `FOUND` — an `ACTIVE` Person matches: `data: { outcome, personId, status: "ACTIVE" }`.
 - `INACTIVE_MATCH` — an `INACTIVE` Person matches: `data: { outcome, personId, status: "INACTIVE" }`.
-  The caller must not auto-reuse or auto-reactivate it.
+  Resolution stops for administrative/manual review. The caller must not
+  auto-reuse, auto-reactivate, or issue an alternate `CreatePerson`.
 - `NOT_FOUND` — no match: `data: { outcome }` — `personId`/`status` are
   **omitted** from the wire, not published as `null`.
 
@@ -308,14 +319,11 @@ Non-cascading rules a consumer must not assume away
 
 ---
 
-## 6. `DUPLICATE_PERSON` — interim rule
+## 6. `DUPLICATE_PERSON`
 
-The platform docs point at `institutional_email_normalized` and say only
-that the duplicate-detection *restriction* is undecided
-(`data-model.md:247-251`), yet `DUPLICATE_PERSON` is already a contractual
-rejection code for `CreatePerson`/`UpdatePerson`.
-
-**Interim rule shipped in this PR:**
+`institutional_email_normalized` is globally unique across all Persons,
+whether `ACTIVE` or `INACTIVE`. This V1 decision is closed for
+`CreatePerson`/`UpdatePerson`:
 
 ```sql
 CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_normalized);
@@ -331,17 +339,14 @@ CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_
   only prevents two *Person* rows claiming the same mailbox, never
   multiple accounts against one Person.
 - `CreatePerson` against an email owned by an `INACTIVE` person →
-  `DUPLICATE_PERSON`. The caller should issue `ActivatePerson` instead of
-  retrying `CreatePerson`.
+  `DUPLICATE_PERSON`. No automatic reactivation, email recycling, or
+  reassignment exists in V1.
 - `UpdatePerson` excludes itself: `... AND person_id <> :personId`.
 - Application-side `DuplicatePersonPolicy` returns a sealed `DuplicateVerdict`
   (`None` | `Duplicate(matchedPersonId, matchedOn)`), not a boolean, so a
   future fuzzy name+birthdate rule can carry richer information without
   changing any caller. Selectable via `estoma.users.duplicate-policy`
   (default `NORMALIZED_EMAIL`).
-
-**Revisit trigger:** when the mass-import matching strategy is decided
-(`data-model.md:386`).
 
 ---
 
@@ -368,8 +373,8 @@ CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_
   - the caller's own `messageId` won the claim → a genuinely new
     intention → execute the handler as normal.
   - an existing claim, but `messageType`/`requestFingerprint` (a SHA-256
-    digest over the command's functional fields, excluding delivery/
-    tracing metadata) disagree → the same key reused for a different
+    digest over an explicit, fixed, ordered list of functional fields and
+    `aggregateId`, excluding delivery/tracing metadata) disagree → the same key reused for a different
     intention → reject `INVALID_MESSAGE`, without touching the original
     claim's row.
   - an existing claim for the same intention, already terminal (never
@@ -756,7 +761,7 @@ line that says so, and states when to revisit.
 | D2 | `DUPLICATE_PERSON` = unique index on normalized email (§6) | `data-model.md:247-251` | When mass-import matching strategy is decided (`data-model.md:386`) |
 | D3 | Health paths served by Actuator groups, not custom controllers (§11) | doc specifies `/health/*` paths; code skeleton used bare Actuator paths | N/A — this is a genuine conflict resolution, not a placeholder |
 | D4 | ~~Rejected payload shape~~ — **closed by the platform**, not a local decision anymore (§4) | `messaging-architecture.md` §3 now defines `{status, data?, error?}` platform-wide | Resolved — this row is historical only |
-| D5 | ~~Domain authorization: interim policy only checks `actor.accountId` present~~ — superseded by the producer/operation matrix (§3, §12) | `PersonAuthorizationPolicy` (the no-op interim seam) has been removed; `EnvelopeValidator`/`QueryEnvelopeValidator` check `(producer, messageType)` against a configured matrix instead — still a technical check only, functional authorization still resolved upstream (`commands.md` §8) | When `authorization-service` ships or a `FORBIDDEN`-equivalent code is added to the platform docs |
+| D5 | ~~Domain authorization: interim policy only checks `actor.accountId` present~~ — superseded by the producer/operation matrix (§3, §12) | `PersonAuthorizationPolicy` (the no-op interim seam) has been removed; `EnvelopeValidator`/`QueryEnvelopeValidator` check `(producer, messageType)` against a configured matrix. Broad functional authorization remains upstream (`commands.md` §8); the closed `academic` `UpdatePerson` field contract is enforced locally in §3. | When `authorization-service` ships or a `FORBIDDEN`-equivalent code is added to the platform docs |
 | D6 | `operationId` on RESULT only, absent on EVENT (§2) | envelope spec includes it; the event example in `events.md:164-181` omits it | When the platform docs state a rule either way |
 | D7 | Outbox `metadata jsonb` column (§8) | not derivable from documented columns at relay time | Propose upstream for the other 4 shared services |
 | D8 | Inbox retention: 30 days, configurable, purge job included in this PR | not addressed in platform docs | If purge cadence conflicts with an observed redelivery window |

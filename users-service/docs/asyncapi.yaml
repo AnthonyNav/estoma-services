@@ -229,6 +229,10 @@ components:
     UpdatePersonCommand:
       name: UpdatePerson
       title: Update personal data
+      description: >
+        bff may update the complete profile. academic's student-import-process
+        may update only names; institutionalEmail is consistency-only and phone
+        must be absent, so both existing values are preserved.
       contentType: application/json
       payload:
         allOf:
@@ -495,8 +499,17 @@ components:
           type: string
           description: >
             logicalComponentId of the technical actor (e.g. `academic`) —
-            same namespace as `producer`, not necessarily equal to it
-            (messaging-architecture.md §4).
+             same namespace as `producer`, not necessarily equal to it
+             (messaging-architecture.md §4).
+
+    AcademicSystemActor:
+      type: object
+      required: [type, service]
+      properties:
+        type:
+          const: SYSTEM
+        service:
+          const: academic
 
     BaseEnvelope:
       type: object
@@ -545,12 +558,13 @@ components:
             results.
         actor:
           $ref: '#/components/schemas/Actor'
+        payload: {}
 
     CommandEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
-          required: [operationId, idempotencyKey]
+          required: [operationId, idempotencyKey, aggregateId, actor, payload]
           properties:
             messageKind:
               const: COMMAND
@@ -568,12 +582,14 @@ components:
                 targetService field: the platform V1 envelope does not
                 carry one (messaging-architecture.md §8) -- routing alone
                 determines the destination.
+            aggregateId:
+              description: Must equal payload.personId for every Person command.
 
     QueryEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
-          required: [operationId]
+          required: [operationId, actor, payload]
           properties:
             messageKind:
               const: QUERY
@@ -581,6 +597,8 @@ components:
               type: string
               format: uuid
               description: Correlates the eventual RESULT back to the client-visible operation.
+            actor:
+              $ref: '#/components/schemas/AcademicSystemActor'
             # No idempotencyKey: the Query is side-effect-free (queries.md
             # §2) and needs no protection against being repeated.
 
