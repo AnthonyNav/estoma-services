@@ -1,7 +1,6 @@
 package com.estoma.users.messaging.outbound;
 
 import com.estoma.users.config.OutboxProperties;
-import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
@@ -118,6 +117,7 @@ public class OutboxRelay {
           case EVENT -> routingKeyResolver.resolveEvent(record.messageType());
           case RESULT -> routingKeyResolver.resolveResult(metadata == null ? null : metadata.destination());
           case COMMAND -> throw new IllegalStateException("users-service never publishes COMMAND messages");
+          case QUERY -> throw new IllegalStateException("users-service never publishes QUERY messages");
         };
 
     MessageEnvelope envelope = buildEnvelope(record, kind, metadata);
@@ -168,7 +168,7 @@ public class OutboxRelay {
   }
 
   private MessageEnvelope buildEnvelope(OutboxRecord record, MessageKind kind, OutboxMetadata metadata) {
-    var actorAccountId = metadata == null ? null : metadata.actorAccountId();
+    var actor = metadata == null ? null : metadata.actor();
     var operationId = kind == MessageKind.RESULT && metadata != null ? metadata.operationId() : null;
 
     return new MessageEnvelope(
@@ -181,10 +181,10 @@ public class OutboxRelay {
         record.correlationId(),
         record.causationId(),
         operationId,
-        null, // targetService only applies to COMMAND messages
+        null, // idempotencyKey only applies to COMMAND messages
         record.aggregateId(),
         record.aggregateVersion(),
-        actorAccountId == null ? null : new Actor(actorAccountId),
+        actor,
         codec.parseJson(record.payloadJson()));
   }
 }

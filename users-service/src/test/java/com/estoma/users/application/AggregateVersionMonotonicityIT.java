@@ -157,10 +157,10 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
             UUID.randomUUID(),
             null,
             UUID.randomUUID(),
-            "users-service",
+            UUID.randomUUID().toString(),
             null,
             null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             payload);
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);

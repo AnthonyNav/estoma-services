@@ -5,6 +5,7 @@ import static org.awaitility.Awaitility.await;
 
 import com.estoma.users.application.port.OutboxAppendRequest;
 import com.estoma.users.config.OutboxProperties;
+import com.estoma.users.contract.Actor;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.messaging.OutboxMetadata;
 import com.estoma.users.persistence.JdbcOutboxRepository;
@@ -81,7 +82,8 @@ class OutboxRelayIT extends AbstractMessagingIT {
   private UUID appendResult(String unboundDestination) {
     UUID messageId = UUID.randomUUID();
     UUID personId = UUID.randomUUID();
-    OutboxMetadata metadata = new OutboxMetadata(unboundDestination, UUID.randomUUID(), UUID.randomUUID());
+    OutboxMetadata metadata =
+        new OutboxMetadata(unboundDestination, UUID.randomUUID(), new Actor.Account(UUID.randomUUID()));
     outboxRepository.append(
         new OutboxAppendRequest(
             messageId,

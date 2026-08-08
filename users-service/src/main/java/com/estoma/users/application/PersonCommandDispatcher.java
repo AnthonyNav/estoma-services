@@ -98,8 +98,7 @@ public class PersonCommandDispatcher {
   private void appendSucceededResult(MessageEnvelope envelope, HandlerResult result) {
     String resultType = envelope.messageType() + "Succeeded";
     SucceededPayload payload = new SucceededPayload(result.aggregateId(), result.aggregateVersion());
-    OutboxMetadata metadata =
-        new OutboxMetadata(envelope.producer(), envelope.operationId(), actorAccountIdOf(envelope));
+    OutboxMetadata metadata = new OutboxMetadata(envelope.producer(), envelope.operationId(), envelope.actor());
 
     outbox.append(
         new OutboxAppendRequest(
@@ -119,8 +118,7 @@ public class PersonCommandDispatcher {
   private void appendRejectedResult(MessageEnvelope envelope, PersonRejectedException rejected) {
     String resultType = envelope.messageType() + "Rejected";
     RejectedPayload payload = RejectedPayload.of(rejected.code().name(), rejected.getMessage());
-    OutboxMetadata metadata =
-        new OutboxMetadata(envelope.producer(), envelope.operationId(), actorAccountIdOf(envelope));
+    OutboxMetadata metadata = new OutboxMetadata(envelope.producer(), envelope.operationId(), envelope.actor());
 
     outbox.append(
         new OutboxAppendRequest(
@@ -140,7 +138,7 @@ public class PersonCommandDispatcher {
   private void appendEvent(MessageEnvelope envelope, HandlerResult result) {
     // No operationId on events (docs/system-contract.md §10 D6): it
     // tracks a client-visible operation, meaningless to an event consumer.
-    OutboxMetadata metadata = new OutboxMetadata(null, null, actorAccountIdOf(envelope));
+    OutboxMetadata metadata = new OutboxMetadata(null, null, envelope.actor());
 
     outbox.append(
         new OutboxAppendRequest(
@@ -155,10 +153,6 @@ public class PersonCommandDispatcher {
             codec.writeValueAsString(result.eventPayload()),
             codec.writeValueAsString(metadata),
             Instant.now()));
-  }
-
-  private static UUID actorAccountIdOf(MessageEnvelope envelope) {
-    return envelope.actor() == null ? null : envelope.actor().accountId();
   }
 
   /** All four commands share a {@code personId} payload field; best-effort extraction for a rejected result's aggregateId. */

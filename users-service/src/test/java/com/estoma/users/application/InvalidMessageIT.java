@@ -47,8 +47,8 @@ class InvalidMessageIT extends AbstractMessagingIT {
   }
 
   @Test
-  void wrongTargetServiceGoesStraightToTheDlq() {
-    byte[] body = envelopeWithTargetService("authentication-service");
+  void missingIdempotencyKeyGoesStraightToTheDlq() {
+    byte[] body = envelopeWithIdempotencyKey(null);
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
     rabbitTemplate.send(AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(body, props));
@@ -78,10 +78,10 @@ class InvalidMessageIT extends AbstractMessagingIT {
             UUID.randomUUID(),
             null,
             UUID.randomUUID(),
-            "users-service",
+            UUID.randomUUID().toString(),
             null,
             null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(command));
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
@@ -93,7 +93,7 @@ class InvalidMessageIT extends AbstractMessagingIT {
         .untilAsserted(() -> assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS_DLQ)).isNotNull());
   }
 
-  private byte[] envelopeWithTargetService(String targetService) {
+  private byte[] envelopeWithIdempotencyKey(String idempotencyKey) {
     UUID personId = UUID.randomUUID();
     CreatePersonCommand command =
         new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
@@ -108,10 +108,10 @@ class InvalidMessageIT extends AbstractMessagingIT {
             UUID.randomUUID(),
             null,
             UUID.randomUUID(),
-            targetService,
+            idempotencyKey,
             null,
             null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(command));
     return codec.encode(envelope);
   }

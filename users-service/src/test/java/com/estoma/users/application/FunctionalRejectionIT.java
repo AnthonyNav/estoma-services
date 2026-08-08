@@ -82,15 +82,16 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
   private void createPerson(UUID personId) {
     CreatePersonCommand command =
         new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
-    send(MessageTypes.CREATE_PERSON, "users-service", UUID.randomUUID(), codec.toJsonNode(command));
+    send(MessageTypes.CREATE_PERSON, UUID.randomUUID().toString(), UUID.randomUUID(), codec.toJsonNode(command));
   }
 
   private void activatePerson(UUID personId, int expectedVersion, UUID correlationId) {
     ActivatePersonCommand command = new ActivatePersonCommand(personId, expectedVersion);
-    send(MessageTypes.ACTIVATE_PERSON, "users-service", correlationId, codec.toJsonNode(command));
+    send(MessageTypes.ACTIVATE_PERSON, UUID.randomUUID().toString(), correlationId, codec.toJsonNode(command));
   }
 
-  private void send(String messageType, String targetService, UUID correlationId, tools.jackson.databind.JsonNode payload) {
+  private void send(
+      String messageType, String idempotencyKey, UUID correlationId, tools.jackson.databind.JsonNode payload) {
     MessageEnvelope envelope =
         new MessageEnvelope(
             UUID.randomUUID(),
@@ -102,10 +103,10 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
             correlationId,
             null,
             UUID.randomUUID(),
-            targetService,
+            idempotencyKey,
             null,
             null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             payload);
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);

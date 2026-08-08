@@ -133,10 +133,10 @@ class ActivatePersonHandlerTest {
         UUID.randomUUID(),
         null,
         UUID.randomUUID(),
-        "users-service",
+        UUID.randomUUID().toString(),
         null,
         null,
-        new Actor(UUID.randomUUID()),
+        new Actor.Account(UUID.randomUUID()),
         codec.toJsonNode(command));
   }
 }
