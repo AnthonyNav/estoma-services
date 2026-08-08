@@ -58,7 +58,7 @@ class UpdatePersonHandler implements PersonCommandHandler {
     }
 
     boolean academicImport = "academic".equals(envelope.producer());
-    if (academicImport && !normalize(command.institutionalEmail()).equals(existing.email().normalized())) {
+    if (academicImport && !existing.email().normalized().equals(normalize(command.institutionalEmail()))) {
       throw new PersonRejectedException(
           RejectionCode.INVALID_MESSAGE,
           "academic UpdatePerson institutionalEmail must match the existing person");

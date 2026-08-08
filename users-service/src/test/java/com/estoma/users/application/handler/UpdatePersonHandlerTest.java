@@ -169,6 +169,21 @@ class UpdatePersonHandlerTest {
   }
 
   @Test
+  void academicRejectsMissingEmail() {
+    UUID personId = UUID.randomUUID();
+    when(personRepository.findById(personId)).thenReturn(Optional.of(existingPerson(personId, 1)));
+
+    assertThatThrownBy(
+            () ->
+                handler.handle(
+                    envelopeFor(
+                        "academic",
+                        new UpdatePersonCommand(personId, 1, "Ada", "Lovelace", null, null, null))))
+        .isInstanceOf(PersonRejectedException.class)
+        .satisfies(e -> assertThat(((PersonRejectedException) e).code()).isEqualTo(RejectionCode.INVALID_MESSAGE));
+  }
+
+  @Test
   void academicRejectsPhone() {
     UUID personId = UUID.randomUUID();
     when(personRepository.findById(personId)).thenReturn(Optional.of(existingPerson(personId, 1)));
