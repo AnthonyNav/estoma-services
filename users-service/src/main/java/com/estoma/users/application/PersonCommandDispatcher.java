@@ -43,19 +43,13 @@ public class PersonCommandDispatcher {
 
   private final InboxPort inbox;
   private final OutboxPort outbox;
-  private final PersonAuthorizationPolicy authorizationPolicy;
   private final EnvelopeJsonCodec codec;
   private final Map<String, PersonCommandHandler> handlersByMessageType;
 
   PersonCommandDispatcher(
-      InboxPort inbox,
-      OutboxPort outbox,
-      PersonAuthorizationPolicy authorizationPolicy,
-      EnvelopeJsonCodec codec,
-      List<PersonCommandHandler> handlers) {
+      InboxPort inbox, OutboxPort outbox, EnvelopeJsonCodec codec, List<PersonCommandHandler> handlers) {
     this.inbox = inbox;
     this.outbox = outbox;
-    this.authorizationPolicy = authorizationPolicy;
     this.codec = codec;
     this.handlersByMessageType =
         handlers.stream().collect(Collectors.toMap(PersonCommandHandler::commandMessageType, Function.identity()));
@@ -69,9 +63,12 @@ public class PersonCommandDispatcher {
       return new CommandOutcome.Duplicate();
     }
 
-    // (b) authorization from the ENVELOPE actor, never from the payload.
-    authorizationPolicy.check(envelope.actor(), envelope.messageType());
-
+    // (b) Functional authorization for the four global Person operations
+    // is resolved upstream, by the producer, before publishing
+    // (commands.md §8) — this class does not re-check it. EnvelopeValidator
+    // already confirmed the producer is technically authorized for this
+    // exact messageType (the producer/operation matrix) and that the
+    // envelope carries a usable ACCOUNT actor.
     PersonCommandHandler handler = handlersByMessageType.get(envelope.messageType());
     if (handler == null) {
       // EnvelopeValidator already restricts messageType to a known

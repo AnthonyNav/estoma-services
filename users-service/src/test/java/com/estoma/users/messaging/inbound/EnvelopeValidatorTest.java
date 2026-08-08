@@ -9,6 +9,7 @@ import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,8 @@ import tools.jackson.databind.json.JsonMapper;
 class EnvelopeValidatorTest {
 
   private final EnvelopeValidator validator =
-      new EnvelopeValidator(new MessagingProperties(Set.of("bff"), true, 3, Duration.ofSeconds(5)));
+      new EnvelopeValidator(
+          new MessagingProperties(Map.of("bff", Set.of("CreatePerson")), true, 3, Duration.ofSeconds(5)));
   private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
@@ -54,10 +56,20 @@ class EnvelopeValidatorTest {
   }
 
   @Test
-  void rejectsProducerNotOnTheAllowList() {
+  void rejectsProducerNotOnTheMatrix() {
     MessageEnvelope wrongProducer = withProducer(validCommand(), "some-untrusted-caller");
 
     assertThatThrownBy(() -> validator.validate(wrongProducer)).isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsAProducerAuthorizedForADifferentOperation() {
+    // "bff" is only wired up for CreatePerson in this test's fixture
+    // (see the validator field) — a producer being trusted at all does
+    // not imply it may issue every operation.
+    MessageEnvelope wrongOperation = withMessageType(validCommand(), "ActivatePerson");
+
+    assertThatThrownBy(() -> validator.validate(wrongOperation)).isInstanceOf(InvalidMessageException.class);
   }
 
   @Test
@@ -124,10 +136,13 @@ class EnvelopeValidatorTest {
   void allowsASecondConfiguredProducer() {
     EnvelopeValidator twoProducerValidator =
         new EnvelopeValidator(
-            new MessagingProperties(Set.of("bff", "student-import-process"), true, 3, Duration.ofSeconds(5)));
+            new MessagingProperties(
+                Map.of("bff", Set.of("CreatePerson"), "academic", Set.of("CreatePerson")),
+                true,
+                3,
+                Duration.ofSeconds(5)));
 
-    assertThatCode(
-            () -> twoProducerValidator.validate(withProducer(validCommand(), "student-import-process")))
+    assertThatCode(() -> twoProducerValidator.validate(withProducer(validCommand(), "academic")))
         .doesNotThrowAnyException();
   }
 

@@ -60,7 +60,19 @@ estoma:
   # the mandatory "environment" log field (security-observability.md:446-469).
   environment: ${ESTOMA_ENVIRONMENT:local}
   messaging:
-    allowed-producers: bff
+    # Per-operation producer authorization matrix (commands.md §8): a
+    # producer being technically trusted does not imply it may issue every
+    # command. academic (student-import-process) may create/update
+    # Persons but never activate/deactivate them.
+    command-producers:
+      bff:
+        - CreatePerson
+        - UpdatePerson
+        - ActivatePerson
+        - DeactivatePerson
+      academic:
+        - CreatePerson
+        - UpdatePerson
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     command-max-attempts: 3
     # Bounds ConfirmedRabbitPublisher's wait for a publisher confirm

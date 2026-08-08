@@ -14,7 +14,7 @@ import com.estoma.users.messaging.outbound.ConfirmedRabbitPublisher;
 import com.estoma.users.messaging.outbound.OutboxFailureCode;
 import com.estoma.users.messaging.outbound.RabbitPublishException;
 import java.time.Duration;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -31,7 +31,7 @@ import org.springframework.amqp.core.MessageProperties;
 class FailureRouterTest {
 
   private final ConfirmedRabbitPublisher publisher = mock(ConfirmedRabbitPublisher.class);
-  private final MessagingProperties properties = new MessagingProperties(Set.of("bff"), true, 3, Duration.ofSeconds(5));
+  private final MessagingProperties properties = new MessagingProperties(Map.of(), true, 3, Duration.ofSeconds(5));
   private final FailureRouter router = new FailureRouter(publisher, properties);
 
   @Test

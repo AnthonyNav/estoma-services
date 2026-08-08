@@ -11,7 +11,7 @@ import static org.mockito.Mockito.verify;
 
 import com.estoma.users.config.MessagingProperties;
 import java.time.Duration;
-import java.util.Set;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.AmqpConnectException;
@@ -34,7 +34,7 @@ class ConfirmedRabbitPublisherTest {
 
   private final RabbitTemplate requiredRouteTemplate = mock(RabbitTemplate.class);
   private final RabbitTemplate eventTemplate = mock(RabbitTemplate.class);
-  private final MessagingProperties properties = new MessagingProperties(Set.of("bff"), true, 3, SHORT_TIMEOUT);
+  private final MessagingProperties properties = new MessagingProperties(Map.of(), true, 3, SHORT_TIMEOUT);
   private final DefaultConfirmedRabbitPublisher publisher =
       new DefaultConfirmedRabbitPublisher(requiredRouteTemplate, eventTemplate, properties);
 

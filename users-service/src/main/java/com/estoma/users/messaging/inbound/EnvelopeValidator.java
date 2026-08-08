@@ -49,8 +49,12 @@ public class EnvelopeValidator {
     if (!MessageTypes.COMMANDS.contains(envelope.messageType())) {
       throw new InvalidMessageException("unrecognized command messageType " + envelope.messageType());
     }
-    if (!properties.allowedProducers().contains(envelope.producer())) {
-      throw new InvalidMessageException("producer not allow-listed: " + envelope.producer());
+    if (!properties.isCommandAllowed(envelope.producer(), envelope.messageType())) {
+      throw new InvalidMessageException(
+          "producer not authorized for this operation: producer="
+              + envelope.producer()
+              + ", messageType="
+              + envelope.messageType());
     }
     if (envelope.operationId() == null) {
       throw new InvalidMessageException("commands require operationId for result correlation");
