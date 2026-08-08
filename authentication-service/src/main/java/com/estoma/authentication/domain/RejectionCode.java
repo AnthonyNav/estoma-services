@@ -1,0 +1,30 @@
+package com.estoma.authentication.domain;
+
+/**
+ * The exact, closed set of functional rejection codes this service's
+ * commands and RPC operations may produce (commands.md §3). No other code
+ * may be introduced without updating this enum and commands.md.
+ */
+public enum RejectionCode {
+  ACCOUNT_NOT_FOUND,
+  ACCOUNT_INACTIVE,
+  ACCOUNT_ALREADY_ACTIVE,
+  CREDENTIAL_NOT_CONFIGURED,
+  PERSON_NOT_FOUND,
+  PERSON_INACTIVE,
+  ACCOUNT_ALREADY_EXISTS,
+  ACCOUNT_LOCKED,
+  INVALID_CREDENTIALS,
+  INVALID_PASSWORD,
+  LOGIN_IDENTIFIER_ALREADY_USED,
+  SESSION_NOT_FOUND,
+  SESSION_EXPIRED,
+  SESSION_REVOKED,
+  INVALID_REFRESH_TOKEN,
+  RECOVERY_TOKEN_INVALID,
+  RECOVERY_TOKEN_EXPIRED,
+  RECOVERY_TOKEN_ALREADY_USED,
+  ACCOUNT_VERSION_CONFLICT,
+  ALREADY_EXECUTED_SECRET_NOT_RECOVERABLE,
+  IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST
+}

@@ -68,7 +68,7 @@ The service may expose only internal operational endpoints:
 - `/health/liveness`
 - `/metrics`
 
-The current scaffold also exposes simple `/health` and `/version` endpoints for local operational verification. These endpoints must not authenticate users or administer accounts.
+These paths are served by Actuator health groups (`management.endpoints.web.base-path: /`, so they are the real paths, not `/actuator/*`), not by a custom controller — matching `users-service`'s own resolution of this exact question (its contract's decision D3). `/health` and `/info` are also exposed: `/health` is the aggregate Actuator health endpoint (kept for local operational verification), and `/info` carries build/version metadata via the `spring-boot-maven-plugin` `build-info` goal, replacing the scaffold-era custom `/version` endpoint. None of these endpoints authenticate users or administer accounts; `HttpSecurityConfig` denies everything else, including any Actuator endpoint not explicitly on the exposure allow-list.
 
 ## Functional Input Interfaces
 
@@ -214,26 +214,29 @@ com.estoma.authentication
 │   ├── rpc/                 # ephemeral RPC operation handlers
 │   └── projection/            # PersonCreated/Activated/Deactivated, StudentNumberCorrected handlers
 ├── infrastructure/     # concrete adapters
-│   ├── persistence/       # JPA + Spring Data repositories implementing domain ports
+│   ├── persistence/       # JdbcClient repositories implementing domain ports; SchemaVersionHealthIndicator
 │   ├── messaging/           # RabbitMQ listeners/publishers, envelope (de)serialization
 │   ├── security/               # Argon2 password hashing, JWT issuing/verification
-│   └── config/                    # Spring `@Configuration` classes
+│   ├── observability/             # structured JSON log formatter, MDC field vocabulary
+│   └── config/                       # Spring `@Configuration` classes (HttpSecurityConfig, etc.)
 └── contracts/           # wire-name vocabulary (already implemented)
 ```
 
 `contracts` is not moved or restructured. `LoginType` and `AccountStatus` are pure value enums with no framework dependency and no `wireName()` mapping; `domain` may depend on them directly. Only `AuthenticationCommand`, `AuthenticationEvent`, `AuthenticationRpcOperation`, and `MessagingNames` (which map to wire strings) remain adapter/infrastructure-facing vocabulary.
 
-`domain` must have zero dependency on Spring, JPA, or RabbitMQ. `application` depends on `domain` and on port interfaces declared by `domain` or `application`, never directly on `infrastructure`. `infrastructure` implements those ports and is the only layer allowed to depend on Spring Data, Spring AMQP, or a JWT/hashing library.
+`domain` must have zero dependency on Spring, JDBC, or RabbitMQ. `application` depends on `domain` and on port interfaces declared by `domain` or `application`, never directly on `infrastructure`. `infrastructure` implements those ports and is the only layer allowed to depend on Spring JDBC, Spring AMQP, or a JWT/hashing library.
 
-Port interfaces (e.g. `AccountRepository`, `PasswordHasher`, `TokenIssuer`, `OutboxPublisher`) are not created in Phase 1: an interface with no real consumer yet is speculative. They are designed in Phase 2 alongside their first concrete use.
+Port interfaces (e.g. `AccountRepository`, `PasswordHasher`, `TokenIssuer`, `OutboxPublisher`) are not created until a Phase 2 tramo actually needs them: an interface with no real consumer yet is speculative.
 
-Recommended dependencies for Phase 2 (not added to `pom.xml` in Phase 1, since Phase 1 has no functional dependencies):
+**Persistence: Spring JDBC (`JdbcClient`), not JPA/Hibernate** — corrected from the original Phase 1 recommendation after finding `users-service` (a merged sibling service) had already resolved the same question with a directly applicable rationale. `authentication-service` has the exact same three problems that ruled out JPA there:
 
-- `spring-security-crypto` — `Argon2PasswordEncoder`, without the full Spring Security filter chain.
-- `io.jsonwebtoken:jjwt-api` / `jjwt-impl` / `jjwt-jackson` — JWT issuing and verification.
-- `spring-boot-starter-data-jpa` + `org.postgresql:postgresql`.
-- `flyway-core` + `flyway-database-postgresql`.
-- `spring-boot-starter-amqp`.
+- `ActivateAccount`/`DeactivateAccount`/`ChangeLoginIdentifier` use a client-supplied `expectedVersion` against `accounts.version` — this needs `UPDATE ... WHERE version = ?` with a rows-affected check; Hibernate's `@Version` compares against the version loaded in the *current* session, which cannot detect a caller's stale expectation.
+- `security_rpc_idempotency_records` needs `INSERT ... ON CONFLICT (operation_type, idempotency_key) DO NOTHING` — a JPA `existsById()` + `save()` would be a TOCTOU race under concurrent redelivery.
+- The Outbox relay's claim query needs `FOR UPDATE SKIP LOCKED`, outside JPA's portable surface.
+
+Dependencies (production, already added to `pom.xml` in this tramo unless noted): `spring-boot-starter-jdbc`, `spring-boot-starter-flyway`, `flyway-database-postgresql` (runtime), `postgresql` (runtime), `spring-boot-starter-security` (full starter, not just `spring-security-crypto` alone — needed both for `Argon2PasswordEncoder` and for the HTTP lockdown in `HttpSecurityConfig`). Test: `spring-boot-testcontainers`, `testcontainers-junit-jupiter`, `testcontainers-postgresql`, plus the `-test` variants of the starters above.
+
+Still pending, added when the login/session tramo lands: `io.jsonwebtoken:jjwt-api` / `jjwt-impl` / `jjwt-jackson` — JWT issuing and verification. `spring-boot-starter-amqp` and `testcontainers-rabbitmq` are added alongside the messaging tramo, together with `docker-compose.yml`'s RabbitMQ service.
 
 ## Security Parameters (v1)
 
