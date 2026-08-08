@@ -2,6 +2,7 @@ package com.estoma.authentication.testsupport;
 
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -25,10 +26,18 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * (separate migration credentials, see system_contract.md "Migration
  * Tooling"), and an explicit override here removes any ambiguity about
  * which one wins.
+ *
+ * <p>{@code @ActiveProfiles("test")} layers {@code application-test.yml}
+ * on top of the main config: by default a test context has no real
+ * RabbitMQ broker, so the messaging tramo's self-declared topology and
+ * scheduled Outbox Relay tick are both switched off here to avoid
+ * constant connection-refused noise. {@link AbstractRabbitMqIT} turns
+ * topology declaration back on once a real broker is present.
  */
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
+@ActiveProfiles("test")
 public abstract class AbstractPostgresIT {
 
   protected static final PostgreSQLContainer POSTGRES =

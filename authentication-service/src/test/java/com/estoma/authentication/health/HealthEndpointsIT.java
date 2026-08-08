@@ -2,7 +2,7 @@ package com.estoma.authentication.health;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.estoma.authentication.testsupport.AbstractPostgresIT;
+import com.estoma.authentication.testsupport.AbstractRabbitMqIT;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
@@ -13,10 +13,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 /**
  * Verifies the documented operational HTTP surface (system_contract.md
  * "Operational HTTP Interface"): every health path and {@code
- * /metrics}/{@code /info} respond when the database is healthy. This
- * service has no RabbitMQ dependency yet (messaging is a later tramo), so
- * unlike a sibling service's equivalent test, the aggregate {@code /health}
- * endpoint only ever reflects the {@code db} indicator here.
+ * /metrics}/{@code /info} respond when the database and RabbitMQ are both
+ * healthy. Extends {@link AbstractRabbitMqIT}, not just {@code
+ * AbstractPostgresIT}: readiness now also reflects {@code
+ * commandConsumer}/{@code outboxRelay} (the messaging tramo), so a real
+ * broker must be present for {@code /health/readiness} to report UP.
  *
  * <p>{@code @AutoConfigureMetrics} is required: Spring Boot's test support
  * disables metrics export by default in every {@code @SpringBootTest} (so
@@ -28,7 +29,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @AutoConfigureMetrics
-class HealthEndpointsIT extends AbstractPostgresIT {
+class HealthEndpointsIT extends AbstractRabbitMqIT {
 
   @Autowired private TestRestTemplate restTemplate;
 
