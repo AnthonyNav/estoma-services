@@ -44,4 +44,18 @@ public class EnvelopeJsonCodec {
   public String writeValueAsString(Object value) {
     return mapper.writeValueAsString(value);
   }
+
+  /** Parses a JSON string (e.g. a stored Outbox row's {@code payload}) into a {@link JsonNode}, for rebuilding an outbound envelope. */
+  public JsonNode readTree(String json) {
+    return mapper.readValue(json, JsonNode.class);
+  }
+
+  /** Decodes a raw message body into a specific type -- used by the RPC listener, which does not use {@link MessageEnvelope}. */
+  public <T> T decodeValue(byte[] body, Class<T> type) {
+    return mapper.readValue(body, type);
+  }
+
+  public byte[] encodeValue(Object value) {
+    return mapper.writeValueAsBytes(value);
+  }
 }
