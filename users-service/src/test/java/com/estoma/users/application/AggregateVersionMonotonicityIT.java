@@ -160,7 +160,7 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
             null,
             UUID.randomUUID(),
             UUID.randomUUID().toString(),
-            null,
+            UUID.fromString(payload.path("personId").asString()),
             null,
             new Actor.Account(UUID.randomUUID()),
             payload);

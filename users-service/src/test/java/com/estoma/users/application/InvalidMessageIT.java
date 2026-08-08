@@ -63,6 +63,18 @@ class InvalidMessageIT extends AbstractMessagingIT {
   }
 
   @Test
+  void missingAggregateIdGoesStraightToTheDlq() {
+    byte[] body = envelopeWithAggregateId(null);
+    MessageProperties props = new MessageProperties();
+    props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+    rabbitTemplate.send(AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(body, props));
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS_DLQ)).isNotNull());
+  }
+
+  @Test
   void unsupportedMessageVersionGoesStraightToTheDlq() {
     UUID personId = UUID.randomUUID();
     CreatePersonCommand command =
@@ -79,7 +91,7 @@ class InvalidMessageIT extends AbstractMessagingIT {
             null,
             UUID.randomUUID(),
             UUID.randomUUID().toString(),
-            null,
+            personId,
             null,
             new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(command));
@@ -109,7 +121,30 @@ class InvalidMessageIT extends AbstractMessagingIT {
             null,
             UUID.randomUUID(),
             idempotencyKey,
+            personId,
             null,
+            new Actor.Account(UUID.randomUUID()),
+            codec.toJsonNode(command));
+    return codec.encode(envelope);
+  }
+
+  private byte[] envelopeWithAggregateId(UUID aggregateId) {
+    UUID personId = UUID.randomUUID();
+    CreatePersonCommand command =
+        new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
+    MessageEnvelope envelope =
+        new MessageEnvelope(
+            UUID.randomUUID(),
+            MessageTypes.CREATE_PERSON,
+            1,
+            MessageKind.COMMAND,
+            "bff",
+            Instant.now(),
+            UUID.randomUUID(),
+            null,
+            UUID.randomUUID(),
+            UUID.randomUUID().toString(),
+            aggregateId,
             null,
             new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(command));

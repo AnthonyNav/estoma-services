@@ -111,7 +111,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
             null,
             operationId,
             UUID.randomUUID().toString(),
-            null,
+            personId,
             null,
             new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(command));

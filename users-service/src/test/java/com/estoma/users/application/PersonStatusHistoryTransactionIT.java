@@ -150,7 +150,7 @@ class PersonStatusHistoryTransactionIT extends AbstractPostgresIT {
         null,
         UUID.randomUUID(),
         UUID.randomUUID().toString(),
-        null,
+        UUID.fromString(payload.path("personId").asString()),
         null,
         new Actor.Account(actorAccountId),
         payload);

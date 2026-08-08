@@ -5,6 +5,7 @@ import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
@@ -33,7 +34,9 @@ public class EnvelopeValidator {
   public void validate(MessageEnvelope envelope) {
     requireNonNull(envelope, "envelope");
     requireNonNull(envelope.messageId(), "messageId");
+    requireNonNull(envelope.occurredAt(), "occurredAt");
     requireNonNull(envelope.correlationId(), "correlationId");
+    requireNonNull(envelope.payload(), "payload");
     requireNonBlank(envelope.messageType(), "messageType");
     requireNonBlank(envelope.producer(), "producer");
     requireNonNull(envelope.messageKind(), "messageKind");
@@ -49,6 +52,8 @@ public class EnvelopeValidator {
     if (!MessageTypes.COMMANDS.contains(envelope.messageType())) {
       throw new InvalidMessageException("unrecognized command messageType " + envelope.messageType());
     }
+    requireNonNull(envelope.aggregateId(), "aggregateId");
+    requirePersonId(envelope);
     if (!properties.isCommandAllowed(envelope.producer(), envelope.messageType())) {
       throw new InvalidMessageException(
           "producer not authorized for this operation: producer="
@@ -87,6 +92,18 @@ public class EnvelopeValidator {
   private static void requireNonBlank(String value, String fieldName) {
     if (value == null || value.isBlank()) {
       throw new InvalidMessageException(fieldName + " must not be blank");
+    }
+  }
+
+  private static void requirePersonId(MessageEnvelope envelope) {
+    String personId = envelope.payload().path("personId").asString(null);
+    if (personId == null) {
+      throw new InvalidMessageException("payload.personId must not be null");
+    }
+    try {
+      UUID.fromString(personId);
+    } catch (IllegalArgumentException e) {
+      throw new InvalidMessageException("payload.personId must be a UUID");
     }
   }
 }

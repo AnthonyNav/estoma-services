@@ -292,12 +292,11 @@ public class PersonCommandDispatcher {
    * construction (§4 — the producer sets both to the {@code personId} it
    * generates). Checked once here, for all four commands, rather than
    * per-handler: it's a structural consistency rule of the envelope/payload
-   * pair, not a domain rule any single handler owns. Neither value being
-   * present is not itself an error — this only rejects an actual mismatch.
+   * pair, not a domain rule any single handler owns.
    */
   private void requireAggregateIdMatchesPayload(MessageEnvelope envelope, UUID payloadPersonId) {
     UUID aggregateId = envelope.aggregateId();
-    if (aggregateId != null && payloadPersonId != null && !aggregateId.equals(payloadPersonId)) {
+    if (aggregateId == null || payloadPersonId == null || !aggregateId.equals(payloadPersonId)) {
       throw new PersonRejectedException(
           RejectionCode.INVALID_MESSAGE, "envelope aggregateId does not match payload personId");
     }

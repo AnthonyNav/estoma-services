@@ -73,6 +73,7 @@ class ProducerOperationMatrixTest {
   }
 
   private MessageEnvelope command(String producer, String messageType) {
+    UUID personId = UUID.randomUUID();
     return new MessageEnvelope(
         UUID.randomUUID(),
         messageType,
@@ -84,9 +85,9 @@ class ProducerOperationMatrixTest {
         null,
         UUID.randomUUID(),
         UUID.randomUUID().toString(),
-        null,
+        personId,
         null,
         new Actor.Account(UUID.randomUUID()),
-        mapper.valueToTree(java.util.Map.of()));
+        mapper.valueToTree(Map.of("personId", personId.toString())));
   }
 }

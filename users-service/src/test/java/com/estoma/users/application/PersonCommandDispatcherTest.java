@@ -134,16 +134,15 @@ class PersonCommandDispatcherTest {
   }
 
   @Test
-  void absentAggregateIdDoesNotBlockTheHandler() {
-    // Neither value being present is not itself an error -- only an
-    // actual mismatch is rejected (commands.md §3).
+  void missingAggregateIdIsRejectedWithoutInvokingTheHandlerOrClaimingIdempotency() {
     UUID personId = UUID.randomUUID();
-    when(updateHandler.handle(any())).thenReturn(succeededResult(personId, 2));
 
     CommandOutcome outcome = dispatcher.dispatch(envelope(null, personId, IDEMPOTENCY_KEY));
 
-    assertThat(outcome).isInstanceOf(CommandOutcome.Succeeded.class);
-    verify(updateHandler).handle(any());
+    assertThat(outcome).isInstanceOf(CommandOutcome.Rejected.class);
+    assertThat(((CommandOutcome.Rejected) outcome).code()).isEqualTo(RejectionCode.INVALID_MESSAGE);
+    verify(updateHandler, never()).handle(any());
+    verify(idempotency, never()).claim(any(), any(), any(), any(), any(), any(), any());
   }
 
   @Test

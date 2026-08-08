@@ -37,7 +37,7 @@ class EnvelopeJsonCodecTest {
             null, // causationId: absent on a client-originated command
             UUID.randomUUID(),
             UUID.randomUUID().toString(),
-            null,
+            personId,
             null,
             new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(
@@ -147,6 +147,7 @@ class EnvelopeJsonCodecTest {
   }
 
   private MessageEnvelope minimalCommandEnvelope() {
+    UUID personId = UUID.randomUUID();
     return new MessageEnvelope(
         UUID.randomUUID(),
         "CreatePerson",
@@ -158,9 +159,9 @@ class EnvelopeJsonCodecTest {
         null,
         UUID.randomUUID(),
         UUID.randomUUID().toString(),
-        null,
+        personId,
         null,
         new Actor.Account(UUID.randomUUID()),
-        codec.toJsonNode(java.util.Map.of()));
+        codec.toJsonNode(java.util.Map.of("personId", personId.toString())));
   }
 }

@@ -91,7 +91,7 @@ class CommandTransactionIT extends AbstractPostgresIT {
         null,
         UUID.randomUUID(),
         UUID.randomUUID().toString(),
-        null,
+        personId,
         null,
         new Actor.Account(UUID.randomUUID()),
         codec.toJsonNode(command));

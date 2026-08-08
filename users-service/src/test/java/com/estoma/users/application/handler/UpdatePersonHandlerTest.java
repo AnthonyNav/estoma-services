@@ -254,7 +254,7 @@ class UpdatePersonHandlerTest {
         null,
         UUID.randomUUID(),
         UUID.randomUUID().toString(),
-        null,
+        command.personId(),
         null,
         new Actor.Account(UUID.randomUUID()),
         codec.toJsonNode(command));
