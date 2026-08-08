@@ -28,6 +28,7 @@ import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -54,6 +55,7 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
   @Autowired private AmqpAdmin amqpAdmin;
   @Autowired private EnvelopeJsonCodec codec;
   @Autowired private PersonCommandDispatcher dispatcher;
+  @Autowired private JdbcClient jdbc;
 
   @Test
   void anActivePersonResolvesToFound() {
@@ -100,8 +102,38 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
     String email = "ada." + personId + "@example.edu";
     createPerson(personId, email);
 
-    assertThat(resolve(email).outcome()).isEqualTo(ResolveOutcome.FOUND);
-    assertThat(resolve(email).outcome()).isEqualTo(ResolveOutcome.FOUND);
+    Queue resultsQueue = declareResultsQueue("academic");
+    Queue eventsQueue = amqpAdmin.declareQueue();
+    amqpAdmin.declareBinding(
+        BindingBuilder.bind(eventsQueue).to(new org.springframework.amqp.core.TopicExchange(AmqpNames.EXCHANGE_EVENTS)).with("identity.person.*"));
+    try {
+      UUID messageId = UUID.randomUUID();
+      UUID operationId = UUID.randomUUID();
+      UUID correlationId = UUID.randomUUID();
+      MessageEnvelope query = queryEnvelope(messageId, operationId, correlationId, "academic", email, new Actor.System("academic"));
+      byte[] body = codec.encode(query);
+
+      publishQuery(body);
+      publishQuery(body);
+
+      MessageEnvelope firstResult = codec.decode(awaitMessage(resultsQueue, correlationId).getBody());
+      MessageEnvelope secondResult = codec.decode(awaitMessage(resultsQueue, correlationId).getBody());
+      for (MessageEnvelope result : java.util.List.of(firstResult, secondResult)) {
+        assertThat(result.causationId()).isEqualTo(messageId);
+        assertThat(result.operationId()).isEqualTo(operationId);
+        assertThat(result.correlationId()).isEqualTo(correlationId);
+      }
+      assertThat(
+              jdbc.sql("SELECT count(*) FROM processed_messages WHERE message_id = :messageId")
+                  .param("messageId", messageId)
+                  .query(Long.class)
+                  .single())
+          .isZero();
+      assertThat(rabbitTemplate.receive(eventsQueue.getName())).isNull();
+    } finally {
+      amqpAdmin.deleteQueue(resultsQueue.getName());
+      amqpAdmin.deleteQueue(eventsQueue.getName());
+    }
   }
 
   @Test
@@ -189,26 +221,49 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
   }
 
   private void publishQuery(String producer, String institutionalEmail, UUID correlationId) {
-    ResolvePersonByInstitutionalEmailQuery query = new ResolvePersonByInstitutionalEmailQuery(institutionalEmail);
-    MessageEnvelope envelope =
-        new MessageEnvelope(
+    publishQuery(
+        queryEnvelope(
             UUID.randomUUID(),
-            MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL,
-            1,
-            MessageKind.QUERY,
-            producer,
-            Instant.now(),
+            UUID.randomUUID(),
             correlationId,
-            null,
-            UUID.randomUUID(),
-            null,
-            null,
-            null,
-            new Actor.System("academic"),
-            codec.toJsonNode(query));
+            producer,
+            institutionalEmail,
+            new Actor.System("academic")));
+  }
+
+  private MessageEnvelope queryEnvelope(
+      UUID messageId,
+      UUID operationId,
+      UUID correlationId,
+      String producer,
+      String institutionalEmail,
+      Actor actor) {
+    ResolvePersonByInstitutionalEmailQuery query = new ResolvePersonByInstitutionalEmailQuery(institutionalEmail);
+    return new MessageEnvelope(
+        messageId,
+        MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL,
+        1,
+        MessageKind.QUERY,
+        producer,
+        Instant.now(),
+        correlationId,
+        null,
+        operationId,
+        null,
+        null,
+        null,
+        actor,
+        codec.toJsonNode(query));
+  }
+
+  private void publishQuery(MessageEnvelope envelope) {
+    publishQuery(codec.encode(envelope));
+  }
+
+  private void publishQuery(byte[] body) {
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
-    rabbitTemplate.send(AmqpNames.EXCHANGE_QUERIES, AmqpNames.ROUTING_KEY_QUERIES, new Message(codec.encode(envelope), props));
+    rabbitTemplate.send(AmqpNames.EXCHANGE_QUERIES, AmqpNames.ROUTING_KEY_QUERIES, new Message(body, props));
   }
 
   private MessageEnvelope commandEnvelope(String messageType, UUID correlationId, UUID aggregateId, JsonNode payload) {

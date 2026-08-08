@@ -34,7 +34,9 @@ public class QueryEnvelopeValidator {
   public void validate(MessageEnvelope envelope) {
     requireNonNull(envelope, "envelope");
     requireNonNull(envelope.messageId(), "messageId");
+    requireNonNull(envelope.occurredAt(), "occurredAt");
     requireNonNull(envelope.correlationId(), "correlationId");
+    requireNonNull(envelope.payload(), "payload");
     requireNonBlank(envelope.messageType(), "messageType");
     requireNonBlank(envelope.producer(), "producer");
     requireNonNull(envelope.messageKind(), "messageKind");
@@ -60,11 +62,14 @@ public class QueryEnvelopeValidator {
     if (envelope.operationId() == null) {
       throw new InvalidMessageException("queries require operationId for result correlation");
     }
-    if (!(envelope.actor() instanceof Actor.System)) {
+    if (!(envelope.actor() instanceof Actor.System system)
+        || system.service() == null
+        || system.service().isBlank()
+        || !"academic".equals(system.service())) {
       // A Query is issued by a service acting on its own behalf, never a
       // human -- an ACCOUNT actor here would be structurally wrong, not
       // just unauthorized (messaging-architecture.md §8.1).
-      throw new InvalidMessageException("queries require a SYSTEM actor");
+      throw new InvalidMessageException("ResolvePersonByInstitutionalEmail requires SYSTEM actor academic");
     }
   }
 

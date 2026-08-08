@@ -81,6 +81,24 @@ class QueryEnvelopeValidatorTest {
   }
 
   @Test
+  void rejectsSystemActorWithoutService() {
+    assertThatThrownBy(() -> validator.validate(withActor(validQuery(), new Actor.System(null))))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsSystemActorWithBlankService() {
+    assertThatThrownBy(() -> validator.validate(withActor(validQuery(), new Actor.System("   "))))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsSystemActorFromAnotherService() {
+    assertThatThrownBy(() -> validator.validate(withActor(validQuery(), new Actor.System("another-service"))))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
   void doesNotRequireAnIdempotencyKey() {
     MessageEnvelope noIdempotencyKey = validQuery(); // idempotencyKey is already null in the fixture
 
@@ -96,6 +114,18 @@ class QueryEnvelopeValidatorTest {
   @Test
   void rejectsMissingCorrelationId() {
     assertThatThrownBy(() -> validator.validate(withCorrelationId(validQuery(), null)))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsMissingOccurredAt() {
+    assertThatThrownBy(() -> validator.validate(withOccurredAt(validQuery(), null)))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsMissingPayload() {
+    assertThatThrownBy(() -> validator.validate(withPayload(validQuery(), null)))
         .isInstanceOf(InvalidMessageException.class);
   }
 
@@ -171,5 +201,19 @@ class QueryEnvelopeValidatorTest {
         e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
         e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), actor, e.payload());
+  }
+
+  private MessageEnvelope withOccurredAt(MessageEnvelope e, Instant occurredAt) {
+    return new MessageEnvelope(
+        e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), occurredAt,
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
+        e.aggregateVersion(), e.actor(), e.payload());
+  }
+
+  private MessageEnvelope withPayload(MessageEnvelope e, tools.jackson.databind.JsonNode payload) {
+    return new MessageEnvelope(
+        e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
+        e.aggregateVersion(), e.actor(), payload);
   }
 }
