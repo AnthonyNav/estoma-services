@@ -11,6 +11,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.estoma.users.application.command.CreatePersonCommand;
 import com.estoma.users.application.command.UpdatePersonCommand;
 import com.estoma.users.application.handler.HandlerResult;
 import com.estoma.users.application.handler.PersonCommandHandler;
@@ -59,12 +60,14 @@ class PersonCommandDispatcherTest {
   private final InboxPort inbox = mock(InboxPort.class);
   private final OutboxPort outbox = mock(OutboxPort.class);
   private final IdempotencyPort idempotency = mock(IdempotencyPort.class);
+  private final PersonCommandHandler createHandler = mock(PersonCommandHandler.class);
   private final PersonCommandHandler updateHandler = mock(PersonCommandHandler.class);
 
   // Stubbed before the dispatcher field below is constructed: the handler
   // map is built once, in the constructor, from commandMessageType() --
   // stubbing it inside a @Test method would be too late.
   {
+    when(createHandler.commandMessageType()).thenReturn(MessageTypes.CREATE_PERSON);
     when(updateHandler.commandMessageType()).thenReturn(MessageTypes.UPDATE_PERSON);
     when(inbox.tryInsert(anyString(), any(), any())).thenReturn(true);
     // Default: every claim() call looks like a brand-new intention --
@@ -89,7 +92,7 @@ class PersonCommandDispatcherTest {
   }
 
   private final PersonCommandDispatcher dispatcher =
-      new PersonCommandDispatcher(inbox, outbox, idempotency, codec, List.of(updateHandler));
+      new PersonCommandDispatcher(inbox, outbox, idempotency, codec, List.of(createHandler, updateHandler));
 
   @Test
   void matchingAggregateIdAndPersonIdInvokesTheHandler() {
@@ -261,6 +264,86 @@ class PersonCommandDispatcherTest {
     assertThat(payload.error().code()).isEqualTo(RejectionCode.PERSON_VERSION_CONFLICT.name());
   }
 
+  @Test
+  void malformedCreateEmailIsClaimedAndItsRejectionIsReconstructedWithoutReinvokingTheHandler() {
+    UUID personId = UUID.randomUUID();
+    MessageEnvelope malformed = createEnvelope(personId, "not-an-email", IDEMPOTENCY_KEY);
+    when(createHandler.handle(any()))
+        .thenThrow(new com.estoma.users.domain.PersonRejectedException(RejectionCode.INVALID_PERSON_DATA, "invalid email"));
+
+    CommandOutcome firstOutcome = dispatcher.dispatch(malformed);
+
+    assertThat(firstOutcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.INVALID_PERSON_DATA));
+    ArgumentCaptor<String> fingerprintCaptor = ArgumentCaptor.forClass(String.class);
+    verify(idempotency)
+        .claim(
+            eq(PRODUCER),
+            eq(IDEMPOTENCY_KEY),
+            eq(MessageTypes.CREATE_PERSON),
+            eq(personId),
+            fingerprintCaptor.capture(),
+            eq(malformed.messageId()),
+            any());
+    String malformedFingerprint = fingerprintCaptor.getValue();
+    verify(idempotency).markRejected(eq(PRODUCER), eq(IDEMPOTENCY_KEY), eq(RejectionCode.INVALID_PERSON_DATA.name()), any());
+
+    MessageEnvelope retry = createEnvelope(personId, "not-an-email", IDEMPOTENCY_KEY);
+    when(idempotency.claim(
+            eq(PRODUCER),
+            eq(IDEMPOTENCY_KEY),
+            eq(MessageTypes.CREATE_PERSON),
+            eq(personId),
+            eq(malformedFingerprint),
+            eq(retry.messageId()),
+            any()))
+        .thenReturn(
+            new IdempotencyRecord(
+                PRODUCER,
+                IDEMPOTENCY_KEY,
+                MessageTypes.CREATE_PERSON,
+                personId,
+                malformedFingerprint,
+                malformed.messageId(),
+                IdempotencyStatus.REJECTED,
+                null,
+                RejectionCode.INVALID_PERSON_DATA.name(),
+                Instant.now(),
+                Instant.now()));
+
+    CommandOutcome retryOutcome = dispatcher.dispatch(retry);
+
+    assertThat(retryOutcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.INVALID_PERSON_DATA));
+    verify(createHandler, times(1)).handle(any());
+
+    MessageEnvelope corrected = createEnvelope(personId, "ada@example.edu", IDEMPOTENCY_KEY);
+    when(idempotency.claim(
+            eq(PRODUCER),
+            eq(IDEMPOTENCY_KEY),
+            eq(MessageTypes.CREATE_PERSON),
+            eq(personId),
+            any(),
+            eq(corrected.messageId()),
+            any()))
+        .thenReturn(
+            new IdempotencyRecord(
+                PRODUCER,
+                IDEMPOTENCY_KEY,
+                MessageTypes.CREATE_PERSON,
+                personId,
+                malformedFingerprint,
+                malformed.messageId(),
+                IdempotencyStatus.REJECTED,
+                null,
+                RejectionCode.INVALID_PERSON_DATA.name(),
+                Instant.now(),
+                Instant.now()));
+
+    CommandOutcome correctedOutcome = dispatcher.dispatch(corrected);
+
+    assertThat(correctedOutcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.INVALID_MESSAGE));
+    verify(createHandler, times(1)).handle(any());
+  }
+
   private HandlerResult succeededResult(UUID personId, int version) {
     return new HandlerResult(
         personId,
@@ -274,13 +357,34 @@ class PersonCommandDispatcherTest {
     UpdatePersonCommand command = codec.convertPayload(envelope, UpdatePersonCommand.class);
     return RequestFingerprint.of(
         MessageTypes.UPDATE_PERSON,
+        envelope.aggregateId().toString(),
         command.personId().toString(),
         String.valueOf(command.expectedVersion()),
         command.firstName(),
         command.paternalSurname(),
         command.maternalSurname(),
-        com.estoma.users.domain.InstitutionalEmail.of(command.institutionalEmail()).normalized(),
+        command.institutionalEmail().trim().toLowerCase(java.util.Locale.ROOT),
         command.phone());
+  }
+
+  private MessageEnvelope createEnvelope(UUID personId, String institutionalEmail, String idempotencyKey) {
+    CreatePersonCommand command =
+        new CreatePersonCommand(personId, "Ada", "Lovelace", null, institutionalEmail, null);
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        MessageTypes.CREATE_PERSON,
+        1,
+        MessageKind.COMMAND,
+        PRODUCER,
+        Instant.now(),
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        idempotencyKey,
+        personId,
+        null,
+        new Actor.Account(UUID.randomUUID()),
+        codec.toJsonNode(command));
   }
 
   private OutboxAppendRequest capturedResultRow() {

@@ -12,7 +12,6 @@ import com.estoma.users.contract.MessageTypes;
 import com.estoma.users.contract.result.ResultPayload;
 import com.estoma.users.contract.result.ResultStatus;
 import com.estoma.users.contract.result.SucceededPayload;
-import com.estoma.users.domain.InstitutionalEmail;
 import com.estoma.users.domain.PersonRejectedException;
 import com.estoma.users.domain.RejectionCode;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
@@ -20,6 +19,7 @@ import com.estoma.users.messaging.OutboxMetadata;
 import com.estoma.users.observability.ConsumerNames;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
@@ -318,6 +318,7 @@ public class PersonCommandDispatcher {
     return switch (messageType) {
       case MessageTypes.CREATE_PERSON -> RequestFingerprint.of(
           messageType,
+          envelope.aggregateId().toString(),
           text(p, "personId"),
           text(p, "firstName"),
           text(p, "paternalSurname"),
@@ -326,6 +327,7 @@ public class PersonCommandDispatcher {
           text(p, "phone"));
       case MessageTypes.UPDATE_PERSON -> RequestFingerprint.of(
           messageType,
+          envelope.aggregateId().toString(),
           text(p, "personId"),
           text(p, "expectedVersion"),
           text(p, "firstName"),
@@ -334,15 +336,20 @@ public class PersonCommandDispatcher {
           normalizedEmail(text(p, "institutionalEmail")),
           text(p, "phone"));
       case MessageTypes.ACTIVATE_PERSON -> RequestFingerprint.of(
-          messageType, text(p, "personId"), text(p, "expectedVersion"));
+          messageType, envelope.aggregateId().toString(), text(p, "personId"), text(p, "expectedVersion"));
       case MessageTypes.DEACTIVATE_PERSON -> RequestFingerprint.of(
-          messageType, text(p, "personId"), text(p, "expectedVersion"), text(p, "reasonCode"), text(p, "reasonDetail"));
+          messageType,
+          envelope.aggregateId().toString(),
+          text(p, "personId"),
+          text(p, "expectedVersion"),
+          text(p, "reasonCode"),
+          text(p, "reasonDetail"));
       default -> throw new IllegalStateException("no fingerprint rule for messageType " + messageType);
     };
   }
 
   private static String normalizedEmail(String raw) {
-    return raw == null ? null : InstitutionalEmail.of(raw).normalized();
+    return raw == null ? null : raw.trim().toLowerCase(Locale.ROOT);
   }
 
   private static String text(JsonNode node, String field) {

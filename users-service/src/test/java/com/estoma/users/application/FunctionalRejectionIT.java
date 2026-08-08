@@ -26,6 +26,7 @@ import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * A functional rejection must be durable, correlated, and MUST NOT reach
@@ -39,6 +40,7 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
   @Autowired private RabbitTemplate rabbitTemplate;
   @Autowired private AmqpAdmin amqpAdmin;
   @Autowired private EnvelopeJsonCodec codec;
+  @Autowired private JdbcClient jdbc;
 
   @Test
   void activatingAnAlreadyActivePersonIsRejectedWithoutReachingTheDlqOrAnyRetryTier() throws InterruptedException {
@@ -81,6 +83,55 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
     }
   }
 
+  @Test
+  void malformedCreateEmailIsPersistedAndReplayedWithoutRevalidatingTheDomain() {
+    Queue resultsQueue = amqpAdmin.declareQueue();
+    amqpAdmin.declareBinding(
+        BindingBuilder.bind(resultsQueue).to(new DirectExchange(AmqpNames.EXCHANGE_RESULTS)).with("bff"));
+
+    try {
+      UUID personId = UUID.randomUUID();
+      String idempotencyKey = UUID.randomUUID().toString();
+      CreatePersonCommand malformed =
+          new CreatePersonCommand(personId, "Ada", "Lovelace", null, "not-an-email", null);
+
+      UUID firstCorrelationId = UUID.randomUUID();
+      send(MessageTypes.CREATE_PERSON, idempotencyKey, firstCorrelationId, codec.toJsonNode(malformed));
+      assertRejectedResult(resultsQueue, firstCorrelationId, "CreatePersonRejected", "INVALID_PERSON_DATA");
+
+      assertThat(
+              jdbc.sql(
+                      "SELECT terminal_status FROM idempotency_records "
+                          + "WHERE producer = :producer AND idempotency_key = :idempotencyKey")
+                  .param("producer", "bff")
+                  .param("idempotencyKey", idempotencyKey)
+                  .query(String.class)
+                  .single())
+          .isEqualTo("REJECTED");
+      assertThat(
+              jdbc.sql(
+                      "SELECT error_code FROM idempotency_records "
+                          + "WHERE producer = :producer AND idempotency_key = :idempotencyKey")
+                  .param("producer", "bff")
+                  .param("idempotencyKey", idempotencyKey)
+                  .query(String.class)
+                  .single())
+          .isEqualTo("INVALID_PERSON_DATA");
+
+      UUID retryCorrelationId = UUID.randomUUID();
+      send(MessageTypes.CREATE_PERSON, idempotencyKey, retryCorrelationId, codec.toJsonNode(malformed));
+      assertRejectedResult(resultsQueue, retryCorrelationId, "CreatePersonRejected", "INVALID_PERSON_DATA");
+
+      CreatePersonCommand corrected =
+          new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
+      UUID correctedCorrelationId = UUID.randomUUID();
+      send(MessageTypes.CREATE_PERSON, idempotencyKey, correctedCorrelationId, codec.toJsonNode(corrected));
+      assertRejectedResult(resultsQueue, correctedCorrelationId, "CreatePersonRejected", "INVALID_MESSAGE");
+    } finally {
+      amqpAdmin.deleteQueue(resultsQueue.getName());
+    }
+  }
+
   private void createPerson(UUID personId) {
     CreatePersonCommand command =
         new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
@@ -94,6 +145,7 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
 
   private void send(
       String messageType, String idempotencyKey, UUID correlationId, tools.jackson.databind.JsonNode payload) {
+    UUID aggregateId = UUID.fromString(payload.path("personId").asString());
     MessageEnvelope envelope =
         new MessageEnvelope(
             UUID.randomUUID(),
@@ -106,7 +158,7 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
             null,
             UUID.randomUUID(),
             idempotencyKey,
-            null,
+            aggregateId,
             null,
             new Actor.Account(UUID.randomUUID()),
             payload);
@@ -114,5 +166,21 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
     rabbitTemplate.send(
         AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(codec.encode(envelope), props));
+  }
+
+  private void assertRejectedResult(Queue queue, UUID correlationId, String messageType, String errorCode) {
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> {
+              Message resultMessage = rabbitTemplate.receive(queue.getName());
+              assertThat(resultMessage).isNotNull();
+              MessageEnvelope result = codec.decode(resultMessage.getBody());
+              assertThat(result.messageType()).isEqualTo(messageType);
+              assertThat(result.correlationId()).isEqualTo(correlationId);
+              ResultPayload payload = codec.convertPayload(result, ResultPayload.class);
+              assertThat(payload.status()).isEqualTo(ResultStatus.REJECTED);
+              assertThat(payload.error().code()).isEqualTo(errorCode);
+            });
   }
 }
