@@ -1,0 +1,70 @@
+package com.estoma.authentication.application.command;
+
+import com.estoma.authentication.application.EventToAppend;
+import com.estoma.authentication.application.port.AccountRepository;
+import com.estoma.authentication.application.port.SessionRepository;
+import com.estoma.authentication.contracts.AuthenticationCommand;
+import com.estoma.authentication.contracts.AuthenticationEvent;
+import com.estoma.authentication.contracts.MessageEnvelope;
+import com.estoma.authentication.contracts.command.DeactivateAccountCommand;
+import com.estoma.authentication.contracts.event.AccountDeactivatedPayload;
+import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayload;
+import com.estoma.authentication.domain.AuthenticationRejectedException;
+import com.estoma.authentication.domain.RejectionCode;
+import com.estoma.authentication.domain.account.Account;
+import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
+import java.time.Instant;
+import org.springframework.stereotype.Component;
+
+/**
+ * Handles {@code DeactivateAccount} (commands.md §4.3): deactivates the
+ * account and revokes its sessions in one transaction, producing both
+ * {@code AccountDeactivated} and {@code AllAccountSessionsRevoked}.
+ */
+@Component
+class DeactivateAccountHandler implements CommandHandler {
+
+  private final AccountRepository accountRepository;
+  private final SessionRepository sessionRepository;
+  private final EnvelopeJsonCodec codec;
+
+  DeactivateAccountHandler(AccountRepository accountRepository, SessionRepository sessionRepository, EnvelopeJsonCodec codec) {
+    this.accountRepository = accountRepository;
+    this.sessionRepository = sessionRepository;
+    this.codec = codec;
+  }
+
+  @Override
+  public String commandMessageType() {
+    return AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName();
+  }
+
+  @Override
+  public CommandHandlerResult handle(MessageEnvelope envelope) {
+    DeactivateAccountCommand command = codec.convertPayload(envelope, DeactivateAccountCommand.class);
+
+    Account account =
+        accountRepository
+            .findById(command.accountId())
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
+
+    Instant now = Instant.now();
+    Account deactivated = account.deactivated(now);
+
+    int rowsAffected = accountRepository.update(deactivated, command.expectedVersion());
+    if (rowsAffected == 0) {
+      AccountUpdateGuard.rejectForFailedUpdate(accountRepository, command.accountId(), command.expectedVersion());
+    }
+
+    sessionRepository.revokeAllActiveForAccount(command.accountId(), "account_deactivated", now);
+
+    AccountDeactivatedPayload accountEvent = new AccountDeactivatedPayload(deactivated.accountId(), deactivated.personId(), deactivated.status().name(), deactivated.version(), now);
+    AllAccountSessionsRevokedPayload sessionsEvent = new AllAccountSessionsRevokedPayload(deactivated.accountId(), "account_deactivated", now);
+
+    return CommandHandlerResult.of(
+        deactivated.accountId(),
+        deactivated.version(),
+        new EventToAppend(AuthenticationEvent.ACCOUNT_DEACTIVATED.wireName(), accountEvent),
+        new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), sessionsEvent));
+  }
+}
