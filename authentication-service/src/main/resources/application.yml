@@ -34,11 +34,37 @@ spring:
     placeholders:
       runtime_role: ${AUTH_DB_RUNTIME_USER:authentication_service}
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    # Required for RabbitConfig's RabbitTemplate confirm/return callbacks
+    # to actually fire (system_contract.md "Outbox Operational Policy").
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        # Broker-side TTL retry tiers handle backoff, not Spring AMQP's
+        # in-process retry -- it would block the consumer thread for the
+        # whole backoff and lose the attempt count on pod restart.
+        retry:
+          enabled: false
+        default-requeue-rejected: false
+
 estoma:
   # The deployment environment name, read by EstomaJsonLogFormatter for the
   # mandatory "environment" log field (system_contract.md "Observability
   # Parameters").
   environment: ${ESTOMA_ENVIRONMENT:local}
+  messaging:
+    topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
+    publisher-confirm-timeout: 5s
+    outbox-claim-batch-size: 50
+    outbox-max-attempts: 10
+    outbox-poll-interval: 1000
+    outbox-relay-enabled: ${ESTOMA_OUTBOX_RELAY_ENABLED:true}
 
 server:
   port: 8080
