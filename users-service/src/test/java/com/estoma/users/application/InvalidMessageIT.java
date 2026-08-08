@@ -20,6 +20,7 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import tools.jackson.databind.node.ObjectNode;
 
 /**
  * A structurally/contractually invalid message must go straight to the
@@ -68,6 +69,24 @@ class InvalidMessageIT extends AbstractMessagingIT {
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
     rabbitTemplate.send(AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(body, props));
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS_DLQ)).isNotNull());
+  }
+
+  @Test
+  void missingOccurredAtGoesStraightToTheDlq() {
+    sendInvalidEnvelope(envelopeWithOccurredAt(null));
+
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(() -> assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS_DLQ)).isNotNull());
+  }
+
+  @Test
+  void missingPayloadGoesStraightToTheDlq() {
+    sendInvalidEnvelope(envelopeWithPayload(null));
 
     await()
         .atMost(Duration.ofSeconds(10))
@@ -149,5 +168,53 @@ class InvalidMessageIT extends AbstractMessagingIT {
             new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(command));
     return codec.encode(envelope);
+  }
+
+  private byte[] envelopeWithOccurredAt(Instant occurredAt) {
+    UUID personId = UUID.randomUUID();
+    return codec.encode(commandEnvelope(personId, occurredAt, codec.toJsonNode(
+        new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null))));
+  }
+
+  private byte[] envelopeWithPayload(tools.jackson.databind.JsonNode payload) {
+    UUID personId = UUID.randomUUID();
+    if (payload != null) {
+      return codec.encode(commandEnvelope(personId, Instant.now(), payload));
+    }
+    ObjectNode envelope =
+        (ObjectNode)
+            codec.toJsonNode(
+                commandEnvelope(
+                    personId,
+                    Instant.now(),
+                    codec.toJsonNode(
+                        new CreatePersonCommand(
+                            personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null))));
+    envelope.remove("payload");
+    return codec.writeValueAsString(envelope).getBytes(StandardCharsets.UTF_8);
+  }
+
+  private MessageEnvelope commandEnvelope(UUID personId, Instant occurredAt, tools.jackson.databind.JsonNode payload) {
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        MessageTypes.CREATE_PERSON,
+        1,
+        MessageKind.COMMAND,
+        "bff",
+        occurredAt,
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        UUID.randomUUID().toString(),
+        personId,
+        null,
+        new Actor.Account(UUID.randomUUID()),
+        payload);
+  }
+
+  private void sendInvalidEnvelope(byte[] body) {
+    MessageProperties props = new MessageProperties();
+    props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+    rabbitTemplate.send(AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(body, props));
   }
 }
