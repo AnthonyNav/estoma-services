@@ -13,6 +13,7 @@ import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
+import com.estoma.users.messaging.outbound.OutboxRelay;
 import com.estoma.users.testsupport.AbstractMessagingIT;
 import java.time.Duration;
 import java.time.Instant;
@@ -47,6 +48,7 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
   @Autowired private AmqpAdmin amqpAdmin;
   @Autowired private EnvelopeJsonCodec codec;
   @Autowired private TopicExchange eventsExchange;
+  @Autowired private OutboxRelay relay;
 
   @Test
   void fourSequentialCommandsProduceFourEventsWithGaplessAggregateVersions() {
@@ -137,6 +139,7 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(
             () -> {
+              relay.relay();
               Message message = rabbitTemplate.receive(queue.getName());
               assertThat(message).isNotNull();
               MessageEnvelope envelope = codec.decode(message.getBody());

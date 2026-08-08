@@ -5,7 +5,6 @@ import static org.awaitility.Awaitility.await;
 
 import com.estoma.users.application.port.OutboxAppendRequest;
 import com.estoma.users.messaging.AmqpNames;
-import com.estoma.users.persistence.ExpiredLease;
 import com.estoma.users.persistence.JdbcOutboxRepository;
 import com.estoma.users.persistence.OutboxRecord;
 import com.estoma.users.testsupport.AbstractMessagingIT;
@@ -37,6 +36,8 @@ class OutboxCrashAfterPublishIT extends AbstractMessagingIT {
 
   @Autowired private JdbcOutboxRepository outboxRepository;
   @Autowired private ConfirmedRabbitPublisher publisher;
+  @Autowired private OutboxRelay relay;
+  @Autowired private OutboxSweeper sweeper;
   @Autowired private AmqpAdmin amqpAdmin;
   @Autowired private RabbitTemplate rabbitTemplate;
   @Autowired private TopicExchange eventsExchange;
@@ -74,23 +75,21 @@ class OutboxCrashAfterPublishIT extends AbstractMessagingIT {
       // The "crash": still PROCESSING, because markPublished never ran.
       assertThat(statusOf(messageId)).isEqualTo("PROCESSING");
 
-      // Reclaim the expired lease exactly like OutboxSweeper would, but
-      // deterministically rather than waiting out its 30s schedule.
+      // Run the productive sweeper explicitly rather than waiting for its
+      // scheduled trigger.
       sleepPastLease();
-      ExpiredLease expired =
-          outboxRepository.findExpiredLeases(50).stream()
-              .filter(e -> e.messageId().equals(messageId))
-              .findFirst()
-              .orElseThrow();
-      assertThat(expired.claimToken()).isEqualTo(claimed.claimToken());
-      int released =
-          outboxRepository.releaseForRetry(
-              expired.messageId(), expired.claimToken(), Instant.now(), OutboxFailureCode.LEASE_EXPIRED);
-      assertThat(released).isEqualTo(1);
+      sweeper.releaseExpiredLeases();
+      assertThat(statusOf(messageId)).isEqualTo("PENDING");
 
-      // The row is PENDING and immediately available again -- the live
-      // application relay reclaims and republishes it for real.
-      await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(statusOf(messageId)).isEqualTo("PUBLISHED"));
+      // The sweeper applies the normal retry backoff. Once it becomes
+      // available, invoke the real relay explicitly to republish it.
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .untilAsserted(
+              () -> {
+                relay.relay();
+                assertThat(statusOf(messageId)).isEqualTo("PUBLISHED");
+              });
 
       Message secondDelivery = rabbitTemplate.receive(testQueue.getName(), 5_000);
       assertThat(secondDelivery).isNotNull();

@@ -6,6 +6,7 @@ import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -93,7 +94,8 @@ public class RabbitConfig {
    */
   @Bean
   public SimpleRabbitListenerContainerFactory manualAckContainerFactory(
-      ConnectionFactory connectionFactory) {
+      ConnectionFactory connectionFactory,
+      @Value("${estoma.messaging.listeners-enabled:true}") boolean listenersEnabled) {
     SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
@@ -101,6 +103,7 @@ public class RabbitConfig {
     factory.setConcurrentConsumers(2);
     factory.setMaxConcurrentConsumers(4);
     factory.setDefaultRequeueRejected(false);
+    factory.setAutoStartup(listenersEnabled);
     return factory;
   }
 }

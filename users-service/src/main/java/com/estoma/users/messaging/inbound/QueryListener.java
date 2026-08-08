@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -31,6 +32,11 @@ import org.springframework.stereotype.Component;
  * on), and there is no Consumer Inbox context to seed.
  */
 @Component
+@ConditionalOnProperty(
+    prefix = "estoma.messaging",
+    name = "listeners-enabled",
+    havingValue = "true",
+    matchIfMissing = true)
 public class QueryListener {
 
   private static final Logger log = LoggerFactory.getLogger(QueryListener.class);

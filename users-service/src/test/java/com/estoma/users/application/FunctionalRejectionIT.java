@@ -13,6 +13,7 @@ import com.estoma.users.contract.result.ResultPayload;
 import com.estoma.users.contract.result.ResultStatus;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
+import com.estoma.users.messaging.outbound.OutboxRelay;
 import com.estoma.users.testsupport.AbstractMessagingIT;
 import java.time.Duration;
 import java.time.Instant;
@@ -41,6 +42,7 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
   @Autowired private AmqpAdmin amqpAdmin;
   @Autowired private EnvelopeJsonCodec codec;
   @Autowired private JdbcClient jdbc;
+  @Autowired private OutboxRelay relay;
 
   @Test
   void activatingAnAlreadyActivePersonIsRejectedWithoutReachingTheDlqOrAnyRetryTier() throws InterruptedException {
@@ -52,7 +54,13 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
     try {
       createPerson(personId); // version 1, ACTIVE by construction
       // drain the CreatePersonSucceeded result before sending the command under test
-      await().atMost(Duration.ofSeconds(10)).until(() -> rabbitTemplate.receive(resultsQueue.getName()) != null);
+      await()
+          .atMost(Duration.ofSeconds(10))
+          .until(
+              () -> {
+                relay.relay();
+                return rabbitTemplate.receive(resultsQueue.getName()) != null;
+              });
 
       UUID activateCorrelationId = UUID.randomUUID();
       activatePerson(personId, 1, activateCorrelationId); // already ACTIVE -> rejection expected
@@ -61,6 +69,7 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
           .atMost(Duration.ofSeconds(10))
           .untilAsserted(
               () -> {
+                relay.relay();
                 Message resultMessage = rabbitTemplate.receive(resultsQueue.getName());
                 assertThat(resultMessage).isNotNull();
                 MessageEnvelope result = codec.decode(resultMessage.getBody());
@@ -173,6 +182,7 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(
             () -> {
+              relay.relay();
               Message resultMessage = rabbitTemplate.receive(queue.getName());
               assertThat(resultMessage).isNotNull();
               MessageEnvelope result = codec.decode(resultMessage.getBody());

@@ -15,6 +15,7 @@ import com.estoma.users.contract.query.ResolvePersonByInstitutionalEmailData;
 import com.estoma.users.contract.result.ResultPayload;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
+import com.estoma.users.messaging.outbound.OutboxRelay;
 import com.estoma.users.testsupport.AbstractMessagingIT;
 import java.time.Duration;
 import java.time.Instant;
@@ -56,6 +57,7 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
   @Autowired private EnvelopeJsonCodec codec;
   @Autowired private PersonCommandDispatcher dispatcher;
   @Autowired private JdbcClient jdbc;
+  @Autowired private OutboxRelay relay;
 
   @Test
   void anActivePersonResolvesToFound() {
@@ -211,6 +213,7 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(
             () -> {
+              relay.relay();
               Message message = rabbitTemplate.receive(queue.getName());
               assertThat(message).isNotNull();
               MessageEnvelope envelope = codec.decode(message.getBody());
