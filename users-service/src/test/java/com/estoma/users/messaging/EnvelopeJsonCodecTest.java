@@ -36,10 +36,10 @@ class EnvelopeJsonCodecTest {
             UUID.randomUUID(),
             null, // causationId: absent on a client-originated command
             UUID.randomUUID(),
-            "users-service",
+            UUID.randomUUID().toString(),
+            personId,
             null,
-            null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(
                 new PersonCreatedPayload(
                     personId, "Ada", "Lovelace", null, "ada@example.edu", null, "ACTIVE", 1, Instant.now())));
@@ -59,7 +59,42 @@ class EnvelopeJsonCodecTest {
     assertThat(json).contains("\"messageId\"");
     assertThat(json).contains("\"messageType\"");
     assertThat(json).contains("\"correlationId\"");
-    assertThat(json).contains("\"targetService\"");
+    assertThat(json).contains("\"idempotencyKey\"");
+  }
+
+  @Test
+  void serializesActorWithATypeDiscriminator() {
+    MessageEnvelope envelope = minimalCommandEnvelope();
+
+    String json = new String(codec.encode(envelope), StandardCharsets.UTF_8);
+
+    assertThat(json).contains("\"type\":\"ACCOUNT\"");
+    assertThat(json).contains("\"accountId\"");
+  }
+
+  @Test
+  void roundTripsASystemActor() {
+    MessageEnvelope original =
+        new MessageEnvelope(
+            UUID.randomUUID(),
+            "ResolvePersonByInstitutionalEmail",
+            1,
+            MessageKind.QUERY,
+            "academic",
+            Instant.parse("2026-08-03T12:00:00Z"),
+            UUID.randomUUID(),
+            null,
+            UUID.randomUUID(),
+            null,
+            null,
+            null,
+            new Actor.System("academic"),
+            codec.toJsonNode(java.util.Map.of("institutionalEmail", "juan@universidad.mx")));
+
+    MessageEnvelope decoded = codec.decode(codec.encode(original));
+
+    assertThat(decoded.actor()).isEqualTo(new Actor.System("academic"));
+    assertThat(decoded.actor().accountId()).isNull();
   }
 
   @Test
@@ -84,12 +119,12 @@ class EnvelopeJsonCodecTest {
           "occurredAt": "2026-08-03T12:00:00Z",
           "correlationId": "%s",
           "operationId": "%s",
-          "targetService": "users-service",
+          "idempotencyKey": "%s",
           "payload": {},
           "aFieldFromAFutureContractVersion": "should be ignored"
         }
         """
-            .formatted(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+            .formatted(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
 
     MessageEnvelope decoded = codec.decode(jsonWithExtraField.getBytes(StandardCharsets.UTF_8));
 
@@ -112,6 +147,7 @@ class EnvelopeJsonCodecTest {
   }
 
   private MessageEnvelope minimalCommandEnvelope() {
+    UUID personId = UUID.randomUUID();
     return new MessageEnvelope(
         UUID.randomUUID(),
         "CreatePerson",
@@ -122,10 +158,10 @@ class EnvelopeJsonCodecTest {
         UUID.randomUUID(),
         null,
         UUID.randomUUID(),
-        "users-service",
+        UUID.randomUUID().toString(),
+        personId,
         null,
-        null,
-        new Actor(UUID.randomUUID()),
-        codec.toJsonNode(java.util.Map.of()));
+        new Actor.Account(UUID.randomUUID()),
+        codec.toJsonNode(java.util.Map.of("personId", personId.toString())));
   }
 }

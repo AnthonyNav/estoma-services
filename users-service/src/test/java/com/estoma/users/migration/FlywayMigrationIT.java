@@ -36,11 +36,11 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   void allMigrationsAppliedSuccessfullyOnContextStartup() {
     MigrationInfo[] applied = flyway.info().applied();
 
-    assertThat(applied).hasSize(6);
+    assertThat(applied).hasSize(8);
     assertThat(applied)
         .extracting(MigrationInfo::getVersion)
         .extracting(Object::toString)
-        .containsExactly("1", "2", "3", "4", "5", "6");
+        .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
     assertThat(applied).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
   }
 
@@ -250,6 +250,137 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   }
 
   @Test
+  void ckIdempotencyTerminalFieldsRejectsSucceededWithoutAggregateVersion() {
+    assertThatThrownBy(
+            () ->
+                insertIdempotencyRecord(
+                    r -> {
+                      r.terminalStatus = "SUCCEEDED";
+                      r.aggregateVersion = null;
+                      r.completedAt = OffsetDateTime.now();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_idempotency_terminal_fields");
+  }
+
+  @Test
+  void ckIdempotencyTerminalFieldsRejectsRejectedWithoutErrorCode() {
+    assertThatThrownBy(
+            () ->
+                insertIdempotencyRecord(
+                    r -> {
+                      r.terminalStatus = "REJECTED";
+                      r.errorCode = null;
+                      r.completedAt = OffsetDateTime.now();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_idempotency_terminal_fields");
+  }
+
+  @Test
+  void ckIdempotencyTerminalFieldsRejectsInProgressWithACompletedAt() {
+    assertThatThrownBy(
+            () ->
+                insertIdempotencyRecord(
+                    r -> {
+                      r.terminalStatus = "IN_PROGRESS";
+                      r.completedAt = OffsetDateTime.now();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_idempotency_terminal_fields");
+  }
+
+  @Test
+  void ckIdempotencyTerminalFieldsAcceptsEveryValidStatusShape() {
+    insertIdempotencyRecord(r -> {});
+    insertIdempotencyRecord(
+        r -> {
+          r.terminalStatus = "SUCCEEDED";
+          r.aggregateVersion = 1;
+          r.completedAt = OffsetDateTime.now();
+        });
+    insertIdempotencyRecord(
+        r -> {
+          r.terminalStatus = "REJECTED";
+          r.errorCode = "PERSON_NOT_FOUND";
+          r.completedAt = OffsetDateTime.now();
+        });
+  }
+
+  @Test
+  void ckPersonStatusHistoryReasonRequiredForInactiveRejectsInactiveWithoutAReason() {
+    UUID personId = UUID.randomUUID();
+    insertPerson(personId, p -> {});
+
+    assertThatThrownBy(
+            () ->
+                insertPersonStatusHistory(
+                    personId, r -> {
+                      r.newStatus = "INACTIVE";
+                      r.reasonCode = null;
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_person_status_history_reason_required_for_inactive");
+  }
+
+  @Test
+  void ckPersonStatusHistoryReasonDetailRequiredForOtherRejectsOtherWithoutADetail() {
+    UUID personId = UUID.randomUUID();
+    insertPerson(personId, p -> {});
+
+    assertThatThrownBy(
+            () ->
+                insertPersonStatusHistory(
+                    personId, r -> {
+                      r.newStatus = "INACTIVE";
+                      r.reasonCode = "OTHER";
+                      r.reasonDetail = null;
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_person_status_history_reason_detail_required_for_other");
+  }
+
+  @Test
+  void ckPersonStatusHistoryReasonCodeCatalogRejectsAnUnknownCode() {
+    UUID personId = UUID.randomUUID();
+    insertPerson(personId, p -> {});
+
+    assertThatThrownBy(
+            () ->
+                insertPersonStatusHistory(
+                    personId, r -> {
+                      r.newStatus = "INACTIVE";
+                      r.reasonCode = "NOT_A_REAL_REASON";
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_person_status_history_reason_code_catalog");
+  }
+
+  @Test
+  void personStatusHistoryReasonConstraintsAcceptEveryValidShape() {
+    UUID activatedPersonId = UUID.randomUUID();
+    insertPerson(activatedPersonId, p -> {});
+    insertPersonStatusHistory(activatedPersonId, r -> r.newStatus = "ACTIVE"); // no reason required
+
+    UUID deactivatedPersonId = UUID.randomUUID();
+    insertPerson(deactivatedPersonId, p -> {});
+    insertPersonStatusHistory(
+        deactivatedPersonId, r -> {
+          r.newStatus = "INACTIVE";
+          r.reasonCode = "DUPLICATE";
+        });
+
+    UUID otherReasonPersonId = UUID.randomUUID();
+    insertPerson(otherReasonPersonId, p -> {});
+    insertPersonStatusHistory(
+        otherReasonPersonId, r -> {
+          r.newStatus = "INACTIVE";
+          r.reasonCode = "OTHER";
+          r.reasonDetail = "explained in the ticket";
+        });
+  }
+
+  @Test
   void personIdIsImmutable() {
     UUID personId = UUID.randomUUID();
     insertPerson(personId, p -> {});
@@ -353,5 +484,76 @@ class FlywayMigrationIT extends AbstractPostgresIT {
     String status = "PENDING";
     UUID claimToken = null;
     OffsetDateTime leaseUntil = null;
+  }
+
+  private void insertIdempotencyRecord(java.util.function.Consumer<TestIdempotencyRow> customizer) {
+    TestIdempotencyRow row = new TestIdempotencyRow();
+    customizer.accept(row);
+
+    jdbc.sql(
+            """
+            INSERT INTO idempotency_records (
+              producer, idempotency_key, message_type, aggregate_id, request_fingerprint,
+              claimed_by_message_id, terminal_status, aggregate_version, error_code,
+              created_at, completed_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?::idempotency_status, ?, ?, ?, ?
+            )
+            """)
+        .params(
+            "bff",
+            UUID.randomUUID().toString(),
+            "CreatePerson",
+            UUID.randomUUID(),
+            "f".repeat(64),
+            UUID.randomUUID(),
+            row.terminalStatus,
+            row.aggregateVersion,
+            row.errorCode,
+            OffsetDateTime.now(),
+            row.completedAt)
+        .update();
+  }
+
+  /** Mutable bag of column values for one ck_idempotency_terminal_fields test row. */
+  private static final class TestIdempotencyRow {
+    String terminalStatus = "IN_PROGRESS";
+    Integer aggregateVersion = null;
+    String errorCode = null;
+    OffsetDateTime completedAt = null;
+  }
+
+  private void insertPersonStatusHistory(UUID personId, java.util.function.Consumer<TestStatusHistoryRow> customizer) {
+    TestStatusHistoryRow row = new TestStatusHistoryRow();
+    customizer.accept(row);
+
+    jdbc.sql(
+            """
+            INSERT INTO person_status_history (
+              status_change_id, person_id, previous_status, new_status,
+              reason_code, reason_detail, changed_by_account_id, correlation_id, changed_at
+            ) VALUES (
+              ?, ?, ?::person_status, ?::person_status, ?, ?, ?, ?, ?
+            )
+            """)
+        .params(
+            UUID.randomUUID(),
+            personId,
+            row.previousStatus,
+            row.newStatus,
+            row.reasonCode,
+            row.reasonDetail,
+            (UUID) null,
+            UUID.randomUUID(),
+            OffsetDateTime.now())
+        .update();
+  }
+
+  /** Mutable bag of column values for one ck_person_status_history_reason_* test row. */
+  private static final class TestStatusHistoryRow {
+    String previousStatus = "ACTIVE";
+    String newStatus = "INACTIVE";
+    String reasonCode = "DUPLICATE";
+    String reasonDetail = null;
   }
 }

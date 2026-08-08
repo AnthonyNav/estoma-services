@@ -80,10 +80,10 @@ class DuplicateCommandIT extends AbstractMessagingIT {
             correlationId,
             null,
             UUID.randomUUID(),
-            "users-service",
+            UUID.randomUUID().toString(),
+            personId,
             null,
-            null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             codec.toJsonNode(command));
     return codec.encode(envelope);
   }

@@ -48,12 +48,13 @@ class PersonStatusHistoryTransactionIT extends AbstractPostgresIT {
                 MessageTypes.DEACTIVATE_PERSON,
                 deactivateCorrelationId,
                 actorAccountId,
-                codec.toJsonNode(new DeactivatePersonCommand(personId, 1))));
+                codec.toJsonNode(new DeactivatePersonCommand(personId, 1, "ADMINISTRATIVE_REQUEST", null))));
 
     assertThat(deactivateOutcome).isInstanceOf(CommandOutcome.Succeeded.class);
     assertThat(((CommandOutcome.Succeeded) deactivateOutcome).aggregateVersion()).isEqualTo(2);
     assertThat(countWhere("person_status_history", "person_id = :id", personId)).isEqualTo(1);
-    assertHistoryRow(personId, "ACTIVE", "INACTIVE", actorAccountId, deactivateCorrelationId);
+    assertHistoryRow(
+        personId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE_REQUEST", null, actorAccountId, deactivateCorrelationId);
     // The status transition and the persons/outbox commit are one
     // transaction: if history were written outside it, this row could
     // exist even though the guarded update below never happened.
@@ -77,17 +78,24 @@ class PersonStatusHistoryTransactionIT extends AbstractPostgresIT {
     assertThat(((CommandOutcome.Succeeded) activateOutcome).aggregateVersion()).isEqualTo(3);
     // Append-only: the deactivation row from above must still be there.
     assertThat(countWhere("person_status_history", "person_id = :id", personId)).isEqualTo(2);
-    assertHistoryRow(personId, "INACTIVE", "ACTIVE", actorAccountId, activateCorrelationId);
+    assertHistoryRow(personId, "INACTIVE", "ACTIVE", null, null, actorAccountId, activateCorrelationId);
     assertThat(countWhere("persons", "person_id = :id AND status = 'ACTIVE' AND version = 3", personId))
         .isEqualTo(1);
   }
 
   private void assertHistoryRow(
-      UUID personId, String expectedPrevious, String expectedNew, UUID expectedActor, UUID expectedCorrelationId) {
+      UUID personId,
+      String expectedPrevious,
+      String expectedNew,
+      String expectedReasonCode,
+      String expectedReasonDetail,
+      UUID expectedActor,
+      UUID expectedCorrelationId) {
     var row =
         jdbc.sql(
                 """
                 SELECT previous_status::text AS previous_status, new_status::text AS new_status,
+                       reason_code, reason_detail,
                        changed_by_account_id, correlation_id, changed_at
                 FROM person_status_history
                 WHERE person_id = :personId AND correlation_id = :correlationId
@@ -97,6 +105,8 @@ class PersonStatusHistoryTransactionIT extends AbstractPostgresIT {
             .query((rs, rowNum) -> new Object[] {
               rs.getString("previous_status"),
               rs.getString("new_status"),
+              rs.getString("reason_code"),
+              rs.getString("reason_detail"),
               rs.getObject("changed_by_account_id", UUID.class),
               rs.getObject("correlation_id", UUID.class),
               rs.getTimestamp("changed_at")
@@ -105,9 +115,11 @@ class PersonStatusHistoryTransactionIT extends AbstractPostgresIT {
 
     assertThat(row[0]).isEqualTo(expectedPrevious);
     assertThat(row[1]).isEqualTo(expectedNew);
-    assertThat(row[2]).isEqualTo(expectedActor);
-    assertThat(row[3]).isEqualTo(expectedCorrelationId);
-    assertThat(row[4]).isNotNull();
+    assertThat(row[2]).isEqualTo(expectedReasonCode);
+    assertThat(row[3]).isEqualTo(expectedReasonDetail);
+    assertThat(row[4]).isEqualTo(expectedActor);
+    assertThat(row[5]).isEqualTo(expectedCorrelationId);
+    assertThat(row[6]).isNotNull();
   }
 
   private long countWhere(String table, String whereClause, UUID personId) {
@@ -137,10 +149,10 @@ class PersonStatusHistoryTransactionIT extends AbstractPostgresIT {
         correlationId,
         null,
         UUID.randomUUID(),
-        "users-service",
+        UUID.randomUUID().toString(),
+        UUID.fromString(payload.path("personId").asString()),
         null,
-        null,
-        new Actor(actorAccountId),
+        new Actor.Account(actorAccountId),
         payload);
   }
 }

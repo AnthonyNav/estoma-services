@@ -57,6 +57,17 @@ class RoutingKeyResolverTest {
   }
 
   @Test
+  void resolveResultAcceptsAcademicAsDestination() {
+    // No resolver code change needed for the Query's Result: it's routed
+    // exactly like a Command's (messaging-architecture.md §4) -- this
+    // documents that the new caller needs nothing new here.
+    RoutingKeyResolver.Destination destination = resolver.resolveResult("academic");
+
+    assertThat(destination.exchange()).isEqualTo(AmqpNames.EXCHANGE_RESULTS);
+    assertThat(destination.routingKey()).isEqualTo("academic");
+  }
+
+  @Test
   void resolveResultRejectsBlankDestination() {
     assertThatThrownBy(() -> resolver.resolveResult("   ")).isInstanceOf(IllegalArgumentException.class);
   }

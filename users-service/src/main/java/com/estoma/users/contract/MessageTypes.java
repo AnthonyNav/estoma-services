@@ -4,10 +4,10 @@ import java.util.Set;
 
 /**
  * Every {@code messageType} value this service's contract defines: 4
- * commands + 8 results + 4 events = 16. Kept as one exhaustive list so
- * {@code RoutingKeyResolverTest} (messaging.outbound) can assert every
- * constant has a routing key mapping — the guard against adding a message
- * type and forgetting its key.
+ * commands + 8 results + 4 events + 1 query + 1 query result = 18. Kept
+ * as one exhaustive list so {@code RoutingKeyResolverTest} (messaging.
+ * outbound) can assert every constant has a routing key mapping — the
+ * guard against adding a message type and forgetting its key.
  */
 public final class MessageTypes {
 
@@ -35,6 +35,14 @@ public final class MessageTypes {
   public static final String PERSON_ACTIVATED = "PersonActivated";
   public static final String PERSON_DEACTIVATED = "PersonDeactivated";
 
+  // Query — received on queries.users-service
+  public static final String RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL = "ResolvePersonByInstitutionalEmail";
+
+  // Query Result — published to platform.results; single messageType,
+  // no Succeeded/Rejected split (queries.md §2: FOUND/INACTIVE_MATCH/
+  // NOT_FOUND are three flavors of one successful resolution).
+  public static final String RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL_RESULT = "ResolvePersonByInstitutionalEmailResult";
+
   public static final Set<String> COMMANDS =
       Set.of(CREATE_PERSON, UPDATE_PERSON, ACTIVATE_PERSON, DEACTIVATE_PERSON);
 
@@ -52,12 +60,16 @@ public final class MessageTypes {
   public static final Set<String> EVENTS =
       Set.of(PERSON_CREATED, PERSON_UPDATED, PERSON_ACTIVATED, PERSON_DEACTIVATED);
 
+  public static final Set<String> QUERIES = Set.of(RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL);
+
+  public static final Set<String> QUERY_RESULTS = Set.of(RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL_RESULT);
+
   public static final Set<String> ALL;
 
   static {
     ALL =
         Set.copyOf(
-            java.util.stream.Stream.of(COMMANDS, RESULTS, EVENTS)
+            java.util.stream.Stream.of(COMMANDS, RESULTS, EVENTS, QUERIES, QUERY_RESULTS)
                 .flatMap(Set::stream)
                 .collect(java.util.stream.Collectors.toSet()));
   }

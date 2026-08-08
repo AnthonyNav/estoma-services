@@ -13,6 +13,7 @@ import com.estoma.users.domain.PersonRejectedException;
 import com.estoma.users.domain.RejectionCode;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
@@ -56,7 +57,19 @@ class UpdatePersonHandler implements PersonCommandHandler {
       throw new PersonRejectedException(RejectionCode.PERSON_VERSION_CONFLICT, "expectedVersion is stale");
     }
 
-    InstitutionalEmail email = InstitutionalEmail.of(command.institutionalEmail());
+    boolean academicImport = "academic".equals(envelope.producer());
+    if (academicImport && !existing.email().normalized().equals(normalize(command.institutionalEmail()))) {
+      throw new PersonRejectedException(
+          RejectionCode.INVALID_MESSAGE,
+          "academic UpdatePerson institutionalEmail must match the existing person");
+    }
+    if (academicImport && command.phone() != null) {
+      throw new PersonRejectedException(
+          RejectionCode.INVALID_MESSAGE, "academic UpdatePerson must not include phone");
+    }
+
+    InstitutionalEmail email = academicImport ? existing.email() : InstitutionalEmail.of(command.institutionalEmail());
+    String phone = academicImport ? existing.phone() : command.phone();
 
     if (duplicatePolicy.check(email.normalized(), command.personId())
         instanceof DuplicateVerdict.Duplicate) {
@@ -71,7 +84,7 @@ class UpdatePersonHandler implements PersonCommandHandler {
             command.paternalSurname(),
             command.maternalSurname(),
             email,
-            command.phone(),
+            phone,
             Instant.now());
 
     int rowsAffected = personRepository.updateProfile(updated, command.expectedVersion());
@@ -105,5 +118,9 @@ class UpdatePersonHandler implements PersonCommandHandler {
       return new PersonRejectedException(RejectionCode.PERSON_NOT_FOUND, "person not found");
     }
     return new PersonRejectedException(RejectionCode.PERSON_VERSION_CONFLICT, "expectedVersion is stale");
+  }
+
+  private static String normalize(String value) {
+    return value == null ? null : value.trim().toLowerCase(Locale.ROOT);
   }
 }

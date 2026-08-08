@@ -64,14 +64,40 @@ channels:
             x-dead-letter-exchange: platform.dlx
             x-dead-letter-routing-key: dlq.commands.users-service
 
+  queries.users-service:
+    address: queries.users-service
+    description: >
+      Durable query queue bound to the `platform.queries` direct
+      exchange with routing key `users-service`. Side-effect-free
+      (queries.md §2): no Consumer Inbox. Dead-letters to `platform.dlx`
+      with routing key `dlq.queries.users-service` after exhausting its
+      own retry tiers (5s / 30s / 300s) -- structurally identical to the
+      command queue's DLQ/retry topology, added for operational
+      consistency (system-contract.md §9, D12), not mandated by
+      queries.md.
+    messages:
+      resolvePersonByInstitutionalEmail:
+        $ref: '#/components/messages/ResolvePersonByInstitutionalEmailQuery'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: queries.users-service
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: dlq.queries.users-service
+
   platform.results:
     address: platform.results
     description: >
       Direct exchange. users-service publishes correlated results here
-      with a routing key equal to the `producer` field of the command
-      being answered (e.g. `bff`). Consumers own their own result queue
-      (e.g. `results.bff`) and its binding; users-service does not
-      declare it.
+      with a routing key equal to the `producer` field of the command or
+      Query being answered (e.g. `bff`, `academic`). Consumers own their
+      own result queue (e.g. `results.bff`, `results.academic`) and its
+      binding; users-service does not declare it.
     messages:
       createPersonSucceeded:
         $ref: '#/components/messages/CreatePersonSucceeded'
@@ -89,6 +115,8 @@ channels:
         $ref: '#/components/messages/DeactivatePersonSucceeded'
       deactivatePersonRejected:
         $ref: '#/components/messages/DeactivatePersonRejected'
+      resolvePersonByInstitutionalEmailResult:
+        $ref: '#/components/messages/ResolvePersonByInstitutionalEmailResult'
     bindings:
       amqp:
         is: routingKey
@@ -149,6 +177,13 @@ operations:
     messages:
       - $ref: '#/channels/commands.users-service/messages/deactivatePerson'
 
+  receiveResolvePersonByInstitutionalEmail:
+    action: receive
+    channel:
+      $ref: '#/channels/queries.users-service'
+    messages:
+      - $ref: '#/channels/queries.users-service/messages/resolvePersonByInstitutionalEmail'
+
   sendResults:
     action: send
     channel:
@@ -162,6 +197,7 @@ operations:
       - $ref: '#/channels/platform.results/messages/activatePersonRejected'
       - $ref: '#/channels/platform.results/messages/deactivatePersonSucceeded'
       - $ref: '#/channels/platform.results/messages/deactivatePersonRejected'
+      - $ref: '#/channels/platform.results/messages/resolvePersonByInstitutionalEmailResult'
 
   sendEvents:
     action: send
@@ -193,6 +229,10 @@ components:
     UpdatePersonCommand:
       name: UpdatePerson
       title: Update personal data
+      description: >
+        bff may update the complete profile. academic's student-import-process
+        may update only names; institutionalEmail is consistency-only and phone
+        must be absent, so both existing values are preserved.
       contentType: application/json
       payload:
         allOf:
@@ -230,10 +270,41 @@ components:
           - type: object
             properties:
               payload:
-                $ref: '#/components/schemas/VersionedPersonRef'
+                $ref: '#/components/schemas/DeactivatePersonPayload'
       bindings:
         amqp:
           routingKey: users-service
+
+    ResolvePersonByInstitutionalEmailQuery:
+      name: ResolvePersonByInstitutionalEmail
+      title: Resolve a personId from an institutional email
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/QueryEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/ResolvePersonByInstitutionalEmailPayload'
+      bindings:
+        amqp:
+          routingKey: users-service
+
+    ResolvePersonByInstitutionalEmailResult:
+      name: ResolvePersonByInstitutionalEmailResult
+      title: Resolution outcome for a ResolvePersonByInstitutionalEmail query
+      description: >
+        Single messageType for all three outcomes (queries.md §2) --
+        FOUND/INACTIVE_MATCH/NOT_FOUND are flavors of one successful
+        resolution, not a Succeeded/Rejected split.
+      contentType: application/json
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/ResolvePersonByInstitutionalEmailResultPayload'
 
     CreatePersonSucceeded:
       name: CreatePersonSucceeded
@@ -257,9 +328,10 @@ components:
               payload:
                 $ref: '#/components/schemas/RejectedPayload'
                 example:
-                  errorCode: PERSON_ALREADY_EXISTS
-                  message: A person with this personId already exists.
-                  details: []
+                  status: REJECTED
+                  data: null
+                  error:
+                    code: PERSON_ALREADY_EXISTS
 
     UpdatePersonSucceeded:
       name: UpdatePersonSucceeded
@@ -364,7 +436,7 @@ components:
           - type: object
             properties:
               payload:
-                $ref: '#/components/schemas/PersonStatusEventPayload'
+                $ref: '#/components/schemas/PersonActivatedPayload'
                 example:
                   personId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
                   status: ACTIVE
@@ -383,24 +455,61 @@ components:
           - type: object
             properties:
               payload:
-                $ref: '#/components/schemas/PersonStatusEventPayload'
+                $ref: '#/components/schemas/PersonDeactivatedPayload'
                 example:
                   personId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
                   status: INACTIVE
                   version: 4
                   deactivatedAt: '2026-08-03T12:05:00Z'
+                  reasonCode: ADMINISTRATIVE_REQUEST
       bindings:
         amqp:
           routingKey: identity.person.deactivated
 
   schemas:
     Actor:
+      description: >
+        ActorContext (messaging-architecture.md §8.1) — discriminated by
+        `type`. Commands always carry ACCOUNT (a human actor); the Query
+        (queries.users-service) always carries SYSTEM (a technical
+        actor). A technical actor never carries a fabricated accountId.
+      oneOf:
+        - $ref: '#/components/schemas/AccountActor'
+        - $ref: '#/components/schemas/SystemActor'
+      discriminator:
+        propertyName: type
+
+    AccountActor:
       type: object
-      required: [accountId]
+      required: [type, accountId]
       properties:
+        type:
+          const: ACCOUNT
         accountId:
           type: string
           format: uuid
+
+    SystemActor:
+      type: object
+      required: [type, service]
+      properties:
+        type:
+          const: SYSTEM
+        service:
+          type: string
+          description: >
+            logicalComponentId of the technical actor (e.g. `academic`) —
+            same namespace as `producer`, not necessarily equal to it
+            (messaging-architecture.md §4).
+
+    AcademicSystemActor:
+      type: object
+      required: [type, service]
+      properties:
+        type:
+          const: SYSTEM
+        service:
+          const: academic
 
     BaseEnvelope:
       type: object
@@ -423,10 +532,10 @@ components:
           minimum: 1
         messageKind:
           type: string
-          enum: [COMMAND, RESULT, EVENT]
+          enum: [COMMAND, QUERY, RESULT, EVENT]
         producer:
           type: string
-          description: Logical name of the publishing component (e.g. `bff`, `users-service`).
+          description: Logical name of the publishing component (e.g. `bff`, `academic`, `users-service`).
         occurredAt:
           type: string
           format: date-time
@@ -449,12 +558,13 @@ components:
             results.
         actor:
           $ref: '#/components/schemas/Actor'
+        payload: {}
 
     CommandEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
         - type: object
-          required: [operationId, targetService]
+          required: [operationId, idempotencyKey, aggregateId, actor, payload]
           properties:
             messageKind:
               const: COMMAND
@@ -462,8 +572,35 @@ components:
               type: string
               format: uuid
               description: Correlates the eventual RESULT back to the client-visible operation.
-            targetService:
-              const: users-service
+            idempotencyKey:
+              type: string
+              description: >
+                Identifies the functional intention (commands.md §9,
+                messaging-architecture.md §10.1) -- distinct from
+                messageId (delivery dedup) and operationId (operation
+                tracking). Mandatory on every command. There is no
+                targetService field: the platform V1 envelope does not
+                carry one (messaging-architecture.md §8) -- routing alone
+                determines the destination.
+            aggregateId:
+              description: Must equal payload.personId for every Person command.
+
+    QueryEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          required: [operationId, actor, payload]
+          properties:
+            messageKind:
+              const: QUERY
+            operationId:
+              type: string
+              format: uuid
+              description: Correlates the eventual RESULT back to the client-visible operation.
+            actor:
+              $ref: '#/components/schemas/AcademicSystemActor'
+            # No idempotencyKey: the Query is side-effect-free (queries.md
+            # §2) and needs no protection against being repeated.
 
     ResultEnvelope:
       allOf:
@@ -527,37 +664,67 @@ components:
           type: integer
           minimum: 1
 
+    DeactivatePersonPayload:
+      allOf:
+        - $ref: '#/components/schemas/VersionedPersonRef'
+        - type: object
+          required: [reasonCode]
+          properties:
+            reasonCode:
+              type: string
+              enum: [DUPLICATE, CREATED_BY_ERROR, IDENTITY_CORRECTION, ADMINISTRATIVE_REQUEST, OTHER]
+            reasonDetail:
+              type: [string, 'null']
+              description: Mandatory (non-blank) only when reasonCode is OTHER (commands.md §7.1).
+
+    # SucceededPayload/RejectedPayload are the whole wrapped RESULT
+    # `payload` (messaging-architecture.md §3: {status, data?, error?}),
+    # not just the inner data/error -- named to match the 16 message refs
+    # below without renaming every one of them. An earlier round of this
+    # service published {personId, version}/{errorCode, message, details}
+    # directly at the payload root; that has been corrected to the
+    # platform's now-closed wrapper shape.
     SucceededPayload:
       type: object
-      required: [personId, version]
+      required: [status, data]
       properties:
-        personId:
-          type: string
-          format: uuid
-        version:
-          type: integer
+        status:
+          const: SUCCEEDED
+        data:
+          type: object
+          required: [personId, version]
+          properties:
+            personId:
+              type: string
+              format: uuid
+            version:
+              type: integer
+        error:
+          type: 'null'
 
     RejectedPayload:
       type: object
-      required: [errorCode]
+      required: [status, error]
       properties:
-        errorCode:
-          type: string
-          description: >
-            SCREAMING_SNAKE_CASE functional rejection code. See
-            system-contract.md §3 for the exact set per command and its
-            precedence order.
-        message:
-          type: string
-        details:
-          type: array
-          items:
-            type: object
-            properties:
-              field:
-                type: string
-              code:
-                type: string
+        status:
+          const: REJECTED
+        data:
+          type: 'null'
+        error:
+          type: object
+          required: [code]
+          properties:
+            code:
+              type: string
+              description: >
+                SCREAMING_SNAKE_CASE functional rejection code. See
+                system-contract.md §3 for the exact set per command and
+                its precedence order. No message field on the wire -- a
+                human-readable detail is logged at the rejection site
+                instead of published.
+            details:
+              type: object
+              additionalProperties: true
 
     PersonCreatedPayload:
       type: object
@@ -620,21 +787,81 @@ components:
           type: string
           format: date-time
 
-    PersonStatusEventPayload:
+    PersonActivatedPayload:
       type: object
-      required: [personId, status, version]
+      required: [personId, status, version, activatedAt]
       properties:
         personId:
           type: string
           format: uuid
         status:
-          type: string
-          enum: [ACTIVE, INACTIVE]
+          const: ACTIVE
         version:
           type: integer
         activatedAt:
           type: string
           format: date-time
+
+    PersonDeactivatedPayload:
+      type: object
+      required: [personId, status, version, deactivatedAt, reasonCode]
+      properties:
+        personId:
+          type: string
+          format: uuid
+        status:
+          const: INACTIVE
+        version:
+          type: integer
         deactivatedAt:
           type: string
           format: date-time
+        reasonCode:
+          type: string
+          enum: [DUPLICATE, CREATED_BY_ERROR, IDENTITY_CORRECTION, ADMINISTRATIVE_REQUEST, OTHER]
+        reasonDetail:
+          type: [string, 'null']
+          description: Present only when reasonCode is OTHER (commands.md §7.1).
+
+    ResolvePersonByInstitutionalEmailPayload:
+      type: object
+      required: [institutionalEmail]
+      properties:
+        institutionalEmail:
+          type: string
+
+    ResolvePersonByInstitutionalEmailResultPayload:
+      description: >
+        The wrapped RESULT payload -- always status SUCCEEDED (queries.md
+        §2 has no REJECTED analog; a malformed institutionalEmail is a
+        structural failure, routed to the DLQ, never published as a
+        Result). personId/status are omitted from data entirely for
+        NOT_FOUND, not published as null.
+      type: object
+      required: [status, data]
+      properties:
+        status:
+          const: SUCCEEDED
+        data:
+          type: object
+          required: [outcome]
+          properties:
+            outcome:
+              type: string
+              enum: [FOUND, INACTIVE_MATCH, NOT_FOUND]
+            personId:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [ACTIVE, INACTIVE]
+          examples:
+            - outcome: FOUND
+              personId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              status: ACTIVE
+            - outcome: INACTIVE_MATCH
+              personId: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              status: INACTIVE
+            - outcome: NOT_FOUND
+        error:
+          type: 'null'

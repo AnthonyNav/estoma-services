@@ -9,7 +9,8 @@ import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
-import com.estoma.users.contract.result.RejectedPayload;
+import com.estoma.users.contract.result.ResultPayload;
+import com.estoma.users.contract.result.ResultStatus;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.testsupport.AbstractMessagingIT;
@@ -25,6 +26,7 @@ import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * A functional rejection must be durable, correlated, and MUST NOT reach
@@ -38,6 +40,7 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
   @Autowired private RabbitTemplate rabbitTemplate;
   @Autowired private AmqpAdmin amqpAdmin;
   @Autowired private EnvelopeJsonCodec codec;
+  @Autowired private JdbcClient jdbc;
 
   @Test
   void activatingAnAlreadyActivePersonIsRejectedWithoutReachingTheDlqOrAnyRetryTier() throws InterruptedException {
@@ -63,8 +66,9 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
                 MessageEnvelope result = codec.decode(resultMessage.getBody());
                 assertThat(result.messageType()).isEqualTo("ActivatePersonRejected");
                 assertThat(result.correlationId()).isEqualTo(activateCorrelationId);
-                RejectedPayload payload = codec.convertPayload(result, RejectedPayload.class);
-                assertThat(payload.errorCode()).isEqualTo("PERSON_ALREADY_ACTIVE");
+                ResultPayload payload = codec.convertPayload(result, ResultPayload.class);
+                assertThat(payload.status()).isEqualTo(ResultStatus.REJECTED);
+                assertThat(payload.error().code()).isEqualTo("PERSON_ALREADY_ACTIVE");
               });
 
       // Give any wrongly-triggered retry/DLQ routing time to happen, then
@@ -79,18 +83,69 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
     }
   }
 
+  @Test
+  void malformedCreateEmailIsPersistedAndReplayedWithoutRevalidatingTheDomain() {
+    Queue resultsQueue = amqpAdmin.declareQueue();
+    amqpAdmin.declareBinding(
+        BindingBuilder.bind(resultsQueue).to(new DirectExchange(AmqpNames.EXCHANGE_RESULTS)).with("bff"));
+
+    try {
+      UUID personId = UUID.randomUUID();
+      String idempotencyKey = UUID.randomUUID().toString();
+      CreatePersonCommand malformed =
+          new CreatePersonCommand(personId, "Ada", "Lovelace", null, "not-an-email", null);
+
+      UUID firstCorrelationId = UUID.randomUUID();
+      send(MessageTypes.CREATE_PERSON, idempotencyKey, firstCorrelationId, codec.toJsonNode(malformed));
+      assertRejectedResult(resultsQueue, firstCorrelationId, "CreatePersonRejected", "INVALID_PERSON_DATA");
+
+      assertThat(
+              jdbc.sql(
+                      "SELECT terminal_status FROM idempotency_records "
+                          + "WHERE producer = :producer AND idempotency_key = :idempotencyKey")
+                  .param("producer", "bff")
+                  .param("idempotencyKey", idempotencyKey)
+                  .query(String.class)
+                  .single())
+          .isEqualTo("REJECTED");
+      assertThat(
+              jdbc.sql(
+                      "SELECT error_code FROM idempotency_records "
+                          + "WHERE producer = :producer AND idempotency_key = :idempotencyKey")
+                  .param("producer", "bff")
+                  .param("idempotencyKey", idempotencyKey)
+                  .query(String.class)
+                  .single())
+          .isEqualTo("INVALID_PERSON_DATA");
+
+      UUID retryCorrelationId = UUID.randomUUID();
+      send(MessageTypes.CREATE_PERSON, idempotencyKey, retryCorrelationId, codec.toJsonNode(malformed));
+      assertRejectedResult(resultsQueue, retryCorrelationId, "CreatePersonRejected", "INVALID_PERSON_DATA");
+
+      CreatePersonCommand corrected =
+          new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
+      UUID correctedCorrelationId = UUID.randomUUID();
+      send(MessageTypes.CREATE_PERSON, idempotencyKey, correctedCorrelationId, codec.toJsonNode(corrected));
+      assertRejectedResult(resultsQueue, correctedCorrelationId, "CreatePersonRejected", "INVALID_MESSAGE");
+    } finally {
+      amqpAdmin.deleteQueue(resultsQueue.getName());
+    }
+  }
+
   private void createPerson(UUID personId) {
     CreatePersonCommand command =
         new CreatePersonCommand(personId, "Ada", "Lovelace", null, "ada." + personId + "@example.edu", null);
-    send(MessageTypes.CREATE_PERSON, "users-service", UUID.randomUUID(), codec.toJsonNode(command));
+    send(MessageTypes.CREATE_PERSON, UUID.randomUUID().toString(), UUID.randomUUID(), codec.toJsonNode(command));
   }
 
   private void activatePerson(UUID personId, int expectedVersion, UUID correlationId) {
     ActivatePersonCommand command = new ActivatePersonCommand(personId, expectedVersion);
-    send(MessageTypes.ACTIVATE_PERSON, "users-service", correlationId, codec.toJsonNode(command));
+    send(MessageTypes.ACTIVATE_PERSON, UUID.randomUUID().toString(), correlationId, codec.toJsonNode(command));
   }
 
-  private void send(String messageType, String targetService, UUID correlationId, tools.jackson.databind.JsonNode payload) {
+  private void send(
+      String messageType, String idempotencyKey, UUID correlationId, tools.jackson.databind.JsonNode payload) {
+    UUID aggregateId = UUID.fromString(payload.path("personId").asString());
     MessageEnvelope envelope =
         new MessageEnvelope(
             UUID.randomUUID(),
@@ -102,14 +157,30 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
             correlationId,
             null,
             UUID.randomUUID(),
-            targetService,
+            idempotencyKey,
+            aggregateId,
             null,
-            null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             payload);
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
     rabbitTemplate.send(
         AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS, new Message(codec.encode(envelope), props));
+  }
+
+  private void assertRejectedResult(Queue queue, UUID correlationId, String messageType, String errorCode) {
+    await()
+        .atMost(Duration.ofSeconds(10))
+        .untilAsserted(
+            () -> {
+              Message resultMessage = rabbitTemplate.receive(queue.getName());
+              assertThat(resultMessage).isNotNull();
+              MessageEnvelope result = codec.decode(resultMessage.getBody());
+              assertThat(result.messageType()).isEqualTo(messageType);
+              assertThat(result.correlationId()).isEqualTo(correlationId);
+              ResultPayload payload = codec.convertPayload(result, ResultPayload.class);
+              assertThat(payload.status()).isEqualTo(ResultStatus.REJECTED);
+              assertThat(payload.error().code()).isEqualTo(errorCode);
+            });
   }
 }

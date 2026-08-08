@@ -61,22 +61,47 @@ Every message — command, result, or event — carries the platform envelope
   "correlationId": "uuid",
   "causationId": "uuid",
   "operationId": "uuid",
-  "targetService": "users-service",
+  "idempotencyKey": "string",
   "aggregateId": "uuid",
   "aggregateVersion": 1,
-  "actor": { "accountId": "uuid" },
+  "actor": { "type": "ACCOUNT", "accountId": "uuid" },
   "payload": {}
 }
 ```
+
+There is no `targetService` field — the platform V1 envelope does not
+carry one (`messaging-architecture.md` §8: "No se mantiene
+targetService"); the destination is determined entirely by RabbitMQ
+routing (exchange/routing key). An earlier round of this service kept
+`targetService` as a redundant structural check; it has been removed to
+match the closed V1 contract.
+
+`actor` is one of two shapes (`messaging-architecture.md` §8.1),
+discriminated by `type`:
+
+```json
+{ "type": "ACCOUNT", "accountId": "uuid" }
+{ "type": "SYSTEM", "service": "academic" }
+```
+
+Commands always carry `ACCOUNT` (a human actor, via BFF or an authorized
+import process); the Query (§3a) always carries `SYSTEM` — a technical
+actor never carries a fabricated `accountId`.
 
 Rules:
 
 - `aggregateVersion` is always the version **after** the change
   (`events.md:183`).
-- `operationId` is present on COMMAND and RESULT, **absent on EVENT**. It
-  tracks a client-visible operation; event consumers have no use for it and
-  the documented event example omits it (`events.md:164-181`). This is an
-  interim decision — see §10 (R5).
+- `operationId` is present on COMMAND, QUERY, and RESULT, **absent on
+  EVENT**. It tracks a client-visible operation; event consumers have no
+  use for it and the documented event example omits it
+  (`events.md:164-181`). This is an interim decision — see §10 (R5).
+- `idempotencyKey` identifies a functional intention, distinct from
+  `messageId` (a concrete message instance, used for delivery
+  deduplication via the Consumer Inbox) and `operationId` (a client/BFF-
+  observable operation) — `messaging-architecture.md` §10.1. Mandatory on
+  every command (`commands.md` §9); not applicable to the Query, which is
+  side-effect-free and needs no protection against being repeated.
 - Field casing is camelCase on the wire. Logs and audit records use
   snake_case (`security-observability.md` vs `messaging-architecture.md`);
   this split is intentional and documented, not a bug.
@@ -87,16 +112,41 @@ Rules:
 
 ## 3. Commands (received on `commands.users-service`)
 
-All four commands originate from `bff` or an authorized administrative
-import process (`commands.md:251-260`) and are processed exactly once per
-`(consumerName, messageId)` pair (§7).
+Every command carries a mandatory `idempotencyKey` (§2, §7) and an
+`aggregateId` that must equal the payload's `personId` — see
+"Envelope/payload consistency" below.
+
+### Producer/operation authorization matrix
+
+A producer being technically trusted at all does not imply it may issue
+every command (`commands.md` §8). `EnvelopeValidator` checks the
+`(producer, messageType)` pair against a configured matrix
+(`application.yml`, `estoma.messaging.command-producers`) — a purely
+technical check; broad functional authorization is resolved upstream, by
+the producer, before publishing (`commands.md` §8). The producer-specific
+field contract of `UpdatePerson` is enforced locally below:
+
+| Producer | Authorized operations |
+|---|---|
+| `bff` | `CreatePerson`, `UpdatePerson`, `ActivatePerson`, `DeactivatePerson` |
+| `academic` (`student-import-process`) | `CreatePerson`, `UpdatePerson` only |
+
+### Envelope/payload consistency
+
+For all four commands, `aggregateId` and payload `personId` are mandatory:
+the producer sets both to the same Person identifier. A missing
+`aggregateId`, missing `personId`, or non-UUID `personId` is structurally
+invalid and goes to the DLQ. When both values are present but differ, the
+command is rejected `INVALID_MESSAGE` — a controlled functional Result,
+never a DLQ'd message (`commands.md` §2.1, §3). Checked once, centrally,
+for all four commands — not a per-handler rule.
 
 ### `CreatePerson`
 
 | | |
 |---|---|
 | Payload | `personId` (caller-generated UUID), `firstName`, `paternalSurname`, `maternalSurname?`, `institutionalEmail`, `phone?` |
-| Succeeded | `CreatePersonSucceeded { personId, version: 1 }` |
+| Succeeded | `data: { personId, version: 1 }` (wrapped per §4) |
 | Event | `PersonCreated` |
 | Rejections | see precedence below |
 
@@ -113,49 +163,123 @@ docs, fixed here):
 Same payload plus `expectedVersion`. Never modifies accounts, roles, or
 academic information (`commands.md:117`).
 
+- `bff` may update the complete profile: names, `institutionalEmail`, and
+  `phone`, subject to the normal validation and duplicate rules.
+- `academic` (`student-import-process`) may update only `firstName`,
+  `paternalSurname`, and `maternalSurname`. Its `institutionalEmail` is
+  normalized only to verify it matches the existing Person; it is never
+  modified. `phone` is outside the import contract and must be absent; the
+  existing phone is always preserved. A different email or present phone is
+  rejected as `INVALID_MESSAGE`.
+
 Rejections, in precedence order: `PERSON_NOT_FOUND` >
 `PERSON_VERSION_CONFLICT` > `INVALID_PERSON_DATA` > `DUPLICATE_PERSON`
 (self-exclusion applies — see §6).
 
-### `ActivatePerson` / `DeactivatePerson`
+### `ActivatePerson`
 
-Payload: `personId`, `expectedVersion`. Both perform a single guarded
+Payload: `personId`, `expectedVersion`. Performs a single guarded
 conditional update plus a `person_status_history` insert, in one
 transaction (§5, §8).
 
-Rejection precedence — **fixed here, not in the platform docs**:
+Rejection precedence: `PERSON_NOT_FOUND` > `PERSON_VERSION_CONFLICT` >
+`PERSON_ALREADY_ACTIVE`.
 
-```
-PERSON_NOT_FOUND  >  PERSON_VERSION_CONFLICT  >  PERSON_ALREADY_ACTIVE / PERSON_ALREADY_INACTIVE
-```
+### `DeactivatePerson`
 
-Version wins over state: if the version is stale the caller must re-read
-regardless of current state, so reporting "already active" would send them
-down the wrong recovery path.
+Payload: `personId`, `expectedVersion`, `reasonCode` (mandatory),
+`reasonDetail` (mandatory only when `reasonCode == "OTHER"`) —
+`commands.md` §7.1. `reasonCode` catalog: `DUPLICATE`,
+`CREATED_BY_ERROR`, `IDENTITY_CORRECTION`, `ADMINISTRATIVE_REQUEST`,
+`OTHER`.
+
+Rejection precedence: `PERSON_NOT_FOUND` > `PERSON_VERSION_CONFLICT` >
+`INVALID_PERSON_DATA` (missing/unrecognized `reasonCode`, or `OTHER`
+without a non-blank `reasonDetail`) > `PERSON_ALREADY_INACTIVE`. The
+reason validation is a pure input-shape check, independent of the
+Person's current state, so it runs before the state-dependent
+already-inactive check.
+
+For both `ActivatePerson`/`DeactivatePerson`: version wins over state —
+if the version is stale the caller must re-read regardless of current
+state, so reporting "already active/inactive" would send them down the
+wrong recovery path.
 
 Full JSON Schemas: `asyncapi.yaml`.
 
 ---
 
+## 3a. Query (received on `queries.users-service`)
+
+`ResolvePersonByInstitutionalEmail` (`queries.md` §2) resolves a
+`personId` from an `institutionalEmail` for `academic-service`'s
+`student-import-process`. This operation requires producer `academic` and
+`actor: { type: "SYSTEM", service: "academic" }` (least privilege: this
+Query resolves identity using personal information).
+Side-effect-free: no Consumer Inbox, no domain mutation, no Event. A
+redelivery simply re-evaluates the lookup.
+
+| | |
+|---|---|
+| Payload | `institutionalEmail` |
+| Actor | `{ "type": "SYSTEM", "service": "academic" }` — never `ACCOUNT` |
+| Producer matrix | `academic` → `ResolvePersonByInstitutionalEmail` only (`estoma.messaging.query-producers`) |
+| Result | single `messageType` (`ResolvePersonByInstitutionalEmailResult`), no Succeeded/Rejected split — see §4 |
+
+Three mutually-exclusive outcomes, by construction (`institutional_email_
+normalized` is globally unique regardless of status):
+
+- `FOUND` — an `ACTIVE` Person matches: `data: { outcome, personId, status: "ACTIVE" }`.
+- `INACTIVE_MATCH` — an `INACTIVE` Person matches: `data: { outcome, personId, status: "INACTIVE" }`.
+  Resolution stops for administrative/manual review. The caller must not
+  auto-reuse, auto-reactivate, or issue an alternate `CreatePerson`.
+- `NOT_FOUND` — no match: `data: { outcome }` — `personId`/`status` are
+  **omitted** from the wire, not published as `null`.
+
+A malformed `institutionalEmail` is not `NOT_FOUND` — it is a
+structurally invalid request, translated explicitly to a DLQ'd message,
+never left to escape uncaught into the (nonexistent) rejection path.
+
+---
+
 ## 4. Results (published to `platform.results`)
 
-Every command yields exactly one correlated result:
-`<Command>Succeeded` or `<Command>Rejected` — 8 message types total. No
-exceptions to the naming convention exist in this service (the one
-documented platform-wide exception, `StartStudentImportAccepted/Rejected`,
-belongs to `academic-service`).
+The platform defines a single minimal shape for every RESULT `payload`
+(`messaging-architecture.md` §3 "Resultado") — `status`, `data?`,
+`error?`, with `error.code` mandatory and no free-text `message` on the
+wire:
 
-`Succeeded` payload: `{ personId, version }` — the version is the
+```json
+{ "status": "SUCCEEDED", "data": { }, "error": null }
+{ "status": "REJECTED", "data": null, "error": { "code": "PERSON_NOT_FOUND", "details": {} } }
+```
+
+This is now a **closed platform decision**, not a local interim one — an
+earlier round of this service published `{personId, version}` and
+`{errorCode, message, details}` directly at the payload root, before the
+platform closed on the wrapper shape above; that has been corrected.
+`message` is not part of the wire contract — a human-readable detail for
+a rejection is logged at the rejection site instead of published.
+
+Every command yields exactly one correlated result: `<Command>Succeeded`
+or `<Command>Rejected` — 8 message types total, unaffected by the shape
+change above (the wrapper lives inside `payload`, `messageType` naming is
+unchanged). No exceptions to the naming convention exist in this service
+(the one documented platform-wide exception,
+`StartStudentImportAccepted/Rejected`, belongs to `academic-service`).
+
+`Succeeded` `data`: `{ personId, version }` — the version is the
 aggregate version *after* the change, matching the derived event's
 `aggregateVersion`.
 
-`Rejected` payload shape (interim, cross-service concern — see §10 R6):
+The Query's Result (§3a) reuses this exact mechanism — same
+`platform.results`/`results.<requester>` routing, same wrapper shape —
+with its own single `messageType` and its own `data` contract, not a
+Succeeded/Rejected split.
 
-```json
-{ "errorCode": "PERSON_NOT_FOUND", "message": "string", "details": [{"field": "string", "code": "string"}] }
-```
-
-Routing key = the `producer` field of the command being answered (§9).
+Routing key = the `producer` field of the command or Query being
+answered (§9) — the same resolution either way, no code distinguishes
+between them.
 
 ---
 
@@ -195,14 +319,11 @@ Non-cascading rules a consumer must not assume away
 
 ---
 
-## 6. `DUPLICATE_PERSON` — interim rule
+## 6. `DUPLICATE_PERSON`
 
-The platform docs point at `institutional_email_normalized` and say only
-that the duplicate-detection *restriction* is undecided
-(`data-model.md:247-251`), yet `DUPLICATE_PERSON` is already a contractual
-rejection code for `CreatePerson`/`UpdatePerson`.
-
-**Interim rule shipped in this PR:**
+`institutional_email_normalized` is globally unique across all Persons,
+whether `ACTIVE` or `INACTIVE`. This V1 decision is closed for
+`CreatePerson`/`UpdatePerson`:
 
 ```sql
 CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_normalized);
@@ -218,17 +339,14 @@ CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_
   only prevents two *Person* rows claiming the same mailbox, never
   multiple accounts against one Person.
 - `CreatePerson` against an email owned by an `INACTIVE` person →
-  `DUPLICATE_PERSON`. The caller should issue `ActivatePerson` instead of
-  retrying `CreatePerson`.
+  `DUPLICATE_PERSON`. No automatic reactivation, email recycling, or
+  reassignment exists in V1.
 - `UpdatePerson` excludes itself: `... AND person_id <> :personId`.
 - Application-side `DuplicatePersonPolicy` returns a sealed `DuplicateVerdict`
   (`None` | `Duplicate(matchedPersonId, matchedOn)`), not a boolean, so a
   future fuzzy name+birthdate rule can carry richer information without
   changing any caller. Selectable via `estoma.users.duplicate-policy`
   (default `NORMALIZED_EMAIL`).
-
-**Revisit trigger:** when the mass-import matching strategy is decided
-(`data-model.md:386`).
 
 ---
 
@@ -239,8 +357,30 @@ CREATE UNIQUE INDEX ux_persons_email_normalized ON persons (institutional_email_
   (`messaging-architecture.md:434-445`).
 - Consumer Inbox key: **`(consumer_name, message_id)`**, not `message_id`
   alone (`processed_messages`). First statement inside the transaction.
-- A duplicate delivery is a no-op: no business change, no new outbox rows,
-  transaction commits anyway (empty), message is ACKed.
+  Protects **delivery** of one specific `messageId` — not the same thing
+  as functional idempotency, next.
+- A duplicate delivery (same `messageId`) is a no-op: no business change,
+  no new outbox rows, transaction commits anyway (empty), message is
+  ACKed.
+- **Functional idempotency** (`idempotency_records`, keyed by `(producer,
+  idempotencyKey)` — `commands.md` §9, `messaging-architecture.md`
+  §10.1) protects the **intention**, recognized across a brand-new
+  `messageId`: a retry claims the same key via a single atomic `INSERT
+  ... ON CONFLICT DO UPDATE ... RETURNING`, whose row lock rules out two
+  concurrent claims both executing the command's effect. Stores only the
+  terminal outcome (`aggregateVersion` or `errorCode`), never the Result
+  itself. Three outcomes when the claim resolves:
+  - the caller's own `messageId` won the claim → a genuinely new
+    intention → execute the handler as normal.
+  - an existing claim, but `messageType`/`requestFingerprint` (a SHA-256
+    digest over an explicit, fixed, ordered list of functional fields and
+    `aggregateId`, excluding delivery/tracing metadata) disagree → the same key reused for a different
+    intention → reject `INVALID_MESSAGE`, without touching the original
+    claim's row.
+  - an existing claim for the same intention, already terminal (never
+    observed `IN_PROGRESS` here, by construction of the row lock) →
+    reconstruct the original Result from the stored outcome — no handler
+    call, no domain mutation, no Event.
 - **A functional rejection is caught inside the transaction, not thrown
   past it.** If it unwound the transaction, the Inbox row would roll back
   too, the message would be redelivered forever, and it would eventually
@@ -335,15 +475,34 @@ onMessage:
 BEGIN
   inbox.tryInsert(consumerName, messageId, correlationId)
     not inserted → return Duplicate                      // COMMIT no-op
-  authorizationPolicy.check(envelope.actor, ...)          // from envelope, never payload
+  // Functional authorization for the four global Person operations is
+  // resolved upstream, by the producer, before publishing (commands.md
+  // §8) -- this class does not re-check it. EnvelopeValidator already
+  // confirmed the producer/operation pair and the ACCOUNT actor.
+  try:
+    requireAggregateIdMatchesPayload(envelope)            // else PersonRejectedException(INVALID_MESSAGE)
+    fingerprint = buildRequestFingerprint(envelope)
+  catch PersonRejectedException r:                        // pre-claim: deterministic, no side effect to protect
+    outbox.append(RESULT: <Command>Rejected {status: REJECTED, error: {code: r.code}})
+    return Rejected(r.code)
+
+  claim = idempotency.claim(producer, idempotencyKey, messageType, personId, fingerprint, messageId, now)
+  if not claim.isNewClaim(messageId):
+    if claim.messageType != messageType or claim.requestFingerprint != fingerprint:
+      outbox.append(RESULT: <Command>Rejected {status: REJECTED, error: {code: INVALID_MESSAGE}})
+      return Rejected(INVALID_MESSAGE)                    // original claim untouched
+    return reconstructOutcome(claim)                       // no handler call, no mutation, no Event
+
   try:
     validate payload; check personId not taken; check duplicate policy
     apply change (insert / guarded update)
-    outbox.append(RESULT: <Command>Succeeded)
+    outbox.append(RESULT: <Command>Succeeded {status: SUCCEEDED, data: {personId, version}})
     outbox.append(EVENT: Person<X>)                       // when applicable
+    idempotency.markSucceeded(producer, idempotencyKey, version, now)
     return Succeeded(version)
   catch PersonRejectedException r:
-    outbox.append(RESULT: <Command>Rejected {errorCode: r.code})
+    outbox.append(RESULT: <Command>Rejected {status: REJECTED, error: {code: r.code}})
+    idempotency.markRejected(producer, idempotencyKey, r.code, now)
     return Rejected(r.code)          // NO rethrow → COMMIT → ACK → never DLQ
 COMMIT
 ```
@@ -366,9 +525,10 @@ See `data-model.sql` for the full reference DDL and inline deltas. Summary:
 | Table | Role |
 |---|---|
 | `persons` | aggregate root |
-| `person_status_history` | append-only activation/deactivation log |
-| `processed_messages` | Consumer Inbox — not a domain entity |
+| `person_status_history` | append-only activation/deactivation log, with `reason_code`/`reason_detail` (V8) |
+| `processed_messages` | Consumer Inbox (delivery dedup) — not a domain entity |
 | `outbox_messages` | Transactional Outbox — not a domain entity |
+| `idempotency_records` | functional idempotency (intention dedup), keyed by `(producer, idempotency_key)` — not a domain entity (V7, §7) |
 
 Declared deltas from `data-model.md` (both additive/backwards-compatible,
 proposed upstream — §10):
@@ -515,27 +675,41 @@ not only via the defensive `failExhaustedPending` backstop.
 
 ## 9. RabbitMQ topology
 
-Exchanges are fixed by the platform docs
-(`messaging-architecture.md:171-177`); routing keys and retry topology are
-fixed here (companion ADR pending in the docs repo — §10, §14).
+Exchanges are fixed by the platform docs (`messaging-architecture.md` §4
+— including `platform.queries`, listed there alongside commands/results/
+events/dlx, not left open); routing keys and retry topology are fixed
+here (companion ADR pending in the docs repo — §10, §14).
 
 ```
 platform.commands (direct)  --("users-service")--> commands.users-service
-platform.results  (direct)  --("bff", ...)-------> results.<component>   [owned by the consumer, not us]
+platform.queries  (direct)  --("users-service")--> queries.users-service
+platform.results  (direct)  --("bff", "academic", ...)-------> results.<component>   [owned by the consumer, not us]
 platform.events   (topic)   identity.person.{created,updated,activated,deactivated}
 platform.dlx      (topic)   dlq.commands.users-service --> commands.users-service.dlq
                              retry.commands.users-service.{5s,30s,300s} --> retry queues
+                             dlq.queries.users-service --> queries.users-service.dlq
+                             retry.queries.users-service.{5s,30s,300s} --> retry queues
 ```
+
+`queries.users-service`'s DLQ and 3 retry tiers are structurally
+identical to the command queue's own, added for operational consistency
+with every other durable queue this service owns — not mandated by
+`queries.md`, a gap-filling decision per this document's own governance
+model (§1). `FailureRouter` is generalized over a `RetryTopology` so the
+one retry/DLQ mechanism serves both queues.
 
 Rules:
 
-- **Commands**: routing key = `targetService` from the envelope. One queue
-  per service (`messaging-architecture.md:654` rule 12); adding a new
-  command never requires a topology change.
-- **Results**: routing key = the `producer` field of the command being
-  answered, not a hardcoded `"bff"` — this also serves the "authorized
-  administrative import process" caller the docs already anticipate
-  (`commands.md:254`) without any change here.
+- **Commands/Query routing key**: the fixed logical service identifier
+  (`"users-service"`), the same for both queues — set by the publisher,
+  not derived from any envelope field (the envelope carries no
+  `targetService`, §2). One queue per service per pattern
+  (`messaging-architecture.md:654` rule 12); adding a new command or
+  query never requires a topology change.
+- **Results**: routing key = the `producer` field of the command or Query
+  being answered, not a hardcoded `"bff"` — this also serves `academic`
+  (§3a) and the "authorized administrative import process" caller the
+  docs already anticipate (`commands.md:254`) without any change here.
 - **Events**: fixed 3-segment key `<context>.<aggregate>.<eventPastTense>`,
   lowercase, no version suffix (`messaging-architecture.md:360`). Context,
   not service name, so a future service split does not invalidate other
@@ -584,14 +758,18 @@ line that says so, and states when to revisit.
 | # | Decision | Fills doc gap | Revisit trigger |
 |---|---|---|---|
 | D1 | Routing key scheme (§9) | `messaging-architecture.md:210,731` ("routing keys concretas" under "Decisiones Pendientes"); `data-model.md:312` ("La topología física de publicación queda pendiente") | When the companion platform ADR (§14) is ratified or a second service needs a conflicting scheme |
-| D2 | `DUPLICATE_PERSON` = unique index on normalized email (§6) | `data-model.md:247-251` | When mass-import matching strategy is decided (`data-model.md:386`) |
+| D2 | `DUPLICATE_PERSON` = globally unique normalized email across ACTIVE and INACTIVE Persons (§6) | Closed V1 platform decision | N/A |
 | D3 | Health paths served by Actuator groups, not custom controllers (§11) | doc specifies `/health/*` paths; code skeleton used bare Actuator paths | N/A — this is a genuine conflict resolution, not a placeholder |
-| D4 | Rejected payload shape `{errorCode, message, details[]}` (§4) | `commands.md:321` lists "formato común para resultados de rechazo" as pending | When ratified platform-wide in the docs repo |
-| D5 | Domain authorization: interim policy only checks `actor.accountId` present + `producer` allow-listed (§12) | `authorization-service` doesn't exist yet; none of the 4 commands has an authorization-failure rejection code | When `authorization-service` ships or a `FORBIDDEN`-equivalent code is added to the platform docs |
+| D4 | ~~Rejected payload shape~~ — **closed by the platform**, not a local decision anymore (§4) | `messaging-architecture.md` §3 now defines `{status, data?, error?}` platform-wide | Resolved — this row is historical only |
+| D5 | ~~Domain authorization: interim policy only checks `actor.accountId` present~~ — superseded by the producer/operation matrix (§3, §12) | `PersonAuthorizationPolicy` (the no-op interim seam) has been removed; `EnvelopeValidator`/`QueryEnvelopeValidator` check `(producer, messageType)` against a configured matrix. Broad functional authorization remains upstream (`commands.md` §8); the closed `academic` `UpdatePerson` field contract is enforced locally in §3. | When `authorization-service` ships or a `FORBIDDEN`-equivalent code is added to the platform docs |
 | D6 | `operationId` on RESULT only, absent on EVENT (§2) | envelope spec includes it; the event example in `events.md:164-181` omits it | When the platform docs state a rule either way |
 | D7 | Outbox `metadata jsonb` column (§8) | not derivable from documented columns at relay time | Propose upstream for the other 4 shared services |
 | D8 | Inbox retention: 30 days, configurable, purge job included in this PR | not addressed in platform docs | If purge cadence conflicts with an observed redelivery window |
 | D9 | Retry via broker-side TTL tiers, not `spring.rabbitmq.listener.simple.retry` (§9) | `messaging-architecture.md:479` explicitly leaves timing/policy undecided | If operational experience shows TTL tiers under-serve a specific consumer |
+| D10 | Producer/operation authorization matrix, not a flat producer allow-list (§3) | `commands.md` §8 establishes producers are trusted per-operation, not globally, but leaves the technical enforcement mechanism to the service | If a fifth producer or a shared matrix format is standardized platform-wide |
+| D11 | `idempotency_records` — functional idempotency mechanism (§7, §8) | `commands.md` §9 and `messaging-architecture.md` §10.1 mandate the property; neither specifies a storage mechanism | Propose upstream for the other 4 shared services alongside D7 |
+| D12 | Query DLQ + 3 retry tiers on `queries.users-service`, mirroring the command queue's (§9) | `queries.md` doesn't mandate a DLQ/retry topology for Query | If Query volume/failure patterns justify a different policy than Command's |
+| D13 | `ActorContext` type-safe (`Actor.Account`/`Actor.System`), never a fabricated `accountId` for a technical actor (§2) | `messaging-architecture.md` §8.1 defines both shapes; this is the implementation choice for representing them in Java | N/A — direct implementation of a closed platform contract |
 
 ---
 
@@ -600,7 +778,7 @@ line that says so, and states when to revisit.
 Health groups (Actuator, `management.endpoint.health.group.*`):
 
 - `startup` → `db`, `schemaVersion` (Flyway at expected version).
-- `readiness` → `db`, `commandConsumer`, `outboxRelay`.
+- `readiness` → `db`, `commandConsumer`, `queryConsumer`, `outboxRelay`.
 - `liveness` → `livenessState` **only** — no DB, no RabbitMQ. A temporarily
   degraded dependency should not force restarts
   (`security-observability.md:683-707`, "Salud de componentes"); keeping
@@ -659,7 +837,11 @@ Mandatory metrics (`security-observability.md:509-554`,
   latency. `invalid_messages` increments the moment a message is
   classified invalid, even if its DLQ republication then fails to
   confirm; `retries`/`dead_lettered` increment only after their
-  republication is confirmed (§7).
+  republication is confirmed (§7). `QueryConsumerMetrics` is a parallel
+  class tagged `users-service.queries`, not a generalization of the
+  command consumer's metrics — it has no `duplicates`/`rejected` counters
+  (no Consumer Inbox, no functional rejection catalog for Query) and
+  `resolved` in place of `succeeded`.
 
 **(Round 1) Never persist a stack trace, a full exception message, a
 payload, or a secret** in `outbox_messages.last_error_code`/
@@ -684,29 +866,38 @@ Correlation: every log line and outbound message propagates
   open (`security-observability.md:895`). Interim posture: per-component
   RabbitMQ credentials with least privilege, TLS on the AMQP connection.
 - `users-service`'s RabbitMQ user needs: consume from
-  `commands.users-service`; publish to `platform.results`,
-  `platform.events`, `platform.dlx`. No `configure` permission in
-  staging/prod (topology is GitOps-managed by `estoma-infra`).
+  `commands.users-service` and `queries.users-service`; publish to
+  `platform.results`, `platform.events`, `platform.dlx`. No `configure`
+  permission in staging/prod (topology is GitOps-managed by
+  `estoma-infra`).
 - HTTP surface: everything except `/health`, `/health/**`, `/metrics`,
   `/info` is `denyAll()`. No sessions (`STATELESS`), CSRF/httpBasic/
   formLogin disabled, `X-Frame-Options: DENY`, `X-Content-Type-Options:
   nosniff`. `UserDetailsServiceAutoConfiguration` is excluded — there are
   no authenticated HTTP users here, and leaving it enabled logs a random
   password on every boot.
-- **Domain authorization (interim, D5):** the receiving service must not
+- **Domain authorization (D5, D10):** the receiving service must not
   trust the client-provided payload for authorization
   (`security-observability.md:156`), but no rejection code exists yet for
-  an authorization failure and `authorization-service` isn't built. Interim
-  `PersonAuthorizationPolicy` only asserts `actor.accountId` is present and
-  `producer` is in an allow-list; the actor is recorded in
-  `person_status_history.changed_by_account_id` and in audit logs. This is
-  a deliberate seam, not a finished authorization model.
+  an authorization failure and `authorization-service` isn't built.
+  `EnvelopeValidator`/`QueryEnvelopeValidator` check `(producer,
+  messageType)` against a configured per-operation matrix and require an
+  `ACCOUNT` actor for commands / a `SYSTEM` actor for the Query; the
+  actor is recorded in `person_status_history.changed_by_account_id` and
+  in audit logs. There is no service-level `PersonAuthorizationPolicy`
+  seam anymore — the producer/operation matrix at the envelope-validation
+  border is the actual mechanism, not a placeholder awaiting one. Still
+  not a finished authorization model: the functional permission check
+  itself remains resolved upstream, by the producer, before publishing.
 - Secrets (DB credentials, RabbitMQ credentials) live in Kubernetes
   Secrets, never in code, images, ConfigMaps, or Git.
 - **Migration DB user is separate from the runtime DB user**
   (`security-observability.md:235`) — `spring.flyway.user/password` vs
   `spring.datasource.username/password`; `V6__runtime_privileges.sql`
-  grants the runtime role only what it needs.
+  grants the runtime role what it needs for the tables that exist at that
+  point. A table created afterwards needs its own grant —
+  `V7__idempotency_records.sql` grants it explicitly for
+  `idempotency_records`.
 - No Ingress reaches this service — ClusterIP only. `EXPOSE 8080` in the
   Dockerfile is for the Service, not a public route
   (`security-observability.md:270-284`). Enforced in `estoma-infra`, not
@@ -717,8 +908,8 @@ Correlation: every log line and outbound message propagates
 ## 13. Persistence approach
 
 **Spring JDBC (`JdbcClient`), no JPA/Hibernate** — for `persons`,
-`person_status_history`, `processed_messages`, and `outbox_messages`
-alike.
+`person_status_history`, `processed_messages`, `outbox_messages`, and
+`idempotency_records` alike.
 
 - `expectedVersion` is client-supplied from a read that may be minutes
   old. Hibernate's `@Version` compares against the version loaded in the

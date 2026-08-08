@@ -9,6 +9,7 @@ import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -17,7 +18,9 @@ import tools.jackson.databind.json.JsonMapper;
 class EnvelopeValidatorTest {
 
   private final EnvelopeValidator validator =
-      new EnvelopeValidator(new MessagingProperties(Set.of("bff"), true, 3, Duration.ofSeconds(5)));
+      new EnvelopeValidator(
+          new MessagingProperties(
+              Map.of("bff", Set.of("CreatePerson")), Map.of(), true, 3, 3, Duration.ofSeconds(5)));
   private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
@@ -33,10 +36,10 @@ class EnvelopeValidatorTest {
   }
 
   @Test
-  void rejectsWrongTargetService() {
-    MessageEnvelope wrongTarget = withTargetService(validCommand(), "authentication-service");
+  void rejectsQueryMessageKindOnTheCommandsQueue() {
+    MessageEnvelope query = withKind(validCommand(), MessageKind.QUERY);
 
-    assertThatThrownBy(() -> validator.validate(wrongTarget)).isInstanceOf(InvalidMessageException.class);
+    assertThatThrownBy(() -> validator.validate(query)).isInstanceOf(InvalidMessageException.class);
   }
 
   @Test
@@ -54,10 +57,20 @@ class EnvelopeValidatorTest {
   }
 
   @Test
-  void rejectsProducerNotOnTheAllowList() {
+  void rejectsProducerNotOnTheMatrix() {
     MessageEnvelope wrongProducer = withProducer(validCommand(), "some-untrusted-caller");
 
     assertThatThrownBy(() -> validator.validate(wrongProducer)).isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsAProducerAuthorizedForADifferentOperation() {
+    // "bff" is only wired up for CreatePerson in this test's fixture
+    // (see the validator field) — a producer being trusted at all does
+    // not imply it may issue every operation.
+    MessageEnvelope wrongOperation = withMessageType(validCommand(), "ActivatePerson");
+
+    assertThatThrownBy(() -> validator.validate(wrongOperation)).isInstanceOf(InvalidMessageException.class);
   }
 
   @Test
@@ -65,6 +78,22 @@ class EnvelopeValidatorTest {
     MessageEnvelope missingOperationId = withOperationId(validCommand(), null);
 
     assertThatThrownBy(() -> validator.validate(missingOperationId))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsMissingIdempotencyKey() {
+    MessageEnvelope missingIdempotencyKey = withIdempotencyKey(validCommand(), null);
+
+    assertThatThrownBy(() -> validator.validate(missingIdempotencyKey))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsBlankIdempotencyKey() {
+    MessageEnvelope blankIdempotencyKey = withIdempotencyKey(validCommand(), "   ");
+
+    assertThatThrownBy(() -> validator.validate(blankIdempotencyKey))
         .isInstanceOf(InvalidMessageException.class);
   }
 
@@ -77,10 +106,19 @@ class EnvelopeValidatorTest {
 
   @Test
   void rejectsActorWithoutAccountId() {
-    MessageEnvelope actorWithoutAccountId = withActor(validCommand(), new Actor(null));
+    MessageEnvelope actorWithoutAccountId = withActor(validCommand(), new Actor.Account(null));
 
     assertThatThrownBy(() -> validator.validate(actorWithoutAccountId))
         .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsASystemActorOnACommand() {
+    // Commands require a human ACCOUNT actor in V1; a technical SYSTEM
+    // actor is reserved for Query (QueryEnvelopeValidator).
+    MessageEnvelope systemActor = withActor(validCommand(), new Actor.System("academic"));
+
+    assertThatThrownBy(() -> validator.validate(systemActor)).isInstanceOf(InvalidMessageException.class);
   }
 
   @Test
@@ -96,17 +134,54 @@ class EnvelopeValidatorTest {
   }
 
   @Test
+  void rejectsMissingOccurredAt() {
+    assertThatThrownBy(() -> validator.validate(withOccurredAt(validCommand(), null)))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsMissingPayload() {
+    assertThatThrownBy(() -> validator.validate(withPayload(validCommand(), null)))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsMissingAggregateId() {
+    assertThatThrownBy(() -> validator.validate(withAggregateId(validCommand(), null)))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsMissingPayloadPersonId() {
+    assertThatThrownBy(() -> validator.validate(withPayload(validCommand(), mapper.valueToTree(Map.of()))))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsNonUuidPayloadPersonId() {
+    assertThatThrownBy(
+            () -> validator.validate(withPayload(validCommand(), mapper.valueToTree(Map.of("personId", "not-a-uuid")))))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
   void allowsASecondConfiguredProducer() {
     EnvelopeValidator twoProducerValidator =
         new EnvelopeValidator(
-            new MessagingProperties(Set.of("bff", "student-import-process"), true, 3, Duration.ofSeconds(5)));
+            new MessagingProperties(
+                Map.of("bff", Set.of("CreatePerson"), "academic", Set.of("CreatePerson")),
+                Map.of(),
+                true,
+                3,
+                3,
+                Duration.ofSeconds(5)));
 
-    assertThatCode(
-            () -> twoProducerValidator.validate(withProducer(validCommand(), "student-import-process")))
+    assertThatCode(() -> twoProducerValidator.validate(withProducer(validCommand(), "academic")))
         .doesNotThrowAnyException();
   }
 
   private MessageEnvelope validCommand() {
+    UUID personId = UUID.randomUUID();
     return new MessageEnvelope(
         UUID.randomUUID(),
         "CreatePerson",
@@ -117,73 +192,94 @@ class EnvelopeValidatorTest {
         UUID.randomUUID(),
         null,
         UUID.randomUUID(),
-        "users-service",
+        UUID.randomUUID().toString(),
+        personId,
         null,
-        null,
-        new Actor(UUID.randomUUID()),
-        mapper.valueToTree(java.util.Map.of()));
+        new Actor.Account(UUID.randomUUID()),
+        mapper.valueToTree(Map.of("personId", personId.toString())));
   }
 
   private MessageEnvelope withKind(MessageEnvelope e, MessageKind kind) {
     return new MessageEnvelope(
         e.messageId(), e.messageType(), e.messageVersion(), kind, e.producer(), e.occurredAt(),
-        e.correlationId(), e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
-  private MessageEnvelope withTargetService(MessageEnvelope e, String targetService) {
+  private MessageEnvelope withIdempotencyKey(MessageEnvelope e, String idempotencyKey) {
     return new MessageEnvelope(
         e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
-        e.correlationId(), e.causationId(), e.operationId(), targetService, e.aggregateId(),
+        e.correlationId(), e.causationId(), e.operationId(), idempotencyKey, e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
   private MessageEnvelope withVersion(MessageEnvelope e, int version) {
     return new MessageEnvelope(
         e.messageId(), e.messageType(), version, e.messageKind(), e.producer(), e.occurredAt(),
-        e.correlationId(), e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
   private MessageEnvelope withMessageType(MessageEnvelope e, String messageType) {
     return new MessageEnvelope(
         e.messageId(), messageType, e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
-        e.correlationId(), e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
   private MessageEnvelope withProducer(MessageEnvelope e, String producer) {
     return new MessageEnvelope(
         e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), producer, e.occurredAt(),
-        e.correlationId(), e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
   private MessageEnvelope withOperationId(MessageEnvelope e, UUID operationId) {
     return new MessageEnvelope(
         e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
-        e.correlationId(), e.causationId(), operationId, e.targetService(), e.aggregateId(),
+        e.correlationId(), e.causationId(), operationId, e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
   private MessageEnvelope withMessageId(MessageEnvelope e, UUID messageId) {
     return new MessageEnvelope(
         messageId, e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
-        e.correlationId(), e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
   private MessageEnvelope withCorrelationId(MessageEnvelope e, UUID correlationId) {
     return new MessageEnvelope(
         e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
-        correlationId, e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        correlationId, e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), e.actor(), e.payload());
   }
 
   private MessageEnvelope withActor(MessageEnvelope e, Actor actor) {
     return new MessageEnvelope(
         e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
-        e.correlationId(), e.causationId(), e.operationId(), e.targetService(), e.aggregateId(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
         e.aggregateVersion(), actor, e.payload());
+  }
+
+  private MessageEnvelope withOccurredAt(MessageEnvelope e, Instant occurredAt) {
+    return new MessageEnvelope(
+        e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), occurredAt,
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
+        e.aggregateVersion(), e.actor(), e.payload());
+  }
+
+  private MessageEnvelope withAggregateId(MessageEnvelope e, UUID aggregateId) {
+    return new MessageEnvelope(
+        e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), aggregateId,
+        e.aggregateVersion(), e.actor(), e.payload());
+  }
+
+  private MessageEnvelope withPayload(MessageEnvelope e, tools.jackson.databind.JsonNode payload) {
+    return new MessageEnvelope(
+        e.messageId(), e.messageType(), e.messageVersion(), e.messageKind(), e.producer(), e.occurredAt(),
+        e.correlationId(), e.causationId(), e.operationId(), e.idempotencyKey(), e.aggregateId(),
+        e.aggregateVersion(), e.actor(), payload);
   }
 }

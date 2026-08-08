@@ -63,7 +63,9 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
           new UpdatePersonCommand(personId, 1, "Augusta", "Lovelace", null, "ada." + personId + "@example.edu", null)));
       MessageEnvelope updated = awaitNextEvent(eventsQueue, "PersonUpdated", personId);
 
-      send(MessageTypes.DEACTIVATE_PERSON, codec.toJsonNode(new DeactivatePersonCommand(personId, 2)));
+      send(
+          MessageTypes.DEACTIVATE_PERSON,
+          codec.toJsonNode(new DeactivatePersonCommand(personId, 2, "ADMINISTRATIVE_REQUEST", null)));
       MessageEnvelope deactivated = awaitNextEvent(eventsQueue, "PersonDeactivated", personId);
 
       send(MessageTypes.ACTIVATE_PERSON, codec.toJsonNode(new ActivatePersonCommand(personId, 3)));
@@ -157,10 +159,10 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
             UUID.randomUUID(),
             null,
             UUID.randomUUID(),
-            "users-service",
+            UUID.randomUUID().toString(),
+            UUID.fromString(payload.path("personId").asString()),
             null,
-            null,
-            new Actor(UUID.randomUUID()),
+            new Actor.Account(UUID.randomUUID()),
             payload);
     MessageProperties props = new MessageProperties();
     props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
