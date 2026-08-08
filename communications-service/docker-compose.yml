@@ -1,0 +1,22 @@
+# Local development only. estoma-infra owns real deployment manifests
+# (see root README.md) -- this file exists so `./mvnw spring-boot:run`
+# has something to talk to using nothing but the defaults already baked
+# into src/main/resources/application.yml (no env vars required).
+#
+# RabbitMQ is intentionally not included yet: this tramo (runtime
+# infrastructure + database schema) has no messaging code. It gets added
+# here alongside the messaging shell (Phase 3), so both evolve together.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: communications_db
+      POSTGRES_USER: communications_service
+      POSTGRES_PASSWORD: communications_service
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U communications_service -d communications_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
