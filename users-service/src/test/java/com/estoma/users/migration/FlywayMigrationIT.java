@@ -36,11 +36,11 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   void allMigrationsAppliedSuccessfullyOnContextStartup() {
     MigrationInfo[] applied = flyway.info().applied();
 
-    assertThat(applied).hasSize(6);
+    assertThat(applied).hasSize(7);
     assertThat(applied)
         .extracting(MigrationInfo::getVersion)
         .extracting(Object::toString)
-        .containsExactly("1", "2", "3", "4", "5", "6");
+        .containsExactly("1", "2", "3", "4", "5", "6", "7");
     assertThat(applied).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
   }
 
@@ -250,6 +250,64 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   }
 
   @Test
+  void ckIdempotencyTerminalFieldsRejectsSucceededWithoutAggregateVersion() {
+    assertThatThrownBy(
+            () ->
+                insertIdempotencyRecord(
+                    r -> {
+                      r.terminalStatus = "SUCCEEDED";
+                      r.aggregateVersion = null;
+                      r.completedAt = OffsetDateTime.now();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_idempotency_terminal_fields");
+  }
+
+  @Test
+  void ckIdempotencyTerminalFieldsRejectsRejectedWithoutErrorCode() {
+    assertThatThrownBy(
+            () ->
+                insertIdempotencyRecord(
+                    r -> {
+                      r.terminalStatus = "REJECTED";
+                      r.errorCode = null;
+                      r.completedAt = OffsetDateTime.now();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_idempotency_terminal_fields");
+  }
+
+  @Test
+  void ckIdempotencyTerminalFieldsRejectsInProgressWithACompletedAt() {
+    assertThatThrownBy(
+            () ->
+                insertIdempotencyRecord(
+                    r -> {
+                      r.terminalStatus = "IN_PROGRESS";
+                      r.completedAt = OffsetDateTime.now();
+                    }))
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_idempotency_terminal_fields");
+  }
+
+  @Test
+  void ckIdempotencyTerminalFieldsAcceptsEveryValidStatusShape() {
+    insertIdempotencyRecord(r -> {});
+    insertIdempotencyRecord(
+        r -> {
+          r.terminalStatus = "SUCCEEDED";
+          r.aggregateVersion = 1;
+          r.completedAt = OffsetDateTime.now();
+        });
+    insertIdempotencyRecord(
+        r -> {
+          r.terminalStatus = "REJECTED";
+          r.errorCode = "PERSON_NOT_FOUND";
+          r.completedAt = OffsetDateTime.now();
+        });
+  }
+
+  @Test
   void personIdIsImmutable() {
     UUID personId = UUID.randomUUID();
     insertPerson(personId, p -> {});
@@ -353,5 +411,42 @@ class FlywayMigrationIT extends AbstractPostgresIT {
     String status = "PENDING";
     UUID claimToken = null;
     OffsetDateTime leaseUntil = null;
+  }
+
+  private void insertIdempotencyRecord(java.util.function.Consumer<TestIdempotencyRow> customizer) {
+    TestIdempotencyRow row = new TestIdempotencyRow();
+    customizer.accept(row);
+
+    jdbc.sql(
+            """
+            INSERT INTO idempotency_records (
+              producer, idempotency_key, message_type, aggregate_id, request_fingerprint,
+              claimed_by_message_id, terminal_status, aggregate_version, error_code,
+              created_at, completed_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?::idempotency_status, ?, ?, ?, ?
+            )
+            """)
+        .params(
+            "bff",
+            UUID.randomUUID().toString(),
+            "CreatePerson",
+            UUID.randomUUID(),
+            "f".repeat(64),
+            UUID.randomUUID(),
+            row.terminalStatus,
+            row.aggregateVersion,
+            row.errorCode,
+            OffsetDateTime.now(),
+            row.completedAt)
+        .update();
+  }
+
+  /** Mutable bag of column values for one ck_idempotency_terminal_fields test row. */
+  private static final class TestIdempotencyRow {
+    String terminalStatus = "IN_PROGRESS";
+    Integer aggregateVersion = null;
+    String errorCode = null;
+    OffsetDateTime completedAt = null;
   }
 }
