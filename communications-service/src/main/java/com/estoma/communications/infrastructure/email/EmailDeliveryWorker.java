@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -51,6 +52,8 @@ public class EmailDeliveryWorker {
   private final EnvelopeJsonCodec codec;
   private final int batchSize;
 
+  private final AtomicReference<String> lastPollError = new AtomicReference<>();
+
   EmailDeliveryWorker(
       EmailDeliveryRepository emailDeliveryRepository,
       EmailDeliveryAttemptRepository attemptRepository,
@@ -70,15 +73,31 @@ public class EmailDeliveryWorker {
 
   @Scheduled(fixedDelayString = "${estoma.communications.email.worker.poll-interval-ms:5000}")
   public void pollAndProcess() {
-    for (EmailDelivery claimed : claimDue()) {
-      // No transaction is open here: this is the only place the provider is called.
-      EmailProviderPort.EmailSendResult result =
-          provider.send(
-              new EmailProviderPort.EmailSendRequest(
-                  claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
-                  claimed.contentMode(), claimed.subject(), claimed.textBody(), claimed.htmlBody(), claimed.templateCode(), claimed.templateData()));
-      recordResult(claimed, result);
+    try {
+      for (EmailDelivery claimed : claimDue()) {
+        // No transaction is open here: this is the only place the provider is called.
+        EmailProviderPort.EmailSendResult result =
+            provider.send(
+                new EmailProviderPort.EmailSendRequest(
+                    claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
+                    claimed.contentMode(), claimed.subject(), claimed.textBody(), claimed.htmlBody(), claimed.templateCode(), claimed.templateData()));
+        recordResult(claimed, result);
+      }
+      lastPollError.set(null);
+    } catch (RuntimeException e) {
+      lastPollError.set(e.getMessage());
+      throw e;
     }
+  }
+
+  /**
+   * Read by {@link EmailWorkerHealthIndicator}. A method, not a field: this
+   * bean is proxied for {@code @Transactional}, and direct field access
+   * from another bean would silently read the (uninitialized) proxy's own
+   * copy of the field rather than delegating to the real target.
+   */
+  String lastPollError() {
+    return lastPollError.get();
   }
 
   @Transactional

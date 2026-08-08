@@ -81,7 +81,7 @@ management:
         startup:
           include: db, schemaVersion
         readiness:
-          include: db
+          include: db, emailWorker
           # commandConsumer / outboxRelay join this group once the
           # messaging tramo (Phase 3) lands.
         liveness:
