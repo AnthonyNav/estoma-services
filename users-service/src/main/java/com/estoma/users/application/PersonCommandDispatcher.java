@@ -337,7 +337,7 @@ public class PersonCommandDispatcher {
       case MessageTypes.ACTIVATE_PERSON -> RequestFingerprint.of(
           messageType, text(p, "personId"), text(p, "expectedVersion"));
       case MessageTypes.DEACTIVATE_PERSON -> RequestFingerprint.of(
-          messageType, text(p, "personId"), text(p, "expectedVersion"));
+          messageType, text(p, "personId"), text(p, "expectedVersion"), text(p, "reasonCode"), text(p, "reasonDetail"));
       default -> throw new IllegalStateException("no fingerprint rule for messageType " + messageType);
     };
   }

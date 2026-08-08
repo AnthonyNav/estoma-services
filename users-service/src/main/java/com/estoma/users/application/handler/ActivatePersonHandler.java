@@ -76,6 +76,8 @@ class ActivatePersonHandler implements PersonCommandHandler {
             activated.personId(),
             PersonStatus.INACTIVE,
             PersonStatus.ACTIVE,
+            null, // reasonCode/reasonDetail only apply to a deactivation
+            null,
             changedByAccountId,
             envelope.correlationId(),
             activated.updatedAt()));
