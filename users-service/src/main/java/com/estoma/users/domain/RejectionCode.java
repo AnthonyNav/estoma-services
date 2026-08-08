@@ -17,5 +17,13 @@ public enum RejectionCode {
   PERSON_NOT_FOUND,
   PERSON_VERSION_CONFLICT,
   PERSON_ALREADY_ACTIVE,
-  PERSON_ALREADY_INACTIVE
+  PERSON_ALREADY_INACTIVE,
+
+  /**
+   * The envelope's {@code aggregateId} and the payload's {@code personId}
+   * are both present and differ (commands.md §2.1, §3). A controlled
+   * functional rejection — never a DLQ'd message — checked once for all
+   * four commands in {@code PersonCommandDispatcher}, not per-handler.
+   */
+  INVALID_MESSAGE
 }

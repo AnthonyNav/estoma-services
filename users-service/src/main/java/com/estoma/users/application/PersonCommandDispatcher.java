@@ -10,6 +10,7 @@ import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.result.RejectedPayload;
 import com.estoma.users.contract.result.SucceededPayload;
 import com.estoma.users.domain.PersonRejectedException;
+import com.estoma.users.domain.RejectionCode;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.messaging.OutboxMetadata;
 import com.estoma.users.observability.ConsumerNames;
@@ -79,6 +80,7 @@ public class PersonCommandDispatcher {
     }
 
     try {
+      requireAggregateIdMatchesPayload(envelope);
       HandlerResult result = handler.handle(envelope);
       appendSucceededResult(envelope, result);
       appendEvent(envelope, result);
@@ -150,6 +152,26 @@ public class PersonCommandDispatcher {
             codec.writeValueAsString(result.eventPayload()),
             codec.writeValueAsString(metadata),
             Instant.now()));
+  }
+
+  /**
+   * commands.md §2.1: for operations on an existing Person ({@code
+   * UpdatePerson}, {@code ActivatePerson}, {@code DeactivatePerson}) the
+   * envelope's {@code aggregateId} must equal the payload's {@code
+   * personId}; {@code CreatePerson} carries the same equality by
+   * construction (§4 — the producer sets both to the {@code personId} it
+   * generates). Checked once here, for all four commands, rather than
+   * per-handler: it's a structural consistency rule of the envelope/payload
+   * pair, not a domain rule any single handler owns. Neither value being
+   * present is not itself an error — this only rejects an actual mismatch.
+   */
+  private void requireAggregateIdMatchesPayload(MessageEnvelope envelope) {
+    UUID aggregateId = envelope.aggregateId();
+    UUID payloadPersonId = extractAttemptedPersonId(envelope);
+    if (aggregateId != null && payloadPersonId != null && !aggregateId.equals(payloadPersonId)) {
+      throw new PersonRejectedException(
+          RejectionCode.INVALID_MESSAGE, "envelope aggregateId does not match payload personId");
+    }
   }
 
   /** All four commands share a {@code personId} payload field; best-effort extraction for a rejected result's aggregateId. */
