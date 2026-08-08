@@ -1,0 +1,22 @@
+estoma:
+  scheduling:
+    enabled: false
+  messaging:
+    listeners-enabled: false
+    topology-declare: false
+
+spring:
+  rabbitmq:
+    dynamic: false
+
+management:
+  health:
+    rabbit:
+      enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+    tracing:
+      export:
+        enabled: false

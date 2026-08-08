@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 /**
@@ -35,6 +36,11 @@ import org.springframework.stereotype.Component;
  * the broker redelivers once the connection recovers.
  */
 @Component
+@ConditionalOnProperty(
+    prefix = "estoma.messaging",
+    name = "listeners-enabled",
+    havingValue = "true",
+    matchIfMissing = true)
 public class CommandListener {
 
   private static final Logger log = LoggerFactory.getLogger(CommandListener.class);

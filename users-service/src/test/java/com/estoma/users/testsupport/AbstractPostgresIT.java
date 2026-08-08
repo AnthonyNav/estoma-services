@@ -1,7 +1,11 @@
 package com.estoma.users.testsupport;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -27,7 +31,10 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @SpringBootTest
 @Testcontainers
 @Tag("integration")
+@ActiveProfiles("test")
 public abstract class AbstractPostgresIT {
+
+  @Autowired private JdbcClient jdbc;
 
   protected static final PostgreSQLContainer POSTGRES =
       new PostgreSQLContainer("postgres:16-alpine")
@@ -57,5 +64,13 @@ public abstract class AbstractPostgresIT {
     registry.add("spring.flyway.user", POSTGRES::getUsername);
     registry.add("spring.flyway.password", POSTGRES::getPassword);
     registry.add("spring.flyway.placeholders.runtime_role", POSTGRES::getUsername);
+  }
+
+  @BeforeEach
+  void clearDatabase() {
+    jdbc.sql(
+            "TRUNCATE TABLE outbox_messages, processed_messages, idempotency_records, person_status_history, persons "
+                + "RESTART IDENTITY CASCADE")
+        .update();
   }
 }
