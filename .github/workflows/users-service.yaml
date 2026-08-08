@@ -1,0 +1,29 @@
+name: users-service
+
+on:
+  pull_request:
+    paths:
+      - "users-service/**"
+      - ".github/workflows/users-service.yaml"
+      - ".github/workflows/service-ci.yaml"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "users-service/**"
+      - ".github/workflows/users-service.yaml"
+      - ".github/workflows/service-ci.yaml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  service-ci:
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service-name: users-service
+      image-name: ghcr.io/anthonynav/users-service
+      infra-overlay-path: apps/users-service/overlays/develop/kustomization.yaml
+    secrets: inherit
