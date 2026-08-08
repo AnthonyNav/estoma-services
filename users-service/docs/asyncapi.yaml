@@ -499,8 +499,8 @@ components:
           type: string
           description: >
             logicalComponentId of the technical actor (e.g. `academic`) —
-             same namespace as `producer`, not necessarily equal to it
-             (messaging-architecture.md §4).
+            same namespace as `producer`, not necessarily equal to it
+            (messaging-architecture.md §4).
 
     AcademicSystemActor:
       type: object

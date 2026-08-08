@@ -758,7 +758,7 @@ line that says so, and states when to revisit.
 | # | Decision | Fills doc gap | Revisit trigger |
 |---|---|---|---|
 | D1 | Routing key scheme (§9) | `messaging-architecture.md:210,731` ("routing keys concretas" under "Decisiones Pendientes"); `data-model.md:312` ("La topología física de publicación queda pendiente") | When the companion platform ADR (§14) is ratified or a second service needs a conflicting scheme |
-| D2 | `DUPLICATE_PERSON` = unique index on normalized email (§6) | `data-model.md:247-251` | When mass-import matching strategy is decided (`data-model.md:386`) |
+| D2 | `DUPLICATE_PERSON` = globally unique normalized email across ACTIVE and INACTIVE Persons (§6) | Closed V1 platform decision | N/A |
 | D3 | Health paths served by Actuator groups, not custom controllers (§11) | doc specifies `/health/*` paths; code skeleton used bare Actuator paths | N/A — this is a genuine conflict resolution, not a placeholder |
 | D4 | ~~Rejected payload shape~~ — **closed by the platform**, not a local decision anymore (§4) | `messaging-architecture.md` §3 now defines `{status, data?, error?}` platform-wide | Resolved — this row is historical only |
 | D5 | ~~Domain authorization: interim policy only checks `actor.accountId` present~~ — superseded by the producer/operation matrix (§3, §12) | `PersonAuthorizationPolicy` (the no-op interim seam) has been removed; `EnvelopeValidator`/`QueryEnvelopeValidator` check `(producer, messageType)` against a configured matrix. Broad functional authorization remains upstream (`commands.md` §8); the closed `academic` `UpdatePerson` field contract is enforced locally in §3. | When `authorization-service` ships or a `FORBIDDEN`-equivalent code is added to the platform docs |
