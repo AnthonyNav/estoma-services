@@ -9,7 +9,8 @@ import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
-import com.estoma.users.contract.result.RejectedPayload;
+import com.estoma.users.contract.result.ResultPayload;
+import com.estoma.users.contract.result.ResultStatus;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.testsupport.AbstractMessagingIT;
@@ -63,8 +64,9 @@ class FunctionalRejectionIT extends AbstractMessagingIT {
                 MessageEnvelope result = codec.decode(resultMessage.getBody());
                 assertThat(result.messageType()).isEqualTo("ActivatePersonRejected");
                 assertThat(result.correlationId()).isEqualTo(activateCorrelationId);
-                RejectedPayload payload = codec.convertPayload(result, RejectedPayload.class);
-                assertThat(payload.errorCode()).isEqualTo("PERSON_ALREADY_ACTIVE");
+                ResultPayload payload = codec.convertPayload(result, ResultPayload.class);
+                assertThat(payload.status()).isEqualTo(ResultStatus.REJECTED);
+                assertThat(payload.error().code()).isEqualTo("PERSON_ALREADY_ACTIVE");
               });
 
       // Give any wrongly-triggered retry/DLQ routing time to happen, then

@@ -7,7 +7,7 @@ import com.estoma.users.application.port.OutboxAppendRequest;
 import com.estoma.users.application.port.OutboxPort;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
-import com.estoma.users.contract.result.RejectedPayload;
+import com.estoma.users.contract.result.ResultPayload;
 import com.estoma.users.contract.result.SucceededPayload;
 import com.estoma.users.domain.PersonRejectedException;
 import com.estoma.users.domain.RejectionCode;
@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +43,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Component
 public class PersonCommandDispatcher {
+
+  private static final Logger log = LoggerFactory.getLogger(PersonCommandDispatcher.class);
 
   private final InboxPort inbox;
   private final OutboxPort outbox;
@@ -96,7 +100,8 @@ public class PersonCommandDispatcher {
 
   private void appendSucceededResult(MessageEnvelope envelope, HandlerResult result) {
     String resultType = envelope.messageType() + "Succeeded";
-    SucceededPayload payload = new SucceededPayload(result.aggregateId(), result.aggregateVersion());
+    ResultPayload payload =
+        ResultPayload.succeeded(new SucceededPayload(result.aggregateId(), result.aggregateVersion()));
     OutboxMetadata metadata = new OutboxMetadata(envelope.producer(), envelope.operationId(), envelope.actor());
 
     outbox.append(
@@ -115,8 +120,16 @@ public class PersonCommandDispatcher {
   }
 
   private void appendRejectedResult(MessageEnvelope envelope, PersonRejectedException rejected) {
+    // The wire Result carries only error.code (messaging-architecture.md
+    // §3) -- the human-readable detail is not part of the platform's
+    // minimal Result shape, so it's logged here instead of published.
+    log.info(
+        "command {} rejected: code={}, detail={}",
+        envelope.messageType(),
+        rejected.code(),
+        rejected.getMessage());
     String resultType = envelope.messageType() + "Rejected";
-    RejectedPayload payload = RejectedPayload.of(rejected.code().name(), rejected.getMessage());
+    ResultPayload payload = ResultPayload.rejected(rejected.code().name());
     OutboxMetadata metadata = new OutboxMetadata(envelope.producer(), envelope.operationId(), envelope.actor());
 
     outbox.append(

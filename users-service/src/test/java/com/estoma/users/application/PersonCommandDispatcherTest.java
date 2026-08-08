@@ -19,7 +19,9 @@ import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
 import com.estoma.users.contract.event.PersonUpdatedPayload;
-import com.estoma.users.contract.result.RejectedPayload;
+import com.estoma.users.contract.result.ResultPayload;
+import com.estoma.users.contract.result.ResultStatus;
+import com.estoma.users.contract.result.SucceededPayload;
 import com.estoma.users.domain.RejectionCode;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
@@ -73,6 +75,21 @@ class PersonCommandDispatcherTest {
 
     assertThat(outcome).isInstanceOf(CommandOutcome.Succeeded.class);
     verify(updateHandler).handle(any());
+
+    ArgumentCaptor<OutboxAppendRequest> appended = ArgumentCaptor.forClass(OutboxAppendRequest.class);
+    verify(outbox, org.mockito.Mockito.atLeastOnce()).append(appended.capture());
+    OutboxAppendRequest resultRow =
+        appended.getAllValues().stream()
+            .filter(row -> row.messageKind().equals(MessageKind.RESULT.name()))
+            .findFirst()
+            .orElseThrow();
+    ResultPayload payload = codec.readValue(resultRow.payloadJson(), ResultPayload.class);
+    assertThat(payload.status()).isEqualTo(ResultStatus.SUCCEEDED);
+    assertThat(payload.error()).isNull();
+    SucceededPayload data =
+        codec.readValue(codec.writeValueAsString(payload.data()), SucceededPayload.class);
+    assertThat(data.personId()).isEqualTo(personId);
+    assertThat(data.version()).isEqualTo(2);
   }
 
   @Test
@@ -92,8 +109,10 @@ class PersonCommandDispatcherTest {
     OutboxAppendRequest resultRow = appended.getValue();
     assertThat(resultRow.messageKind()).isEqualTo(MessageKind.RESULT.name());
     assertThat(resultRow.messageType()).isEqualTo("UpdatePersonRejected");
-    RejectedPayload payload = codec.readValue(resultRow.payloadJson(), RejectedPayload.class);
-    assertThat(payload.errorCode()).isEqualTo(RejectionCode.INVALID_MESSAGE.name());
+    ResultPayload payload = codec.readValue(resultRow.payloadJson(), ResultPayload.class);
+    assertThat(payload.status()).isEqualTo(ResultStatus.REJECTED);
+    assertThat(payload.data()).isNull();
+    assertThat(payload.error().code()).isEqualTo(RejectionCode.INVALID_MESSAGE.name());
   }
 
   @Test
