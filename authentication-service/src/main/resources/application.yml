@@ -101,9 +101,7 @@ management:
         startup:
           include: db, schemaVersion
         readiness:
-          include: db
-          # commandConsumer / outboxRelay join this group once the
-          # messaging tramo lands.
+          include: db, commandConsumer, outboxRelay
         liveness:
           # Deliberately excludes db: liveness must never run an expensive
           # check, and a temporarily degraded dependency must not trigger a
