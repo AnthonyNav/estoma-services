@@ -38,6 +38,13 @@ estoma:
   # mandatory "environment" log field (system_contract.md "Observability
   # Parameters").
   environment: ${ESTOMA_ENVIRONMENT:local}
+  communications:
+    email:
+      # v1 resolves every senderCode to this single configured sender
+      # (ConfiguredEmailSenderDirectory); the definitive senderCode catalog
+      # is a pending decision (docs/pending_decisions.md).
+      default-sender-name: ${COMM_EMAIL_DEFAULT_SENDER_NAME:Estoma}
+      default-sender-address: ${COMM_EMAIL_DEFAULT_SENDER_ADDRESS:no-reply@estoma.edu}
 
 server:
   port: 8080
@@ -72,11 +79,9 @@ management:
       show-components: never
       group:
         startup:
-          include: db
-          # schemaVersion joins this group in Phase 2, once Flyway
-          # migrations exist (system_contract.md "Migration Tooling").
+          include: db, schemaVersion
         readiness:
-          include: db
+          include: db, emailWorker
           # commandConsumer / outboxRelay join this group once the
           # messaging tramo (Phase 3) lands.
         liveness:
