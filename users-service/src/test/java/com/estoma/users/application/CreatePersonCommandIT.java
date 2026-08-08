@@ -13,6 +13,7 @@ import com.estoma.users.contract.result.ResultPayload;
 import com.estoma.users.contract.result.SucceededPayload;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
+import com.estoma.users.messaging.outbound.OutboxRelay;
 import com.estoma.users.testsupport.AbstractMessagingIT;
 import java.time.Duration;
 import java.time.Instant;
@@ -42,6 +43,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
   @Autowired private AmqpAdmin amqpAdmin;
   @Autowired private EnvelopeJsonCodec codec;
   @Autowired private TopicExchange eventsExchange;
+  @Autowired private OutboxRelay relay;
 
   @Test
   void happyPathProducesACorrelatedResultAndTheDerivedEvent() {
@@ -63,6 +65,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
           .atMost(Duration.ofSeconds(10))
           .untilAsserted(
               () -> {
+                relay.relay();
                 Message resultMessage = rabbitTemplate.receive(resultsQueue.getName());
                 assertThat(resultMessage).isNotNull();
 
@@ -80,6 +83,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
           .atMost(Duration.ofSeconds(10))
           .untilAsserted(
               () -> {
+                relay.relay();
                 Message eventMessage = rabbitTemplate.receive(eventsQueue.getName());
                 assertThat(eventMessage).isNotNull();
 
@@ -199,6 +203,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
         .atMost(Duration.ofSeconds(10))
         .untilAsserted(
             () -> {
+              relay.relay();
               Message message = rabbitTemplate.receive(queue.getName());
               assertThat(message).isNotNull();
               assertThat(codec.decode(message.getBody()).correlationId()).isEqualTo(correlationId);

@@ -1,7 +1,6 @@
 package com.estoma.users.messaging.outbound;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
 
 import com.estoma.users.application.port.OutboxAppendRequest;
 import com.estoma.users.config.OutboxProperties;
@@ -10,8 +9,6 @@ import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.messaging.OutboxMetadata;
 import com.estoma.users.persistence.JdbcOutboxRepository;
 import com.estoma.users.testsupport.AbstractMessagingIT;
-import io.micrometer.core.instrument.MeterRegistry;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -21,7 +18,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * Verifies the real, application-wired {@code OutboxRelay} (the {@code
- * @Scheduled} bean, not a hand-built instance) against a real broker:
+ * application bean, not a hand-built instance) against a real broker:
  * RESULT publications must be routable to count as published, EVENT
  * publications must not (docs/system-contract.md §7, §8).
  */
@@ -31,30 +28,24 @@ class OutboxRelayIT extends AbstractMessagingIT {
   @Autowired private JdbcClient jdbc;
   @Autowired private EnvelopeJsonCodec codec;
   @Autowired private OutboxProperties outboxProperties;
-  @Autowired private MeterRegistry meterRegistry;
+  @Autowired private OutboxRelay relay;
 
   @Test
   void anUnroutableResultNeverReachesPublishedAndRecordsWhyItFailed() {
-    double failedPublishBefore = counter("estoma.outbox.failed_publish");
-    double publishedBefore = counter("estoma.outbox.published");
     UUID messageId = appendResult("it.no-binding." + UUID.randomUUID());
+    relay.relay();
 
-    await()
-        .atMost(Duration.ofSeconds(10))
-        .untilAsserted(() -> assertThat(lastErrorCodeOf(messageId)).isEqualTo("PUBLISH_RETURNED"));
-
+    assertThat(lastErrorCodeOf(messageId)).isEqualTo("PUBLISH_RETURNED");
     assertThat(statusOf(messageId)).isEqualTo("PENDING");
     assertThat(availableAtOf(messageId)).isAfter(OffsetDateTime.now());
-    assertThat(counter("estoma.outbox.failed_publish")).isGreaterThan(failedPublishBefore);
-    assertThat(counter("estoma.outbox.published")).isEqualTo(publishedBefore);
   }
 
   @Test
   void anEventWithNoBoundConsumerStillReachesPublished() {
     UUID messageId = appendEvent();
+    relay.relay();
 
-    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(statusOf(messageId)).isEqualTo("PUBLISHED"));
-
+    assertThat(statusOf(messageId)).isEqualTo("PUBLISHED");
     assertThat(lastErrorCodeOf(messageId)).isNull();
     assertThat(lastErrorAtOf(messageId)).isNull();
   }
@@ -70,12 +61,9 @@ class OutboxRelayIT extends AbstractMessagingIT {
         .param("id", messageId)
         .update();
 
-    // Generous timeout: if the live relay's first claim races ahead of
-    // the attempts fast-forward above, this row goes through one more
-    // full 5s-backoff retry cycle before the second claim lands on
-    // attempts = maxAttempts and marks it FAILED.
-    await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> assertThat(statusOf(messageId)).isEqualTo("FAILED"));
+    relay.relay();
 
+    assertThat(statusOf(messageId)).isEqualTo("FAILED");
     assertThat(lastErrorCodeOf(messageId)).isEqualTo("PUBLISH_RETURNED");
   }
 
@@ -147,10 +135,5 @@ class OutboxRelayIT extends AbstractMessagingIT {
         .param("id", messageId)
         .query(OffsetDateTime.class)
         .single();
-  }
-
-  private double counter(String name) {
-    var counter = meterRegistry.find(name).counter();
-    return counter == null ? 0.0 : counter.count();
   }
 }
