@@ -19,7 +19,8 @@ class EnvelopeValidatorTest {
 
   private final EnvelopeValidator validator =
       new EnvelopeValidator(
-          new MessagingProperties(Map.of("bff", Set.of("CreatePerson")), true, 3, Duration.ofSeconds(5)));
+          new MessagingProperties(
+              Map.of("bff", Set.of("CreatePerson")), Map.of(), true, 3, 3, Duration.ofSeconds(5)));
   private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
@@ -138,7 +139,9 @@ class EnvelopeValidatorTest {
         new EnvelopeValidator(
             new MessagingProperties(
                 Map.of("bff", Set.of("CreatePerson"), "academic", Set.of("CreatePerson")),
+                Map.of(),
                 true,
+                3,
                 3,
                 Duration.ofSeconds(5)));
 

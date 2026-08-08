@@ -31,7 +31,8 @@ class ProducerOperationMatrixTest {
           "academic", Set.of("CreatePerson", "UpdatePerson"));
 
   private final EnvelopeValidator validator =
-      new EnvelopeValidator(new MessagingProperties(PRODUCTION_SHAPED_MATRIX, true, 3, Duration.ofSeconds(5)));
+      new EnvelopeValidator(
+          new MessagingProperties(PRODUCTION_SHAPED_MATRIX, Map.of(), true, 3, 3, Duration.ofSeconds(5)));
   private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test

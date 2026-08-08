@@ -105,6 +105,56 @@ class AmqpTopologyConfigIT extends AbstractMessagingIT {
   }
 
   @Test
+  void queryPublishedToQueriesExchangeIsConsumedAndAnInvalidPayloadReachesItsOwnDlq() {
+    String body = "test-" + UUID.randomUUID();
+
+    rabbitTemplate.convertAndSend(AmqpNames.EXCHANGE_QUERIES, AmqpNames.ROUTING_KEY_QUERIES, body);
+
+    // QueryListener consumes it from queries.users-service and, since a
+    // bare string isn't a valid envelope, routes it to the QUERY DLQ --
+    // proving platform.queries really is bound to queries.users-service
+    // with routing key "users-service", and that the query queue's own
+    // DLQ is a separate destination from the command queue's.
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .untilAsserted(() -> assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_QUERIES_DLQ)).isNotNull());
+    assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_COMMANDS_DLQ)).isNull();
+  }
+
+  @Test
+  void messagePublishedWithTheQueriesDlqRoutingKeyArrivesOnTheQueriesDlq() {
+    String body = "test-" + UUID.randomUUID();
+
+    rabbitTemplate.convertAndSend(AmqpNames.EXCHANGE_DLX, AmqpNames.ROUTING_KEY_QUERIES_DLQ, body);
+
+    Message received = rabbitTemplate.receive(AmqpNames.QUEUE_QUERIES_DLQ, 2_000);
+    assertThat(received).isNotNull();
+  }
+
+  @Test
+  void queryRoutedToTheFiveSecondRetryTierReappearsOnQueriesAndThenReachesItsOwnDlq() {
+    MessageProperties props = new MessageProperties();
+    props.getHeaders().put(AmqpNames.HEADER_ATTEMPT, 1);
+    Message message = new Message("retry-me".getBytes(), props);
+
+    rabbitTemplate.send(AmqpNames.EXCHANGE_DLX, AmqpNames.ROUTING_KEY_QUERIES_RETRY_5S, message);
+
+    // Once the 5s TTL elapses, the broker dead-letters it back onto
+    // platform.queries with the fixed query routing key, landing on
+    // queries.users-service -- proving the whole retry-tier chain (TTL +
+    // dead-letter-exchange + dead-letter-routing-key) is wired correctly
+    // for the query queue's own tiers, independent of the command tiers.
+    await()
+        .atMost(Duration.ofSeconds(8))
+        .untilAsserted(
+            () -> {
+              Message redelivered = rabbitTemplate.receive(AmqpNames.QUEUE_QUERIES_DLQ);
+              assertThat(redelivered).isNotNull();
+              assertThat(new String(redelivered.getBody())).isEqualTo("retry-me");
+            });
+  }
+
+  @Test
   void eventPublishedWithANonMatchingRoutingKeyDoesNotReachAWildcardBoundQueue() {
     Queue testQueue = amqpAdmin.declareQueue();
     Binding binding = BindingBuilder.bind(testQueue).to(eventsExchange).with("identity.person.*");

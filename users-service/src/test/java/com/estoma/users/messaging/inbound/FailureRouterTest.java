@@ -31,7 +31,8 @@ import org.springframework.amqp.core.MessageProperties;
 class FailureRouterTest {
 
   private final ConfirmedRabbitPublisher publisher = mock(ConfirmedRabbitPublisher.class);
-  private final MessagingProperties properties = new MessagingProperties(Map.of(), true, 3, Duration.ofSeconds(5));
+  private final MessagingProperties properties =
+      new MessagingProperties(Map.of(), Map.of(), true, 3, 3, Duration.ofSeconds(5));
   private final FailureRouter router = new FailureRouter(publisher, properties);
 
   @Test

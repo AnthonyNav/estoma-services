@@ -73,8 +73,14 @@ estoma:
       academic:
         - CreatePerson
         - UpdatePerson
+    # Same matrix, for Query (queries.md §2): academic's student-import-
+    # process is the only authorized requester in V1.
+    query-producers:
+      academic:
+        - ResolvePersonByInstitutionalEmail
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     command-max-attempts: 3
+    query-max-attempts: 3
     # Bounds ConfirmedRabbitPublisher's wait for a publisher confirm
     # (docs/system-contract.md §7). Also the input to the Outbox lease
     # budget below (OutboxLeaseBudgetValidator).
@@ -126,7 +132,7 @@ management:
         startup:
           include: db, schemaVersion
         readiness:
-          include: db, commandConsumer, outboxRelay
+          include: db, commandConsumer, queryConsumer, outboxRelay
         liveness:
           # Deliberately excludes db/commandConsumer/outboxRelay: liveness
           # must never run an expensive check, and a temporarily degraded

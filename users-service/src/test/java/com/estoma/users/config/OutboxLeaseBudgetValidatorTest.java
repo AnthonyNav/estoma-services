@@ -39,7 +39,8 @@ class OutboxLeaseBudgetValidatorTest {
     OutboxProperties outboxProperties =
         new OutboxProperties(
             10, lease, 10, Duration.ofDays(7), Duration.ofDays(30), List.of(Duration.ofSeconds(5)));
-    MessagingProperties messagingProperties = new MessagingProperties(Map.of(), true, 3, Duration.ofSeconds(5));
+    MessagingProperties messagingProperties =
+        new MessagingProperties(Map.of(), Map.of(), true, 3, 3, Duration.ofSeconds(5));
     return new OutboxLeaseBudgetValidator(outboxProperties, messagingProperties);
   }
 }

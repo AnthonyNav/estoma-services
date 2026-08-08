@@ -12,9 +12,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Declares the RabbitMQ topology this service depends on: the four fixed
- * exchanges, its own command queue, its DLQ, and its three retry tiers
- * (docs/system-contract.md §9).
+ * Declares the RabbitMQ topology this service depends on: the fixed
+ * exchanges, its command and query queues, their DLQs, and their retry
+ * tiers (docs/system-contract.md §9).
  *
  * <p>Gated behind {@code estoma.messaging.topology-declare} — {@code true}
  * in dev/test, where the app self-provisions everything against a plain
@@ -55,6 +55,11 @@ public class AmqpTopologyConfig {
     return new TopicExchange(AmqpNames.EXCHANGE_DLX, true, false);
   }
 
+  @Bean
+  public DirectExchange queriesExchange() {
+    return new DirectExchange(AmqpNames.EXCHANGE_QUERIES, true, false);
+  }
+
   /**
    * The command queue, its DLQ, and its three retry tiers, all bundled as
    * one {@link Declarables} bean so the RabbitAdmin declares them
@@ -80,15 +85,21 @@ public class AmqpTopologyConfig {
     Binding dlqBinding =
         BindingBuilder.bind(dlq).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_DLQ);
 
-    Queue retry5s = retryTierQueue(AmqpNames.QUEUE_RETRY_5S, AmqpNames.RETRY_TTL_5S_MS);
+    Queue retry5s =
+        retryTierQueue(
+            AmqpNames.QUEUE_RETRY_5S, AmqpNames.RETRY_TTL_5S_MS, AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS);
     Binding retry5sBinding =
         BindingBuilder.bind(retry5s).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_RETRY_5S);
 
-    Queue retry30s = retryTierQueue(AmqpNames.QUEUE_RETRY_30S, AmqpNames.RETRY_TTL_30S_MS);
+    Queue retry30s =
+        retryTierQueue(
+            AmqpNames.QUEUE_RETRY_30S, AmqpNames.RETRY_TTL_30S_MS, AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS);
     Binding retry30sBinding =
         BindingBuilder.bind(retry30s).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_RETRY_30S);
 
-    Queue retry300s = retryTierQueue(AmqpNames.QUEUE_RETRY_300S, AmqpNames.RETRY_TTL_300S_MS);
+    Queue retry300s =
+        retryTierQueue(
+            AmqpNames.QUEUE_RETRY_300S, AmqpNames.RETRY_TTL_300S_MS, AmqpNames.EXCHANGE_COMMANDS, AmqpNames.ROUTING_KEY_COMMANDS);
     Binding retry300sBinding =
         BindingBuilder.bind(retry300s).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_RETRY_300S);
 
@@ -106,16 +117,77 @@ public class AmqpTopologyConfig {
   }
 
   /**
-   * A retry tier queue: messages sit here for {@code ttlMillis}, then
-   * dead-letter back onto {@code platform.commands} with the original
-   * command routing key, re-entering {@code commands.users-service} for
-   * another attempt.
+   * The query queue, its DLQ, and its three retry tiers — structurally
+   * identical to {@link #userServiceCommandTopology}, on the {@code
+   * platform.queries} exchange instead of {@code platform.commands}. Not
+   * mandated by queries.md; added for operational consistency with every
+   * other durable queue this service owns (a gap-filling decision per
+   * docs/system-contract.md §1's own governance model).
    */
-  private static Queue retryTierQueue(String name, long ttlMillis) {
+  @Bean
+  public Declarables userServiceQueryTopology(DirectExchange queriesExchange, TopicExchange deadLetterExchange) {
+    Queue queryQueue =
+        QueueBuilder.durable(AmqpNames.QUEUE_QUERIES)
+            .withArgument("x-dead-letter-exchange", AmqpNames.EXCHANGE_DLX)
+            .withArgument("x-dead-letter-routing-key", AmqpNames.ROUTING_KEY_QUERIES_DLQ)
+            .build();
+    Binding queryBinding =
+        BindingBuilder.bind(queryQueue).to(queriesExchange).with(AmqpNames.ROUTING_KEY_QUERIES);
+
+    Queue dlq = QueueBuilder.durable(AmqpNames.QUEUE_QUERIES_DLQ).build();
+    Binding dlqBinding =
+        BindingBuilder.bind(dlq).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_QUERIES_DLQ);
+
+    Queue retry5s =
+        retryTierQueue(
+            AmqpNames.QUEUE_QUERIES_RETRY_5S,
+            AmqpNames.RETRY_TTL_5S_MS,
+            AmqpNames.EXCHANGE_QUERIES,
+            AmqpNames.ROUTING_KEY_QUERIES);
+    Binding retry5sBinding =
+        BindingBuilder.bind(retry5s).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_QUERIES_RETRY_5S);
+
+    Queue retry30s =
+        retryTierQueue(
+            AmqpNames.QUEUE_QUERIES_RETRY_30S,
+            AmqpNames.RETRY_TTL_30S_MS,
+            AmqpNames.EXCHANGE_QUERIES,
+            AmqpNames.ROUTING_KEY_QUERIES);
+    Binding retry30sBinding =
+        BindingBuilder.bind(retry30s).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_QUERIES_RETRY_30S);
+
+    Queue retry300s =
+        retryTierQueue(
+            AmqpNames.QUEUE_QUERIES_RETRY_300S,
+            AmqpNames.RETRY_TTL_300S_MS,
+            AmqpNames.EXCHANGE_QUERIES,
+            AmqpNames.ROUTING_KEY_QUERIES);
+    Binding retry300sBinding =
+        BindingBuilder.bind(retry300s).to(deadLetterExchange).with(AmqpNames.ROUTING_KEY_QUERIES_RETRY_300S);
+
+    return new Declarables(
+        queryQueue,
+        queryBinding,
+        dlq,
+        dlqBinding,
+        retry5s,
+        retry5sBinding,
+        retry30s,
+        retry30sBinding,
+        retry300s,
+        retry300sBinding);
+  }
+
+  /**
+   * A retry tier queue: messages sit here for {@code ttlMillis}, then
+   * dead-letter back onto {@code originExchange} with {@code
+   * originRoutingKey}, re-entering the origin queue for another attempt.
+   */
+  private static Queue retryTierQueue(String name, long ttlMillis, String originExchange, String originRoutingKey) {
     return QueueBuilder.durable(name)
         .withArgument("x-message-ttl", ttlMillis)
-        .withArgument("x-dead-letter-exchange", AmqpNames.EXCHANGE_COMMANDS)
-        .withArgument("x-dead-letter-routing-key", AmqpNames.ROUTING_KEY_COMMANDS)
+        .withArgument("x-dead-letter-exchange", originExchange)
+        .withArgument("x-dead-letter-routing-key", originRoutingKey)
         .build();
   }
 }
