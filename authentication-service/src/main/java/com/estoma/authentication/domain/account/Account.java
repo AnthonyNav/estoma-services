@@ -32,8 +32,6 @@ public final class Account {
   private final AccountStatus status;
   private final int failedAttempts;
   private final Instant lockedUntil;
-  private final boolean mustChangePassword;
-  private final Instant temporaryPasswordExpiresAt;
   private final int version;
   private final Instant createdAt;
   private final Instant updatedAt;
@@ -46,8 +44,6 @@ public final class Account {
       AccountStatus status,
       int failedAttempts,
       Instant lockedUntil,
-      boolean mustChangePassword,
-      Instant temporaryPasswordExpiresAt,
       int version,
       Instant createdAt,
       Instant updatedAt,
@@ -61,8 +57,6 @@ public final class Account {
     }
     this.failedAttempts = failedAttempts;
     this.lockedUntil = lockedUntil;
-    this.mustChangePassword = mustChangePassword;
-    this.temporaryPasswordExpiresAt = temporaryPasswordExpiresAt;
     if (version <= 0) {
       throw new IllegalArgumentException("version must be positive");
     }
@@ -74,7 +68,7 @@ public final class Account {
 
   /** A brand-new account: version 1, INACTIVE, no credential, no lock. */
   public static Account createNew(UUID accountId, UUID personId, LoginIdentifier loginIdentifier, Instant now) {
-    return new Account(accountId, personId, loginIdentifier, AccountStatus.INACTIVE, 0, null, false, null, 1, now, now, null);
+    return new Account(accountId, personId, loginIdentifier, AccountStatus.INACTIVE, 0, null, 1, now, now, null);
   }
 
   /** Reconstructs an Account from a persisted row. No invariant re-derivation beyond the constructor's own checks. */
@@ -85,8 +79,6 @@ public final class Account {
       AccountStatus status,
       int failedAttempts,
       Instant lockedUntil,
-      boolean mustChangePassword,
-      Instant temporaryPasswordExpiresAt,
       int version,
       Instant createdAt,
       Instant updatedAt,
@@ -98,8 +90,6 @@ public final class Account {
         status,
         failedAttempts,
         lockedUntil,
-        mustChangePassword,
-        temporaryPasswordExpiresAt,
         version,
         createdAt,
         updatedAt,
@@ -116,8 +106,7 @@ public final class Account {
       throw new AuthenticationRejectedException(RejectionCode.ACCOUNT_ALREADY_ACTIVE, "account " + accountId + " is already active");
     }
     return new Account(
-        accountId, personId, loginIdentifier, AccountStatus.ACTIVE, failedAttempts, lockedUntil, mustChangePassword,
-        temporaryPasswordExpiresAt, version + 1, createdAt, now, deactivatedAt);
+        accountId, personId, loginIdentifier, AccountStatus.ACTIVE, failedAttempts, lockedUntil, version + 1, createdAt, now, deactivatedAt);
   }
 
   /**
@@ -130,15 +119,13 @@ public final class Account {
    */
   public Account deactivated(Instant now) {
     return new Account(
-        accountId, personId, loginIdentifier, AccountStatus.INACTIVE, failedAttempts, lockedUntil, mustChangePassword,
-        temporaryPasswordExpiresAt, version + 1, createdAt, now, now);
+        accountId, personId, loginIdentifier, AccountStatus.INACTIVE, failedAttempts, lockedUntil, version + 1, createdAt, now, now);
   }
 
   /** {@code ChangeLoginIdentifier} (commands.md §4.4). */
   public Account withLoginIdentifierChanged(LoginIdentifier newLoginIdentifier, Instant now) {
     return new Account(
-        accountId, personId, newLoginIdentifier, status, failedAttempts, lockedUntil, mustChangePassword,
-        temporaryPasswordExpiresAt, version + 1, createdAt, now, deactivatedAt);
+        accountId, personId, newLoginIdentifier, status, failedAttempts, lockedUntil, version + 1, createdAt, now, deactivatedAt);
   }
 
   /**
@@ -149,29 +136,13 @@ public final class Account {
    */
   public Account withFailedAttemptRecorded(Instant now, Instant lockedUntilOrNull) {
     return new Account(
-        accountId, personId, loginIdentifier, status, failedAttempts + 1, lockedUntilOrNull, mustChangePassword,
-        temporaryPasswordExpiresAt, version, createdAt, now, deactivatedAt);
+        accountId, personId, loginIdentifier, status, failedAttempts + 1, lockedUntilOrNull, version, createdAt, now, deactivatedAt);
   }
 
   /** A successful authentication (data-model.md §10): resets attempts and clears any lock. */
   public Account withAttemptsReset(Instant now) {
     return new Account(
-        accountId, personId, loginIdentifier, status, 0, null, mustChangePassword, temporaryPasswordExpiresAt,
-        version, createdAt, now, deactivatedAt);
-  }
-
-  /** {@code SetTemporaryPassword}/{@code RegenerateTemporaryPassword} (commands.md §7). */
-  public Account withTemporaryPasswordSet(Instant expiresAt, Instant now) {
-    return new Account(
-        accountId, personId, loginIdentifier, status, failedAttempts, lockedUntil, true, expiresAt, version,
-        createdAt, now, deactivatedAt);
-  }
-
-  /** {@code ChangePassword}/{@code ResetPassword} (commands.md §8.5, §8.6): clears the temporary-password state. */
-  public Account withPasswordChangeCompleted(Instant now) {
-    return new Account(
-        accountId, personId, loginIdentifier, status, failedAttempts, lockedUntil, false, null, version, createdAt,
-        now, deactivatedAt);
+        accountId, personId, loginIdentifier, status, 0, null, version, createdAt, now, deactivatedAt);
   }
 
   public boolean isLocked(Instant now) {
@@ -204,14 +175,6 @@ public final class Account {
 
   public Instant lockedUntil() {
     return lockedUntil;
-  }
-
-  public boolean mustChangePassword() {
-    return mustChangePassword;
-  }
-
-  public Instant temporaryPasswordExpiresAt() {
-    return temporaryPasswordExpiresAt;
   }
 
   public int version() {

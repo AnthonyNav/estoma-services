@@ -28,8 +28,6 @@ final class AccountRowMapper implements RowMapper<Account> {
         AccountStatus.valueOf(rs.getString("status")),
         rs.getInt("failed_attempts"),
         Timestamps.toInstant(rs, "locked_until"),
-        rs.getBoolean("must_change_password"),
-        Timestamps.toInstant(rs, "temporary_password_expires_at"),
         rs.getInt("version"),
         Timestamps.toInstant(rs, "created_at"),
         Timestamps.toInstant(rs, "updated_at"),

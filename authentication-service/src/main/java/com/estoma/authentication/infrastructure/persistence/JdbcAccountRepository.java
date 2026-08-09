@@ -5,6 +5,9 @@ import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
@@ -33,7 +36,7 @@ class JdbcAccountRepository implements AccountRepository {
   private static final String COLUMNS =
       """
       account_id, person_id, login_type, login_identifier, login_identifier_normalized,
-      status, failed_attempts, locked_until, must_change_password, temporary_password_expires_at,
+       status, failed_attempts, locked_until,
       version, created_at, updated_at, deactivated_at
       """;
 
@@ -63,6 +66,14 @@ class JdbcAccountRepository implements AccountRepository {
   }
 
   @Override
+  public List<UUID> findIdsByPersonId(UUID personId) {
+    return jdbc.sql("SELECT account_id FROM accounts WHERE person_id = :personId")
+        .param("personId", personId)
+        .query(JdbcAccountRepository::mapAccountId)
+        .list();
+  }
+
+  @Override
   @Transactional(propagation = Propagation.NESTED)
   public void insert(Account account) {
     try {
@@ -70,11 +81,11 @@ class JdbcAccountRepository implements AccountRepository {
               """
               INSERT INTO accounts (
                 account_id, person_id, login_type, login_identifier, login_identifier_normalized,
-                status, failed_attempts, locked_until, must_change_password, temporary_password_expires_at,
+                 status, failed_attempts, locked_until,
                 version, created_at, updated_at, deactivated_at
               ) VALUES (
                 :accountId, :personId, CAST(:loginType AS login_type), :loginIdentifier, :normalized,
-                CAST(:status AS account_status), :failedAttempts, :lockedUntil, :mustChangePassword, :temporaryPasswordExpiresAt,
+                 CAST(:status AS account_status), :failedAttempts, :lockedUntil,
                 :version, :createdAt, :updatedAt, :deactivatedAt
               )
               """)
@@ -86,8 +97,6 @@ class JdbcAccountRepository implements AccountRepository {
           .param("status", account.status().name())
           .param("failedAttempts", account.failedAttempts())
           .param("lockedUntil", Timestamps.toTimestamp(account.lockedUntil()))
-          .param("mustChangePassword", account.mustChangePassword())
-          .param("temporaryPasswordExpiresAt", Timestamps.toTimestamp(account.temporaryPasswordExpiresAt()))
           .param("version", account.version())
           .param("createdAt", Timestamps.toTimestamp(account.createdAt()))
           .param("updatedAt", Timestamps.toTimestamp(account.updatedAt()))
@@ -110,9 +119,7 @@ class JdbcAccountRepository implements AccountRepository {
                 login_identifier_normalized = :normalized,
                 status = CAST(:status AS account_status),
                 failed_attempts = :failedAttempts,
-                locked_until = :lockedUntil,
-                must_change_password = :mustChangePassword,
-                temporary_password_expires_at = :temporaryPasswordExpiresAt,
+                 locked_until = :lockedUntil,
                 version = :newVersion,
                 updated_at = :updatedAt,
                 deactivated_at = :deactivatedAt
@@ -124,8 +131,6 @@ class JdbcAccountRepository implements AccountRepository {
           .param("status", updated.status().name())
           .param("failedAttempts", updated.failedAttempts())
           .param("lockedUntil", Timestamps.toTimestamp(updated.lockedUntil()))
-          .param("mustChangePassword", updated.mustChangePassword())
-          .param("temporaryPasswordExpiresAt", Timestamps.toTimestamp(updated.temporaryPasswordExpiresAt()))
           .param("newVersion", updated.version())
           .param("updatedAt", Timestamps.toTimestamp(updated.updatedAt()))
           .param("deactivatedAt", Timestamps.toTimestamp(updated.deactivatedAt()))
@@ -148,5 +153,9 @@ class JdbcAccountRepository implements AccountRepository {
           RejectionCode.LOGIN_IDENTIFIER_ALREADY_USED, "login identifier is already claimed by a different account");
     }
     throw e;
+  }
+
+  private static UUID mapAccountId(ResultSet rs, int rowNum) throws SQLException {
+    return rs.getObject("account_id", UUID.class);
   }
 }

@@ -2,6 +2,7 @@ package com.estoma.authentication.application.port;
 
 import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.domain.account.Account;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,6 +19,9 @@ public interface AccountRepository {
   Optional<Account> findById(UUID accountId);
 
   Optional<Account> findByLoginIdentifier(LoginType loginType, String normalizedIdentifier);
+
+  /** Returns every account logically owned by the Person; no cross-service FK is required. */
+  List<UUID> findIdsByPersonId(UUID personId);
 
   /**
    * @throws com.estoma.authentication.domain.AuthenticationRejectedException with {@code
