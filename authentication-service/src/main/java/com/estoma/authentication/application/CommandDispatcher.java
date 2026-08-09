@@ -9,6 +9,7 @@ import com.estoma.authentication.application.port.OutboxPort;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.contracts.result.ResultPayload;
+import com.estoma.authentication.contracts.result.ResultStatus;
 import com.estoma.authentication.contracts.result.SucceededPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
@@ -72,6 +73,13 @@ public class CommandDispatcher {
       return new CommandOutcome.Duplicate();
     }
 
+    try {
+      authorizationPolicy.check(envelope);
+    } catch (AuthenticationRejectedException rejected) {
+      appendRejectedResult(envelope, rejected, false);
+      return new CommandOutcome.Rejected(rejected.code());
+    }
+
     CommandIdempotencyRepository.ClaimResult claim =
         idempotency.claim(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), fingerprint(envelope), envelope.aggregateId());
     if (claim instanceof CommandIdempotencyRepository.ClaimResult.Conflict) {
@@ -87,15 +95,19 @@ public class CommandDispatcher {
       appendResult(envelope, replay.resultPayloadJson());
       return new CommandOutcome.Duplicate();
     }
+    if (claim instanceof CommandIdempotencyRepository.ClaimResult.InProgress) {
+      return new CommandOutcome.Duplicate();
+    }
 
     try {
-      authorizationPolicy.check(envelope);
       CommandHandler handler = handlersByMessageType.get(envelope.messageType());
       if (handler == null) {
         throw new IllegalStateException("no handler registered for messageType " + envelope.messageType());
       }
       CommandHandlerResult result = handler.handle(envelope);
-      appendSucceededResult(envelope, result);
+      String payloadJson = succeededPayload(result);
+      complete(envelope, payloadJson);
+      appendResult(envelope, result.aggregateId(), result.aggregateVersion(), payloadJson);
       result.events().forEach(event -> appendEvent(envelope, result.aggregateId(), result.aggregateVersion(), event));
       return new CommandOutcome.Succeeded(result.aggregateVersion());
     } catch (AuthenticationRejectedException rejected) {
@@ -104,18 +116,26 @@ public class CommandDispatcher {
     }
   }
 
-  private void appendSucceededResult(MessageEnvelope envelope, CommandHandlerResult result) {
-    ResultPayload payload = ResultPayload.succeeded(new SucceededPayload(result.aggregateId(), result.aggregateVersion()));
-    String payloadJson = codec.writeValueAsString(payload);
-    idempotency.complete(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), payloadJson);
-    appendResult(envelope, result.aggregateId(), result.aggregateVersion(), payloadJson);
+  private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected) {
+    appendRejectedResult(envelope, rejected, true);
   }
 
-  private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected) {
+  private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected, boolean complete) {
     ResultPayload payload = ResultPayload.rejected(rejected.code().name());
     String payloadJson = codec.writeValueAsString(payload);
-    idempotency.complete(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), payloadJson);
+    if (complete) {
+      complete(envelope, payloadJson);
+    }
     appendResult(envelope, null, null, payloadJson);
+  }
+
+  private String succeededPayload(CommandHandlerResult result) {
+    return codec.writeValueAsString(ResultPayload.succeeded(new SucceededPayload(result.aggregateId(), result.aggregateVersion())));
+  }
+
+  private void complete(MessageEnvelope envelope, String payloadJson) {
+    ResultPayload payload = codec.decodeValue(payloadJson.getBytes(StandardCharsets.UTF_8), ResultPayload.class);
+    idempotency.complete(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), payload.status(), payloadJson);
   }
 
   private void appendResult(MessageEnvelope envelope, String payloadJson) {
@@ -133,7 +153,8 @@ public class CommandDispatcher {
   private void appendEvent(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
     outbox.append(
         new OutboxAppendRequest(
-            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion,
+            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), event.aggregateId() != null ? event.aggregateId() : aggregateId,
+            event.aggregateVersion() != null ? event.aggregateVersion() : aggregateVersion,
             envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
             null, codec.writeValueAsString(event.payload()), Instant.now()));
   }

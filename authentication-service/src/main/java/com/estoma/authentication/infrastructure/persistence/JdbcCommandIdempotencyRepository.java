@@ -1,6 +1,7 @@
 package com.estoma.authentication.infrastructure.persistence;
 
 import com.estoma.authentication.application.port.CommandIdempotencyRepository;
+import com.estoma.authentication.contracts.result.ResultStatus;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -40,7 +41,7 @@ public class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepos
     ExistingRecord existing =
         jdbc.sql(
                 """
-                SELECT request_fingerprint, result_data::text AS result_payload
+                SELECT request_fingerprint, status, result_data::text AS result_payload
                 FROM command_idempotency_records
                 WHERE producer = :producer AND operation_type = :operationType AND idempotency_key = :idempotencyKey
                 FOR UPDATE
@@ -48,19 +49,22 @@ public class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepos
             .param("producer", producer)
             .param("operationType", operationType)
             .param("idempotencyKey", idempotencyKey)
-            .query((rs, rowNum) -> new ExistingRecord(rs.getString("request_fingerprint"), rs.getString("result_payload")))
+            .query((rs, rowNum) -> new ExistingRecord(rs.getString("request_fingerprint"), rs.getString("status"), rs.getString("result_payload")))
             .single();
     if (!existing.requestFingerprint().equals(requestFingerprint)) {
       return new ClaimResult.Conflict();
     }
+    if ("PROCESSING".equals(existing.status())) {
+      return new ClaimResult.InProgress();
+    }
     if (existing.resultPayload() == null) {
-      throw new IllegalStateException("command idempotency record has no terminal result");
+      throw new IllegalStateException("completed command idempotency record has no terminal result");
     }
     return new ClaimResult.Replay(existing.resultPayload());
   }
 
   @Override
-  public void complete(String producer, String operationType, String idempotencyKey, String resultPayloadJson) {
+  public void complete(String producer, String operationType, String idempotencyKey, ResultStatus resultStatus, String resultPayloadJson) {
     jdbc.sql(
             """
             UPDATE command_idempotency_records
@@ -68,7 +72,7 @@ public class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepos
                 error_code = CAST(:resultPayload AS jsonb) -> 'error' ->> 'code', completed_at = :completedAt
             WHERE producer = :producer AND operation_type = :operationType AND idempotency_key = :idempotencyKey
             """)
-        .param("resultStatus", resultPayloadJson.contains("\"status\":\"SUCCEEDED\"") ? "SUCCEEDED" : "REJECTED")
+        .param("resultStatus", resultStatus.name())
         .param("resultPayload", resultPayloadJson)
         .param("completedAt", Timestamps.toTimestamp(Instant.now()))
         .param("producer", producer)
@@ -77,5 +81,5 @@ public class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepos
         .update();
   }
 
-  private record ExistingRecord(String requestFingerprint, String resultPayload) {}
+  private record ExistingRecord(String requestFingerprint, String status, String resultPayload) {}
 }

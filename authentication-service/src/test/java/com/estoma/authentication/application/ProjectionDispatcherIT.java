@@ -63,6 +63,8 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
     assertThat(sessionRepository.findById(firstSessionId).orElseThrow().revocationReason()).isEqualTo("person_deactivated");
     assertThat(sessionRepository.findById(secondSessionId).orElseThrow().revocationReason()).isEqualTo("person_deactivated");
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AllAccountSessionsRevoked'").query(Long.class).single()).isEqualTo(2L);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AllAccountSessionsRevoked' AND aggregate_id IN (:first, :second)")
+        .param("first", firstAccountId).param("second", secondAccountId).query(Long.class).single()).isEqualTo(2L);
 
     dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_DEACTIVATED, new PersonStatusEventPayload(personId, "INACTIVE", 1), personId, 1));
 
@@ -101,6 +103,10 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
     assertThat(outcome).isInstanceOf(ProjectionOutcome.Applied.class);
     assertThat(accountRepository.findById(accountId).orElseThrow().loginIdentifier().value()).isEqualTo(newNumber);
     assertThat(studentNumberSyncRepository.findByAccountId(accountId).orElseThrow().synchronizationStatus()).isEqualTo("SYNCHRONIZED");
+    assertThat(jdbc.sql("SELECT aggregate_id, aggregate_version FROM outbox_messages WHERE message_type = 'LoginIdentifierChanged' AND payload::jsonb ->> 'accountId' = :accountId")
+        .param("accountId", accountId.toString())
+        .query((rs, rowNum) -> new Object[] {rs.getObject("aggregate_id", UUID.class), rs.getInt("aggregate_version")}).single())
+        .containsExactly(accountId, 2);
   }
 
   @Test

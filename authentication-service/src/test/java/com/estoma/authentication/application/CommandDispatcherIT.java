@@ -140,6 +140,24 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   }
 
   @Test
+  void unauthorizedCommandDoesNotClaimIdempotencyAndStillEmitsRejectedResult() {
+    UUID accountId = UUID.randomUUID();
+    MessageEnvelope envelope = Envelopes.command(
+        AuthenticationCommand.CREATE_ACCOUNT.wireName(),
+        new CreateAccountCommand(accountId, UUID.randomUUID(), LoginType.MATRICULA, "unauthorized-" + UUID.randomUUID()));
+    envelope = new MessageEnvelope(
+        envelope.messageId(), envelope.messageType(), envelope.messageVersion(), envelope.messageKind(), envelope.producer(), envelope.occurredAt(),
+        envelope.correlationId(), envelope.causationId(), envelope.operationId(), envelope.idempotencyKey(), envelope.aggregateId(), envelope.aggregateVersion(),
+        new Actor("SYSTEM", null, "untrusted-service", "GLOBAL", null), envelope.payload());
+
+    assertThat(dispatcher.dispatch(envelope)).isEqualTo(new CommandOutcome.Rejected(RejectionCode.ACTOR_NOT_AUTHORIZED));
+    assertThat(jdbc.sql("SELECT count(*) FROM command_idempotency_records WHERE idempotency_key = :key")
+        .param("key", envelope.idempotencyKey()).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'CreateAccountResult' AND causation_id = :messageId")
+        .param("messageId", envelope.messageId()).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
   void activateAccountRequiresACredential() {
     UUID accountId = insertInactiveAccount(activePerson());
 
