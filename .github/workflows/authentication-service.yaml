@@ -1,0 +1,29 @@
+name: authentication-service
+
+on:
+  pull_request:
+    paths:
+      - "authentication-service/**"
+      - ".github/workflows/authentication-service.yaml"
+      - ".github/workflows/service-ci.yaml"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "authentication-service/**"
+      - ".github/workflows/authentication-service.yaml"
+      - ".github/workflows/service-ci.yaml"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  service-ci:
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service-name: authentication-service
+      image-name: ghcr.io/anthonynav/authentication-service
+      infra-overlay-path: apps/authentication-service/overlays/develop/kustomization.yaml
+    secrets: inherit

@@ -11,6 +11,7 @@ public enum AuthenticationEvent {
   TEMPORARY_PASSWORD_REGENERATED("TemporaryPasswordRegenerated"),
   SESSION_REVOKED("SessionRevoked"),
   ALL_ACCOUNT_SESSIONS_REVOKED("AllAccountSessionsRevoked"),
+  OTHER_ACCOUNT_SESSIONS_REVOKED("OtherAccountSessionsRevoked"),
   PASSWORD_RECOVERY_REQUESTED("PasswordRecoveryRequested");
 
   private final String wireName;

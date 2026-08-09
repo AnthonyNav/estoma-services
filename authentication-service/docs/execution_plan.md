@@ -1,79 +1,52 @@
-# authentication-service Execution Plan
+# authentication-service V1 Execution Plan
 
 ## Goal
 
-Deliver `authentication-service` safely through small pull requests into `develop`. The plan has three phases. Phase 1 closes all technical decisions this service has authority over, so Phase 2 can proceed without intermediate approval gates. Phase 3 is intentionally left as a placeholder for later scoping.
+Deliver an operational, secure, deployable and contract-compatible
+`authentication-service` V1. This branch does not declare the complete
+platform ready: BFF, Communications, Users and Academic are simulated at the
+messaging boundary where their implementations are unavailable.
 
-## Branch And PR Policy
+## Branch Strategy
 
-- All changes target `develop` through pull requests.
-- No direct commits to `develop`.
-- Each PR must keep secrets out of Git.
-- Each PR must include verification notes.
-- Phase 2 may be delivered as several small, independently reviewable commits or sub-PRs on the same branch. Splitting it does not require re-approval of already-resolved decisions, because Phase 1 removes the prerequisite gates that existed in the previous 10-PR plan.
+- Repository: `AnthonyNav/estoma-services`.
+- Base: `develop`.
+- Integration branch: `authentication-service/feat/v1-operational`.
+- `authentication-service/feat/messaging-shell` is reference material only.
+  Each of its commits must be reviewed and ported selectively; it was built
+  against older contracts and must not be blindly cherry-picked.
 
-## Phase 1 (PR1): Scaffold And Complete System Contract
+## Delivery Sequence
 
-Scope:
+1. **Contract sync**: synchronize local documentation, constants, DTOs,
+   envelope vocabulary, queues and routing keys with platform V1.
+2. **Persistence V1**: additive Flyway migrations, constraints, indexes,
+   repositories, and migration tests from an empty and current schema.
+3. **Security/domain**: Argon2id, 15-character password policy, local common
+   password verifier, temporary-password rules and authorization boundary.
+4. **Sessions/recovery/concurrency**: lockout, HMAC recovery, cooldown,
+   current/previous refresh rotation, replay detection and fail-closed Person
+   checks using row locks or an equivalent transactional guarantee.
+5. **Selective messaging-shell port**: port only reviewed RabbitMQ
+   infrastructure compatible with V1.
+6. **Commands/Results/Events**: durable Commands, Result V1, events, Consumer
+   Inbox, strict envelope validation and ACK after commit.
+7. **Security RPC**: Direct Reply-To, no durable secret storage, administrative
+   RPC checks and `GetRecoveryCodeForDelivery` restricted to Communications.
+8. **Outbox relay**: publisher confirms, `FOR UPDATE SKIP LOCKED`, backoff,
+   ten-attempt terminal `FAILED` state, and operational replay/reconciliation.
+9. **JWT configuration**: configured key, `kid`, issuer and audience; ephemeral
+   keys are local/test only and no JWKS endpoint is exposed.
+10. **Health/metrics/cleanup**: liveness, readiness, startup, metrics and
+    durable cleanup workers without dependency-induced restart loops.
+11. **Contract tests**: envelope, command, RPC and event contract suites.
+12. **Integration/concurrency tests**: PostgreSQL and RabbitMQ Testcontainers,
+    including races and duplicate delivery.
+13. **Full V1 smoke**: execute the documented temporary-password, session and
+    recovery lifecycle through real broker and database containers.
 
-- Spring Boot service scaffold (already in place).
-- `docs/system_contract.md`: service boundary, ownership, persistence boundary, messaging interfaces, mandatory invariants, prohibited behavior, and the full set of v1 technical decisions (security parameters, session/token policy, lockout policy, recovery policy, migration tooling, Outbox operational policy, observability parameter names, internal architecture).
-- `docs/execution_plan.md` (this file).
-- `docs/pending_decisions.md`: only what genuinely remains open (deferred to Phase 3, or owned by `estoma-infra`/platform team outside this service's control).
-- Hexagonal package skeleton (`domain`, `application`, `infrastructure`, alongside the existing `contracts`), documented with `package-info.java`, no business logic yet.
-- Canonical enum/constant names for defined commands, RPC operations, events, login types, account statuses, exchanges, and queues (already implemented in `contracts`).
-- Operational health endpoints for startup, readiness, and liveness.
+## Verification Gate
 
-Out of scope:
-
-- Authentication logic, password hashing implementation, token generation implementation.
-- RabbitMQ consumers or publishers.
-- Database migrations with real tables.
-- Outbox Relay implementation.
-
-Acceptance criteria:
-
-- Service builds and tests continue passing.
-- `system_contract.md` has no open technical decision that blocks starting Phase 2 (all v1 values are concrete, not "TBD").
-- `pending_decisions.md` contains only items that are explicitly deferred to Phase 3 or explicitly out of this service's control.
-- The hexagonal package skeleton exists and is documented; no premature interfaces or implementations.
-- Code only exposes safe foundation constants and operational endpoints.
-
-## Phase 2 (PR2): Build And Finish The Microservice
-
-Single milestone covering all functional behavior. No external approvals block sub-parts of this phase — every technical decision needed to implement it was resolved in Phase 1. Suggested internal order:
-
-1. **Runtime infrastructure shell**: typed configuration (service, database, RabbitMQ, observability, security), startup/readiness/liveness/metrics behavior, safe logging baseline with the redaction rules from `system_contract.md`, Docker/runtime verification.
-2. **Database migrations**: Flyway migrations under `src/main/resources/db/migration/` implementing the full schema documented in the platform's `data-model.md` (`accounts`, `account_credentials`, `sessions`, `password_recovery_requests`, `person_status_projection`, `student_number_login_sync_projection`, `security_rpc_idempotency_records`, `processed_messages`, `outbox_messages`), with the constraints and indexes already specified there.
-
-Steps 3-8 below (business logic) are built and tested **before** step 9 (messaging shell), reversed from an earlier draft of this order. Rationale: in the hexagonal architecture fixed in `system_contract.md`, no domain or application-layer code depends on RabbitMQ — a handler only ever receives an already-decoded envelope or RPC request and returns a result. Every one of steps 3-8 is fully buildable and testable (against a real database via Testcontainers, invoking a transactional dispatcher directly) without any `@RabbitListener`, `RabbitConfig`, or `OutboxRelay` in place. Building the messaging shell last turns it into a thin, mechanical wiring layer over already-proven business logic, instead of the reverse.
-
-3. **Durable account administration**: `CreateAccount`, `ActivateAccount`, `DeactivateAccount`, `ChangeLoginIdentifier`, `RevokeAllAccountSessions`, `RequestPasswordRecovery`, dispatched by a single transactional `CommandDispatcher` (Consumer Inbox first, functional rejection caught inside the transaction, non-sensitive events appended to Outbox). No correlated result is actually published to `platform.results` until the messaging shell exists; the dispatcher's Outbox write is the durable, testable proof of correctness in the meantime.
-4. **Person projection consumers**: consume `PersonCreated`, `PersonActivated`, `PersonDeactivated`; update `person_status_projection` idempotently, via the same `ProjectionDispatcher` pattern. Implemented against the conceptual payload already assumed by `person_status_projection` (`personId`, `status`, `sourceVersion`) — Phase 3 formalizes this against what `users-service` actually publishes.
-5. **Administrative temporary password RPC**: `SetTemporaryPassword`, `RegenerateTemporaryPassword`, `security_rpc_idempotency_records` behavior (claim → validate fingerprint → execute → mark `COMPLETED`), dispatched by `RpcDispatcher`. No secret persistence in plain text. Direct Reply-To response wiring is a messaging-shell concern; the dispatcher already returns the generated secret directly to its caller.
-6. **Login, refresh, and logout**: `AuthenticateAccount`, `RefreshSession`, `RevokeSession`, failed attempts, temporary account locks, session persistence, token generation and refresh-token rotation, per the parameters fixed in `system_contract.md`.
-7. **Password recovery**: `ValidateRecoveryCode`, `ResetPassword`, `ChangePassword`, recovery code hashing and single-use behavior, session revocation after reset. The integration event toward `communications-service` is produced per `events.md`; the final delivery contract is Phase 3 work.
-8. **Student number synchronization**: consume `StudentNumberCorrected`, apply ordered synchronization through `student_number_login_sync_projection`, publish `LoginIdentifierChanged` or `StudentLoginIdentifierSynchronizationFailed`. Implemented against the conceptual payload already documented in this service's `events.md`/`data-model.md` — Phase 3 formalizes it against what `academic-service` actually publishes.
-9. **Messaging shell**: durable command consumer for `commands.authentication-service`, ephemeral RPC consumer for `rpc.authentication`, result publisher for `platform.results`, Outbox publisher implementing the relay policy from `system_contract.md`, Consumer Inbox for durable events — all wiring the `CommandDispatcher`/`RpcDispatcher`/`ProjectionDispatcher` from steps 3-8 to real RabbitMQ. Adds `spring-boot-starter-amqp`, RabbitMQ to `docker-compose.yml`, and the `commandConsumer`/`outboxRelay` members of the readiness health group.
-
-Out of scope:
-
-- Anything requiring a payload contract not yet ratified with `users-service`, `academic-service`, or the BFF beyond what this service's own docs already assume (see Phase 3).
-
-Acceptance criteria:
-
-- All commands, RPC operations, and events listed in `system_contract.md` are implemented and tested.
-- All mandatory invariants hold under test.
-- No secret ever appears in logs, metrics, traces, audit, Outbox, Inbox, DLQ, or results.
-- Service is deployable and passes its own health checks against a real database and RabbitMQ instance.
-
-## Phase 3 (PR3): Refine Input Contracts — Deferred
-
-Not scoped yet. When picked up, its purpose is to formalize, with the `users-service`, `academic-service`, and BFF teams, the exact payloads `authentication-service` requires to receive (`PersonCreated`/`PersonActivated`/`PersonDeactivated`, `StudentNumberCorrected`, and the durable command envelopes from the BFF), and to reconcile Phase 2's implementation against whatever those teams actually publish.
-
-## Safe Delivery Rules
-
-- Do not introduce secrets in durable messages.
-- Prefer database constraints over in-memory checks for critical invariants.
-- Keep Phase 2 sub-parts independently reviewable even though they are not gated on external approval.
-- Update this plan when a phase's scope changes.
+`./mvnw clean verify` must pass. The suite must prove migration compatibility,
+multi-instance JWT verification with the same configured key, no secret in
+durable messaging or observability data, and the V1 smoke flow.

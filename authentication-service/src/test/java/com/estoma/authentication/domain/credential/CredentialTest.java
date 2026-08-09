@@ -31,6 +31,18 @@ class CredentialTest {
 
     assertThat(changed.hash()).isEqualTo(rotated);
     assertThat(changed.passwordChangedAt()).isEqualTo(now.plusSeconds(60));
+    assertThat(changed.mustChangePassword()).isFalse();
+    assertThat(changed.credentialVersion()).isEqualTo(2);
+  }
+
+  @Test
+  void temporaryPasswordRequiresChangeUntilItExpires() {
+    Credential credential = Credential.configure(UUID.randomUUID(), new PasswordHash("old", "ARGON2ID", "{}"), now)
+        .temporaryPassword(new PasswordHash("temporary", "ARGON2ID", "{}"), now.plusSeconds(60), now);
+
+    assertThat(credential.mustChangePassword()).isTrue();
+    assertThat(credential.isValidTemporaryPassword(now.plusSeconds(1))).isTrue();
+    assertThat(credential.isValidTemporaryPassword(now.plusSeconds(60))).isFalse();
   }
 
   @Test

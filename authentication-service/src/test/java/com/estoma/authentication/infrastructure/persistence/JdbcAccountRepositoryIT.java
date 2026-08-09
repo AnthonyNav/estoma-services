@@ -8,6 +8,7 @@ import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
+import com.estoma.authentication.domain.account.AccountDeactivationReason;
 import com.estoma.authentication.domain.account.LoginIdentifier;
 import com.estoma.authentication.testsupport.AbstractPostgresIT;
 import java.time.Instant;
@@ -83,7 +84,7 @@ class JdbcAccountRepositoryIT extends AbstractPostgresIT {
     Account activated = account.activated(Instant.now());
     repository.update(activated, account.version());
 
-    int rowsAffected = repository.update(activated.deactivated(Instant.now()), account.version());
+    int rowsAffected = repository.update(activated.deactivated(Instant.now(), AccountDeactivationReason.ADMINISTRATIVE), account.version());
 
     assertThat(rowsAffected).isZero();
   }

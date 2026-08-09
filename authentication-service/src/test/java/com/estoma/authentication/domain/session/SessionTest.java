@@ -10,25 +10,28 @@ import org.junit.jupiter.api.Test;
 class SessionTest {
 
   private final Instant now = Instant.parse("2026-01-01T00:00:00Z");
-  private final Instant expiresAt = now.plusSeconds(900);
+  private final Instant idleExpiresAt = now.plusSeconds(900);
 
   @Test
   void createNewIsValidUntilExpiry() {
     Session session = newSession();
 
     assertThat(session.isValid(now.plusSeconds(1))).isTrue();
-    assertThat(session.isValid(expiresAt.plusSeconds(1))).isFalse();
+    assertThat(session.isValid(idleExpiresAt.plusSeconds(1))).isFalse();
   }
 
   @Test
   void rotatedReplacesTokenHashAndExpiry() {
     Session session = newSession();
-    Instant newExpiry = expiresAt.plusSeconds(900);
+    Instant newExpiry = idleExpiresAt.plusSeconds(900);
 
-    Session rotated = session.rotated("new-hash", now.plusSeconds(10), newExpiry);
+    Session rotated = session.rotated("new-hash", now.plusSeconds(10), newExpiry, now.plusSeconds(40));
 
     assertThat(rotated.refreshTokenHash()).isEqualTo("new-hash");
-    assertThat(rotated.expiresAt()).isEqualTo(newExpiry);
+    assertThat(rotated.idleExpiresAt()).isEqualTo(newExpiry);
+    assertThat(rotated.previousRefreshTokenHash()).isEqualTo("hash");
+    assertThat(rotated.classifyRefreshTokenHash("hash", now.plusSeconds(20)))
+        .isEqualTo(Session.RefreshTokenMatch.PREVIOUS_WITHIN_GRACE);
     assertThat(rotated.lastUsedAt()).isEqualTo(now.plusSeconds(10));
   }
 
@@ -43,12 +46,22 @@ class SessionTest {
   }
 
   @Test
-  void rejectsExpiresAtNotAfterCreatedAt() {
-    assertThatThrownBy(() -> Session.createNew(UUID.randomUUID(), UUID.randomUUID(), "hash", null, null, null, now, now))
+  void classifiesAnExpiredPreviousTokenAsReplay() {
+    Session rotated = newSession().rotated("new-hash", now.plusSeconds(10), idleExpiresAt, now.plusSeconds(20));
+
+    assertThat(rotated.classifyRefreshTokenHash("hash", now.plusSeconds(20)))
+        .isEqualTo(Session.RefreshTokenMatch.PREVIOUS_OUTSIDE_GRACE);
+    assertThat(rotated.classifyRefreshTokenHash("unknown", now.plusSeconds(20)))
+        .isEqualTo(Session.RefreshTokenMatch.NO_MATCH);
+  }
+
+  @Test
+  void rejectsIdleExpiryNotAfterCreatedAt() {
+    assertThatThrownBy(() -> Session.createNormal(UUID.randomUUID(), UUID.randomUUID(), "hash", null, null, null, now, now, now.plusSeconds(1)))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   private Session newSession() {
-    return Session.createNew(UUID.randomUUID(), UUID.randomUUID(), "hash", "Chrome", "127.0.0.1", "UA", now, expiresAt);
+    return Session.createNormal(UUID.randomUUID(), UUID.randomUUID(), "hash", "Chrome", "127.0.0.1", "UA", now, idleExpiresAt, now.plusSeconds(1800));
   }
 }

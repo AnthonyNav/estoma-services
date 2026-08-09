@@ -1,5 +1,6 @@
 package com.estoma.authentication.application.rpc;
 
+import com.estoma.authentication.application.EventToAppend;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.SecureRandomGenerator;
@@ -8,6 +9,9 @@ import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.application.port.TokenIssuer;
 import com.estoma.authentication.contracts.rpc.RefreshSessionRequest;
 import com.estoma.authentication.contracts.rpc.RefreshSessionResponse;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
+import com.estoma.authentication.contracts.AuthenticationEvent;
+import com.estoma.authentication.contracts.event.SessionRevokedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
@@ -26,7 +30,7 @@ import org.springframework.stereotype.Component;
 public class RefreshSessionHandler {
 
   private static final Duration REFRESH_EXTENSION = Duration.ofDays(14);
-  private static final Duration ABSOLUTE_SESSION_LIFETIME = Duration.ofDays(30);
+  private static final Duration REFRESH_GRACE = Duration.ofSeconds(30);
 
   private final SessionRepository sessionRepository;
   private final AccountRepository accountRepository;
@@ -50,18 +54,36 @@ public class RefreshSessionHandler {
     this.randomGenerator = randomGenerator;
   }
 
-  public RpcHandlerOutcome<RefreshSessionResponse> handle(RefreshSessionRequest request) {
+  public RpcHandlerOutcome<RefreshSessionResponse> handle(RpcRequestContext context, RefreshSessionRequest request) {
     Session session =
-        sessionRepository.findById(request.sessionId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
+        sessionRepository
+            .findByIdForUpdate(request.sessionId())
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
 
     if (session.revokedAt() != null) {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_REVOKED, "session " + session.sessionId() + " was revoked");
     }
+    if (!session.accountId().equals(context.targetAccountId()) || !session.accountId().equals(context.actor().accountId())) {
+      throw new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist");
+    }
     Instant now = Instant.now();
-    if (!session.expiresAt().isAfter(now)) {
+    if (!session.isValid(now)) {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_EXPIRED, "session " + session.sessionId() + " has expired");
     }
-    if (!session.refreshTokenHash().equals(tokenHasher.sha256Hex(request.refreshToken()))) {
+    Session.RefreshTokenMatch tokenMatch = session.classifyRefreshTokenHash(tokenHasher.sha256Hex(request.refreshToken()), now);
+    if (tokenMatch == Session.RefreshTokenMatch.PREVIOUS_OUTSIDE_GRACE) {
+      Session revoked = session.revoked("REFRESH_TOKEN_REPLAY", now);
+      sessionRepository.update(revoked);
+      SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "REFRESH_TOKEN_REPLAY", now);
+      return RpcHandlerOutcome.rejected(
+          RejectionCode.REFRESH_TOKEN_REPLAY,
+          revoked.sessionId(),
+          null,
+          new EventToAppend(AuthenticationEvent.SESSION_REVOKED.wireName(), event));
+    }
+    if (session.authState() != Session.AuthState.NORMAL
+        || (tokenMatch != Session.RefreshTokenMatch.CURRENT
+            && tokenMatch != Session.RefreshTokenMatch.PREVIOUS_WITHIN_GRACE)) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_REFRESH_TOKEN, "refresh token does not match the current session token");
     }
 
@@ -74,11 +96,11 @@ public class RefreshSessionHandler {
     }
 
     String newRefreshToken = randomGenerator.randomUrlSafeToken(32);
-    Instant cappedExpiresAt = minInstant(now.plus(REFRESH_EXTENSION), session.createdAt().plus(ABSOLUTE_SESSION_LIFETIME));
-    Session rotated = session.rotated(tokenHasher.sha256Hex(newRefreshToken), now, cappedExpiresAt);
+    Instant cappedExpiresAt = minInstant(now.plus(REFRESH_EXTENSION), session.absoluteExpiresAt());
+    Session rotated = session.rotated(tokenHasher.sha256Hex(newRefreshToken), now, cappedExpiresAt, now.plus(REFRESH_GRACE));
     sessionRepository.update(rotated);
 
-    TokenIssuer.IssuedAccessToken accessToken = tokenIssuer.issueAccessToken(account.accountId(), account.personId(), account.loginIdentifier().type().name());
+    TokenIssuer.IssuedAccessToken accessToken = tokenIssuer.issueAccessToken(account.accountId(), account.personId(), session.sessionId(), session.authState().name());
 
     // SessionRenewed is internal, not published in v1 (events.md §5).
     return RpcHandlerOutcome.withoutEvents(new RefreshSessionResponse(accessToken.token(), newRefreshToken, cappedExpiresAt));
@@ -86,7 +108,7 @@ public class RefreshSessionHandler {
 
   private boolean isPersonActive(UUID personId) {
     var status = personStatusProjectionRepository.findByPersonId(personId);
-    return status.isEmpty() || "ACTIVE".equals(status.get().status());
+    return status.isPresent() && "ACTIVE".equals(status.get().status());
   }
 
   private static Instant minInstant(Instant a, Instant b) {

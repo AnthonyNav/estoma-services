@@ -9,7 +9,6 @@ import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Base64;
-import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,27 +18,33 @@ import org.springframework.context.annotation.Configuration;
  * signs and verifies with (system_contract.md "Sessions and tokens": JWT
  * RS256).
  *
- * <p>If {@code estoma.jwt.private-key}/{@code estoma.jwt.public-key} (PEM,
- * PKCS8/X509, base64-encoded contents without the header/footer lines) are
- * both configured, they are used. Otherwise an ephemeral RSA-2048 keypair
- * is generated at startup -- sufficient for a single running instance
- * (local dev, tests, or a single-replica deployment), and intentionally not
- * more than that: real signing-key provisioning and rotation is a platform
- * secrets-management decision explicitly out of this service's control
- * (docs/pending_decisions.md). Tokens already carry a {@code kid} header,
- * so swapping to provisioned keys later needs no wire-format change.
+ * <p>Ephemeral keys are limited to local and test. A deployable environment
+ * must provide both key parts and a stable {@code kid}; otherwise startup
+ * fails instead of issuing tokens no other replica can validate.
  */
 @Configuration
 class JwtKeyConfig {
 
   @Bean
   SigningKeys jwtSigningKeys(
-      @Value("${estoma.jwt.private-key:}") String privateKeyPem, @Value("${estoma.jwt.public-key:}") String publicKeyPem) {
-    String kid = UUID.randomUUID().toString();
+      @Value("${estoma.jwt.private-key:}") String privateKeyPem,
+      @Value("${estoma.jwt.public-key:}") String publicKeyPem,
+      @Value("${estoma.jwt.kid:}") String kid,
+      @Value("${estoma.environment:local}") String environment) {
     if (!privateKeyPem.isBlank() && !publicKeyPem.isBlank()) {
+      if (kid.isBlank()) {
+        throw new IllegalStateException("estoma.jwt.kid must be configured when JWT keys are configured");
+      }
       return new SigningKeys(loadKeyPair(privateKeyPem, publicKeyPem), kid);
     }
+    if (!isLocalOrTest(environment)) {
+      throw new IllegalStateException("JWT private/public keys and kid are required outside local and test environments");
+    }
     return new SigningKeys(generateEphemeralKeyPair(), kid);
+  }
+
+  private static boolean isLocalOrTest(String environment) {
+    return "local".equalsIgnoreCase(environment) || "test".equalsIgnoreCase(environment);
   }
 
   private static KeyPair generateEphemeralKeyPair() {

@@ -49,9 +49,10 @@ class RevokeAllAccountSessionsHandler implements CommandHandler {
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
 
     Instant now = Instant.now();
-    sessionRepository.revokeAllActiveForAccount(command.accountId(), command.reason(), now);
+    String reasonCode = command.reason().toUpperCase(java.util.Locale.ROOT);
+    sessionRepository.revokeAllActiveForAccount(command.accountId(), reasonCode, now);
 
-    AllAccountSessionsRevokedPayload eventPayload = new AllAccountSessionsRevokedPayload(command.accountId(), command.reason(), now);
+    AllAccountSessionsRevokedPayload eventPayload = new AllAccountSessionsRevokedPayload(command.accountId(), reasonCode, now);
     return CommandHandlerResult.of(account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), eventPayload));
   }
 }

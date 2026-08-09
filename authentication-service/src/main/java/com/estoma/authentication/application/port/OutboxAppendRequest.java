@@ -1,5 +1,6 @@
 package com.estoma.authentication.application.port;
 
+import com.estoma.authentication.contracts.Actor;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -9,10 +10,8 @@ import java.util.UUID;
  * business change. {@code payloadJson} is pre-serialized JSON -- this port
  * does not depend on a JSON library.
  *
- * <p>No {@code metadata} column: this service's v1 Outbox schema is the
- * simple one decided for this tramo (system_contract.md "Outbox Operational
- * Policy"), without the {@code claim_token}/{@code lease_until}/{@code
- * metadata} deltas {@code users-service} added.
+ * <p>Correlation, causation, operation, idempotency and actor context are
+ * persisted as first-class metadata so the relay can reproduce the envelope.
  *
  * <p>{@code status = PENDING}, {@code attempts = 0}, and {@code availableAt
  * = occurredAt} are implicit: every newly-appended row starts immediately
@@ -27,5 +26,9 @@ public record OutboxAppendRequest(
     Integer aggregateVersion,
     UUID correlationId,
     UUID causationId,
+    UUID operationId,
+    String idempotencyKey,
+    Actor actor,
+    String resultRequester,
     String payloadJson,
     Instant occurredAt) {}

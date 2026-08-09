@@ -2,6 +2,7 @@ package com.estoma.authentication.application.command;
 
 import com.estoma.authentication.application.EventToAppend;
 import com.estoma.authentication.application.port.AccountRepository;
+import com.estoma.authentication.application.port.AccountStatusHistoryRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.contracts.AuthenticationCommand;
 import com.estoma.authentication.contracts.AuthenticationEvent;
@@ -11,9 +12,11 @@ import com.estoma.authentication.contracts.event.AccountCreatedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
+import com.estoma.authentication.domain.account.AccountStatusChange;
 import com.estoma.authentication.domain.account.LoginIdentifier;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,12 +29,17 @@ class CreateAccountHandler implements CommandHandler {
 
   private final AccountRepository accountRepository;
   private final PersonStatusProjectionRepository personStatusProjectionRepository;
+  private final AccountStatusHistoryRepository statusHistoryRepository;
   private final EnvelopeJsonCodec codec;
 
   CreateAccountHandler(
-      AccountRepository accountRepository, PersonStatusProjectionRepository personStatusProjectionRepository, EnvelopeJsonCodec codec) {
+      AccountRepository accountRepository,
+      PersonStatusProjectionRepository personStatusProjectionRepository,
+      AccountStatusHistoryRepository statusHistoryRepository,
+      EnvelopeJsonCodec codec) {
     this.accountRepository = accountRepository;
     this.personStatusProjectionRepository = personStatusProjectionRepository;
+    this.statusHistoryRepository = statusHistoryRepository;
     this.codec = codec;
   }
 
@@ -58,9 +66,13 @@ class CreateAccountHandler implements CommandHandler {
 
     // May itself throw AuthenticationRejectedException on a lost race against a concurrent writer.
     accountRepository.insert(account);
+    statusHistoryRepository.insert(
+        new AccountStatusChange(
+            UUID.randomUUID(), account.accountId(), null, account.status(), null, null, envelope.actor(), envelope.correlationId(), now,
+            account.version()));
 
     AccountCreatedPayload eventPayload =
-        new AccountCreatedPayload(account.accountId(), account.personId(), account.loginIdentifier().type(), account.status().name(), account.version(), account.createdAt());
+        new AccountCreatedPayload(account.accountId(), account.personId(), account.loginIdentifier().type(), account.status().name(), account.createdAt());
 
     return CommandHandlerResult.of(
         account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.ACCOUNT_CREATED.wireName(), eventPayload));

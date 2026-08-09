@@ -3,11 +3,13 @@ package com.estoma.authentication.application;
 import com.estoma.authentication.application.command.CommandHandler;
 import com.estoma.authentication.application.command.CommandHandlerResult;
 import com.estoma.authentication.application.port.InboxPort;
+import com.estoma.authentication.application.port.CommandIdempotencyRepository;
 import com.estoma.authentication.application.port.OutboxAppendRequest;
 import com.estoma.authentication.application.port.OutboxPort;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
-import com.estoma.authentication.contracts.result.RejectedPayload;
+import com.estoma.authentication.contracts.result.ResultPayload;
+import com.estoma.authentication.contracts.result.ResultStatus;
 import com.estoma.authentication.contracts.result.SucceededPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
@@ -16,6 +18,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
@@ -45,14 +50,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class CommandDispatcher {
 
   private final InboxPort inbox;
+  private final CommandIdempotencyRepository idempotency;
   private final OutboxPort outbox;
   private final AccountAuthorizationPolicy authorizationPolicy;
   private final EnvelopeJsonCodec codec;
   private final Map<String, CommandHandler> handlersByMessageType;
 
   CommandDispatcher(
-      InboxPort inbox, OutboxPort outbox, AccountAuthorizationPolicy authorizationPolicy, EnvelopeJsonCodec codec, List<CommandHandler> handlers) {
+      InboxPort inbox, CommandIdempotencyRepository idempotency, OutboxPort outbox, AccountAuthorizationPolicy authorizationPolicy, EnvelopeJsonCodec codec, List<CommandHandler> handlers) {
     this.inbox = inbox;
+    this.idempotency = idempotency;
     this.outbox = outbox;
     this.authorizationPolicy = authorizationPolicy;
     this.codec = codec;
@@ -66,16 +73,41 @@ public class CommandDispatcher {
       return new CommandOutcome.Duplicate();
     }
 
-    authorizationPolicy.check(envelope.actor(), envelope.messageType());
+    try {
+      authorizationPolicy.check(envelope);
+    } catch (AuthenticationRejectedException rejected) {
+      appendRejectedResult(envelope, rejected, false);
+      return new CommandOutcome.Rejected(rejected.code());
+    }
 
-    CommandHandler handler = handlersByMessageType.get(envelope.messageType());
-    if (handler == null) {
-      throw new IllegalStateException("no handler registered for messageType " + envelope.messageType());
+    CommandIdempotencyRepository.ClaimResult claim =
+        idempotency.claim(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), fingerprint(envelope), envelope.aggregateId());
+    if (claim instanceof CommandIdempotencyRepository.ClaimResult.Conflict) {
+      appendResult(
+          envelope,
+          null,
+          null,
+          codec.writeValueAsString(ResultPayload.rejected("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")));
+      return new CommandOutcome.Rejected(
+          com.estoma.authentication.domain.RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST);
+    }
+    if (claim instanceof CommandIdempotencyRepository.ClaimResult.Replay replay) {
+      appendResult(envelope, replay.resultPayloadJson());
+      return new CommandOutcome.Duplicate();
+    }
+    if (claim instanceof CommandIdempotencyRepository.ClaimResult.InProgress) {
+      return new CommandOutcome.Duplicate();
     }
 
     try {
+      CommandHandler handler = handlersByMessageType.get(envelope.messageType());
+      if (handler == null) {
+        throw new IllegalStateException("no handler registered for messageType " + envelope.messageType());
+      }
       CommandHandlerResult result = handler.handle(envelope);
-      appendSucceededResult(envelope, result);
+      String payloadJson = succeededPayload(result);
+      complete(envelope, payloadJson);
+      appendResult(envelope, result.aggregateId(), result.aggregateVersion(), payloadJson);
       result.events().forEach(event -> appendEvent(envelope, result.aggregateId(), result.aggregateVersion(), event));
       return new CommandOutcome.Succeeded(result.aggregateVersion());
     } catch (AuthenticationRejectedException rejected) {
@@ -84,28 +116,57 @@ public class CommandDispatcher {
     }
   }
 
-  private void appendSucceededResult(MessageEnvelope envelope, CommandHandlerResult result) {
-    String resultType = envelope.messageType() + "Succeeded";
-    SucceededPayload payload = new SucceededPayload(result.aggregateId(), result.aggregateVersion());
-    outbox.append(
-        new OutboxAppendRequest(
-            UUID.randomUUID(), resultType, 1, MessageKind.RESULT.name(), result.aggregateId(), result.aggregateVersion(),
-            envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(payload), Instant.now()));
+  private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected) {
+    appendRejectedResult(envelope, rejected, true);
   }
 
-  private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected) {
-    String resultType = envelope.messageType() + "Rejected";
-    RejectedPayload payload = RejectedPayload.of(rejected.code().name(), rejected.getMessage());
+  private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected, boolean complete) {
+    ResultPayload payload = ResultPayload.rejected(rejected.code().name());
+    String payloadJson = codec.writeValueAsString(payload);
+    if (complete) {
+      complete(envelope, payloadJson);
+    }
+    appendResult(envelope, null, null, payloadJson);
+  }
+
+  private String succeededPayload(CommandHandlerResult result) {
+    return codec.writeValueAsString(ResultPayload.succeeded(new SucceededPayload(result.aggregateId(), result.aggregateVersion())));
+  }
+
+  private void complete(MessageEnvelope envelope, String payloadJson) {
+    ResultPayload payload = codec.decodeValue(payloadJson.getBytes(StandardCharsets.UTF_8), ResultPayload.class);
+    idempotency.complete(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), payload.status(), payloadJson);
+  }
+
+  private void appendResult(MessageEnvelope envelope, String payloadJson) {
+    appendResult(envelope, null, null, payloadJson);
+  }
+
+  private void appendResult(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, String payloadJson) {
     outbox.append(
         new OutboxAppendRequest(
-            UUID.randomUUID(), resultType, 1, MessageKind.RESULT.name(), null, null, envelope.correlationId(), envelope.messageId(),
-            codec.writeValueAsString(payload), Instant.now()));
+            UUID.randomUUID(), envelope.messageType() + "Result", 1, MessageKind.RESULT.name(), aggregateId, aggregateVersion,
+            envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
+            envelope.producer(), payloadJson, Instant.now()));
   }
 
   private void appendEvent(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
+    UUID eventAggregateId = event.inheritHandlerAggregate() ? aggregateId : event.aggregateId();
+    Integer eventAggregateVersion = event.inheritHandlerAggregate() ? aggregateVersion : event.aggregateVersion();
     outbox.append(
         new OutboxAppendRequest(
-            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion,
-            envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(event.payload()), Instant.now()));
+            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), eventAggregateId, eventAggregateVersion,
+            envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
+            null, codec.writeValueAsString(event.payload()), Instant.now()));
+  }
+
+  private String fingerprint(MessageEnvelope envelope) {
+    try {
+      byte[] digest = MessageDigest.getInstance("SHA-256")
+          .digest((envelope.messageType() + "\n" + codec.writeValueAsString(envelope.payload())).getBytes(StandardCharsets.UTF_8));
+      return java.util.HexFormat.of().formatHex(digest);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 is unavailable", e);
+    }
   }
 }

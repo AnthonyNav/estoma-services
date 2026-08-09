@@ -1,0 +1,15 @@
+# Layered on top of src/main/resources/application.yml for every IT
+# (see AbstractPostgresIT's @ActiveProfiles("test")). Only overrides what
+# a test context without a real RabbitMQ broker needs to stay quiet:
+# self-declaring the messaging topology and letting the Outbox Relay's
+# scheduled tick run both assume a broker is reachable.
+#
+# AbstractRabbitMqIT re-enables topology-declare via @DynamicPropertySource
+# once a real (Testcontainers) broker is actually present. No test relies
+# on outbox-relay-enabled=true: every messaging IT calls
+# OutboxRelay#relay() directly for determinism instead of waiting on the
+# schedule.
+estoma:
+  messaging:
+    topology-declare: false
+    outbox-relay-enabled: false

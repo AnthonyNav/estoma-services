@@ -8,6 +8,7 @@ import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayloa
 import com.estoma.authentication.contracts.event.TemporaryPasswordSetPayload;
 import com.estoma.authentication.contracts.rpc.SetTemporaryPasswordRequest;
 import com.estoma.authentication.contracts.rpc.SetTemporaryPasswordResponse;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.account.Account;
 import java.time.Instant;
 import org.springframework.stereotype.Component;
@@ -33,31 +34,46 @@ public class SetTemporaryPasswordHandler {
     this.tokenHasher = tokenHasher;
   }
 
-  public RpcHandlerOutcome<SetTemporaryPasswordResponse> handle(SetTemporaryPasswordRequest request) {
-    Account account = support.requireAccount(request.accountId());
+  public RpcHandlerOutcome<SetTemporaryPasswordResponse> handle(RpcRequestContext context, SetTemporaryPasswordRequest request) {
+    requireContextConsistency(context, request.accountId(), request.idempotencyKey());
+    requireRequester(context, request.requestedByAccountId());
+    Account account = support.requireAccount(context.targetAccountId());
 
     String fingerprint = fingerprint(request);
-    support.claimOrThrow(OPERATION_TYPE, request.idempotencyKey(), request.accountId(), request.requestedByAccountId(), fingerprint);
+    support.claimOrThrow(OPERATION_TYPE, context.idempotencyKey(), context.targetAccountId(), context.actor().accountId(), fingerprint);
 
     Instant now = Instant.now();
-    String temporaryPassword = support.issueNewSecretAndUpdateCredential(account);
-    Account updated = support.markMustChangePassword(account, request.expiresAt(), now);
-    sessionRepository.revokeAllActiveForAccount(account.accountId(), "temporary_password_set", now);
+    TemporaryPasswordSupport.IssuedTemporaryPassword issued = support.issueNewSecretAndUpdateCredential(account, now);
+    sessionRepository.revokeAllActiveForAccount(account.accountId(), "TEMPORARY_PASSWORD_SET", now);
 
-    support.markCompleted(OPERATION_TYPE, request.idempotencyKey(), now);
+    support.markCompleted(OPERATION_TYPE, context.idempotencyKey(), now);
 
-    TemporaryPasswordSetPayload setEvent = new TemporaryPasswordSetPayload(updated.accountId(), true, updated.temporaryPasswordExpiresAt(), now);
-    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(updated.accountId(), "temporary_password_set", now);
+    TemporaryPasswordSetPayload setEvent = new TemporaryPasswordSetPayload(account.accountId(), true, issued.credential().temporaryPasswordExpiresAt(), now);
+    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "TEMPORARY_PASSWORD_SET", now);
 
     return RpcHandlerOutcome.of(
-        new SetTemporaryPasswordResponse(temporaryPassword, updated.temporaryPasswordExpiresAt()),
-        updated.accountId(),
-        updated.version(),
+        new SetTemporaryPasswordResponse(issued.password(), issued.credential().temporaryPasswordExpiresAt()),
+        account.accountId(),
+        account.version(),
         new EventToAppend(AuthenticationEvent.TEMPORARY_PASSWORD_SET.wireName(), setEvent),
         new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), revokedEvent));
   }
 
   private String fingerprint(SetTemporaryPasswordRequest request) {
-    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.requestedByAccountId() + "|" + request.expiresAt());
+    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.requestedByAccountId() + "|" + request.idempotencyKey());
+  }
+
+  private static void requireContextConsistency(RpcRequestContext context, java.util.UUID accountId, String idempotencyKey) {
+    if (!java.util.Objects.equals(context.targetAccountId(), accountId) || !java.util.Objects.equals(context.idempotencyKey(), idempotencyKey)) {
+      throw new com.estoma.authentication.domain.AuthenticationRejectedException(
+          com.estoma.authentication.domain.RejectionCode.ACTOR_NOT_AUTHORIZED, "RPC context does not match request");
+    }
+  }
+
+  private static void requireRequester(RpcRequestContext context, java.util.UUID requestedByAccountId) {
+    if (!java.util.Objects.equals(context.actor().accountId(), requestedByAccountId)) {
+      throw new com.estoma.authentication.domain.AuthenticationRejectedException(
+          com.estoma.authentication.domain.RejectionCode.ACTOR_NOT_AUTHORIZED, "requester does not match actor");
+    }
   }
 }

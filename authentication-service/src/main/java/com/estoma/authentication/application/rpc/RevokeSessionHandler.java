@@ -6,6 +6,7 @@ import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.event.SessionRevokedPayload;
 import com.estoma.authentication.contracts.rpc.RevokeSessionRequest;
 import com.estoma.authentication.contracts.rpc.RevokeSessionResponse;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.session.Session;
@@ -26,11 +27,11 @@ public class RevokeSessionHandler {
     this.sessionRepository = sessionRepository;
   }
 
-  public RpcHandlerOutcome<RevokeSessionResponse> handle(RevokeSessionRequest request) {
+  public RpcHandlerOutcome<RevokeSessionResponse> handle(RpcRequestContext context, RevokeSessionRequest request) {
     Session session =
-        sessionRepository.findById(request.sessionId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
+        sessionRepository.findByIdForUpdate(request.sessionId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
 
-    if (!session.accountId().equals(request.accountId())) {
+    if (!session.accountId().equals(context.targetAccountId()) || !session.accountId().equals(context.actor().accountId())) {
       // Do not reveal that a session exists under a different account.
       throw new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist");
     }
@@ -40,10 +41,11 @@ public class RevokeSessionHandler {
     }
 
     Instant now = Instant.now();
-    Session revoked = session.revoked("actor_requested", now);
+    Session revoked = session.revoked("USER_REQUESTED", now);
     sessionRepository.update(revoked);
 
-    SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "actor_requested", now);
+    SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "USER_REQUESTED", now);
     return RpcHandlerOutcome.of(new RevokeSessionResponse(true), revoked.sessionId(), null, new EventToAppend(AuthenticationEvent.SESSION_REVOKED.wireName(), event));
   }
+
 }

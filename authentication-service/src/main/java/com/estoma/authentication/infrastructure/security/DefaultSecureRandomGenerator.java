@@ -11,7 +11,7 @@ class DefaultSecureRandomGenerator implements SecureRandomGenerator {
 
   private static final String TEMPORARY_PASSWORD_ALPHABET =
       "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
-  private static final int TEMPORARY_PASSWORD_LENGTH = 12;
+  private static final int TEMPORARY_PASSWORD_LENGTH = 16;
 
   private final SecureRandom random = new SecureRandom();
 

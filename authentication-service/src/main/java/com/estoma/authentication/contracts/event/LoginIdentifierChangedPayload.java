@@ -9,4 +9,4 @@ import java.util.UUID;
  * include the full identifier -- consumers that need it are not yet
  * documented as requiring it.
  */
-public record LoginIdentifierChangedPayload(UUID accountId, LoginType loginType, int version, Instant changedAt) {}
+public record LoginIdentifierChangedPayload(UUID accountId, LoginType loginType, String changeSource, Instant changedAt) {}

@@ -1,6 +1,7 @@
 package com.estoma.authentication.application.rpc;
 
 import com.estoma.authentication.application.EventToAppend;
+import com.estoma.authentication.domain.RejectionCode;
 import java.util.List;
 import java.util.UUID;
 
@@ -13,13 +14,20 @@ import java.util.UUID;
  * RPC operations need this, but the shape stays consistent with {@code
  * CommandHandlerResult}).
  */
-public record RpcHandlerOutcome<T>(T response, UUID aggregateId, Integer aggregateVersion, List<EventToAppend> events) {
+public record RpcHandlerOutcome<T>(T response, UUID aggregateId, Integer aggregateVersion, List<EventToAppend> events,
+                                   RejectionCode rejectionCode) {
 
   public static <T> RpcHandlerOutcome<T> withoutEvents(T response) {
-    return new RpcHandlerOutcome<>(response, null, null, List.of());
+    return new RpcHandlerOutcome<>(response, null, null, List.of(), null);
   }
 
   public static <T> RpcHandlerOutcome<T> of(T response, UUID aggregateId, Integer aggregateVersion, EventToAppend... events) {
-    return new RpcHandlerOutcome<>(response, aggregateId, aggregateVersion, List.of(events));
+    return new RpcHandlerOutcome<>(response, aggregateId, aggregateVersion, List.of(events), null);
+  }
+
+  /** Persists derived events before returning a functional RPC rejection. */
+  public static <T> RpcHandlerOutcome<T> rejected(RejectionCode code, UUID aggregateId, Integer aggregateVersion,
+                                                   EventToAppend... events) {
+    return new RpcHandlerOutcome<>(null, aggregateId, aggregateVersion, List.of(events), code);
   }
 }

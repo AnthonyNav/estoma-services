@@ -65,7 +65,8 @@ public class ProjectionDispatcher {
   private void appendEvent(MessageEnvelope envelope, EventToAppend event) {
     outbox.append(
         new OutboxAppendRequest(
-            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), envelope.aggregateId(), envelope.aggregateVersion(),
-            envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(event.payload()), Instant.now()));
+            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), event.aggregateId(), event.aggregateVersion(),
+            envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
+            null, codec.writeValueAsString(event.payload()), Instant.now()));
   }
 }

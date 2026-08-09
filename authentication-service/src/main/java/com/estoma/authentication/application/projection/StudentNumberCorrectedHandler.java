@@ -11,10 +11,10 @@ import com.estoma.authentication.contracts.consumed.StudentNumberCorrectedPayloa
 import com.estoma.authentication.contracts.event.StudentLoginIdentifierSynchronizationFailedPayload;
 import com.estoma.authentication.domain.account.Account;
 import com.estoma.authentication.domain.account.LoginIdentifier;
+import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -50,17 +50,22 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     StudentNumberCorrectedPayload payload = codec.convertPayload(envelope, StudentNumberCorrectedPayload.class);
     Instant now = Instant.now();
 
+    if (payload == null
+        || payload.accountId() == null
+        || payload.studentAcademicProfileId() == null
+        || payload.studentNumberVersion() <= 0
+        || isBlank(payload.previousStudentNumber())
+        || isBlank(payload.newStudentNumber())) {
+      return fail(envelope, payload, "INVALID_STUDENT_NUMBER_CORRECTION_PAYLOAD", now);
+    }
+
     syncRepository.ensureExists(payload.accountId(), payload.studentAcademicProfileId(), now);
     var sync = syncRepository.findByAccountId(payload.accountId()).orElseThrow(() -> new IllegalStateException("sync row must exist after ensureExists"));
 
     if (payload.studentNumberVersion() <= sync.lastAppliedStudentNumberVersion()) {
       return ProjectionHandlerResult.NONE; // stale or already-applied redelivery: ignored, per data-model.md §9.1
     }
-    if (payload.studentNumberVersion() > sync.lastAppliedStudentNumberVersion() + 1) {
-      return fail(envelope, payload, "SOURCE_VERSION_GAP", now);
-    }
-
-    Optional<Account> accountOpt = accountRepository.findById(payload.accountId());
+    var accountOpt = accountRepository.findById(payload.accountId());
     if (accountOpt.isEmpty()) {
       return fail(envelope, payload, "ACCOUNT_NOT_FOUND_FOR_STUDENT", now);
     }
@@ -68,11 +73,8 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     if (account.loginIdentifier().type() != LoginType.MATRICULA) {
       return fail(envelope, payload, "ACCOUNT_LOGIN_TYPE_MISMATCH", now);
     }
-    if (!account.loginIdentifier().value().equals(payload.previousStudentNumber())) {
-      return fail(envelope, payload, "PREVIOUS_LOGIN_IDENTIFIER_MISMATCH", now);
-    }
     LoginIdentifier newIdentifier = LoginIdentifier.of(LoginType.MATRICULA, payload.newStudentNumber());
-    Optional<Account> collision = accountRepository.findByLoginIdentifier(LoginType.MATRICULA, newIdentifier.normalized());
+    var collision = accountRepository.findByLoginIdentifier(LoginType.MATRICULA, newIdentifier.normalized());
     if (collision.isPresent() && !collision.get().accountId().equals(account.accountId())) {
       return fail(envelope, payload, "NEW_LOGIN_IDENTIFIER_ALREADY_USED", now);
     }
@@ -87,15 +89,25 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     }
 
     syncRepository.markSynchronized(account.accountId(), payload.studentNumberVersion(), now);
-    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(updated.accountId(), LoginType.MATRICULA, updated.version(), now);
-    return ProjectionHandlerResult.of(new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), event));
+    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(updated.accountId(), LoginType.MATRICULA, "STUDENT_NUMBER_CORRECTION", now);
+    return ProjectionHandlerResult.of(new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), event, updated.accountId(), updated.version()));
   }
 
   private ProjectionHandlerResult fail(MessageEnvelope envelope, StudentNumberCorrectedPayload payload, String errorCode, Instant now) {
-    syncRepository.markFailed(payload.accountId(), errorCode, now);
+    if (payload != null && payload.accountId() != null) {
+      syncRepository.markFailed(payload.accountId(), errorCode, now);
+    }
     var event =
         new StudentLoginIdentifierSynchronizationFailedPayload(
-            payload.accountId(), payload.studentAcademicProfileId(), payload.studentNumberVersion(), errorCode, now, envelope.correlationId(), envelope.causationId());
-    return ProjectionHandlerResult.of(new EventToAppend(AuthenticationEvent.STUDENT_LOGIN_IDENTIFIER_SYNCHRONIZATION_FAILED.wireName(), event));
+            payload == null ? null : payload.accountId(),
+            payload == null ? null : payload.studentAcademicProfileId(),
+            payload == null ? 0 : payload.studentNumberVersion(),
+            errorCode,
+            now);
+    return ProjectionHandlerResult.of(new EventToAppend(AuthenticationEvent.STUDENT_LOGIN_IDENTIFIER_SYNCHRONIZATION_FAILED.wireName(), event, payload == null ? null : payload.accountId(), null));
+  }
+
+  private static boolean isBlank(String value) {
+    return value == null || value.isBlank();
   }
 }

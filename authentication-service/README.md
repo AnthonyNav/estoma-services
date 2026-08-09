@@ -1,44 +1,22 @@
 # authentication-service
 
-Spring Boot service that manages access accounts, credentials, and sessions.
+Spring Boot service that owns access accounts, credentials, sessions, login
+lockout, password recovery and temporary passwords. It exposes no client
+business HTTP API: functional input is RabbitMQ only.
 
-## Current Scope
+## V1 Contract
 
-Runtime infrastructure and database schema are in place: typed configuration, an HTTP surface locked down to operational endpoints only, structured logging, and the full Flyway-managed schema. Authentication flows, credentials, sessions, and messaging consumers are not implemented yet — see `docs/execution_plan.md`.
+The platform documentation at
+`03-services/shared/authentication-service/` is normative. The service:
 
-## Service Docs
-
-- `docs/system_contract.md`: implementation contract for the service boundary.
-- `docs/execution_plan.md`: phased PR plan for safe delivery.
-- `docs/pending_decisions.md`: decisions that must remain explicit before implementation.
-
-## Local Development
-
-```bash
-docker compose up -d
-./mvnw spring-boot:run
-```
-
-No environment variables are required; `docker-compose.yml` matches the defaults baked into `application.yml`.
-
-## Owns
-
-- Access accounts.
-- Login by student identifier or username.
-- Passwords and temporary passwords.
-- Password recovery.
-- Sessions and logout.
-- Account lock, deactivation, and credential lifecycle.
-
-## Does Not Own
-
-- Personal identity data.
-- Roles and permissions.
-- Academic status.
+- consumes durable Commands on `platform.commands` / `commands.authentication`;
+- consumes security RPC on `platform.security.rpc` / `rpc.authentication`;
+- returns RPC responses using Direct Reply-To;
+- publishes non-sensitive Results and events through Transactional Outbox;
+- never persists or logs passwords, hashes, refresh tokens, recovery codes or
+  generated temporary passwords in messaging infrastructure.
 
 ## Operational Endpoints
-
-Served by Actuator health groups, not a custom controller (`management.endpoints.web.base-path` is `/`, so these are the real paths, not `/actuator/*`):
 
 - `GET /health`
 - `GET /health/startup`
@@ -47,4 +25,15 @@ Served by Actuator health groups, not a custom controller (`management.endpoints
 - `GET /metrics`
 - `GET /info`
 
-Everything else is denied by `HttpSecurityConfig`.
+All other HTTP endpoints are denied.
+
+## Local Development
+
+```bash
+docker compose up -d
+./mvnw clean verify
+```
+
+Ephemeral JWT keys are permitted only for local and test profiles. Staging and
+production require a configured private key, public key, `kid`, issuer and
+audience supplied through deployment secrets/configuration.

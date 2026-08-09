@@ -10,6 +10,9 @@ public interface SessionRepository {
 
   Optional<Session> findById(UUID sessionId);
 
+  /** Acquires the session row lock for refresh, replay and password flows. */
+  Optional<Session> findByIdForUpdate(UUID sessionId);
+
   Optional<Session> findByRefreshTokenHash(String refreshTokenHash);
 
   void insert(Session session);
@@ -25,4 +28,7 @@ public interface SessionRepository {
    * @return the number of sessions revoked.
    */
   int revokeAllActiveForAccount(UUID accountId, String reason, Instant now);
+
+  /** Revokes currently-valid sessions for an account except its retained current session. */
+  int revokeOtherActiveForAccount(UUID accountId, UUID retainedSessionId, String reason, Instant now);
 }

@@ -2,6 +2,7 @@ package com.estoma.authentication.application.port;
 
 import com.estoma.authentication.domain.credential.Credential;
 import java.util.Optional;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -18,6 +19,9 @@ public interface CredentialRepository {
   /** First-time configuration; the row does not exist until this is called. */
   void insert(Credential credential);
 
-  /** Rehash (ChangePassword/ResetPassword/RegenerateTemporaryPassword). No version column on this table. */
+  /** Rehash or replace a temporary credential. */
   int update(Credential credential);
+
+  /** Atomically consumes the exact temporary credential that was authenticated. */
+  int consumeTemporaryIfValid(UUID accountId, int credentialVersion, Instant now);
 }

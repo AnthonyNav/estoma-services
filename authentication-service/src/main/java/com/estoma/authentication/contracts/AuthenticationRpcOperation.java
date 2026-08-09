@@ -8,7 +8,8 @@ public enum AuthenticationRpcOperation {
   RESET_PASSWORD("ResetPassword"),
   CHANGE_PASSWORD("ChangePassword"),
   SET_TEMPORARY_PASSWORD("SetTemporaryPassword"),
-  REGENERATE_TEMPORARY_PASSWORD("RegenerateTemporaryPassword");
+  REGENERATE_TEMPORARY_PASSWORD("RegenerateTemporaryPassword"),
+  GET_RECOVERY_CODE_FOR_DELIVERY("GetRecoveryCodeForDelivery");
 
   private final String wireName;
 

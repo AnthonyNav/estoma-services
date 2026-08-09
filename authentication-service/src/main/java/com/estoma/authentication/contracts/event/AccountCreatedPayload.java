@@ -6,4 +6,4 @@ import java.util.UUID;
 
 /** Payload of {@code AccountCreated} (events.md §3). Status is always INACTIVE at creation. */
 public record AccountCreatedPayload(
-    UUID accountId, UUID personId, LoginType loginType, String status, int version, Instant createdAt) {}
+    UUID accountId, UUID personId, LoginType loginType, String status, Instant createdAt) {}
