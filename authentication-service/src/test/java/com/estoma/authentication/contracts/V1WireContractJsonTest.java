@@ -83,6 +83,11 @@ class V1WireContractJsonTest {
   }
 
   @Test
+  void commonMessageKindsIncludeQueryWithoutAddingRoutingMetadata() {
+    assertThat(MessageKind.values()).contains(MessageKind.QUERY);
+  }
+
+  @Test
   void envelopeDoesNotDeclareRoutingOrReplyMetadata() {
     var fields = Arrays.stream(MessageEnvelope.class.getRecordComponents()).map(RecordComponent::getName).toList();
 
@@ -95,24 +100,42 @@ class V1WireContractJsonTest {
     Instant now = Instant.parse("2026-08-08T00:00:00Z");
 
     var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "PASSWORD_RESET", now)));
-    var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.MATRICULA, "COMMAND", now)));
+     var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.USERNAME, "ADMINISTRATIVE", now)));
     var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE", null, now)));
     var created = mapper.readTree(mapper.writeValueAsBytes(new AccountCreatedPayload(accountId, UUID.randomUUID(), LoginType.USERNAME, "INACTIVE", now)));
-    var activated = mapper.readTree(mapper.writeValueAsBytes(new AccountActivatedPayload(accountId, "INACTIVE", "ACTIVE", "COMMAND", now)));
+     var activated = mapper.readTree(mapper.writeValueAsBytes(new AccountActivatedPayload(accountId, "INACTIVE", "ACTIVE", "ADMINISTRATIVE", now)));
     var sessions = mapper.readTree(mapper.writeValueAsBytes(new AllAccountSessionsRevokedPayload(accountId, "PERSON_DEACTIVATED", now)));
 
     assertThat(password.get("changeSource").asString()).isEqualTo("PASSWORD_RESET");
     assertThat(password.has("sessionsRevoked")).isFalse();
-    assertThat(login.get("changeSource").asString()).isEqualTo("COMMAND");
+     assertThat(login.get("changeSource").asString()).isEqualTo("ADMINISTRATIVE");
     assertThat(login.has("version")).isFalse();
     assertThat(created.has("version")).isFalse();
     assertThat(activated.get("previousStatus").asString()).isEqualTo("INACTIVE");
-    assertThat(activated.get("activationReason").asString()).isEqualTo("COMMAND");
+     assertThat(activated.get("activationReason").asString()).isEqualTo("ADMINISTRATIVE");
     assertThat(deactivation.get("previousStatus").asString()).isEqualTo("ACTIVE");
     assertThat(deactivation.get("reasonDetail").isNull()).isTrue();
     assertThat(deactivation.get("reasonCode").asString()).isEqualTo("ADMINISTRATIVE");
     assertThat(sessions.get("reasonCode").asString()).isEqualTo("PERSON_DEACTIVATED");
     assertThat(sessions.has("reason")).isFalse();
+
+    var syncFailure = mapper.readTree(mapper.writeValueAsBytes(
+        new StudentLoginIdentifierSynchronizationFailedPayload(
+            accountId, UUID.randomUUID(), 3, "ACCOUNT_NOT_FOUND_FOR_STUDENT", now)));
+    assertThat(syncFailure.size()).isEqualTo(5);
+    assertThat(syncFailure.has("accountId")).isTrue();
+    assertThat(syncFailure.has("studentAcademicProfileId")).isTrue();
+    assertThat(syncFailure.has("studentNumberVersion")).isTrue();
+    assertThat(syncFailure.has("errorCode")).isTrue();
+    assertThat(syncFailure.has("failedAt")).isTrue();
+  }
+
+  @Test
+  void authenticationAndChangePasswordResponsesExposeOnlyTheV1Fields() {
+    assertThat(Arrays.stream(AuthenticateAccountResponse.class.getRecordComponents()).map(RecordComponent::getName).toList())
+        .containsExactly("accountId", "sessionId", "accessToken", "refreshToken", "authState");
+    assertThat(Arrays.stream(ChangePasswordResponse.class.getRecordComponents()).map(RecordComponent::getName).toList())
+        .containsExactly("sessionId", "accessToken", "refreshToken", "authState");
   }
 
   @Test

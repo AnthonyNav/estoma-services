@@ -39,7 +39,7 @@ class ContractAccountAuthorizationPolicyTest {
   @Test
   void rejectsAnUndeclaredScope() {
     UUID accountId = UUID.randomUUID();
-    assertRejected(envelope("bff", new Actor("ACCOUNT", accountId, null, "GLOBAL", null), accountId));
+     assertRejected(envelope("bff", new Actor("ACCOUNT", accountId, null, "SELF", null), accountId));
   }
 
   @Test

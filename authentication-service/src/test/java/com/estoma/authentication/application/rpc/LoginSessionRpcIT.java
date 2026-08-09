@@ -188,7 +188,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
 
     assertThat(((RpcOutcome.Rejected<?>) replay).code()).isEqualTo(RejectionCode.REFRESH_TOKEN_REPLAY);
     assertThat(sessionRepository.findById(authenticated.sessionId()).orElseThrow().revocationReason())
-        .isEqualTo("refresh_token_replay");
+         .isEqualTo("REFRESH_TOKEN_REPLAY");
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE aggregate_id = :sessionId AND message_type = 'SessionRevoked'")
         .param("sessionId", authenticated.sessionId()).query(Long.class).single()).isEqualTo(1);
   }
@@ -254,7 +254,12 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
             dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
     var authResponse = (AuthenticateAccountResponse) authOutcome.response();
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> revokeHandler.handle(new RevokeSessionRequest(authResponse.sessionId(), UUID.randomUUID())));
+     var outcome = dispatcher.execute(UUID.randomUUID(), () -> revokeHandler.handle(
+         new com.estoma.authentication.contracts.rpc.RpcRequestContext(
+             UUID.randomUUID(), UUID.randomUUID(), "bff",
+             new com.estoma.authentication.contracts.Actor("ACCOUNT", UUID.randomUUID(), null, "SELF", null),
+             authResponse.accountId(), null),
+         new RevokeSessionRequest(authResponse.sessionId())));
 
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.SESSION_NOT_FOUND);
   }

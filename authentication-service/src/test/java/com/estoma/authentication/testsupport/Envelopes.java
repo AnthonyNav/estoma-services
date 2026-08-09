@@ -26,7 +26,7 @@ public final class Envelopes {
     boolean publicRecovery = "RequestPasswordRecovery".equals(messageType);
     Actor actor = publicRecovery
         ? new Actor("ANONYMOUS", null, null, "PUBLIC", null)
-        : new Actor("SYSTEM", null, "bff", "GLOBAL", null);
+        : new Actor("ACCOUNT", accountId, null, "GLOBAL", null);
     return new MessageEnvelope(
         messageId, messageType, 1, MessageKind.COMMAND, "bff", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(),
         UUID.randomUUID().toString(), publicRecovery ? null : accountId, null, actor, payloadNode);

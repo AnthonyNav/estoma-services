@@ -75,9 +75,9 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
 
     SetTemporaryPasswordResponse temporaryPassword = rpcSuccess(
         AuthenticationRpcOperation.SET_TEMPORARY_PASSWORD,
-        new SetTemporaryPasswordRequest(accountId, null, UUID.randomUUID(), "v1-smoke-" + UUID.randomUUID()),
+        new SetTemporaryPasswordRequest(accountId, accountId, "v1-smoke-" + UUID.randomUUID()),
         accountId,
-        new Actor("SYSTEM", null, "bff", "GLOBAL", null),
+        new Actor("ACCOUNT", accountId, null, "GLOBAL", null),
         SetTemporaryPasswordResponse.class);
 
     // Accounts are intentionally inactive after CreateAccount; activation is the required command once a credential exists.
@@ -98,14 +98,14 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
     ResultPayload restrictedRefresh = rpcResult(
         AuthenticationRpcOperation.REFRESH_SESSION,
         new RefreshSessionRequest(restrictedSession.sessionId(), "not-issued"),
-        null,
+        accountId,
         accountActor(accountId));
     assertThat(restrictedRefresh.status()).isEqualTo(ResultStatus.REJECTED);
     assertThat(restrictedRefresh.error().code()).isEqualTo(RejectionCode.INVALID_REFRESH_TOKEN.name());
 
     ChangePasswordResponse passwordChanged = rpcSuccess(
         AuthenticationRpcOperation.CHANGE_PASSWORD,
-        new ChangePasswordRequest(accountId, restrictedSession.sessionId(), temporaryPassword.temporaryPassword(), NORMAL_PASSWORD),
+         new ChangePasswordRequest(restrictedSession.sessionId(), null, NORMAL_PASSWORD),
         accountId,
         accountActor(accountId),
         ChangePasswordResponse.class);
@@ -118,8 +118,8 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
     RefreshSessionResponse refreshed = rpcSuccess(
         AuthenticationRpcOperation.REFRESH_SESSION,
         new RefreshSessionRequest(restrictedSession.sessionId(), passwordChanged.refreshToken()),
-        null,
-        accountActor(accountId),
+         accountId,
+         accountActor(accountId),
         RefreshSessionResponse.class);
     assertThat(refreshed.refreshToken()).isNotBlank();
 
@@ -175,7 +175,7 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
   private <T> T rpcSuccess(
       AuthenticationRpcOperation operation, Object payload, UUID aggregateId, Actor actor, Class<T> responseType) {
     ResultPayload result = rpcResult(operation, payload, aggregateId, actor);
-    assertThat(result.status()).isEqualTo(ResultStatus.SUCCEEDED);
+     assertThat(result.status()).isEqualTo(ResultStatus.SUCCEEDED);
     return codec.convertPayload(new MessageEnvelope(
         UUID.randomUUID(), operation.wireName(), 1, MessageKind.RPC_RESPONSE, "authentication", java.time.Instant.now(),
         UUID.randomUUID(), UUID.randomUUID(), null, null, aggregateId, null, actor, codec.toJsonNode(result.data())), responseType);
@@ -184,10 +184,15 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
   private ResultPayload rpcResult(AuthenticationRpcOperation operation, Object payload, UUID aggregateId, Actor actor) {
     MessageProperties properties = new MessageProperties();
     properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+    properties.setReplyTo("amq.rabbitmq.reply-to");
     MessageEnvelope request = new MessageEnvelope(
-        UUID.randomUUID(), operation.wireName(), 1, MessageKind.RPC_REQUEST,
-        actor.service() == null ? "bff" : actor.service(), java.time.Instant.now(), UUID.randomUUID(), null, null, null,
-        aggregateId, null, actor, codec.toJsonNode(payload));
+         UUID.randomUUID(), operation.wireName(), 1, MessageKind.RPC_REQUEST,
+         actor.service() == null ? "bff" : actor.service(), java.time.Instant.now(), UUID.randomUUID(), null, null,
+         switch (payload) {
+           case SetTemporaryPasswordRequest temporary -> temporary.idempotencyKey();
+           default -> null;
+         },
+         aggregateId, null, actor, codec.toJsonNode(payload));
     Message reply = rabbitTemplate.sendAndReceive(
         MessagingNames.SECURITY_RPC_EXCHANGE,
         MessagingNames.AUTHENTICATION_RPC_QUEUE,

@@ -131,8 +131,8 @@ class CommandDispatcherIT extends AbstractPostgresIT {
 
     dispatcher.dispatch(first);
 
-    assertThat(dispatcher.dispatch(conflict))
-        .isEqualTo(new CommandOutcome.Rejected(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST));
+     assertThat(dispatcher.dispatch(conflict))
+         .isEqualTo(new CommandOutcome.Rejected(RejectionCode.ACTOR_NOT_AUTHORIZED));
     assertThat(jdbc.sql("SELECT count(*) FROM accounts WHERE person_id = :personId")
         .param("personId", personId).query(Long.class).single()).isEqualTo(1L);
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AccountCreated' AND correlation_id = :correlationId")
@@ -248,8 +248,9 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   void changeLoginIdentifierRejectsACollision() {
     UUID personId = activePerson();
     String takenIdentifier = "taken-" + UUID.randomUUID();
-    accountRepository.insert(Account.createNew(UUID.randomUUID(), personId, LoginIdentifier.of(LoginType.MATRICULA, takenIdentifier), Instant.now()));
-    UUID accountId = insertInactiveAccount(personId);
+     accountRepository.insert(Account.createNew(UUID.randomUUID(), personId, LoginIdentifier.of(LoginType.USERNAME, takenIdentifier), Instant.now()));
+     UUID accountId = UUID.randomUUID();
+     accountRepository.insert(Account.createNew(accountId, personId, LoginIdentifier.of(LoginType.USERNAME, "change-" + UUID.randomUUID()), Instant.now()));
 
     var outcome =
         dispatcher.dispatch(
@@ -291,6 +292,20 @@ class CommandDispatcherIT extends AbstractPostgresIT {
 
     assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(null));
     assertThat(passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId)).isPresent();
+  }
+
+  @Test
+  void requestingRecoveryDoesNotIncrementAccountVersion() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+    String identifier = accountRepository.findById(accountId).orElseThrow().loginIdentifier().value();
+    int versionBefore = accountRepository.findById(accountId).orElseThrow().version();
+
+    dispatcher.dispatch(
+        Envelopes.command(AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(), new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
+
+    Account accountAfter = accountRepository.findById(accountId).orElseThrow();
+    assertThat(accountAfter.version()).isEqualTo(versionBefore);
+    assertThat(accountAfter.lastRecoveryRequestedAt()).isNotNull();
   }
 
   @Test
@@ -425,7 +440,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         AuthenticationCommand.ACTIVATE_ACCOUNT.wireName(),
         1,
         MessageKind.COMMAND,
-        "academic",
+         "student-import-process",
         Instant.now(),
         UUID.randomUUID(),
         null,
@@ -433,7 +448,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         UUID.randomUUID().toString(),
         accountId,
         null,
-        new Actor("SYSTEM", null, "academic", "GLOBAL", "student-import-process"),
+         new Actor("SYSTEM", null, "academic", "GLOBAL", null),
         codec.toJsonNode(new ActivateAccountCommand(accountId, expectedVersion)));
   }
 

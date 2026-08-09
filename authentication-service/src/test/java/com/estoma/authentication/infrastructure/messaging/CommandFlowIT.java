@@ -69,7 +69,7 @@ class CommandFlowIT extends AbstractRabbitMqIT {
     outboxRelay.relay();
 
     MessageEnvelope result = awaitResult(resultsQueue, envelope.correlationId());
-    assertThat(result.messageType()).isEqualTo("CreateAccountSucceeded");
+     assertThat(result.messageType()).isEqualTo("CreateAccountResult");
     assertThat(result.correlationId()).isEqualTo(envelope.correlationId());
   }
 

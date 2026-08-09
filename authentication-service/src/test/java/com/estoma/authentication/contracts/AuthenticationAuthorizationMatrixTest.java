@@ -67,7 +67,8 @@ class AuthenticationAuthorizationMatrixTest {
   private static Actor actor(AuthenticationAuthorizationMatrix.Rule rule, UUID target) {
     return switch (rule.actorMode()) {
       case ANONYMOUS -> new Actor("ANONYMOUS", null, null, rule.scope(), null);
-      case ACCOUNT -> accountActor(target != null ? target : UUID.randomUUID(), rule.scope());
+      case ACCOUNT -> new Actor("ACCOUNT", target != null ? target : UUID.randomUUID(), null, rule.scope(),
+          "SYSTEM_PERSONNEL".equals(rule.scope()) ? "personnel" : null);
       case SYSTEM -> new Actor("SYSTEM", null, rule.actorService(), rule.scope(), rule.actorSystemId());
     };
   }

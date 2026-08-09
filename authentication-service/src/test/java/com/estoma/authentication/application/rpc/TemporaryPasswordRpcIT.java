@@ -29,7 +29,7 @@ class TemporaryPasswordRpcIT extends AbstractPostgresIT {
   @Test
   void setTemporaryPasswordSucceedsAndSetsMustChangePassword() {
     UUID accountId = insertAccount();
-    var request = new SetTemporaryPasswordRequest(accountId, null, UUID.randomUUID(), "key-" + UUID.randomUUID());
+     var request = new SetTemporaryPasswordRequest(accountId, accountId, "key-" + UUID.randomUUID());
 
     var outcome = dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(request));
 
@@ -44,7 +44,7 @@ class TemporaryPasswordRpcIT extends AbstractPostgresIT {
     UUID accountId = insertAccount();
     String key = "key-" + UUID.randomUUID();
     UUID requestedBy = UUID.randomUUID();
-    var request = new SetTemporaryPasswordRequest(accountId, null, requestedBy, key);
+     var request = new SetTemporaryPasswordRequest(accountId, requestedBy, key);
     dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(request));
 
     var second = dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(request));
@@ -58,10 +58,10 @@ class TemporaryPasswordRpcIT extends AbstractPostgresIT {
     UUID accountId = insertAccount();
     String key = "key-" + UUID.randomUUID();
     UUID requestedBy = UUID.randomUUID();
-    dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(new SetTemporaryPasswordRequest(accountId, null, requestedBy, key)));
+     dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(new SetTemporaryPasswordRequest(accountId, requestedBy, key)));
 
     var second =
-        dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(new SetTemporaryPasswordRequest(accountId, Instant.now().plusSeconds(3600), requestedBy, key)));
+         dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(new SetTemporaryPasswordRequest(accountId, UUID.randomUUID(), key)));
 
     assertThat(second).isInstanceOf(RpcOutcome.Rejected.class);
     assertThat(((RpcOutcome.Rejected<?>) second).code()).isEqualTo(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST);
@@ -69,7 +69,7 @@ class TemporaryPasswordRpcIT extends AbstractPostgresIT {
 
   @Test
   void setTemporaryPasswordRejectsUnknownAccount() {
-    var request = new SetTemporaryPasswordRequest(UUID.randomUUID(), null, UUID.randomUUID(), "key-" + UUID.randomUUID());
+     var request = new SetTemporaryPasswordRequest(UUID.randomUUID(), UUID.randomUUID(), "key-" + UUID.randomUUID());
 
     var outcome = dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(request));
 
@@ -81,11 +81,11 @@ class TemporaryPasswordRpcIT extends AbstractPostgresIT {
   void regenerateTemporaryPasswordIssuesANewSecretWithADistinctKey() {
     UUID accountId = insertAccount();
     UUID requestedBy = UUID.randomUUID();
-    dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(new SetTemporaryPasswordRequest(accountId, null, requestedBy, "set-" + UUID.randomUUID())));
+     dispatcher.execute(UUID.randomUUID(), () -> setHandler.handle(new SetTemporaryPasswordRequest(accountId, requestedBy, "set-" + UUID.randomUUID())));
 
     var outcome =
         dispatcher.execute(
-            UUID.randomUUID(), () -> regenerateHandler.handle(new RegenerateTemporaryPasswordRequest(accountId, null, requestedBy, "regen-" + UUID.randomUUID())));
+             UUID.randomUUID(), () -> regenerateHandler.handle(new RegenerateTemporaryPasswordRequest(accountId, requestedBy, "regen-" + UUID.randomUUID())));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
   }

@@ -60,8 +60,8 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
     var projection = personStatusProjectionRepository.findByPersonId(personId).orElseThrow();
     assertThat(projection.status()).isEqualTo("INACTIVE");
     assertThat(projection.sourceVersion()).isEqualTo(2);
-    assertThat(sessionRepository.findById(firstSessionId).orElseThrow().revocationReason()).isEqualTo("person_deactivated");
-    assertThat(sessionRepository.findById(secondSessionId).orElseThrow().revocationReason()).isEqualTo("person_deactivated");
+     assertThat(sessionRepository.findById(firstSessionId).orElseThrow().revocationReason()).isEqualTo("PERSON_DEACTIVATED");
+     assertThat(sessionRepository.findById(secondSessionId).orElseThrow().revocationReason()).isEqualTo("PERSON_DEACTIVATED");
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AllAccountSessionsRevoked'").query(Long.class).single()).isEqualTo(2L);
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AllAccountSessionsRevoked' AND aggregate_id IN (:first, :second)")
         .param("first", firstAccountId).param("second", secondAccountId).query(Long.class).single()).isEqualTo(2L);
@@ -148,6 +148,6 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
             .param("accountId", accountId.toString())
             .query(String.class)
             .single();
-    assertThat(errorCode).isEqualTo("ACCOUNT_NOT_FOUND");
+     assertThat(errorCode).isEqualTo("ACCOUNT_NOT_FOUND_FOR_STUDENT");
   }
 }
