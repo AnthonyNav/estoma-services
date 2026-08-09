@@ -14,6 +14,7 @@ import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.rpc.ChangePasswordRequest;
 import com.estoma.authentication.contracts.rpc.ResetPasswordRequest;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
@@ -29,6 +30,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 class RecoveryRpcIT extends AbstractPostgresIT {
+
+  private RpcRequestContext context(UUID accountId) {
+    return new RpcRequestContext(UUID.randomUUID(), UUID.randomUUID(), "test", new com.estoma.authentication.contracts.Actor("ACCOUNT", accountId, null, "SELF", null), accountId, null);
+  }
 
   private static final String OLD_PASSWORD = "old-password-123";
   private static final String NEW_PASSWORD = "new-password-456";
@@ -52,7 +57,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     String code = uniqueCode("100001");
     var recovery = insertRecoveryRequest(accountId, code);
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), code)));
+    var outcome = dispatcher.execute(context(accountId), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), code)));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
     assertThat(((com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse) ((RpcOutcome.Success<?>) outcome).response()).result()).isEqualTo("VALID");
@@ -63,7 +68,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     UUID accountId = insertActiveAccountWithPassword();
     var recovery = insertRecoveryRequest(accountId, uniqueCode("100002"));
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), "000000")));
+    var outcome = dispatcher.execute(context(accountId), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), "000000")));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
     assertThat(((com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse) ((RpcOutcome.Success<?>) outcome).response()).result()).isEqualTo("INVALID");
@@ -76,7 +81,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
 
     for (int attempt = 0; attempt < 5; attempt++) {
       var outcome = dispatcher.execute(
-          UUID.randomUUID(),
+          context(accountId),
           () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), "000000")));
       assertThat(((com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse) ((RpcOutcome.Success<?>) outcome).response()).result())
           .isEqualTo("INVALID");
@@ -93,7 +98,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     String code = uniqueCode("200001");
     var recovery = insertRecoveryRequest(accountId, code);
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
+    var outcome = dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
     assertThat(passwordHasher.matches(NEW_PASSWORD, credentialRepository.findByAccountId(accountId).orElseThrow().hash())).isTrue();
@@ -105,9 +110,9 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     UUID accountId = insertActiveAccountWithPassword();
     String code = uniqueCode("200002");
     var recovery = insertRecoveryRequest(accountId, code);
-    dispatcher.execute(UUID.randomUUID(), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
+    dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
 
-    var second = dispatcher.execute(UUID.randomUUID(), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, "yet-another-password")));
+    var second = dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, "yet-another-password")));
 
     assertThat(((RpcOutcome.Rejected<?>) second).code()).isEqualTo(RejectionCode.RECOVERY_NOT_AVAILABLE);
   }
@@ -120,7 +125,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     var recovery = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, tokenHasher.sha256Hex(code), past.minusSeconds(1800), past);
     recoveryRepository.insert(recovery);
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
+    var outcome = dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
 
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.RECOVERY_NOT_AVAILABLE);
   }
@@ -131,12 +136,46 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     Session currentSession = normalSession(accountId);
     sessionRepository.insert(currentSession);
 
-     var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, NEW_PASSWORD)));
+     var outcome = dispatcher.execute(context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, NEW_PASSWORD)));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
     assertThat(passwordHasher.matches(NEW_PASSWORD, credentialRepository.findByAccountId(accountId).orElseThrow().hash())).isTrue();
     assertThat(sessionRepository.findById(currentSession.sessionId()).orElseThrow().isValid(Instant.now())).isTrue();
-    assertThat(eventCount(accountId, "OtherAccountSessionsRevoked")).isZero();
+     assertThat(eventCount(accountId, "OtherAccountSessionsRevoked")).isZero();
+   }
+
+  @Test
+  void securityRpcEventsPreserveRequestMetadata() {
+    UUID accountId = insertActiveAccountWithPassword();
+    Session currentSession = normalSession(accountId);
+    sessionRepository.insert(currentSession);
+    UUID messageId = UUID.randomUUID();
+    UUID correlationId = UUID.randomUUID();
+    RpcRequestContext requestContext = new RpcRequestContext(
+        messageId,
+        correlationId,
+        "bff",
+        new com.estoma.authentication.contracts.Actor("ACCOUNT", accountId, null, "SELF", null),
+        accountId,
+        null);
+
+    dispatcher.execute(
+        requestContext,
+        () -> changeHandler.handle(requestContext, new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, NEW_PASSWORD)));
+
+    var metadata = jdbc.sql(
+            "SELECT correlation_id, causation_id, operation_id, idempotency_key, actor::jsonb ->> 'accountId' "
+                + "FROM outbox_messages WHERE message_type = 'PasswordChanged' AND correlation_id = :correlationId")
+        .param("correlationId", correlationId)
+        .query((rs, rowNum) -> new Object[] {
+            rs.getObject(1), rs.getObject(2), rs.getObject(3), rs.getString(4), rs.getString(5)})
+        .single();
+
+    assertThat(metadata[0]).isEqualTo(correlationId);
+    assertThat(metadata[1]).isEqualTo(messageId);
+    assertThat(metadata[2]).isNull();
+    assertThat(metadata[3]).isNull();
+    assertThat(metadata[4]).isEqualTo(accountId.toString());
   }
 
   @Test
@@ -147,7 +186,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     sessionRepository.insert(currentSession);
     sessionRepository.insert(otherSession);
 
-     var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, NEW_PASSWORD)));
+     var outcome = dispatcher.execute(context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, NEW_PASSWORD)));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
     assertThat(sessionRepository.findById(currentSession.sessionId()).orElseThrow().isValid(Instant.now())).isTrue();
@@ -162,7 +201,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     Session currentSession = normalSession(accountId);
     sessionRepository.insert(currentSession);
 
-     var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(currentSession.sessionId(), "not-the-current-password", NEW_PASSWORD)));
+     var outcome = dispatcher.execute(context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(currentSession.sessionId(), "not-the-current-password", NEW_PASSWORD)));
 
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.INVALID_CREDENTIALS);
   }
@@ -173,7 +212,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     Session currentSession = normalSession(accountId);
     sessionRepository.insert(currentSession);
 
-     var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, OLD_PASSWORD)));
+     var outcome = dispatcher.execute(context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, OLD_PASSWORD)));
 
      assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.PASSWORD_REUSE);
   }
@@ -187,14 +226,14 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     sessionRepository.insert(restricted);
 
     var invalid = dispatcher.execute(
-         UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(restricted.sessionId(), null, "passwordpassword")));
+         context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(restricted.sessionId(), null, "passwordpassword")));
 
     assertThat(((RpcOutcome.Rejected<?>) invalid).code()).isEqualTo(RejectionCode.INVALID_PASSWORD);
     assertThat(sessionRepository.findById(restricted.sessionId()).orElseThrow().authState())
         .isEqualTo(Session.AuthState.PASSWORD_CHANGE_REQUIRED);
 
     var changed = dispatcher.execute(
-         UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(restricted.sessionId(), null, NEW_PASSWORD)));
+         context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(restricted.sessionId(), null, NEW_PASSWORD)));
 
     assertThat(changed).isInstanceOf(RpcOutcome.Success.class);
     Session renewed = sessionRepository.findById(restricted.sessionId()).orElseThrow();

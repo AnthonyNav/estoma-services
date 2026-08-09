@@ -15,6 +15,7 @@ import com.estoma.authentication.contracts.rpc.AuthenticateAccountResponse;
 import com.estoma.authentication.contracts.rpc.RefreshSessionRequest;
 import com.estoma.authentication.contracts.rpc.RefreshSessionResponse;
 import com.estoma.authentication.contracts.rpc.RevokeSessionRequest;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
 import com.estoma.authentication.domain.account.LoginIdentifier;
@@ -32,6 +33,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 class LoginSessionRpcIT extends AbstractPostgresIT {
+
+  private RpcRequestContext context(UUID accountId) {
+    return new RpcRequestContext(UUID.randomUUID(), UUID.randomUUID(), "test", accountId == null ? null : new com.estoma.authentication.contracts.Actor("ACCOUNT", accountId, null, "SELF", null), accountId, null);
+  }
 
   private static final String PASSWORD = "correct horse battery staple";
 
@@ -53,7 +58,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
 
     var outcome =
         dispatcher.execute(
-            UUID.randomUUID(),
+             context(null),
             () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, "Chrome", "127.0.0.1", "UA")));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
@@ -71,7 +76,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
         .temporaryPassword(passwordHasher.hash(PASSWORD), now.plusSeconds(60), now);
     credentialRepository.update(temporary);
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(
+  var outcome = dispatcher.execute(context(null), () -> authenticateHandler.handle(
         new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
 
     var response = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) outcome).response();
@@ -88,7 +93,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
 
     var outcome =
         dispatcher.execute(
-            UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, "wrong-password", null, null, null)));
+            context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, "wrong-password", null, null, null)));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Rejected.class);
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.INVALID_CREDENTIALS);
@@ -99,7 +104,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
   void authenticateDoesNotRevealAnUnknownIdentifier() {
     var outcome =
         dispatcher.execute(
-            UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, "no-such-user", "irrelevant", null, null, null)));
+            context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, "no-such-user", "irrelevant", null, null, null)));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Rejected.class);
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.INVALID_CREDENTIALS);
@@ -111,13 +116,13 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     UUID accountId = insertActiveAccountWithPassword(identifier, PASSWORD);
 
     for (int i = 0; i < 5; i++) {
-      dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, "wrong", null, null, null)));
+      dispatcher.execute(context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, "wrong", null, null, null)));
     }
 
     assertThat(accountRepository.findById(accountId).orElseThrow().isLocked(Instant.now())).isTrue();
 
     var lockedOutcome =
-        dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
+         dispatcher.execute(context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
     assertThat(((RpcOutcome.Rejected<?>) lockedOutcome).code()).isEqualTo(RejectionCode.ACCOUNT_LOCKED);
   }
 
@@ -134,7 +139,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
             ready.countDown();
             start.await();
             return dispatcher.execute(
-                UUID.randomUUID(),
+                 context(null),
                 () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, "wrong", null, null, null)));
           }))
           .toList();
@@ -157,17 +162,17 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     insertActiveAccountWithPassword(identifier, PASSWORD);
     var authOutcome =
         (RpcOutcome.Success<?>)
-            dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
+            dispatcher.execute(context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
     var authResponse = (AuthenticateAccountResponse) authOutcome.response();
 
     var refreshOutcome =
-        dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authResponse.sessionId(), authResponse.refreshToken())));
+         dispatcher.execute(context(authResponse.accountId()), () -> refreshHandler.handle(context(authResponse.accountId()), new RefreshSessionRequest(authResponse.sessionId(), authResponse.refreshToken())));
 
     assertThat(refreshOutcome).isInstanceOf(RpcOutcome.Success.class);
     var refreshResponse = (RefreshSessionResponse) ((RpcOutcome.Success<?>) refreshOutcome).response();
     assertThat(refreshResponse.refreshToken()).isNotEqualTo(authResponse.refreshToken());
 
-    var reuseOldToken = dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authResponse.sessionId(), authResponse.refreshToken())));
+    var reuseOldToken = dispatcher.execute(context(authResponse.accountId()), () -> refreshHandler.handle(context(authResponse.accountId()), new RefreshSessionRequest(authResponse.sessionId(), authResponse.refreshToken())));
     assertThat(reuseOldToken).isInstanceOf(RpcOutcome.Success.class);
   }
 
@@ -176,15 +181,15 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     String identifier = "user-" + UUID.randomUUID();
     insertActiveAccountWithPassword(identifier, PASSWORD);
     var authenticated = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) dispatcher.execute(
-        UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)))).response();
-    dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+        context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)))).response();
+     dispatcher.execute(context(authenticated.accountId()), () -> refreshHandler.handle(context(authenticated.accountId()), new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
     jdbc.sql("UPDATE sessions SET previous_refresh_valid_until = :expired WHERE session_id = :sessionId")
         .param("expired", java.sql.Timestamp.from(Instant.now().minusSeconds(1)))
         .param("sessionId", authenticated.sessionId())
         .update();
 
     var replay = dispatcher.execute(
-        UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+        context(authenticated.accountId()), () -> refreshHandler.handle(context(authenticated.accountId()), new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
 
     assertThat(((RpcOutcome.Rejected<?>) replay).code()).isEqualTo(RejectionCode.REFRESH_TOKEN_REPLAY);
     assertThat(sessionRepository.findById(authenticated.sessionId()).orElseThrow().revocationReason())
@@ -198,8 +203,8 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     String identifier = "user-" + UUID.randomUUID();
     insertActiveAccountWithPassword(identifier, PASSWORD);
     var authenticated = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) dispatcher.execute(
-        UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)))).response();
-    dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+        context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)))).response();
+     dispatcher.execute(context(authenticated.accountId()), () -> refreshHandler.handle(context(authenticated.accountId()), new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
     jdbc.sql("UPDATE sessions SET previous_refresh_valid_until = :expired WHERE session_id = :sessionId")
         .param("expired", java.sql.Timestamp.from(Instant.now().minusSeconds(1)))
         .param("sessionId", authenticated.sessionId())
@@ -211,7 +216,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
       var futures = java.util.stream.IntStream.range(0, 2).mapToObj(ignored -> executor.submit(() -> {
         ready.countDown();
         start.await();
-        return dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+         return dispatcher.execute(context(authenticated.accountId()), () -> refreshHandler.handle(context(authenticated.accountId()), new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
       })).toList();
       assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
       start.countDown();
@@ -234,15 +239,43 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     insertActiveAccountWithPassword(identifier, PASSWORD);
     var authOutcome =
         (RpcOutcome.Success<?>)
-            dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
+             dispatcher.execute(context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
     var authResponse = (AuthenticateAccountResponse) authOutcome.response();
 
-    var first = dispatcher.execute(UUID.randomUUID(), () -> revokeHandler.handle(new RevokeSessionRequest(authResponse.sessionId(), authResponse.accountId())));
-    var second = dispatcher.execute(UUID.randomUUID(), () -> revokeHandler.handle(new RevokeSessionRequest(authResponse.sessionId(), authResponse.accountId())));
+     var first = dispatcher.execute(context(authResponse.accountId()), () -> revokeHandler.handle(context(authResponse.accountId()), new RevokeSessionRequest(authResponse.sessionId())));
+     var second = dispatcher.execute(context(authResponse.accountId()), () -> revokeHandler.handle(context(authResponse.accountId()), new RevokeSessionRequest(authResponse.sessionId())));
 
     assertThat(first).isInstanceOf(RpcOutcome.Success.class);
     assertThat(second).isInstanceOf(RpcOutcome.Success.class);
     assertThat(sessionRepository.findById(authResponse.sessionId()).orElseThrow().isValid(Instant.now())).isFalse();
+  }
+
+  @Test
+  void concurrentRevocationLocksSessionAndEmitsOneEvent() throws Exception {
+    String identifier = "user-" + UUID.randomUUID();
+    insertActiveAccountWithPassword(identifier, PASSWORD);
+    var authResponse = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) dispatcher.execute(
+        context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)))).response();
+
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = java.util.stream.IntStream.range(0, 2).mapToObj(ignored -> executor.submit(() -> {
+        ready.countDown();
+        start.await();
+        RpcRequestContext context = context(authResponse.accountId());
+         return dispatcher.execute(context, () -> revokeHandler.handle(context, new RevokeSessionRequest(authResponse.sessionId())));
+      })).toList();
+      assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      for (var future : futures) {
+        assertThat(future.get(10, TimeUnit.SECONDS)).isInstanceOf(RpcOutcome.Success.class);
+      }
+    }
+
+    assertThat(sessionRepository.findById(authResponse.sessionId()).orElseThrow().revokedAt()).isNotNull();
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE aggregate_id = :sessionId AND message_type = 'SessionRevoked'")
+        .param("sessionId", authResponse.sessionId()).query(Long.class).single()).isEqualTo(1);
   }
 
   @Test
@@ -251,10 +284,10 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     insertActiveAccountWithPassword(identifier, PASSWORD);
     var authOutcome =
         (RpcOutcome.Success<?>)
-            dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
+             dispatcher.execute(context(null), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
     var authResponse = (AuthenticateAccountResponse) authOutcome.response();
 
-     var outcome = dispatcher.execute(UUID.randomUUID(), () -> revokeHandler.handle(
+     var outcome = dispatcher.execute(context(authResponse.accountId()), () -> revokeHandler.handle(
          new com.estoma.authentication.contracts.rpc.RpcRequestContext(
              UUID.randomUUID(), UUID.randomUUID(), "bff",
              new com.estoma.authentication.contracts.Actor("ACCOUNT", UUID.randomUUID(), null, "SELF", null),

@@ -202,8 +202,41 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     assertThat(accountRepository.findById(accountId).orElseThrow().deactivationReasonCode()).isEqualTo("ADMINISTRATIVE");
     assertThat(jdbc.sql("SELECT reason_code FROM account_status_history WHERE account_id = :accountId AND new_status = 'INACTIVE'")
         .param("accountId", accountId)
-        .query(String.class)
-        .single()).isEqualTo("ADMINISTRATIVE");
+         .query(String.class)
+         .single()).isEqualTo("ADMINISTRATIVE");
+  }
+
+  @Test
+  void studentImportMayDeactivateAMatriculaAccountForAcademicAbsence() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+
+    var outcome = dispatcher.dispatch(studentImportDeactivation(accountId, 2, "ACADEMIC_ABSENCE"));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(3));
+    assertThat(accountRepository.findById(accountId).orElseThrow().deactivationReasonCode()).isEqualTo("ACADEMIC_ABSENCE");
+  }
+
+  @Test
+  void studentImportCannotUseAdministrativeDeactivation() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+
+    var outcome = dispatcher.dispatch(studentImportDeactivation(accountId, 2, "ADMINISTRATIVE"));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.ACTOR_NOT_AUTHORIZED));
+  }
+
+  @Test
+  void studentImportCannotDeactivateUsernameAccounts() {
+    UUID personId = activePerson();
+    UUID accountId = UUID.randomUUID();
+    Account account = Account.createNew(accountId, personId, LoginIdentifier.of(LoginType.USERNAME, "academic-username-" + accountId), Instant.now());
+    accountRepository.insert(account);
+    credentialRepository.insert(Credential.configure(accountId, new PasswordHash("hash", "ARGON2ID", "{}"), Instant.now()));
+    accountRepository.update(account.activated(Instant.now()), account.version());
+
+    var outcome = dispatcher.dispatch(studentImportDeactivation(accountId, 2, "ACADEMIC_ABSENCE"));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.ACTOR_NOT_AUTHORIZED));
   }
 
   @Test
@@ -449,7 +482,25 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         accountId,
         null,
          new Actor("SYSTEM", null, "academic", "GLOBAL", null),
-        codec.toJsonNode(new ActivateAccountCommand(accountId, expectedVersion)));
+         codec.toJsonNode(new ActivateAccountCommand(accountId, expectedVersion)));
+  }
+
+  private MessageEnvelope studentImportDeactivation(UUID accountId, int expectedVersion, String reasonCode) {
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName(),
+        1,
+        MessageKind.COMMAND,
+        "student-import-process",
+        Instant.now(),
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        UUID.randomUUID().toString(),
+        accountId,
+        null,
+        new Actor("SYSTEM", null, "academic", "GLOBAL", null),
+        codec.toJsonNode(new DeactivateAccountCommand(accountId, expectedVersion, reasonCode, null)));
   }
 
   private static MessageEnvelope withMessageId(MessageEnvelope source, UUID messageId) {

@@ -1,12 +1,15 @@
 package com.estoma.authentication.application;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -45,6 +48,40 @@ class ContractAccountAuthorizationPolicyTest {
   @Test
   void rejectsAnAccountActorWhoseTargetDoesNotMatchItsScope() {
     assertRejected(envelope("bff", new Actor("ACCOUNT", UUID.randomUUID(), null, "SELF", null), UUID.randomUUID()));
+  }
+
+  @Test
+  void permitsAcademicStudentImportToDeactivateAnAggregate() {
+    UUID accountId = UUID.randomUUID();
+    assertThatCode(() -> policy.check(new MessageEnvelope(
+        UUID.randomUUID(), "DeactivateAccount", 1, MessageKind.COMMAND, "student-import-process", Instant.now(),
+        UUID.randomUUID(), null, UUID.randomUUID(), "test", accountId, 1,
+        new Actor("SYSTEM", null, "academic", "GLOBAL", null), null))).doesNotThrowAnyException();
+  }
+
+  @Test
+  void rejectsAcademicDeactivateWithoutAnAggregate() {
+    assertRejected(new MessageEnvelope(
+        UUID.randomUUID(), "DeactivateAccount", 1, MessageKind.COMMAND, "student-import-process", Instant.now(),
+        UUID.randomUUID(), null, UUID.randomUUID(), "test", null, null,
+        new Actor("SYSTEM", null, "academic", "GLOBAL", null), null));
+  }
+
+  @Test
+  void rejectsAcademicDeactivateFromAnotherProducer() {
+    assertRejected(new MessageEnvelope(
+        UUID.randomUUID(), "DeactivateAccount", 1, MessageKind.COMMAND, "academic-service", Instant.now(),
+        UUID.randomUUID(), null, UUID.randomUUID(), "test", UUID.randomUUID(), 1,
+        new Actor("SYSTEM", null, "academic", "GLOBAL", null), null));
+  }
+
+  @Test
+  void academicOnlyAuthorizesAccountLifecycleCommands() {
+    assertThat(com.estoma.authentication.contracts.AuthenticationAuthorizationMatrix.rules().stream()
+        .filter(rule -> "student-import-process".equals(rule.producer()))
+        .map(com.estoma.authentication.contracts.AuthenticationAuthorizationMatrix.Rule::operation)
+        .collect(java.util.stream.Collectors.toSet()))
+        .isEqualTo(Set.of("CreateAccount", "ActivateAccount", "DeactivateAccount"));
   }
 
   private void assertRejected(MessageEnvelope envelope) {

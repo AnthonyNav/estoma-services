@@ -40,6 +40,8 @@ import com.estoma.authentication.contracts.rpc.SetTemporaryPasswordRequest;
 import com.estoma.authentication.contracts.rpc.SetTemporaryPasswordResponse;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse;
+import com.estoma.authentication.infrastructure.messaging.AmqpNames;
+import com.estoma.authentication.infrastructure.messaging.outbound.RoutingKeyResolver;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.Arrays;
@@ -88,6 +90,14 @@ class V1WireContractJsonTest {
   }
 
   @Test
+  void passwordRecoveryRequestedUsesTheCanonicalRoutingKey() {
+    assertThat(AmqpNames.ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED)
+        .isEqualTo("authentication.password-recovery.requested");
+    assertThat(new RoutingKeyResolver().resolveEvent("PasswordRecoveryRequested").routingKey())
+        .isEqualTo("authentication.password-recovery.requested");
+  }
+
+  @Test
   void envelopeDoesNotDeclareRoutingOrReplyMetadata() {
     var fields = Arrays.stream(MessageEnvelope.class.getRecordComponents()).map(RecordComponent::getName).toList();
 
@@ -97,25 +107,34 @@ class V1WireContractJsonTest {
   @Test
   void eventPayloadsUseV1SourceAndReasonCodeFieldNames() {
     UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
     Instant now = Instant.parse("2026-08-08T00:00:00Z");
 
-    var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "PASSWORD_RESET", now)));
+     var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "RESET_PASSWORD", now)));
+     var changedPassword = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "CHANGE_PASSWORD", now)));
      var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.USERNAME, "ADMINISTRATIVE", now)));
-    var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE", null, now)));
-    var created = mapper.readTree(mapper.writeValueAsBytes(new AccountCreatedPayload(accountId, UUID.randomUUID(), LoginType.USERNAME, "INACTIVE", now)));
-     var activated = mapper.readTree(mapper.writeValueAsBytes(new AccountActivatedPayload(accountId, "INACTIVE", "ACTIVE", "ADMINISTRATIVE", now)));
+     var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, personId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE", null, now)));
+     var created = mapper.readTree(mapper.writeValueAsBytes(new AccountCreatedPayload(accountId, personId, LoginType.USERNAME, "INACTIVE", now)));
+      var activated = mapper.readTree(mapper.writeValueAsBytes(new AccountActivatedPayload(accountId, personId, "INACTIVE", "ACTIVE", "ADMINISTRATIVE", now)));
     var sessions = mapper.readTree(mapper.writeValueAsBytes(new AllAccountSessionsRevokedPayload(accountId, "PERSON_DEACTIVATED", now)));
 
-    assertThat(password.get("changeSource").asString()).isEqualTo("PASSWORD_RESET");
-    assertThat(password.has("sessionsRevoked")).isFalse();
+      assertThat(password.get("changeSource").asString()).isEqualTo("RESET_PASSWORD");
+      assertThat(changedPassword.get("changeSource").asString()).isEqualTo("CHANGE_PASSWORD");
+      assertExactFields(password, "accountId", "changeSource", "changedAt");
+      assertExactFields(changedPassword, "accountId", "changeSource", "changedAt");
+      assertThat(password.has("sessionsRevoked")).isFalse();
      assertThat(login.get("changeSource").asString()).isEqualTo("ADMINISTRATIVE");
     assertThat(login.has("version")).isFalse();
     assertThat(created.has("version")).isFalse();
-    assertThat(activated.get("previousStatus").asString()).isEqualTo("INACTIVE");
-     assertThat(activated.get("activationReason").asString()).isEqualTo("ADMINISTRATIVE");
-    assertThat(deactivation.get("previousStatus").asString()).isEqualTo("ACTIVE");
-    assertThat(deactivation.get("reasonDetail").isNull()).isTrue();
-    assertThat(deactivation.get("reasonCode").asString()).isEqualTo("ADMINISTRATIVE");
+     assertThat(activated.get("previousStatus").asString()).isEqualTo("INACTIVE");
+     assertThat(activated.get("personId").asString()).isEqualTo(personId.toString());
+      assertThat(activated.get("activationReason").asString()).isEqualTo("ADMINISTRATIVE");
+      assertExactFields(activated, "accountId", "personId", "previousStatus", "status", "activationReason", "activatedAt");
+     assertThat(deactivation.get("previousStatus").asString()).isEqualTo("ACTIVE");
+     assertThat(deactivation.get("personId").asString()).isEqualTo(personId.toString());
+      assertThat(deactivation.get("reasonDetail").isNull()).isTrue();
+      assertThat(deactivation.get("reasonCode").asString()).isEqualTo("ADMINISTRATIVE");
+      assertExactFields(deactivation, "accountId", "personId", "previousStatus", "status", "reasonCode", "reasonDetail", "deactivatedAt");
     assertThat(sessions.get("reasonCode").asString()).isEqualTo("PERSON_DEACTIVATED");
     assertThat(sessions.has("reason")).isFalse();
 
@@ -128,6 +147,64 @@ class V1WireContractJsonTest {
     assertThat(syncFailure.has("studentNumberVersion")).isTrue();
     assertThat(syncFailure.has("errorCode")).isTrue();
     assertThat(syncFailure.has("failedAt")).isTrue();
+  }
+
+  @Test
+  void lifecycleAndPasswordEventsMatchExplicitV1JsonFixtures() throws Exception {
+    UUID accountId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    UUID personId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    Instant changedAt = Instant.parse("2026-08-08T00:00:00Z");
+
+    tools.jackson.databind.JsonNode activated = mapper.valueToTree(new AccountActivatedPayload(accountId, personId, "INACTIVE", "ACTIVE", "ADMINISTRATIVE", changedAt));
+    assertThat(activated)
+        .isEqualTo(mapper.readTree("""
+            {
+              "accountId": "11111111-1111-1111-1111-111111111111",
+              "personId": "22222222-2222-2222-2222-222222222222",
+              "previousStatus": "INACTIVE",
+              "status": "ACTIVE",
+              "activationReason": "ADMINISTRATIVE",
+              "activatedAt": "2026-08-08T00:00:00Z"
+            }
+            """));
+    tools.jackson.databind.JsonNode deactivated = mapper.valueToTree(new AccountDeactivatedPayload(accountId, personId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE", null, changedAt));
+    assertThat(deactivated)
+        .isEqualTo(mapper.readTree("""
+            {
+              "accountId": "11111111-1111-1111-1111-111111111111",
+              "personId": "22222222-2222-2222-2222-222222222222",
+              "previousStatus": "ACTIVE",
+              "status": "INACTIVE",
+              "reasonCode": "ADMINISTRATIVE",
+              "reasonDetail": null,
+              "deactivatedAt": "2026-08-08T00:00:00Z"
+            }
+            """));
+    tools.jackson.databind.JsonNode changed = mapper.valueToTree(new PasswordChangedPayload(accountId, "CHANGE_PASSWORD", changedAt));
+    assertThat(changed)
+        .isEqualTo(mapper.readTree("""
+            {
+              "accountId": "11111111-1111-1111-1111-111111111111",
+              "changeSource": "CHANGE_PASSWORD",
+              "changedAt": "2026-08-08T00:00:00Z"
+            }
+            """));
+    tools.jackson.databind.JsonNode reset = mapper.valueToTree(new PasswordChangedPayload(accountId, "RESET_PASSWORD", changedAt));
+    assertThat(reset)
+        .isEqualTo(mapper.readTree("""
+            {
+              "accountId": "11111111-1111-1111-1111-111111111111",
+              "changeSource": "RESET_PASSWORD",
+              "changedAt": "2026-08-08T00:00:00Z"
+            }
+            """));
+  }
+
+  private static void assertExactFields(tools.jackson.databind.JsonNode json, String... fields) {
+    assertThat(json.size()).isEqualTo(fields.length);
+    for (String field : fields) {
+      assertThat(json.has(field)).as("field %s", field).isTrue();
+    }
   }
 
   @Test
