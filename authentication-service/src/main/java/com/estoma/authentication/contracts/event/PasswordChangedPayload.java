@@ -7,4 +7,4 @@ import java.util.UUID;
  * Payload of {@code PasswordChanged} (events.md §4). Never includes the
  * previous password, the new password, the hash, or hash parameters.
  */
-public record PasswordChangedPayload(UUID accountId, Instant changedAt, boolean sessionsRevoked) {}
+public record PasswordChangedPayload(UUID accountId, String changeSource, Instant changedAt, boolean sessionsRevoked) {}

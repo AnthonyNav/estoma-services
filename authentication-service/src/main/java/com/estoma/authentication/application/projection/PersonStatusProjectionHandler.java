@@ -3,6 +3,9 @@ package com.estoma.authentication.application.projection;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.SessionRepository;
+import com.estoma.authentication.application.EventToAppend;
+import com.estoma.authentication.contracts.AuthenticationEvent;
+import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayload;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.consumed.ConsumedEventTypes;
 import com.estoma.authentication.contracts.consumed.PersonStatusEventPayload;
@@ -48,9 +51,12 @@ class PersonStatusProjectionHandler implements ProjectionHandler {
     Instant now = Instant.now();
     boolean applied = repository.upsertIfNewer(payload.personId(), payload.status(), envelope.aggregateVersion(), now);
     if (applied && ConsumedEventTypes.PERSON_DEACTIVATED.equals(envelope.messageType())) {
-      accountRepository
-          .findIdsByPersonId(payload.personId())
-          .forEach(accountId -> sessionRepository.revokeAllActiveForAccount(accountId, "person_deactivated", now));
+      var events = accountRepository.findIdsByPersonId(payload.personId()).stream()
+          .filter(accountId -> sessionRepository.revokeAllActiveForAccount(accountId, "person_deactivated", now) > 0)
+          .map(accountId -> new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(),
+              new AllAccountSessionsRevokedPayload(accountId, "person_deactivated", now)))
+          .toList();
+      return new ProjectionHandlerResult(events);
     }
     return ProjectionHandlerResult.NONE;
   }

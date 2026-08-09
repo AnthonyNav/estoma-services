@@ -51,7 +51,7 @@ class ChangeLoginIdentifierHandler implements CommandHandler {
       AccountUpdateGuard.rejectForFailedUpdate(accountRepository, command.accountId(), command.expectedVersion());
     }
 
-    LoginIdentifierChangedPayload eventPayload = new LoginIdentifierChangedPayload(updated.accountId(), updated.loginIdentifier().type(), updated.version(), now);
+    LoginIdentifierChangedPayload eventPayload = new LoginIdentifierChangedPayload(updated.accountId(), updated.loginIdentifier().type(), "command", updated.version(), now);
     return CommandHandlerResult.of(updated.accountId(), updated.version(), new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), eventPayload));
   }
 }

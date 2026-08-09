@@ -34,6 +34,7 @@ public class EnvelopeValidator {
     if (!COMMAND_MESSAGE_TYPES.contains(envelope.messageType())) {
       throw new InvalidMessageException("unrecognized command messageType " + envelope.messageType());
     }
+    requireNonBlank(envelope.idempotencyKey(), "idempotencyKey");
   }
 
   public void validateEvent(MessageEnvelope envelope) {

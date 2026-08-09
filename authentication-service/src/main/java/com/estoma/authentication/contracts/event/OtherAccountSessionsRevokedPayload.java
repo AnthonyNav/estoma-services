@@ -4,4 +4,4 @@ import java.time.Instant;
 import java.util.UUID;
 
 /** Payload of {@code OtherAccountSessionsRevoked}; the initiating session remains valid. */
-public record OtherAccountSessionsRevokedPayload(UUID accountId, UUID retainedSessionId, String reason, Instant revokedAt) {}
+public record OtherAccountSessionsRevokedPayload(UUID accountId, UUID retainedSessionId, String reasonCode, Instant revokedAt) {}

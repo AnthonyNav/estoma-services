@@ -8,4 +8,4 @@ import java.util.UUID;
  * originate from deactivation, password change/recovery, suspicious
  * activity, or an administrative request.
  */
-public record AllAccountSessionsRevokedPayload(UUID accountId, String reason, Instant revokedAt) {}
+public record AllAccountSessionsRevokedPayload(UUID accountId, String reasonCode, Instant revokedAt) {}

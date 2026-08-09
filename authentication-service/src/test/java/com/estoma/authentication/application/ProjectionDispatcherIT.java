@@ -62,7 +62,11 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
     assertThat(projection.sourceVersion()).isEqualTo(2);
     assertThat(sessionRepository.findById(firstSessionId).orElseThrow().revocationReason()).isEqualTo("person_deactivated");
     assertThat(sessionRepository.findById(secondSessionId).orElseThrow().revocationReason()).isEqualTo("person_deactivated");
-    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AllAccountSessionsRevoked'").query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AllAccountSessionsRevoked'").query(Long.class).single()).isEqualTo(2L);
+
+    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_DEACTIVATED, new PersonStatusEventPayload(personId, "INACTIVE", 1), personId, 1));
+
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AllAccountSessionsRevoked'").query(Long.class).single()).isEqualTo(2L);
   }
 
   @Test

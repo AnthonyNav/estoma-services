@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.estoma.authentication.contracts.result.ResultPayload;
 import com.estoma.authentication.contracts.result.ResultStatus;
+import com.estoma.authentication.contracts.event.AccountDeactivatedPayload;
+import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayload;
+import com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload;
+import com.estoma.authentication.contracts.event.PasswordChangedPayload;
 import java.lang.reflect.RecordComponent;
 import java.time.Instant;
 import java.util.Arrays;
@@ -50,5 +54,22 @@ class V1WireContractJsonTest {
     var fields = Arrays.stream(MessageEnvelope.class.getRecordComponents()).map(RecordComponent::getName).toList();
 
     assertThat(fields).doesNotContain("targetService", "targetQueue", "destination", "replyService");
+  }
+
+  @Test
+  void eventPayloadsUseV1SourceAndReasonCodeFieldNames() {
+    UUID accountId = UUID.randomUUID();
+    Instant now = Instant.parse("2026-08-08T00:00:00Z");
+
+    var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "password_reset", now, true)));
+    var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.MATRICULA, "command", 3, now)));
+    var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, UUID.randomUUID(), "INACTIVE", 3, "ADMINISTRATIVE", now)));
+    var sessions = mapper.readTree(mapper.writeValueAsBytes(new AllAccountSessionsRevokedPayload(accountId, "person_deactivated", now)));
+
+    assertThat(password.get("changeSource").asString()).isEqualTo("password_reset");
+    assertThat(login.get("changeSource").asString()).isEqualTo("command");
+    assertThat(deactivation.get("reasonCode").asString()).isEqualTo("ADMINISTRATIVE");
+    assertThat(sessions.get("reasonCode").asString()).isEqualTo("person_deactivated");
+    assertThat(sessions.has("reason")).isFalse();
   }
 }

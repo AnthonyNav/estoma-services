@@ -102,7 +102,7 @@ public class ResetPasswordHandler {
     recoveryRepository.invalidateActiveForAccount(account.accountId(), now);
     sessionRepository.revokeAllActiveForAccount(account.accountId(), "password_reset", now);
 
-    PasswordChangedPayload passwordEvent = new PasswordChangedPayload(account.accountId(), now, true);
+    PasswordChangedPayload passwordEvent = new PasswordChangedPayload(account.accountId(), "password_reset", now, true);
     AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "password_reset", now);
 
     return RpcHandlerOutcome.of(

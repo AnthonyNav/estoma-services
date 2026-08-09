@@ -80,7 +80,7 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     }
 
     syncRepository.markSynchronized(account.accountId(), payload.studentNumberVersion(), now);
-    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(updated.accountId(), LoginType.MATRICULA, updated.version(), now);
+    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(updated.accountId(), LoginType.MATRICULA, "student_number_corrected", updated.version(), now);
     return ProjectionHandlerResult.of(new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), event));
   }
 

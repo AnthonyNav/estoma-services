@@ -29,7 +29,7 @@ public final class Envelopes {
         : new Actor("SYSTEM", null, "bff", "GLOBAL", null);
     return new MessageEnvelope(
         messageId, messageType, 1, MessageKind.COMMAND, "bff", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(),
-        "authentication-service", publicRecovery ? null : accountId, null, actor, payloadNode);
+        UUID.randomUUID().toString(), publicRecovery ? null : accountId, null, actor, payloadNode);
   }
 
   public static MessageEnvelope event(String messageType, Object payload, UUID aggregateId, int aggregateVersion) {

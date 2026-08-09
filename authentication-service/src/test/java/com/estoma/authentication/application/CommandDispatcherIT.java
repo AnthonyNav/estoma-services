@@ -98,6 +98,48 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   }
 
   @Test
+  void differentMessageIdsWithTheSameIdempotencyKeyReplayOnlyTheTerminalResult() {
+    UUID personId = activePerson();
+    MessageEnvelope first = Envelopes.command(
+        AuthenticationCommand.CREATE_ACCOUNT.wireName(),
+        new CreateAccountCommand(UUID.randomUUID(), personId, LoginType.MATRICULA, "idem-" + UUID.randomUUID()));
+    MessageEnvelope replay = withMessageId(first, UUID.randomUUID());
+
+    assertThat(dispatcher.dispatch(first)).isInstanceOf(CommandOutcome.Succeeded.class);
+    assertThat(dispatcher.dispatch(replay)).isInstanceOf(CommandOutcome.Duplicate.class);
+
+    assertThat(jdbc.sql("SELECT count(*) FROM accounts WHERE person_id = :personId")
+        .param("personId", personId).query(Long.class).single()).isEqualTo(1L);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AccountCreated' AND causation_id = :messageId")
+        .param("messageId", first.messageId()).query(Long.class).single()).isEqualTo(1L);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'CreateAccountSucceeded' AND correlation_id = :correlationId")
+        .param("correlationId", first.correlationId()).query(Long.class).single()).isEqualTo(2L);
+    assertThat(jdbc.sql("SELECT result_data IS NOT NULL FROM command_idempotency_records WHERE idempotency_key = :key")
+        .param("key", first.idempotencyKey()).query(Boolean.class).single()).isTrue();
+  }
+
+  @Test
+  void differentPayloadWithTheSameIdempotencyKeyIsRejectedWithoutInvokingTheHandler() {
+    UUID personId = activePerson();
+    MessageEnvelope first = Envelopes.command(
+        AuthenticationCommand.CREATE_ACCOUNT.wireName(),
+        new CreateAccountCommand(UUID.randomUUID(), personId, LoginType.MATRICULA, "idem-" + UUID.randomUUID()));
+    MessageEnvelope conflict = new MessageEnvelope(
+        UUID.randomUUID(), first.messageType(), first.messageVersion(), first.messageKind(), first.producer(), first.occurredAt(),
+        first.correlationId(), first.causationId(), first.operationId(), first.idempotencyKey(), first.aggregateId(), first.aggregateVersion(),
+        first.actor(), codec.toJsonNode(new CreateAccountCommand(UUID.randomUUID(), personId, LoginType.MATRICULA, "other-" + UUID.randomUUID())));
+
+    dispatcher.dispatch(first);
+
+    assertThat(dispatcher.dispatch(conflict))
+        .isEqualTo(new CommandOutcome.Rejected(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST));
+    assertThat(jdbc.sql("SELECT count(*) FROM accounts WHERE person_id = :personId")
+        .param("personId", personId).query(Long.class).single()).isEqualTo(1L);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AccountCreated' AND correlation_id = :correlationId")
+        .param("correlationId", first.correlationId()).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
   void activateAccountRequiresACredential() {
     UUID accountId = insertInactiveAccount(activePerson());
 
@@ -370,10 +412,17 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         UUID.randomUUID(),
         null,
         UUID.randomUUID(),
-        "authentication-service",
+        UUID.randomUUID().toString(),
         accountId,
         null,
         new Actor("SYSTEM", null, "academic", "GLOBAL", "student-import-process"),
         codec.toJsonNode(new ActivateAccountCommand(accountId, expectedVersion)));
+  }
+
+  private static MessageEnvelope withMessageId(MessageEnvelope source, UUID messageId) {
+    return new MessageEnvelope(
+        messageId, source.messageType(), source.messageVersion(), source.messageKind(), source.producer(), source.occurredAt(),
+        source.correlationId(), source.causationId(), source.operationId(), source.idempotencyKey(), source.aggregateId(),
+        source.aggregateVersion(), source.actor(), source.payload());
   }
 }

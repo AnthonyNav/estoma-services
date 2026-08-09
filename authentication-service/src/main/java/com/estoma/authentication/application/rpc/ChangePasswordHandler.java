@@ -111,7 +111,7 @@ public class ChangePasswordHandler {
         tokenIssuer.issueAccessToken(account.accountId(), account.personId(), renewedSession.sessionId(), Session.AuthState.NORMAL.name());
     ChangePasswordResponse response = new ChangePasswordResponse(accessToken.token(), refreshToken, accessToken.expiresAt());
 
-    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), now, revokedOtherSessions > 0);
+    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), "password_change", now, revokedOtherSessions > 0);
     if (revokedOtherSessions == 0) {
       return RpcHandlerOutcome.of(
           response, account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event));
