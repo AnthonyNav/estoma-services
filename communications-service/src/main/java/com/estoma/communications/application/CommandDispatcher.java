@@ -69,14 +69,12 @@ public class CommandDispatcher {
       return new CommandOutcome.Duplicate();
     }
 
-    authorizationPolicy.check(envelope.actor(), envelope.messageType());
-
-    CommandHandler handler = handlersByMessageType.get(envelope.messageType());
-    if (handler == null) {
-      throw new IllegalStateException("no handler registered for messageType " + envelope.messageType());
-    }
-
     try {
+      authorizationPolicy.check(envelope.actor(), envelope.messageType());
+      CommandHandler handler = handlersByMessageType.get(envelope.messageType());
+      if (handler == null) {
+        throw new IllegalStateException("no handler registered for messageType " + envelope.messageType());
+      }
       CommandHandlerResult result = handler.handle(envelope);
       appendSucceededResult(envelope, result);
       result.events().forEach(event -> appendEvent(envelope, result.aggregateId(), result.aggregateVersion(), event));

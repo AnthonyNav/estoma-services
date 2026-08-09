@@ -23,7 +23,7 @@ public interface CommunicationRepository {
    *     source_reference_type + source_reference_id + recipient_account_id + system_code +
    *     communication_type}) is already taken (commands.md §6).
    */
-  void insert(Communication communication);
+  Communication insert(Communication communication);
 
-  void update(Communication communication);
+  int update(Communication communication);
 }

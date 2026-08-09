@@ -24,7 +24,9 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.TestPropertySource;
 
+@TestPropertySource(properties = "estoma.communications.admin.system-allowlist=bff")
 class CommandDispatcherIT extends AbstractPostgresIT {
 
   @Autowired private CommandDispatcher dispatcher;
@@ -105,12 +107,12 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         new RequestCommunicationCommand(
             accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service", "AppointmentCancelled",
             sourceReferenceId, null, new RequestCommunicationCommand.InboxContent("Cita cancelada", "Tu cita fue cancelada.", null), null);
-    dispatcher.dispatch(Envelopes.command(CommunicationsCommand.REQUEST_COMMUNICATION.wireName(), command));
+     UUID key = UUID.randomUUID();
+     dispatcher.dispatch(Envelopes.command(CommunicationsCommand.REQUEST_COMMUNICATION.wireName(), command, UUID.randomUUID(), key));
 
-    var outcome = dispatcher.dispatch(Envelopes.command(CommunicationsCommand.REQUEST_COMMUNICATION.wireName(), command));
+     var outcome = dispatcher.dispatch(Envelopes.command(CommunicationsCommand.REQUEST_COMMUNICATION.wireName(), command, UUID.randomUUID(), key));
 
-    assertThat(outcome).isInstanceOf(CommandOutcome.Rejected.class);
-    assertThat(((CommandOutcome.Rejected) outcome).code()).isEqualTo(RejectionCode.COMMUNICATION_ALREADY_EXISTS);
+     assertThat(outcome).isInstanceOf(CommandOutcome.Succeeded.class);
   }
 
   @Test

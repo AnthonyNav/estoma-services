@@ -173,6 +173,16 @@ public final class Communication {
         requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint, correlationId, causationId);
   }
 
+  /** Assigns a boundary correlation to a legacy row before it emits new effects. */
+  public Communication withCorrelationId(UUID newCorrelationId) {
+    if (correlationId != null) return this;
+    return new Communication(
+        communicationId, recipientAccountId, systemCode, communicationType, priority,
+        sourceService, sourceReferenceType, sourceReferenceId, initiatedByAccountId, status,
+        createdAt, completedAt, failedAt, requestedChannels, sourceMessageId, idempotencyKey,
+        requestFingerprint, requireNonNull(newCorrelationId, "correlationId"), causationId);
+  }
+
   /** Reopens a failed communication as part of an administrative email retry. */
   public Communication reopenedForRetry(Instant now) {
     if (status != CommunicationStatus.FAILED) {

@@ -7,9 +7,14 @@ import java.util.UUID;
 /** {@code CommunicationCompleted}: every requested channel reached its terminal successful state (events.md §2). */
 public record CommunicationCompletedPayload(
     UUID communicationId, UUID recipientAccountId, String systemCode, String communicationType, List<String> completedChannels,
-    List<String> failedChannels, Instant completedAt) {
+    Instant completedAt) {
   public CommunicationCompletedPayload(UUID communicationId, UUID recipientAccountId, String systemCode, String communicationType,
       List<String> completedChannels, Instant completedAt) {
-    this(communicationId, recipientAccountId, systemCode, communicationType, completedChannels, List.of(), completedAt);
+    this.communicationId = communicationId;
+    this.recipientAccountId = recipientAccountId;
+    this.systemCode = systemCode;
+    this.communicationType = communicationType;
+    this.completedChannels = List.copyOf(completedChannels);
+    this.completedAt = completedAt;
   }
 }

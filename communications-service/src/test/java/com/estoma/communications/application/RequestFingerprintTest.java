@@ -17,4 +17,10 @@ class RequestFingerprintTest {
     assertThat(RequestFingerprint.sha256("recipient", "system", "type", "source", "event", "1", "EMAIL", "body"))
         .isNotEqualTo(RequestFingerprint.sha256("recipient", "system", "type", "source", "event", "1", "INBOX", "body"));
   }
+
+  @Test
+  void normalizesEquivalentJsonTemplateData() {
+    assertThat(RequestFingerprint.sha256("{\"first\":1,\"second\":2}"))
+        .isEqualTo(RequestFingerprint.sha256("{\"second\":2,\"first\":1}"));
+  }
 }

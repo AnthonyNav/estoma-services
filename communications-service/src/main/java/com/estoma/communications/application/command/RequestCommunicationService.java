@@ -67,7 +67,8 @@ public class RequestCommunicationService {
   }
 
   public CommandHandlerResult create(RequestCommunicationCommand command) {
-    return create(command, null);
+    throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT,
+        "durable communication requests require an envelope correlationId and idempotencyKey");
   }
 
   public CommandHandlerResult create(RequestCommunicationCommand command, MessageEnvelope envelope) {
@@ -95,6 +96,9 @@ public class RequestCommunicationService {
     if (envelope != null && envelope.correlationId() == null) {
       throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "correlationId is required for new communications");
     }
+    if (envelope != null && envelope.idempotencyKey() == null) {
+      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "idempotencyKey is required for durable communication requests");
+    }
     Instant now = Instant.now();
     UUID communicationId = UUID.randomUUID();
     List<String> requestedChannels = command.requestedChannels() == null
@@ -119,31 +123,16 @@ public class RequestCommunicationService {
         command.email() == null ? null : command.email().htmlBody(),
         command.email() == null ? null : command.email().templateCode(),
         command.email() == null ? null : command.email().templateData());
-    if (envelope != null && envelope.idempotencyKey() != null) {
-      var existing = communicationRepository.findBySourceAndIdempotency(command.sourceService(), envelope.idempotencyKey());
-      if (existing.isPresent()) {
-        if (!fingerprint.equals(existing.get().requestFingerprint())) {
-          throw new CommunicationsRejectedException(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST,
-              "idempotency key was reused with a different request");
-        }
-        return CommandHandlerResult.of(existing.get().communicationId(), 1);
-      }
-    }
     Communication communication =
         Communication.requested(
             communicationId, command.recipientAccountId(), command.systemCode(), command.communicationType(), command.priority(),
             command.sourceService(), command.sourceReferenceType(), command.sourceReferenceId(), command.initiatedByAccountId(),
             requestedChannels, envelope == null ? null : envelope.messageId(), envelope == null ? null : envelope.idempotencyKey(),
          fingerprint, envelope == null ? null : envelope.correlationId(), envelope == null ? null : envelope.causationId(), now);
-     if (envelope != null && envelope.idempotencyKey() != null) {
-       var existing = communicationRepository.findBySourceAndIdempotency(command.sourceService(), envelope.idempotencyKey());
-       if (existing.isPresent()) {
-         if (!fingerprint.equals(existing.get().requestFingerprint()))
-           throw new CommunicationsRejectedException(RejectionCode.COMMUNICATION_ALREADY_EXISTS, "idempotency key was reused with a different request");
-         return CommandHandlerResult.of(existing.get().communicationId(), 1);
-       }
+     Communication persisted = communicationRepository.insert(communication);
+     if (!persisted.communicationId().equals(communication.communicationId())) {
+       return CommandHandlerResult.of(persisted.communicationId(), 1);
      }
-    communicationRepository.insert(communication);
 
     List<EventToAppend> events = new ArrayList<>();
 
@@ -185,7 +174,7 @@ public class RequestCommunicationService {
     // see Communication's javadoc for the completion rule.
     if (command.email() == null) {
       Communication completed = communication.completed(now);
-      communicationRepository.update(completed);
+       if (communicationRepository.update(completed) != 1) throw new IllegalStateException("communication claim lost while completing");
       events.add(
           new EventToAppend(
               CommunicationsEvent.COMMUNICATION_COMPLETED.wireName(),

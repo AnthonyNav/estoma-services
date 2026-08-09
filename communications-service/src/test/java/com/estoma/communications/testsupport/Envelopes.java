@@ -16,13 +16,17 @@ public final class Envelopes {
   private Envelopes() {}
 
   public static MessageEnvelope command(String messageType, Object payload) {
-    return command(messageType, payload, UUID.randomUUID());
+    return command(messageType, payload, UUID.randomUUID(), UUID.randomUUID());
   }
 
   public static MessageEnvelope command(String messageType, Object payload, UUID messageId) {
+    return command(messageType, payload, messageId, UUID.randomUUID());
+  }
+
+  public static MessageEnvelope command(String messageType, Object payload, UUID messageId, UUID idempotencyKey) {
     JsonNode payloadNode = MAPPER.valueToTree(payload);
     return new MessageEnvelope(
-        messageId, messageType, 1, MessageKind.COMMAND, "bff", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(), null, null, null,
+         messageId, messageType, 1, MessageKind.COMMAND, "bff", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(), idempotencyKey, null, null,
         Actor.system("bff"), payloadNode);
   }
 
