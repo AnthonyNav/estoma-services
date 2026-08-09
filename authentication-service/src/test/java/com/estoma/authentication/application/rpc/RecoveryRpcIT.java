@@ -67,8 +67,9 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   void validateRecoveryCodeRejectsAWrongCodeWithoutThrowing() {
     UUID accountId = insertActiveAccountWithPassword();
     var recovery = insertRecoveryRequest(accountId);
+    String wrongCode = wrongCodeFor(codeDeriver.derive(recovery.recoveryId(), recovery.codeDerivationContext()));
 
-    var outcome = dispatcher.execute(context(accountId), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), "000000")));
+    var outcome = dispatcher.execute(context(accountId), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), wrongCode)));
 
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
     assertThat(((com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse) ((RpcOutcome.Success<?>) outcome).response()).result()).isEqualTo("INVALID");
@@ -78,11 +79,12 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   void fifthInvalidRecoveryCodeExhaustsTheRequest() {
     UUID accountId = insertActiveAccountWithPassword();
     PasswordRecoveryRequest recovery = insertRecoveryRequest(accountId);
+    String wrongCode = wrongCodeFor(codeDeriver.derive(recovery.recoveryId(), recovery.codeDerivationContext()));
 
     for (int attempt = 0; attempt < 5; attempt++) {
       var outcome = dispatcher.execute(
           context(accountId),
-          () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), "000000")));
+          () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), wrongCode)));
       assertThat(((com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse) ((RpcOutcome.Success<?>) outcome).response()).result())
           .isEqualTo("INVALID");
     }
@@ -263,6 +265,11 @@ class RecoveryRpcIT extends AbstractPostgresIT {
 
   private String accountLogin(UUID accountId) {
     return accountRepository.findById(accountId).orElseThrow().loginIdentifier().value();
+  }
+
+  private String wrongCodeFor(String validCode) {
+    char replacement = validCode.charAt(0) == '0' ? '1' : '0';
+    return replacement + validCode.substring(1);
   }
 
   private long eventCount(UUID accountId, String messageType) {

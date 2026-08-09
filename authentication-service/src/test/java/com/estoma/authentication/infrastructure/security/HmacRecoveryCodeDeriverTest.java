@@ -16,10 +16,11 @@ class HmacRecoveryCodeDeriverTest {
     UUID recoveryId = UUID.randomUUID();
 
     String code = deriver.derive(recoveryId, RecoveryCodeDerivationContext.HMAC_SHA256_V1);
+    String wrongCode = wrongCodeFor(code);
 
     assertThat(code).matches("\\d{6}");
     assertThat(deriver.matches(recoveryId, RecoveryCodeDerivationContext.HMAC_SHA256_V1, code)).isTrue();
-    assertThat(deriver.matches(recoveryId, RecoveryCodeDerivationContext.HMAC_SHA256_V1, "000000")).isFalse();
+    assertThat(deriver.matches(recoveryId, RecoveryCodeDerivationContext.HMAC_SHA256_V1, wrongCode)).isFalse();
   }
 
   @Test
@@ -30,5 +31,10 @@ class HmacRecoveryCodeDeriverTest {
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> deriver.matches(recoveryId, "unknown", "123456"))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  private String wrongCodeFor(String validCode) {
+    char replacement = validCode.charAt(0) == '0' ? '1' : '0';
+    return replacement + validCode.substring(1);
   }
 }
