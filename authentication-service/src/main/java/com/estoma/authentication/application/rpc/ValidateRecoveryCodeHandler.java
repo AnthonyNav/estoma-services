@@ -3,9 +3,12 @@ package com.estoma.authentication.application.rpc;
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.RecoveryCodeDeriver;
 import com.estoma.authentication.application.port.TokenHasher;
+import com.estoma.authentication.application.port.AccountRepository;
+import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse;
 import java.time.Instant;
+import com.estoma.authentication.domain.account.LoginIdentifier;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,34 +23,43 @@ public class ValidateRecoveryCodeHandler {
   static final int ATTEMPT_LIMIT = 5;
 
   private final PasswordRecoveryRepository repository;
+  private final AccountRepository accountRepository;
+  private final PersonStatusProjectionRepository personStatusProjectionRepository;
   private final RecoveryCodeDeriver codeDeriver;
   private final TokenHasher tokenHasher;
 
-  ValidateRecoveryCodeHandler(PasswordRecoveryRepository repository, RecoveryCodeDeriver codeDeriver, TokenHasher tokenHasher) {
+  ValidateRecoveryCodeHandler(
+      PasswordRecoveryRepository repository,
+      AccountRepository accountRepository,
+      PersonStatusProjectionRepository personStatusProjectionRepository,
+      RecoveryCodeDeriver codeDeriver,
+      TokenHasher tokenHasher) {
     this.repository = repository;
+    this.accountRepository = accountRepository;
+    this.personStatusProjectionRepository = personStatusProjectionRepository;
     this.codeDeriver = codeDeriver;
     this.tokenHasher = tokenHasher;
   }
 
   public RpcHandlerOutcome<ValidateRecoveryCodeResponse> handle(ValidateRecoveryCodeRequest request) {
-    var found = repository.findById(request.recoveryId());
+    var account = accountRepository.findByLoginIdentifier(
+        request.loginType(), LoginIdentifier.of(request.loginType(), request.loginIdentifier()).normalized());
+    if (account.isEmpty() || !account.get().isActive() || !isPersonActive(account.get().personId())) {
+      return result("INVALID");
+    }
+    var found = repository.findActiveByAccountIdForUpdate(account.get().accountId());
     if (found.isEmpty()) {
       return result("INVALID");
     }
     var recovery = found.get();
     Instant now = Instant.now();
 
-    if (recovery.isUsed()) {
-      return result("INVALID");
-    }
     if (recovery.isExpired(now)) {
+      repository.expireIfActive(recovery.recoveryId(), now);
       return result("EXPIRED");
     }
-    if (recovery.failedAttempts() >= ATTEMPT_LIMIT) {
-      return result("INVALID");
-    }
     if (!matches(recovery, request.code())) {
-      repository.update(recovery.attemptFailed());
+      repository.recordFailedAttempt(recovery.recoveryId(), now, ATTEMPT_LIMIT);
       return result("INVALID");
     }
     return result("VALID");
@@ -61,5 +73,10 @@ public class ValidateRecoveryCodeHandler {
     return "v1-hmac".equals(recovery.tokenHash())
         ? codeDeriver.matches(recovery.recoveryId(), code)
         : recovery.tokenHash().equals(tokenHasher.sha256Hex(code));
+  }
+
+  private boolean isPersonActive(java.util.UUID personId) {
+    var status = personStatusProjectionRepository.findByPersonId(personId);
+    return status.isPresent() && "ACTIVE".equals(status.get().status());
   }
 }

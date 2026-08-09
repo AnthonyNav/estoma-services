@@ -24,9 +24,13 @@ public class GetRecoveryCodeForDeliveryHandler {
   public RpcHandlerOutcome<GetRecoveryCodeForDeliveryResponse> handle(GetRecoveryCodeForDeliveryRequest request) {
     var recovery =
         repository
-            .findById(request.recoveryId())
+            .findByIdForUpdate(request.recoveryId())
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery request does not exist"));
-    if (recovery.isUsed() || recovery.isExpired(Instant.now())) {
+    Instant now = Instant.now();
+    if (recovery.isExpired(now)) {
+      repository.expireIfActive(recovery.recoveryId(), now);
+    }
+    if (!recovery.isActiveAndUsable(now)) {
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery request is no longer usable");
     }
     return RpcHandlerOutcome.withoutEvents(new GetRecoveryCodeForDeliveryResponse(codeDeriver.derive(recovery.recoveryId())));

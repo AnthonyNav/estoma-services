@@ -40,7 +40,9 @@ public class AuthenticateAccountHandler {
 
   private static final int FAILED_ATTEMPT_LIMIT = 5;
   private static final Duration LOCK_DURATION = Duration.ofMinutes(15);
-  private static final Duration SESSION_LIFETIME = Duration.ofDays(30);
+  private static final Duration IDLE_SESSION_LIFETIME = Duration.ofDays(14);
+  private static final Duration ABSOLUTE_SESSION_LIFETIME = Duration.ofDays(30);
+  private static final Duration PASSWORD_CHANGE_SESSION_LIFETIME = Duration.ofMinutes(15);
 
   private final AccountRepository accountRepository;
   private final CredentialRepository credentialRepository;
@@ -86,8 +88,9 @@ public class AuthenticateAccountHandler {
     Optional<Credential> credential = account.isActive() ? credentialRepository.findByAccountId(account.accountId()) : Optional.empty();
     boolean personActive = isPersonActive(account.personId());
     boolean passwordMatches = credential.isPresent() && passwordHasher.matches(request.password(), credential.get().hash());
+    boolean temporaryCredential = credential.isPresent() && credential.get().isValidTemporaryPassword(now);
 
-    if (credential.isEmpty() || !personActive || !passwordMatches) {
+    if (credential.isEmpty() || !personActive || !passwordMatches || (credential.get().mustChangePassword() && !temporaryCredential)) {
       recordFailedAttempt(account, now);
       throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "identifier or password is incorrect");
     }
@@ -95,16 +98,26 @@ public class AuthenticateAccountHandler {
     Account reset = account.withAttemptsReset(now);
     accountRepository.update(reset, account.version());
 
-    String refreshToken = randomGenerator.randomUrlSafeToken(32);
-    Instant sessionExpiresAt = now.plus(SESSION_LIFETIME);
-    Session session =
-        Session.createNew(UUID.randomUUID(), account.accountId(), tokenHasher.sha256Hex(refreshToken), request.deviceName(), request.ipAddress(), request.userAgent(), now, sessionExpiresAt);
+    Session session;
+    String refreshToken;
+    if (temporaryCredential) {
+      if (credentialRepository.consumeTemporaryIfValid(account.accountId(), credential.get().credentialVersion(), now) == 0) {
+        throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "identifier or password is incorrect");
+      }
+      refreshToken = null;
+      session = Session.createPasswordChangeRequired(UUID.randomUUID(), account.accountId(), request.deviceName(), request.ipAddress(),
+          request.userAgent(), now, now.plus(PASSWORD_CHANGE_SESSION_LIFETIME));
+    } else {
+      refreshToken = randomGenerator.randomUrlSafeToken(32);
+      session = Session.createNormal(UUID.randomUUID(), account.accountId(), tokenHasher.sha256Hex(refreshToken), request.deviceName(),
+          request.ipAddress(), request.userAgent(), now, now.plus(IDLE_SESSION_LIFETIME), now.plus(ABSOLUTE_SESSION_LIFETIME));
+    }
     sessionRepository.insert(session);
 
-    TokenIssuer.IssuedAccessToken accessToken = tokenIssuer.issueAccessToken(account.accountId(), account.personId(), account.loginIdentifier().type().name());
+    TokenIssuer.IssuedAccessToken accessToken = tokenIssuer.issueAccessToken(account.accountId(), account.personId(), session.sessionId(), session.authState().name());
 
     AuthenticateAccountResponse response =
-        new AuthenticateAccountResponse(account.accountId(), session.sessionId(), accessToken.token(), refreshToken, accessToken.expiresAt(), reset.mustChangePassword());
+        new AuthenticateAccountResponse(account.accountId(), session.sessionId(), accessToken.token(), refreshToken, accessToken.expiresAt(), temporaryCredential);
     return RpcHandlerOutcome.withoutEvents(response); // AuthenticationSucceeded is internal, not published in v1 (events.md §5)
   }
 

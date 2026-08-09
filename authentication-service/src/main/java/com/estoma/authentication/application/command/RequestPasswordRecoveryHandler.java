@@ -3,6 +3,7 @@ package com.estoma.authentication.application.command;
 import com.estoma.authentication.application.EventToAppend;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
+import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.SecureRandomGenerator;
 import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.AuthenticationCommand;
@@ -34,9 +35,11 @@ class RequestPasswordRecoveryHandler implements CommandHandler {
 
   private static final int CODE_DIGITS = 6;
   private static final java.time.Duration RECOVERY_EXPIRATION = java.time.Duration.ofMinutes(10);
+  private static final java.time.Duration RECOVERY_COOLDOWN = java.time.Duration.ofMinutes(5);
 
   private final AccountRepository accountRepository;
   private final PasswordRecoveryRepository passwordRecoveryRepository;
+  private final PersonStatusProjectionRepository personStatusProjectionRepository;
   private final SecureRandomGenerator randomGenerator;
   private final TokenHasher tokenHasher;
   private final EnvelopeJsonCodec codec;
@@ -44,11 +47,13 @@ class RequestPasswordRecoveryHandler implements CommandHandler {
   RequestPasswordRecoveryHandler(
       AccountRepository accountRepository,
       PasswordRecoveryRepository passwordRecoveryRepository,
+      PersonStatusProjectionRepository personStatusProjectionRepository,
       SecureRandomGenerator randomGenerator,
       TokenHasher tokenHasher,
       EnvelopeJsonCodec codec) {
     this.accountRepository = accountRepository;
     this.passwordRecoveryRepository = passwordRecoveryRepository;
+    this.personStatusProjectionRepository = personStatusProjectionRepository;
     this.randomGenerator = randomGenerator;
     this.tokenHasher = tokenHasher;
     this.codec = codec;
@@ -66,11 +71,21 @@ class RequestPasswordRecoveryHandler implements CommandHandler {
     LoginIdentifier identifier = LoginIdentifier.of(command.loginType(), command.loginIdentifier());
     Optional<Account> account = accountRepository.findByLoginIdentifier(identifier.type(), identifier.normalized());
 
-    if (account.isEmpty() || !account.get().isActive()) {
+    if (account.isEmpty() || !account.get().isActive() || !isPersonActive(account.get().personId())) {
       return new CommandHandlerResult(null, null, List.of());
     }
 
     Instant now = Instant.now();
+    Optional<PasswordRecoveryRequest> active = passwordRecoveryRepository.findActiveByAccountIdForUpdate(account.get().accountId());
+    if (active.isPresent()) {
+      if (active.get().isExpired(now)) {
+        passwordRecoveryRepository.expireIfActive(active.get().recoveryId(), now);
+      } else if (active.get().createdAt().plus(RECOVERY_COOLDOWN).isAfter(now)) {
+        return new CommandHandlerResult(null, null, List.of());
+      } else {
+        passwordRecoveryRepository.invalidateActiveForAccount(account.get().accountId(), now);
+      }
+    }
     PasswordRecoveryRequest request =
         PasswordRecoveryRequest.createNew(
             UUID.randomUUID(), account.get().accountId(), "v1-hmac", now, now.plus(RECOVERY_EXPIRATION));
@@ -81,5 +96,10 @@ class RequestPasswordRecoveryHandler implements CommandHandler {
 
     return new CommandHandlerResult(
         null, null, List.of(new EventToAppend(AuthenticationEvent.PASSWORD_RECOVERY_REQUESTED.wireName(), eventPayload)));
+  }
+
+  private boolean isPersonActive(UUID personId) {
+    var status = personStatusProjectionRepository.findByPersonId(personId);
+    return status.isPresent() && "ACTIVE".equals(status.get().status());
   }
 }

@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
 public class RefreshSessionHandler {
 
   private static final Duration REFRESH_EXTENSION = Duration.ofDays(14);
-  private static final Duration ABSOLUTE_SESSION_LIFETIME = Duration.ofDays(30);
+  private static final Duration REFRESH_GRACE = Duration.ofSeconds(30);
 
   private final SessionRepository sessionRepository;
   private final AccountRepository accountRepository;
@@ -60,10 +60,10 @@ public class RefreshSessionHandler {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_REVOKED, "session " + session.sessionId() + " was revoked");
     }
     Instant now = Instant.now();
-    if (!session.expiresAt().isAfter(now)) {
+    if (!session.isValid(now)) {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_EXPIRED, "session " + session.sessionId() + " has expired");
     }
-    if (!session.refreshTokenHash().equals(tokenHasher.sha256Hex(request.refreshToken()))) {
+    if (session.authState() != Session.AuthState.NORMAL || !session.matchesRefreshTokenHash(tokenHasher.sha256Hex(request.refreshToken()), now)) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_REFRESH_TOKEN, "refresh token does not match the current session token");
     }
 
@@ -76,11 +76,11 @@ public class RefreshSessionHandler {
     }
 
     String newRefreshToken = randomGenerator.randomUrlSafeToken(32);
-    Instant cappedExpiresAt = minInstant(now.plus(REFRESH_EXTENSION), session.createdAt().plus(ABSOLUTE_SESSION_LIFETIME));
-    Session rotated = session.rotated(tokenHasher.sha256Hex(newRefreshToken), now, cappedExpiresAt);
+    Instant cappedExpiresAt = minInstant(now.plus(REFRESH_EXTENSION), session.absoluteExpiresAt());
+    Session rotated = session.rotated(tokenHasher.sha256Hex(newRefreshToken), now, cappedExpiresAt, now.plus(REFRESH_GRACE));
     sessionRepository.update(rotated);
 
-    TokenIssuer.IssuedAccessToken accessToken = tokenIssuer.issueAccessToken(account.accountId(), account.personId(), account.loginIdentifier().type().name());
+    TokenIssuer.IssuedAccessToken accessToken = tokenIssuer.issueAccessToken(account.accountId(), account.personId(), session.sessionId(), session.authState().name());
 
     // SessionRenewed is internal, not published in v1 (events.md §5).
     return RpcHandlerOutcome.withoutEvents(new RefreshSessionResponse(accessToken.token(), newRefreshToken, cappedExpiresAt));

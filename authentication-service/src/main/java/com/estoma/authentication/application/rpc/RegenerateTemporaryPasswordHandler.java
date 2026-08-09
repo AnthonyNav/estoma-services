@@ -37,17 +37,16 @@ public class RegenerateTemporaryPasswordHandler {
     support.claimOrThrow(OPERATION_TYPE, request.idempotencyKey(), request.accountId(), request.requestedByAccountId(), fingerprint);
 
     Instant now = Instant.now();
-    String temporaryPassword = support.issueNewSecretAndUpdateCredential(account);
-    Account updated = support.markMustChangePassword(account, request.expiresAt(), now);
+    TemporaryPasswordSupport.IssuedTemporaryPassword issued = support.issueNewSecretAndUpdateCredential(account, now);
 
     support.markCompleted(OPERATION_TYPE, request.idempotencyKey(), now);
 
-    TemporaryPasswordRegeneratedPayload event = new TemporaryPasswordRegeneratedPayload(updated.accountId(), true, updated.temporaryPasswordExpiresAt(), now);
+    TemporaryPasswordRegeneratedPayload event = new TemporaryPasswordRegeneratedPayload(account.accountId(), true, issued.credential().temporaryPasswordExpiresAt(), now);
 
     return RpcHandlerOutcome.of(
-        new RegenerateTemporaryPasswordResponse(temporaryPassword, updated.temporaryPasswordExpiresAt()),
-        updated.accountId(),
-        updated.version(),
+        new RegenerateTemporaryPasswordResponse(issued.password(), issued.credential().temporaryPasswordExpiresAt()),
+        account.accountId(),
+        account.version(),
         new EventToAppend(AuthenticationEvent.TEMPORARY_PASSWORD_REGENERATED.wireName(), event));
   }
 

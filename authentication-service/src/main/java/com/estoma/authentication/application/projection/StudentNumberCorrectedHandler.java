@@ -11,10 +11,10 @@ import com.estoma.authentication.contracts.consumed.StudentNumberCorrectedPayloa
 import com.estoma.authentication.contracts.event.StudentLoginIdentifierSynchronizationFailedPayload;
 import com.estoma.authentication.domain.account.Account;
 import com.estoma.authentication.domain.account.LoginIdentifier;
+import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -56,25 +56,18 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     if (payload.studentNumberVersion() <= sync.lastAppliedStudentNumberVersion()) {
       return ProjectionHandlerResult.NONE; // stale or already-applied redelivery: ignored, per data-model.md §9.1
     }
-    if (payload.studentNumberVersion() > sync.lastAppliedStudentNumberVersion() + 1) {
-      return fail(envelope, payload, "SOURCE_VERSION_GAP", now);
-    }
-
-    Optional<Account> accountOpt = accountRepository.findById(payload.accountId());
+    var accountOpt = accountRepository.findById(payload.accountId());
     if (accountOpt.isEmpty()) {
-      return fail(envelope, payload, "ACCOUNT_NOT_FOUND_FOR_STUDENT", now);
+      return fail(envelope, payload, RejectionCode.ACCOUNT_NOT_FOUND.name(), now);
     }
     Account account = accountOpt.get();
     if (account.loginIdentifier().type() != LoginType.MATRICULA) {
       return fail(envelope, payload, "ACCOUNT_LOGIN_TYPE_MISMATCH", now);
     }
-    if (!account.loginIdentifier().value().equals(payload.previousStudentNumber())) {
-      return fail(envelope, payload, "PREVIOUS_LOGIN_IDENTIFIER_MISMATCH", now);
-    }
     LoginIdentifier newIdentifier = LoginIdentifier.of(LoginType.MATRICULA, payload.newStudentNumber());
-    Optional<Account> collision = accountRepository.findByLoginIdentifier(LoginType.MATRICULA, newIdentifier.normalized());
+    var collision = accountRepository.findByLoginIdentifier(LoginType.MATRICULA, newIdentifier.normalized());
     if (collision.isPresent() && !collision.get().accountId().equals(account.accountId())) {
-      return fail(envelope, payload, "NEW_LOGIN_IDENTIFIER_ALREADY_USED", now);
+      return fail(envelope, payload, RejectionCode.LOGIN_IDENTIFIER_ALREADY_USED.name(), now);
     }
 
     Account updated = account.withLoginIdentifierChanged(newIdentifier, now);

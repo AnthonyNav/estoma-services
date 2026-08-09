@@ -1,6 +1,8 @@
 package com.estoma.authentication.application.projection;
 
+import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
+import com.estoma.authentication.application.port.SessionRepository;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.consumed.ConsumedEventTypes;
 import com.estoma.authentication.contracts.consumed.PersonStatusEventPayload;
@@ -20,10 +22,18 @@ import org.springframework.stereotype.Component;
 class PersonStatusProjectionHandler implements ProjectionHandler {
 
   private final PersonStatusProjectionRepository repository;
+  private final AccountRepository accountRepository;
+  private final SessionRepository sessionRepository;
   private final EnvelopeJsonCodec codec;
 
-  PersonStatusProjectionHandler(PersonStatusProjectionRepository repository, EnvelopeJsonCodec codec) {
+  PersonStatusProjectionHandler(
+      PersonStatusProjectionRepository repository,
+      AccountRepository accountRepository,
+      SessionRepository sessionRepository,
+      EnvelopeJsonCodec codec) {
     this.repository = repository;
+    this.accountRepository = accountRepository;
+    this.sessionRepository = sessionRepository;
     this.codec = codec;
   }
 
@@ -35,7 +45,13 @@ class PersonStatusProjectionHandler implements ProjectionHandler {
   @Override
   public ProjectionHandlerResult handle(MessageEnvelope envelope) {
     PersonStatusEventPayload payload = codec.convertPayload(envelope, PersonStatusEventPayload.class);
-    repository.upsertIfNewer(payload.personId(), payload.status(), payload.sourceVersion(), Instant.now());
+    Instant now = Instant.now();
+    boolean applied = repository.upsertIfNewer(payload.personId(), payload.status(), envelope.aggregateVersion(), now);
+    if (applied && ConsumedEventTypes.PERSON_DEACTIVATED.equals(envelope.messageType())) {
+      accountRepository
+          .findIdsByPersonId(payload.personId())
+          .forEach(accountId -> sessionRepository.revokeAllActiveForAccount(accountId, "person_deactivated", now));
+    }
     return ProjectionHandlerResult.NONE;
   }
 }

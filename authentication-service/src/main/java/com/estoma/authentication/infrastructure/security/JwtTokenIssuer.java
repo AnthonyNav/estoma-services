@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
 /**
  * JWT RS256 access tokens (system_contract.md "Sessions and tokens"): 15-minute
  * lifetime, claims {@code sub} (accountId), {@code personId}, {@code
- * loginType}, {@code iat}, {@code exp}, {@code jti}; {@code kid} in the
+ * sid}, {@code authState}, {@code iat}, {@code exp}, {@code jti}; {@code kid} in the
  * header. No revocation in v1 -- the token is left to expire; revocation
  * acts on the session/refresh token, never the access token itself.
  */
@@ -49,7 +49,7 @@ public class JwtTokenIssuer implements TokenIssuer {
   }
 
   @Override
-  public IssuedAccessToken issueAccessToken(UUID accountId, UUID personId, String loginType) {
+  public IssuedAccessToken issueAccessToken(UUID accountId, UUID personId, UUID sessionId, String authState) {
     Instant now = Instant.now();
     Instant expiresAt = now.plus(ACCESS_TOKEN_LIFETIME);
     String token =
@@ -60,8 +60,9 @@ public class JwtTokenIssuer implements TokenIssuer {
             .subject(accountId.toString())
             .issuer(issuer)
             .audience().add(audience).and()
+            .claim("sid", sessionId.toString())
             .claim("personId", personId.toString())
-            .claim("loginType", loginType)
+            .claim("authState", authState)
             .id(UUID.randomUUID().toString())
             .issuedAt(Date.from(now))
             .expiration(Date.from(expiresAt))

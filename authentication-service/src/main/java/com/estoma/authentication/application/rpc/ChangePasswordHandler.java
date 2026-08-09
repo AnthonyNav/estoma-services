@@ -6,7 +6,11 @@ import com.estoma.authentication.application.port.CredentialRepository;
 import com.estoma.authentication.application.port.PasswordHasher;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.SessionRepository;
+import com.estoma.authentication.application.port.SecureRandomGenerator;
+import com.estoma.authentication.application.port.TokenHasher;
+import com.estoma.authentication.application.port.TokenIssuer;
 import com.estoma.authentication.contracts.AuthenticationEvent;
+import com.estoma.authentication.contracts.event.OtherAccountSessionsRevokedPayload;
 import com.estoma.authentication.contracts.event.PasswordChangedPayload;
 import com.estoma.authentication.contracts.rpc.ChangePasswordRequest;
 import com.estoma.authentication.contracts.rpc.ChangePasswordResponse;
@@ -14,6 +18,8 @@ import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
 import com.estoma.authentication.domain.credential.Credential;
+import com.estoma.authentication.domain.session.Session;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -28,23 +34,35 @@ import org.springframework.stereotype.Component;
 @Component
 public class ChangePasswordHandler {
 
+  private static final Duration IDLE_SESSION_LIFETIME = Duration.ofDays(14);
+  private static final Duration ABSOLUTE_SESSION_LIFETIME = Duration.ofDays(30);
+
   private final AccountRepository accountRepository;
   private final CredentialRepository credentialRepository;
   private final PersonStatusProjectionRepository personStatusProjectionRepository;
   private final SessionRepository sessionRepository;
   private final PasswordHasher passwordHasher;
+  private final TokenIssuer tokenIssuer;
+  private final TokenHasher tokenHasher;
+  private final SecureRandomGenerator randomGenerator;
 
   ChangePasswordHandler(
       AccountRepository accountRepository,
       CredentialRepository credentialRepository,
       PersonStatusProjectionRepository personStatusProjectionRepository,
       SessionRepository sessionRepository,
-      PasswordHasher passwordHasher) {
+      PasswordHasher passwordHasher,
+      TokenIssuer tokenIssuer,
+      TokenHasher tokenHasher,
+      SecureRandomGenerator randomGenerator) {
     this.accountRepository = accountRepository;
     this.credentialRepository = credentialRepository;
     this.personStatusProjectionRepository = personStatusProjectionRepository;
     this.sessionRepository = sessionRepository;
     this.passwordHasher = passwordHasher;
+    this.tokenIssuer = tokenIssuer;
+    this.tokenHasher = tokenHasher;
+    this.randomGenerator = randomGenerator;
   }
 
   public RpcHandlerOutcome<ChangePasswordResponse> handle(ChangePasswordRequest request) {
@@ -61,29 +79,61 @@ public class ChangePasswordHandler {
 
     Credential credential =
         credentialRepository.findByAccountId(account.accountId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.CREDENTIAL_NOT_CONFIGURED, "no credential configured"));
-    if (!passwordHasher.matches(request.currentPassword(), credential.hash())) {
-      throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "current password is incorrect");
-    }
     if (request.newPassword() == null || request.newPassword().length() < 15) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "password must be at least 15 characters");
     }
     if (passwordHasher.matches(request.newPassword(), credential.hash())) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "new password must differ from the current password");
     }
+    if (!passwordHasher.matches(request.currentPassword(), credential.hash())) {
+      throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "current password is incorrect");
+    }
 
     Instant now = Instant.now();
-    credentialRepository.update(credential.changed(passwordHasher.hash(request.newPassword()), now));
-    Account cleared = account.withPasswordChangeCompleted(now);
-    accountRepository.update(cleared, account.version());
-    // v1 policy: revoke every session after a password change (system_contract.md "Sessions").
-    sessionRepository.revokeAllActiveForAccount(account.accountId(), "password_changed", now);
+    Session currentSession =
+        sessionRepository
+            .findByIdForUpdate(request.sessionId())
+            .filter(session -> session.accountId().equals(account.accountId()))
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
+    if (!currentSession.isValid(now)) {
+      throw new AuthenticationRejectedException(RejectionCode.SESSION_EXPIRED, "session " + currentSession.sessionId() + " has expired");
+    }
 
-    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), now, true);
-    return RpcHandlerOutcome.of(new ChangePasswordResponse(true), account.accountId(), cleared.version(), new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event));
+    String refreshToken = randomGenerator.randomUrlSafeToken(32);
+    Instant absoluteExpiresAt = currentSession.authState() == Session.AuthState.PASSWORD_CHANGE_REQUIRED
+        ? now.plus(ABSOLUTE_SESSION_LIFETIME)
+        : currentSession.absoluteExpiresAt();
+    Instant idleExpiresAt = minInstant(now.plus(IDLE_SESSION_LIFETIME), absoluteExpiresAt);
+    Session renewedSession = currentSession.passwordChanged(tokenHasher.sha256Hex(refreshToken), now, idleExpiresAt, absoluteExpiresAt);
+    credentialRepository.update(credential.changed(passwordHasher.hash(request.newPassword()), now));
+    sessionRepository.update(renewedSession);
+    int revokedOtherSessions =
+        sessionRepository.revokeOtherActiveForAccount(account.accountId(), currentSession.sessionId(), "password_changed", now);
+    TokenIssuer.IssuedAccessToken accessToken =
+        tokenIssuer.issueAccessToken(account.accountId(), account.personId(), renewedSession.sessionId(), Session.AuthState.NORMAL.name());
+    ChangePasswordResponse response = new ChangePasswordResponse(true, accessToken.token(), refreshToken, accessToken.expiresAt());
+
+    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), now, revokedOtherSessions > 0);
+    if (revokedOtherSessions == 0) {
+      return RpcHandlerOutcome.of(
+          response, account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event));
+    }
+    OtherAccountSessionsRevokedPayload sessionsRevoked =
+        new OtherAccountSessionsRevokedPayload(account.accountId(), currentSession.sessionId(), "password_changed", now);
+    return RpcHandlerOutcome.of(
+        response,
+        account.accountId(),
+        account.version(),
+        new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event),
+        new EventToAppend(AuthenticationEvent.OTHER_ACCOUNT_SESSIONS_REVOKED.wireName(), sessionsRevoked));
   }
 
   private boolean isPersonActive(UUID personId) {
     var status = personStatusProjectionRepository.findByPersonId(personId);
     return status.isPresent() && "ACTIVE".equals(status.get().status());
+  }
+
+  private static Instant minInstant(Instant a, Instant b) {
+    return a.isBefore(b) ? a : b;
   }
 }

@@ -40,19 +40,18 @@ public class SetTemporaryPasswordHandler {
     support.claimOrThrow(OPERATION_TYPE, request.idempotencyKey(), request.accountId(), request.requestedByAccountId(), fingerprint);
 
     Instant now = Instant.now();
-    String temporaryPassword = support.issueNewSecretAndUpdateCredential(account);
-    Account updated = support.markMustChangePassword(account, request.expiresAt(), now);
+    TemporaryPasswordSupport.IssuedTemporaryPassword issued = support.issueNewSecretAndUpdateCredential(account, now);
     sessionRepository.revokeAllActiveForAccount(account.accountId(), "temporary_password_set", now);
 
     support.markCompleted(OPERATION_TYPE, request.idempotencyKey(), now);
 
-    TemporaryPasswordSetPayload setEvent = new TemporaryPasswordSetPayload(updated.accountId(), true, updated.temporaryPasswordExpiresAt(), now);
-    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(updated.accountId(), "temporary_password_set", now);
+    TemporaryPasswordSetPayload setEvent = new TemporaryPasswordSetPayload(account.accountId(), true, issued.credential().temporaryPasswordExpiresAt(), now);
+    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "temporary_password_set", now);
 
     return RpcHandlerOutcome.of(
-        new SetTemporaryPasswordResponse(temporaryPassword, updated.temporaryPasswordExpiresAt()),
-        updated.accountId(),
-        updated.version(),
+        new SetTemporaryPasswordResponse(issued.password(), issued.credential().temporaryPasswordExpiresAt()),
+        account.accountId(),
+        account.version(),
         new EventToAppend(AuthenticationEvent.TEMPORARY_PASSWORD_SET.wireName(), setEvent),
         new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), revokedEvent));
   }

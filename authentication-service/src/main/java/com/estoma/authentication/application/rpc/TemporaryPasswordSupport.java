@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
  * Shared logic between {@code SetTemporaryPassword} and {@code
  * RegenerateTemporaryPassword} (commands.md §7): confirm the account
  * exists, claim the idempotency key, generate and store the secret, update
- * the account's must-change-password state. Differs only in which event(s)
+   * the credential's must-change-password state. Differs only in which event(s)
  * the caller appends and the {@code operationType} used for the
  * idempotency ledger -- left to each handler.
  *
@@ -79,30 +79,26 @@ class TemporaryPasswordSupport {
   }
 
   /** Generates a new temporary password, stores only its hash, and returns the plain-text secret (never persisted). */
-  String issueNewSecretAndUpdateCredential(Account account) {
+  IssuedTemporaryPassword issueNewSecretAndUpdateCredential(Account account, Instant now) {
     String temporaryPassword = randomGenerator.randomTemporaryPassword();
     PasswordHash hash = passwordHasher.hash(temporaryPassword);
-    Instant now = Instant.now();
+    Instant expiresAt = now.plus(DEFAULT_EXPIRATION);
 
     if (credentialRepository.existsByAccountId(account.accountId())) {
       Credential existing = credentialRepository.findByAccountId(account.accountId()).orElseThrow();
-      credentialRepository.update(existing.changed(hash, now));
+      Credential updated = existing.temporaryPassword(hash, expiresAt, now);
+      credentialRepository.update(updated);
+      return new IssuedTemporaryPassword(temporaryPassword, updated);
     } else {
-      credentialRepository.insert(Credential.configure(account.accountId(), hash, now));
+      Credential created = Credential.configureTemporary(account.accountId(), hash, expiresAt, now);
+      credentialRepository.insert(created);
+      return new IssuedTemporaryPassword(temporaryPassword, created);
     }
-    return temporaryPassword;
-  }
-
-  Account markMustChangePassword(Account account, Instant expiresAtOrNull, Instant now) {
-    // Administrative callers cannot extend or shorten the contractually fixed
-    // 24-hour lifetime through a payload value.
-    Instant expiresAt = now.plus(DEFAULT_EXPIRATION);
-    Account updated = account.withTemporaryPasswordSet(expiresAt, now);
-    accountRepository.update(updated, account.version());
-    return updated;
   }
 
   void markCompleted(String operationType, String idempotencyKey, Instant now) {
     idempotencyRepository.markCompleted(operationType, idempotencyKey, now);
   }
+
+  record IssuedTemporaryPassword(String password, Credential credential) {}
 }
