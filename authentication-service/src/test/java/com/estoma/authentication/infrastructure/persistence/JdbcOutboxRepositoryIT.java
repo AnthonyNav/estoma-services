@@ -43,7 +43,7 @@ class JdbcOutboxRepositoryIT extends AbstractPostgresIT {
     repository.append(
         new OutboxAppendRequest(
             messageId, "AccountCreated", 1, MessageKind.EVENT.name(), aggregateId, 1, correlationId, causationId,
-            operationId, "request-123", actor, "{}", Instant.now()));
+             operationId, "request-123", actor, null, "{}", Instant.now()));
 
     String status = jdbc.sql("SELECT status FROM outbox_messages WHERE message_id = :id").param("id", messageId).query(String.class).single();
     assertThat(status).isEqualTo("PENDING");
@@ -62,7 +62,7 @@ class JdbcOutboxRepositoryIT extends AbstractPostgresIT {
     repository.append(
         new OutboxAppendRequest(
             messageId, "AccountCreated", 1, MessageKind.EVENT.name(), UUID.randomUUID(), 1, UUID.randomUUID(), null,
-            null, null, null, "{}", Instant.now()));
+             null, null, null, null, "{}", Instant.now()));
 
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);

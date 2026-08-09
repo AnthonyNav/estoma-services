@@ -65,8 +65,8 @@ public final class AmqpNames {
   public static final String ROUTING_KEY_OTHER_ACCOUNT_SESSIONS_REVOKED = "authentication.session.other-revoked";
   public static final String ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED = "authentication.recovery.requested";
 
-  /** The only requester `system_contract.md` lists for durable commands today (`results.bff`). */
-  public static final String ROUTING_KEY_RESULTS_BFF = "bff";
+  public static final String ROUTING_KEY_RESULTS_BFF = "results.bff";
+  public static final String ROUTING_KEY_RESULTS_STUDENT_IMPORT_PROCESS = "results.student-import-process";
 
   /** RPC Ephemeral Operational Parameters (system_contract.md): message TTL 5s, no DLQ, no retry tiers. */
   public static final long RPC_MESSAGE_TTL_MS = 5_000L;

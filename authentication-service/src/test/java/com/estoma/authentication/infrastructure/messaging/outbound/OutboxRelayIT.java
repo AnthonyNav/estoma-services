@@ -38,8 +38,8 @@ class OutboxRelayIT extends AbstractRabbitMqIT {
   void aRowWithNoConfiguredRoutingKeyIsBackedOffNotDropped() {
     UUID messageId = UUID.randomUUID();
     outboxRepository.append(
-        new OutboxAppendRequest(
-            messageId, "NoSuchEventType", 1, "EVENT", null, null, UUID.randomUUID(), null, null, null, null, "{}", Instant.now()));
+         new OutboxAppendRequest(
+             messageId, "NoSuchEventType", 1, "EVENT", null, null, UUID.randomUUID(), null, null, null, null, null, "{}", Instant.now()));
 
     outboxRelay.relay();
 

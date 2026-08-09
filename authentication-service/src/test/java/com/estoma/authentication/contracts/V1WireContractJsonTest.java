@@ -75,8 +75,8 @@ class V1WireContractJsonTest {
     var json = mapper.readTree(mapper.writeValueAsBytes(ResultPayload.rejected("ACTOR_NOT_AUTHORIZED")));
 
     assertThat(ResultStatus.values()).containsExactly(ResultStatus.SUCCEEDED, ResultStatus.REJECTED, ResultStatus.FAILED, ResultStatus.EXPIRED);
-    assertThat(json.size()).isEqualTo(3);
-    assertThat(json.has("data")).isTrue();
+    assertThat(json.size()).isEqualTo(2);
+    assertThat(json.has("data")).isFalse();
     assertThat(json.has("error")).isTrue();
     assertThat(json.get("status").asString()).isEqualTo("REJECTED");
     assertThat(json.get("error").get("code").asString()).isEqualTo("ACTOR_NOT_AUTHORIZED");

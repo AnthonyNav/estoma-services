@@ -63,7 +63,7 @@ public class RpcDispatcher {
   private void appendEvent(UUID correlationId, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
     outbox.append(
         new OutboxAppendRequest(
-            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion, correlationId, null,
-            null, null, null, codec.writeValueAsString(event.payload()), Instant.now()));
+             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion, correlationId, null,
+             null, null, null, null, codec.writeValueAsString(event.payload()), Instant.now()));
   }
 }

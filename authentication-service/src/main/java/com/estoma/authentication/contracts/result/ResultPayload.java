@@ -1,9 +1,12 @@
 package com.estoma.authentication.contracts.result;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 /**
  * The common V1 payload for durable Results and security RPC responses:
  * {@code status}, {@code data}, and {@code error}.
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record ResultPayload(ResultStatus status, Object data, ErrorPayload error) {
 
   public static ResultPayload succeeded(Object data) {

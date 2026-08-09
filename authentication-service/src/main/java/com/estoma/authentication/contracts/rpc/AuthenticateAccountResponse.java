@@ -1,6 +1,5 @@
 package com.estoma.authentication.contracts.rpc;
 
-import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -9,4 +8,4 @@ import java.util.UUID;
  * events, {@code platform.results}, Outbox, Inbox, logs, or traces.
  */
 public record AuthenticateAccountResponse(
-    UUID accountId, UUID sessionId, String accessToken, String refreshToken, Instant expiresAt, boolean mustChangePassword) {}
+    UUID accountId, UUID sessionId, String accessToken, String refreshToken, AuthState authState) {}

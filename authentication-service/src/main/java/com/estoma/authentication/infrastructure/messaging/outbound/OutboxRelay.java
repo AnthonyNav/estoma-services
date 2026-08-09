@@ -92,7 +92,7 @@ public class OutboxRelay {
     RoutingKeyResolver.Destination destination =
         switch (kind) {
           case EVENT -> routingKeyResolver.resolveEvent(record.messageType());
-          case RESULT -> routingKeyResolver.resolveResult();
+           case RESULT -> routingKeyResolver.resolveResult(record.resultRequester());
           case COMMAND, QUERY, RPC_REQUEST, RPC_RESPONSE -> throw new IllegalStateException("authentication-service only publishes durable RESULT and EVENT messages");
         };
 

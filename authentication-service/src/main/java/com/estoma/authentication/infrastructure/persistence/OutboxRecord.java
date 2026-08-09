@@ -17,6 +17,7 @@ public record OutboxRecord(
     UUID operationId,
     String idempotencyKey,
     Actor actor,
+    String resultRequester,
     String payloadJson,
     int attempts,
     Instant occurredAt) {}

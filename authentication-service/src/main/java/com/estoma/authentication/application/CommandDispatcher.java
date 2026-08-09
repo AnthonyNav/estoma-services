@@ -79,8 +79,7 @@ public class CommandDispatcher {
           envelope,
           null,
           null,
-          codec.writeValueAsString(ResultPayload.rejected("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")),
-          "Rejected");
+          codec.writeValueAsString(ResultPayload.rejected("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")));
       return new CommandOutcome.Rejected(
           com.estoma.authentication.domain.RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST);
     }
@@ -109,26 +108,26 @@ public class CommandDispatcher {
     ResultPayload payload = ResultPayload.succeeded(new SucceededPayload(result.aggregateId(), result.aggregateVersion()));
     String payloadJson = codec.writeValueAsString(payload);
     idempotency.complete(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), payloadJson);
-    appendResult(envelope, result.aggregateId(), result.aggregateVersion(), payloadJson, "Succeeded");
+    appendResult(envelope, result.aggregateId(), result.aggregateVersion(), payloadJson);
   }
 
   private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected) {
     ResultPayload payload = ResultPayload.rejected(rejected.code().name());
     String payloadJson = codec.writeValueAsString(payload);
     idempotency.complete(envelope.producer(), envelope.messageType(), envelope.idempotencyKey(), payloadJson);
-    appendResult(envelope, null, null, payloadJson, "Rejected");
+    appendResult(envelope, null, null, payloadJson);
   }
 
   private void appendResult(MessageEnvelope envelope, String payloadJson) {
-    String suffix = "SUCCEEDED".equals(codec.readTree(payloadJson).get("status").asString()) ? "Succeeded" : "Rejected";
-    appendResult(envelope, null, null, payloadJson, suffix);
+    appendResult(envelope, null, null, payloadJson);
   }
 
-  private void appendResult(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, String payloadJson, String suffix) {
+  private void appendResult(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, String payloadJson) {
     outbox.append(
         new OutboxAppendRequest(
-            UUID.randomUUID(), envelope.messageType() + suffix, 1, MessageKind.RESULT.name(), aggregateId, aggregateVersion,
-            envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(), payloadJson, Instant.now()));
+            UUID.randomUUID(), envelope.messageType() + "Result", 1, MessageKind.RESULT.name(), aggregateId, aggregateVersion,
+            envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
+            envelope.producer(), payloadJson, Instant.now()));
   }
 
   private void appendEvent(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
@@ -136,7 +135,7 @@ public class CommandDispatcher {
         new OutboxAppendRequest(
             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion,
             envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
-            codec.writeValueAsString(event.payload()), Instant.now()));
+            null, codec.writeValueAsString(event.payload()), Instant.now()));
   }
 
   private String fingerprint(MessageEnvelope envelope) {

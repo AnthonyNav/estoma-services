@@ -90,7 +90,7 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
         null,
         anonymousActor(),
         AuthenticateAccountResponse.class);
-    assertThat(restrictedSession.mustChangePassword()).isTrue();
+    assertThat(restrictedSession.authState()).isEqualTo(com.estoma.authentication.contracts.rpc.AuthState.PASSWORD_CHANGE_REQUIRED);
     assertThat(restrictedSession.refreshToken()).isNull();
     assertThat(sessionRepository.findById(restrictedSession.sessionId()).orElseThrow().authState())
         .isEqualTo(Session.AuthState.PASSWORD_CHANGE_REQUIRED);
@@ -112,6 +112,8 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
     assertThat(sessionRepository.findById(restrictedSession.sessionId()).orElseThrow().authState())
         .isEqualTo(Session.AuthState.NORMAL);
     assertThat(passwordChanged.refreshToken()).isNotBlank();
+    assertThat(passwordChanged.sessionId()).isEqualTo(restrictedSession.sessionId());
+    assertThat(passwordChanged.authState()).isEqualTo(com.estoma.authentication.contracts.rpc.AuthState.NORMAL);
 
     RefreshSessionResponse refreshed = rpcSuccess(
         AuthenticationRpcOperation.REFRESH_SESSION,

@@ -112,7 +112,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         .param("personId", personId).query(Long.class).single()).isEqualTo(1L);
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'AccountCreated' AND causation_id = :messageId")
         .param("messageId", first.messageId()).query(Long.class).single()).isEqualTo(1L);
-    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'CreateAccountSucceeded' AND correlation_id = :correlationId")
+     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'CreateAccountResult' AND correlation_id = :correlationId")
         .param("correlationId", first.correlationId()).query(Long.class).single()).isEqualTo(2L);
     assertThat(jdbc.sql("SELECT result_data IS NOT NULL FROM command_idempotency_records WHERE idempotency_key = :key")
         .param("key", first.idempotencyKey()).query(Boolean.class).single()).isTrue();

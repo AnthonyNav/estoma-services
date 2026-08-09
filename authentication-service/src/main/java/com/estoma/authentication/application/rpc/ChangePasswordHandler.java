@@ -14,6 +14,7 @@ import com.estoma.authentication.contracts.event.OtherAccountSessionsRevokedPayl
 import com.estoma.authentication.contracts.event.PasswordChangedPayload;
 import com.estoma.authentication.contracts.rpc.ChangePasswordRequest;
 import com.estoma.authentication.contracts.rpc.ChangePasswordResponse;
+import com.estoma.authentication.contracts.rpc.AuthState;
 import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
@@ -110,7 +111,7 @@ public class ChangePasswordHandler {
         sessionRepository.revokeOtherActiveForAccount(account.accountId(), currentSession.sessionId(), "password_changed", now);
     TokenIssuer.IssuedAccessToken accessToken =
         tokenIssuer.issueAccessToken(account.accountId(), account.personId(), renewedSession.sessionId(), Session.AuthState.NORMAL.name());
-    ChangePasswordResponse response = new ChangePasswordResponse(accessToken.token(), refreshToken, accessToken.expiresAt());
+    ChangePasswordResponse response = new ChangePasswordResponse(renewedSession.sessionId(), accessToken.token(), refreshToken, AuthState.NORMAL);
 
     PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), "password_change", now, revokedOtherSessions > 0);
     if (revokedOtherSessions == 0) {

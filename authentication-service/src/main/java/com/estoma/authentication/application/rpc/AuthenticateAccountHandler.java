@@ -10,6 +10,7 @@ import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.application.port.TokenIssuer;
 import com.estoma.authentication.contracts.rpc.AuthenticateAccountRequest;
 import com.estoma.authentication.contracts.rpc.AuthenticateAccountResponse;
+import com.estoma.authentication.contracts.rpc.AuthState;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
@@ -117,7 +118,7 @@ public class AuthenticateAccountHandler {
     TokenIssuer.IssuedAccessToken accessToken = tokenIssuer.issueAccessToken(account.accountId(), account.personId(), session.sessionId(), session.authState().name());
 
     AuthenticateAccountResponse response =
-        new AuthenticateAccountResponse(account.accountId(), session.sessionId(), accessToken.token(), refreshToken, accessToken.expiresAt(), temporaryCredential);
+        new AuthenticateAccountResponse(account.accountId(), session.sessionId(), accessToken.token(), refreshToken, AuthState.valueOf(session.authState().name()));
     return RpcHandlerOutcome.withoutEvents(response); // AuthenticationSucceeded is internal, not published in v1 (events.md §5)
   }
 

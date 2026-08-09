@@ -76,7 +76,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
 
     var response = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) outcome).response();
     assertThat(response.refreshToken()).isNull();
-    assertThat(response.mustChangePassword()).isTrue();
+    assertThat(response.authState()).isEqualTo(com.estoma.authentication.contracts.rpc.AuthState.PASSWORD_CHANGE_REQUIRED);
     assertThat(sessionRepository.findById(response.sessionId()).orElseThrow().authState().name()).isEqualTo("PASSWORD_CHANGE_REQUIRED");
     assertThat(credentialRepository.findByAccountId(accountId).orElseThrow().temporaryPasswordConsumedAt()).isNotNull();
   }

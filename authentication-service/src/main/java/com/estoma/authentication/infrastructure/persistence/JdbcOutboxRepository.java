@@ -35,10 +35,10 @@ public class JdbcOutboxRepository implements OutboxPort {
             """
             INSERT INTO outbox_messages (
               message_id, message_type, message_version, message_kind, aggregate_id, aggregate_version,
-               correlation_id, causation_id, operation_id, idempotency_key, actor, payload, status, attempts, occurred_at, available_at
+                correlation_id, causation_id, operation_id, idempotency_key, actor, result_requester, payload, status, attempts, occurred_at, available_at
             ) VALUES (
               :messageId, :messageType, :messageVersion, :messageKind, :aggregateId, :aggregateVersion,
-               :correlationId, :causationId, :operationId, :idempotencyKey, CAST(:actor AS jsonb), CAST(:payload AS jsonb),
+               :correlationId, :causationId, :operationId, :idempotencyKey, CAST(:actor AS jsonb), :resultRequester, CAST(:payload AS jsonb),
               CAST('PENDING' AS outbox_status), 0, :occurredAt, :occurredAt
             )
             """)
@@ -53,6 +53,7 @@ public class JdbcOutboxRepository implements OutboxPort {
         .param("operationId", request.operationId())
         .param("idempotencyKey", request.idempotencyKey())
         .param("actor", request.actor() == null ? null : mapper.writeValueAsString(request.actor()))
+         .param("resultRequester", request.resultRequester())
         .param("payload", request.payloadJson())
         .param("occurredAt", Timestamps.toTimestamp(request.occurredAt()))
         .update();
@@ -73,7 +74,7 @@ public class JdbcOutboxRepository implements OutboxPort {
     return jdbc.sql(
             """
             SELECT message_id, message_type, message_version, message_kind, aggregate_id, aggregate_version,
-                    correlation_id, causation_id, operation_id, idempotency_key, actor::text AS actor, payload::text AS payload, attempts, occurred_at
+                    correlation_id, causation_id, operation_id, idempotency_key, actor::text AS actor, result_requester, payload::text AS payload, attempts, occurred_at
             FROM outbox_messages
             WHERE status = 'PENDING' AND available_at <= now()
             ORDER BY occurred_at
@@ -95,7 +96,8 @@ public class JdbcOutboxRepository implements OutboxPort {
                     (UUID) rs.getObject("operation_id"),
                     rs.getString("idempotency_key"),
                     rs.getString("actor") == null ? null : mapper.readValue(rs.getString("actor"), Actor.class),
-                    rs.getString("payload"),
+                     rs.getString("result_requester"),
+                     rs.getString("payload"),
                     rs.getInt("attempts"),
                     Timestamps.toInstant(rs, "occurred_at")))
         .list();

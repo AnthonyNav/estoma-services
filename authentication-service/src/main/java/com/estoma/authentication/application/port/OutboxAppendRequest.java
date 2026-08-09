@@ -29,5 +29,6 @@ public record OutboxAppendRequest(
     UUID operationId,
     String idempotencyKey,
     Actor actor,
+    String resultRequester,
     String payloadJson,
     Instant occurredAt) {}

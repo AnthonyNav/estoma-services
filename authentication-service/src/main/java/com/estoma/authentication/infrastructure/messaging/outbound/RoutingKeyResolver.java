@@ -43,6 +43,10 @@ public class RoutingKeyResolver {
            Map.entry(AuthenticationEvent.OTHER_ACCOUNT_SESSIONS_REVOKED.wireName(), AmqpNames.ROUTING_KEY_OTHER_ACCOUNT_SESSIONS_REVOKED),
            Map.entry(AuthenticationEvent.PASSWORD_RECOVERY_REQUESTED.wireName(), AmqpNames.ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED));
 
+  private static final Map<String, String> RESULT_ROUTING_KEYS =
+      Map.of("bff", AmqpNames.ROUTING_KEY_RESULTS_BFF,
+          "student-import-process", AmqpNames.ROUTING_KEY_RESULTS_STUDENT_IMPORT_PROCESS);
+
   public record Destination(String exchange, String routingKey) {}
 
   public Destination resolveEvent(String messageType) {
@@ -53,8 +57,12 @@ public class RoutingKeyResolver {
     return new Destination(MessagingNames.EVENTS_EXCHANGE, routingKey);
   }
 
-  public Destination resolveResult() {
-    return new Destination(MessagingNames.RESULTS_EXCHANGE, AmqpNames.ROUTING_KEY_RESULTS_BFF);
+  public Destination resolveResult(String requester) {
+    String routingKey = RESULT_ROUTING_KEYS.get(requester);
+    if (routingKey == null) {
+      throw new IllegalArgumentException("no result routing key configured for requester " + requester);
+    }
+    return new Destination(MessagingNames.RESULTS_EXCHANGE, routingKey);
   }
 
   public static Map<String, String> eventRoutingKeys() {

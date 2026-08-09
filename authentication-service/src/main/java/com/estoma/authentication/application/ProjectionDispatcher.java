@@ -67,6 +67,6 @@ public class ProjectionDispatcher {
         new OutboxAppendRequest(
             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), envelope.aggregateId(), envelope.aggregateVersion(),
             envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
-            codec.writeValueAsString(event.payload()), Instant.now()));
+            null, codec.writeValueAsString(event.payload()), Instant.now()));
   }
 }
