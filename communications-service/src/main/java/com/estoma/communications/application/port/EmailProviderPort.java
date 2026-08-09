@@ -25,19 +25,10 @@ public interface EmailProviderPort {
       String templateCode,
       String templateData) {}
 
-  sealed interface EmailSendResult permits EmailSendResult.Accepted, EmailSendResult.Failed, EmailSendResult.Indeterminate {
+  sealed interface EmailSendResult {
 
     record Accepted(String provider, String providerMessageId) implements EmailSendResult {}
 
-    record Failed(String provider, String normalizedErrorCode, String errorMessage, boolean retryable) implements EmailSendResult {
-      public Failed(String provider, String normalizedErrorCode, String errorMessage) {
-        this(provider, normalizedErrorCode, errorMessage, true);
-      }
-      public String sanitizedErrorDetail() { return errorMessage; }
-    }
-
-    record Indeterminate(String provider, String normalizedErrorCode, String errorMessage) implements EmailSendResult {
-      public String sanitizedErrorDetail() { return errorMessage; }
-    }
+    record Failed(String provider, String normalizedErrorCode, String errorMessage) implements EmailSendResult {}
   }
 }

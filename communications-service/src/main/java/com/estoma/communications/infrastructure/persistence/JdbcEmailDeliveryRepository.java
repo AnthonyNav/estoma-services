@@ -17,16 +17,13 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
       email_delivery_id, communication_id, recipient_address, recipient_name, from_name, from_address, reply_to_address,
       content_mode, subject, text_body, html_body, template_code, template_data,
       status, attempt_count, next_attempt_at, accepted_at, delivered_at, failed_at, last_error_code, last_error_message,
-       created_at, updated_at, claim_token, claimed_at, lease_until, worker_id, retry_cycle, cycle_attempt_count
+      created_at, updated_at
       """;
 
   private final JdbcClient jdbc;
-  private final long leaseDurationMs;
 
-  JdbcEmailDeliveryRepository(JdbcClient jdbc,
-      @org.springframework.beans.factory.annotation.Value("${estoma.communications.email.worker.lease-duration-ms:30000}") long leaseDurationMs) {
+  JdbcEmailDeliveryRepository(JdbcClient jdbc) {
     this.jdbc = jdbc;
-    this.leaseDurationMs = leaseDurationMs;
   }
 
   @Override
@@ -45,12 +42,12 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
               email_delivery_id, communication_id, recipient_address, recipient_name, from_name, from_address, reply_to_address,
               content_mode, subject, text_body, html_body, template_code, template_data,
               status, attempt_count, next_attempt_at, accepted_at, delivered_at, failed_at, last_error_code, last_error_message,
-                created_at, updated_at, claim_token, claimed_at, lease_until, worker_id, retry_cycle, cycle_attempt_count
+              created_at, updated_at
             ) VALUES (
               :emailDeliveryId, :communicationId, :recipientAddress, :recipientName, :fromName, :fromAddress, :replyToAddress,
               CAST(:contentMode AS email_content_mode), :subject, :textBody, :htmlBody, :templateCode, CAST(:templateData AS jsonb),
               CAST(:status AS email_delivery_status), :attemptCount, :nextAttemptAt, :acceptedAt, :deliveredAt, :failedAt, :lastErrorCode, :lastErrorMessage,
-                :createdAt, :updatedAt, :claimToken, :claimedAt, :leaseUntil, :workerId, :retryCycle, :cycleAttemptCount
+              :createdAt, :updatedAt
             )
             """)
         .param("emailDeliveryId", delivery.emailDeliveryId())
@@ -76,9 +73,6 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
         .param("lastErrorMessage", delivery.lastErrorMessage())
         .param("createdAt", Timestamps.toTimestamp(delivery.createdAt()))
         .param("updatedAt", Timestamps.toTimestamp(delivery.updatedAt()))
-         .param("claimToken", delivery.claimToken()).param("claimedAt", Timestamps.toTimestamp(delivery.claimedAt()))
-         .param("leaseUntil", Timestamps.toTimestamp(delivery.leaseUntil())).param("workerId", delivery.workerId())
-         .param("retryCycle", delivery.retryCycle()).param("cycleAttemptCount", delivery.cycleAttemptCount())
         .update();
   }
 
@@ -95,8 +89,7 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
               failed_at = :failedAt,
               last_error_code = :lastErrorCode,
               last_error_message = :lastErrorMessage,
-              updated_at = :updatedAt, claim_token = :claimToken, claimed_at = :claimedAt,
-              lease_until = :leaseUntil, worker_id = :workerId, retry_cycle = :retryCycle, cycle_attempt_count = :cycleAttemptCount
+              updated_at = :updatedAt
             WHERE email_delivery_id = :emailDeliveryId
             """)
         .param("status", delivery.status().name())
@@ -108,20 +101,12 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
         .param("lastErrorCode", delivery.lastErrorCode())
         .param("lastErrorMessage", delivery.lastErrorMessage())
         .param("updatedAt", Timestamps.toTimestamp(delivery.updatedAt()))
-        .param("claimToken", delivery.claimToken()).param("claimedAt", Timestamps.toTimestamp(delivery.claimedAt()))
-        .param("leaseUntil", Timestamps.toTimestamp(delivery.leaseUntil())).param("workerId", delivery.workerId())
-        .param("retryCycle", delivery.retryCycle()).param("cycleAttemptCount", delivery.cycleAttemptCount())
         .param("emailDeliveryId", delivery.emailDeliveryId())
         .update();
   }
 
   @Override
   public List<EmailDelivery> claimDue(int batchSize) {
-    return claimDue(batchSize, "legacy-worker");
-  }
-
-  @Override
-  public List<EmailDelivery> claimDue(int batchSize, String workerId) {
     return jdbc.sql(
             """
             WITH due AS (
@@ -133,91 +118,18 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
               FOR UPDATE SKIP LOCKED
             )
             UPDATE email_deliveries e
-            SET status = CAST('SENDING' AS email_delivery_status), claim_token = gen_random_uuid(), claimed_at = :now, lease_until = :leaseUntil,
-                worker_id = :workerId, updated_at = :now
+            SET status = CAST('SENDING' AS email_delivery_status), updated_at = :now
             FROM due
             WHERE e.email_delivery_id = due.email_delivery_id
             RETURNING
               e.email_delivery_id, e.communication_id, e.recipient_address, e.recipient_name, e.from_name, e.from_address, e.reply_to_address,
               e.content_mode, e.subject, e.text_body, e.html_body, e.template_code, e.template_data,
               e.status, e.attempt_count, e.next_attempt_at, e.accepted_at, e.delivered_at, e.failed_at, e.last_error_code, e.last_error_message,
-              e.created_at, e.updated_at, e.claim_token, e.claimed_at, e.lease_until, e.worker_id, e.retry_cycle, e.cycle_attempt_count
+              e.created_at, e.updated_at
             """)
         .param("now", Timestamps.toTimestamp(Instant.now()))
-         .param("batchSize", batchSize)
-           .param("leaseUntil", Timestamps.toTimestamp(Instant.now().plusMillis(leaseDurationMs))).param("workerId", workerId)
+        .param("batchSize", batchSize)
         .query(EmailDeliveryRowMapper.INSTANCE)
         .list();
-  }
-
-  @Override
-  public int releaseExpiredLeases() {
-    jdbc.sql("""
-        UPDATE email_delivery_attempts a SET status = CAST('INDETERMINATE' AS email_attempt_status),
-          normalized_error_code = 'LEASE_EXPIRED', error_message = 'provider call may have started', completed_at = now()
-        FROM email_deliveries d
-        WHERE a.email_delivery_id = d.email_delivery_id AND a.claim_token = d.claim_token
-          AND a.status = CAST('CALL_STARTED' AS email_attempt_status)
-          AND d.status = CAST('SENDING' AS email_delivery_status)
-          AND d.lease_until IS NOT NULL AND d.lease_until < now()
-        """).update();
-    int recovered = jdbc.sql("""
-        UPDATE email_deliveries d
-           SET status = CASE WHEN EXISTS (
-                 SELECT 1 FROM email_delivery_attempts a
-                  WHERE a.email_delivery_id = d.email_delivery_id
-                    AND a.claim_token = d.claim_token
-                    AND a.status = CAST('INDETERMINATE' AS email_attempt_status)
-               ) THEN CAST('INDETERMINATE' AS email_delivery_status)
-               ELSE CAST('PENDING' AS email_delivery_status) END,
-               next_attempt_at = CASE WHEN EXISTS (
-                 SELECT 1 FROM email_delivery_attempts a
-                  WHERE a.email_delivery_id = d.email_delivery_id
-                    AND a.claim_token = d.claim_token
-                    AND a.status = CAST('INDETERMINATE' AS email_attempt_status)
-               ) THEN NULL ELSE now() END,
-               claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL, updated_at = now()
-         WHERE d.status = CAST('SENDING' AS email_delivery_status)
-           AND d.lease_until IS NOT NULL AND d.lease_until < now()
-        """).update();
-    return recovered;
-  }
-
-  @Override
-  public int startSending(UUID deliveryId, UUID claimToken, Instant now) {
-    return jdbc.sql("""
-        UPDATE email_deliveries SET status = CAST('SENDING' AS email_delivery_status),
-          attempt_count = attempt_count + 1, cycle_attempt_count = cycle_attempt_count + 1, updated_at = :now
-        WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > :now
-          AND status IN (CAST('PENDING' AS email_delivery_status), CAST('RETRY_SCHEDULED' AS email_delivery_status), CAST('SENDING' AS email_delivery_status))
-        """)
-        .param("id", deliveryId).param("token", claimToken).param("now", Timestamps.toTimestamp(now)).update();
-  }
-
-  @Override
-  public int failPreProvider(UUID deliveryId, UUID claimToken, String code, String message, Instant now) {
-    return jdbc.sql("""
-        UPDATE email_deliveries SET status = CAST('FAILED' AS email_delivery_status),
-          failed_at = :now, last_error_code = :code, last_error_message = :message,
-          claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL, updated_at = :now
-         WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > :now AND status IN
-          (CAST('PENDING' AS email_delivery_status), CAST('RETRY_SCHEDULED' AS email_delivery_status), CAST('SENDING' AS email_delivery_status))
-        """).param("now", Timestamps.toTimestamp(now)).param("code", code).param("message", message)
-        .param("id", deliveryId).param("token", claimToken).param("now", Timestamps.toTimestamp(now)).update();
-  }
-
-  @Override
-  public int updateClaimed(EmailDelivery delivery, UUID claimToken) {
-    return jdbc.sql("""
-        UPDATE email_deliveries SET status = CAST(:status AS email_delivery_status), next_attempt_at = :nextAttemptAt,
-          accepted_at = :acceptedAt, delivered_at = :deliveredAt, failed_at = :failedAt, last_error_code = :code,
-          last_error_message = :message, updated_at = :updatedAt, claim_token = NULL, claimed_at = NULL,
-          lease_until = NULL, worker_id = NULL
-         WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > now()
-           AND status = CAST('SENDING' AS email_delivery_status)
-        """).param("status", delivery.status().name()).param("nextAttemptAt", Timestamps.toTimestamp(delivery.nextAttemptAt()))
-        .param("acceptedAt", Timestamps.toTimestamp(delivery.acceptedAt())).param("deliveredAt", Timestamps.toTimestamp(delivery.deliveredAt()))
-        .param("failedAt", Timestamps.toTimestamp(delivery.failedAt())).param("code", delivery.lastErrorCode()).param("message", delivery.lastErrorMessage())
-        .param("updatedAt", Timestamps.toTimestamp(delivery.updatedAt())).param("id", delivery.emailDeliveryId()).param("token", claimToken).update();
   }
 }

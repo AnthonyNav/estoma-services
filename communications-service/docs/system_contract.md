@@ -216,7 +216,7 @@ This section has no equivalent in `authentication-service`: it documents how the
 - A separate scheduled `EmailDeliveryWorker` claims due `PENDING`/`RETRY_SCHEDULED` rows with `SELECT ... FOR UPDATE SKIP LOCKED`, in its own transaction that only marks rows as claimed (e.g. `SENDING`) — no provider call happens in this transaction either.
 - The provider call happens with **no** database transaction open.
 - The resulting `EmailDeliveryAttempt`, the `EmailDelivery` status transition, and the derived event (`EmailDeliveryAccepted` / `EmailDeliveryRetryScheduled` / `EmailDeliveryFailed` / `EmailProviderFallbackActivated`) are recorded together in a second, separate transaction, appended to Outbox in the same commit.
-- v1 operational values, this service's own authority (may be tuned later with production data; not a Phase 2 blocker): worker polls every 5 seconds, claims a batch of 20; retry backoff schedule on provider failure is `1m, 5m, 30m, 2h, 24h` for six physical calls per retry cycle, then the delivery is marked `FAILED`.
+- v1 operational values, this service's own authority (may be tuned later with production data; not a Phase 2 blocker): worker polls every 5 seconds, claims a batch of 20; retry backoff schedule on provider failure is `1m, 5m, 30m, 2h, 24h` (5 attempts total including the first), then the delivery is marked `FAILED`.
 - Which concrete providers are used and their fallback order remain pending (`pending_decisions.md`) — the provider port and a stub implementation are enough to build and test this policy in PR2 without that decision being made yet.
 
 ## Observability Parameters

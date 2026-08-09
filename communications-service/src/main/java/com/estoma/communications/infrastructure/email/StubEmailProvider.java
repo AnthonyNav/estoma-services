@@ -2,7 +2,6 @@ package com.estoma.communications.infrastructure.email;
 
 import com.estoma.communications.application.port.EmailProviderPort;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -17,18 +16,9 @@ import org.springframework.stereotype.Component;
 class StubEmailProvider implements EmailProviderPort {
 
   static final String PROVIDER_NAME = "stub";
-  private final String mode;
-
-  StubEmailProvider(@Value("${estoma.communications.email.fake.mode:accepted}") String mode) {
-    this.mode = mode.toLowerCase();
-  }
 
   @Override
   public EmailSendResult send(EmailSendRequest request) {
-    if ("retryable".equals(mode)) return new EmailSendResult.Failed(PROVIDER_NAME, "PROVIDER_RETRYABLE", "provider rejected temporarily", true);
-    if ("terminal".equals(mode)) return new EmailSendResult.Failed(PROVIDER_NAME, "PROVIDER_TERMINAL", "provider rejected", false);
-    if ("indeterminate".equals(mode) || "timeout".equals(mode)) return new EmailSendResult.Indeterminate(PROVIDER_NAME, "PROVIDER_INDETERMINATE", mode);
-    if ("exception".equals(mode)) throw new IllegalStateException("provider exception");
     return new EmailSendResult.Accepted(PROVIDER_NAME, UUID.randomUUID().toString());
   }
 }

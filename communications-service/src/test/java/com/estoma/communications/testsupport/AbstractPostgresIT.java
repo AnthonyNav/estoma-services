@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
@@ -29,12 +28,6 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  */
 @SpringBootTest
 @Testcontainers
-@TestPropertySource(properties = {
-    "spring.task.scheduling.enabled=false",
-    "estoma.communications.email.worker.enabled=false",
-    "estoma.communications.email.worker.poll-interval-ms=3600000",
-    "estoma.communications.email.worker.sweeper-interval-ms=3600000"
-})
 @Tag("integration")
 public abstract class AbstractPostgresIT {
 
