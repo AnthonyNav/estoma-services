@@ -30,6 +30,10 @@ import com.estoma.communications.testsupport.AbstractPostgresIT;
 import com.estoma.communications.testsupport.Envelopes;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.TestPropertySource;
@@ -304,6 +308,26 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   }
 
   @Test
+  void concurrentResolutionsProduceOneAdministrativeAction() throws Exception {
+    UUID emailDeliveryId = insertIndeterminateEmailDelivery(false);
+    try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+      CountDownLatch ready = new CountDownLatch(2);
+      CountDownLatch start = new CountDownLatch(1);
+      var first = pool.submit(() -> dispatchAfterBarrier(ready, start, emailDeliveryId));
+      var second = pool.submit(() -> dispatchAfterBarrier(ready, start, emailDeliveryId));
+      assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+
+      CommandOutcome firstOutcome = first.get(10, TimeUnit.SECONDS);
+      CommandOutcome secondOutcome = second.get(10, TimeUnit.SECONDS);
+      assertThat(java.util.List.of(firstOutcome, secondOutcome)).anyMatch(CommandOutcome.Succeeded.class::isInstance);
+      assertThat(java.util.List.of(firstOutcome, secondOutcome)).anyMatch(outcome -> outcome
+          .equals(new CommandOutcome.Rejected(RejectionCode.EMAIL_ALREADY_ACCEPTED)));
+    }
+    assertThat(administrativeActionCount(emailDeliveryId)).isEqualTo(1);
+  }
+
+  @Test
   void resolveResendDoesNotRequireAnAttemptAndRecordsTheRiskyAction() {
     UUID emailDeliveryId = insertIndeterminateEmailDelivery(false, false);
 
@@ -399,6 +423,20 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   private long administrativeActionCount(UUID emailDeliveryId) {
     return jdbc.sql("SELECT count(*) FROM email_delivery_administrative_actions WHERE email_delivery_id = :id")
         .param("id", emailDeliveryId).query(Long.class).single();
+  }
+
+  private CommandOutcome dispatchAfterBarrier(CountDownLatch ready, CountDownLatch start, UUID emailDeliveryId) {
+    ready.countDown();
+    try {
+      if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("concurrent command test did not start");
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
+    return dispatcher.dispatch(Envelopes.command(
+        CommunicationsCommand.RESOLVE_INDETERMINATE_EMAIL_DELIVERY.wireName(),
+        new ResolveIndeterminateEmailDeliveryCommand(emailDeliveryId,
+            ResolveIndeterminateEmailDeliveryCommand.Resolution.RECONCILED_ACCEPTED, false, "provider confirmed")));
   }
 
   private RequestCommunicationCommand inboxCommand(UUID accountId, String sourceReference, CommunicationPriority priority) {

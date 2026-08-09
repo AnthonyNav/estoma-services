@@ -46,7 +46,7 @@ class EmailDeliveryLifecycleTest {
   }
 
   @Test
-  void attemptLifecycleDistinguishesAcceptedAndIndeterminate() {
+  void terminalAttemptTransitionsReleaseTheirClaim() {
     UUID token = UUID.randomUUID();
     EmailDeliveryAttempt ready = EmailDeliveryAttempt.readyToSend(UUID.randomUUID(), UUID.randomUUID(), 1, 1, 1,
         token, "fake", EmailContentMode.GENERIC, NOW);
@@ -56,7 +56,10 @@ class EmailDeliveryLifecycleTest {
     assertThat(started.status()).isEqualTo(EmailAttemptStatus.CALL_STARTED);
     assertThat(started.completedAt()).isNull();
     assertThat(started.accepted("provider-id", NOW.plusSeconds(2)).status()).isEqualTo(EmailAttemptStatus.ACCEPTED);
+    assertThat(started.accepted("provider-id", NOW.plusSeconds(2)).claimToken()).isNull();
+    assertThat(started.failed("REJECTED", "rejected", NOW.plusSeconds(2)).claimToken()).isNull();
     assertThat(started.indeterminate("TIMEOUT", "unknown", NOW.plusSeconds(2)).status())
         .isEqualTo(EmailAttemptStatus.INDETERMINATE);
+    assertThat(started.indeterminate("TIMEOUT", "unknown", NOW.plusSeconds(2)).claimToken()).isNull();
   }
 }

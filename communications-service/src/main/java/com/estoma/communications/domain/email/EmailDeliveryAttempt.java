@@ -51,21 +51,26 @@ public final class EmailDeliveryAttempt {
     return copy(EmailAttemptStatus.CALL_STARTED, null, null, null, now, null);
   }
   public EmailDeliveryAttempt accepted(String providerMessageId, Instant now) {
-    return copy(EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, callStartedAt, now);
+    return terminal(EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, now);
   }
   public EmailDeliveryAttempt failed(String code, String message, Instant now) {
-    return copy(EmailAttemptStatus.FAILED, null, code, message, callStartedAt, now);
+    return terminal(EmailAttemptStatus.FAILED, null, code, message, now);
   }
   public EmailDeliveryAttempt indeterminate(String code, String message, Instant now) {
-    return copy(EmailAttemptStatus.INDETERMINATE, null, code, message, callStartedAt, now);
+    return terminal(EmailAttemptStatus.INDETERMINATE, null, code, message, now);
   }
   public EmailDeliveryAttempt reconciledAccepted(Instant now) {
     if (status != EmailAttemptStatus.INDETERMINATE) throw new IllegalStateException("attempt is not indeterminate");
-    return copy(EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, callStartedAt, now);
+    return terminal(EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, now);
   }
   public EmailDeliveryAttempt reconciledFailed(String code, String message, Instant now) {
     if (status != EmailAttemptStatus.INDETERMINATE) throw new IllegalStateException("attempt is not indeterminate");
-    return copy(EmailAttemptStatus.FAILED, providerMessageId, code, message, callStartedAt, now);
+    return terminal(EmailAttemptStatus.FAILED, providerMessageId, code, message, now);
+  }
+  private EmailDeliveryAttempt terminal(EmailAttemptStatus newStatus, String providerMessageId, String code, String message,
+      Instant completedAt) {
+    return new EmailDeliveryAttempt(id, deliveryId, attemptNumber, retryCycle, cycleAttemptNumber, null, provider,
+        deliveryMode, newStatus, providerMessageId, code, message, startedAt, callStartedAt, completedAt);
   }
   private EmailDeliveryAttempt copy(EmailAttemptStatus newStatus, String providerMessageId, String code, String message,
       Instant newCallStartedAt, Instant completedAt) {

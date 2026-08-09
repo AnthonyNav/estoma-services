@@ -47,7 +47,7 @@ class FlywayV10ToV12UpgradeIT {
         }
       }
       try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
-          var query = connection.prepareStatement("SELECT attempt_number, retry_cycle, cycle_attempt_number, status::text, normalized_error_code FROM email_delivery_attempts WHERE email_delivery_id = ? ORDER BY attempt_number")) {
+           var query = connection.prepareStatement("SELECT attempt_number, retry_cycle, cycle_attempt_number, status::text, normalized_error_code, claim_token, completed_at FROM email_delivery_attempts WHERE email_delivery_id = ? ORDER BY attempt_number")) {
         query.setObject(1, delivery);
         try (var rows = query.executeQuery()) {
           assertThat(rows.next()).isTrue();
@@ -58,14 +58,20 @@ class FlywayV10ToV12UpgradeIT {
           assertThat(rows.getInt(1)).isEqualTo(2);
           assertThat(rows.getInt(2)).isEqualTo(1);
           assertThat(rows.getInt(3)).isEqualTo(2);
-           assertThat(rows.getString(4)).isEqualTo("ACCEPTED");
-           assertThat(rows.getString(5)).isNull();
+            assertThat(rows.getString(4)).isEqualTo("ACCEPTED");
+            assertThat(rows.getString(5)).isNull();
+            assertThat(rows.getObject(6)).isNull();
+            assertThat(rows.getObject(7)).isNotNull();
         }
         assertThatThrownBy(() -> connection.createStatement().execute("INSERT INTO email_delivery_attempts (email_delivery_attempt_id, email_delivery_id, attempt_number, retry_cycle, cycle_attempt_number, provider, delivery_mode, status, started_at) VALUES ('" + UUID.randomUUID() + "', '" + delivery + "', 2, 2, 1, 'legacy', 'GENERIC', 'READY_TO_SEND', now())"))
             .isInstanceOf(java.sql.SQLException.class);
-        assertThatThrownBy(() -> connection.createStatement().execute("INSERT INTO email_delivery_attempts (email_delivery_attempt_id, email_delivery_id, attempt_number, retry_cycle, cycle_attempt_number, provider, delivery_mode, status, started_at) VALUES ('" + UUID.randomUUID() + "', '" + delivery + "', 3, 1, 2, 'legacy', 'GENERIC', 'READY_TO_SEND', now())"))
-            .isInstanceOf(java.sql.SQLException.class);
-      }
+         assertThatThrownBy(() -> connection.createStatement().execute("INSERT INTO email_delivery_attempts (email_delivery_attempt_id, email_delivery_id, attempt_number, retry_cycle, cycle_attempt_number, provider, delivery_mode, status, started_at) VALUES ('" + UUID.randomUUID() + "', '" + delivery + "', 3, 1, 2, 'legacy', 'GENERIC', 'READY_TO_SEND', now())"))
+             .isInstanceOf(java.sql.SQLException.class);
+         assertThatThrownBy(() -> connection.createStatement().execute("INSERT INTO email_delivery_attempts (email_delivery_attempt_id, email_delivery_id, attempt_number, retry_cycle, cycle_attempt_number, provider, delivery_mode, status, started_at, call_started_at) VALUES ('" + UUID.randomUUID() + "', '" + delivery + "', 3, 1, 3, 'legacy', 'GENERIC', 'CALL_STARTED', now(), now())"))
+             .isInstanceOf(java.sql.SQLException.class);
+         assertThatThrownBy(() -> connection.createStatement().execute("UPDATE email_deliveries SET claim_token = gen_random_uuid() WHERE email_delivery_id = '" + delivery + "'"))
+             .isInstanceOf(java.sql.SQLException.class);
+       }
       try (var runtime = DriverManager.getConnection(postgres.getJdbcUrl(), "communications_runtime", "runtime_password");
            var statement = runtime.createStatement()) {
         statement.execute("INSERT INTO email_delivery_administrative_actions (action_id, command_message_id, email_delivery_id, action, actor, reason, created_at) VALUES ('" + UUID.randomUUID() + "', '" + UUID.randomUUID() + "', '" + delivery + "', 'TEST', '{}'::jsonb, 'grant check', now())");

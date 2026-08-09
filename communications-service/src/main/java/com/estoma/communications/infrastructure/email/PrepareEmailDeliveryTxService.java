@@ -30,8 +30,8 @@ class PrepareEmailDeliveryTxService {
         && delivery.subject() == null && delivery.textBody() == null && delivery.htmlBody() == null) {
       EmailDelivery finalContent = EmailDelivery.withRenderedContent(delivery, rendered.subject(), rendered.textBody(), rendered.htmlBody());
       if (repository.persistRenderedContent(finalContent, delivery.claimToken()) != 1)
-        throw new StartEmailDeliveryTxService.LostEmailClaimException();
-      delivery = repository.findById(delivery.emailDeliveryId()).orElseThrow(StartEmailDeliveryTxService.LostEmailClaimException::new);
+        throw new LostEmailClaimException();
+      delivery = repository.findById(delivery.emailDeliveryId()).orElseThrow(LostEmailClaimException::new);
     }
     EmailDeliveryAttempt attempt = attempts.findReadyByDelivery(delivery.emailDeliveryId()).orElse(null);
     if (attempt == null) {

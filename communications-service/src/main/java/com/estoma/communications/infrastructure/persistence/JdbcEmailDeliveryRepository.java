@@ -125,8 +125,8 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
     return jdbc.sql("""
         UPDATE email_deliveries SET subject = :subject, text_body = :textBody, html_body = :htmlBody, updated_at = :updatedAt
          WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > :now
-           AND status = CAST('SENDING' AS email_delivery_status)
-           AND subject IS NULL AND text_body IS NULL AND html_body IS NULL
+            AND status = CAST('SENDING' AS email_delivery_status)
+            AND subject IS NULL AND text_body IS NULL AND html_body IS NULL
         """)
         .param("subject", delivery.subject()).param("textBody", delivery.textBody()).param("htmlBody", delivery.htmlBody())
         .param("updatedAt", Timestamps.toTimestamp(delivery.updatedAt())).param("id", delivery.emailDeliveryId()).param("token", claimToken)
@@ -234,7 +234,8 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
           attempt_count = attempt_count - 1, cycle_attempt_count = cycle_attempt_count - 1,
           claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL, updated_at = :now
          WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > :now
-           AND status = CAST('SENDING' AS email_delivery_status)
+            AND status = CAST('SENDING' AS email_delivery_status)
+            AND attempt_count > 0 AND cycle_attempt_count > 0
         """).param("id", deliveryId).param("token", claimToken).param("now", Timestamps.toTimestamp(now)).update();
   }
 

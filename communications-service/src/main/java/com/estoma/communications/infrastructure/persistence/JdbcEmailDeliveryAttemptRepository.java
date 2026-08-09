@@ -99,6 +99,17 @@ class JdbcEmailDeliveryAttemptRepository implements EmailDeliveryAttemptReposito
              Timestamps.toInstant(rs, "call_started_at"), Timestamps.toInstant(rs, "completed_at"))).optional();
   }
 
+  @Override public Optional<EmailDeliveryAttempt> findByClaimForUpdate(UUID deliveryId, UUID claimToken) {
+    return jdbc.sql("SELECT * FROM email_delivery_attempts WHERE email_delivery_id = :deliveryId AND claim_token = :claimToken ORDER BY attempt_number DESC LIMIT 1 FOR UPDATE")
+        .param("deliveryId", deliveryId).param("claimToken", claimToken).query((rs, row) -> EmailDeliveryAttempt.reconstitute(
+            rs.getObject("email_delivery_attempt_id", UUID.class), rs.getObject("email_delivery_id", UUID.class), rs.getInt("attempt_number"),
+            rs.getInt("retry_cycle"), rs.getInt("cycle_attempt_number"), rs.getObject("claim_token", UUID.class), rs.getString("provider"),
+            com.estoma.communications.contracts.EmailContentMode.valueOf(rs.getString("delivery_mode")),
+            com.estoma.communications.contracts.EmailAttemptStatus.valueOf(rs.getString("status")), rs.getString("provider_message_id"),
+            rs.getString("normalized_error_code"), rs.getString("error_message"), Timestamps.toInstant(rs, "started_at"),
+            Timestamps.toInstant(rs, "call_started_at"), Timestamps.toInstant(rs, "completed_at"))).optional();
+  }
+
   @Override public int reconcileIndeterminateWithoutClaim(EmailDeliveryAttempt attempt) {
     return jdbc.sql("""
         UPDATE email_delivery_attempts
@@ -120,6 +131,20 @@ class JdbcEmailDeliveryAttemptRepository implements EmailDeliveryAttemptReposito
 
   @Override public int resetUnstarted(UUID deliveryId, UUID claimToken) {
     return jdbc.sql("UPDATE email_delivery_attempts SET status = CAST('READY_TO_SEND' AS email_attempt_status), call_started_at = NULL, claim_token = NULL WHERE email_delivery_id = :deliveryId AND claim_token = :claimToken AND status = CAST('CALL_STARTED' AS email_attempt_status)")
-        .param("deliveryId", deliveryId).param("claimToken", claimToken).update();
+         .param("deliveryId", deliveryId).param("claimToken", claimToken).update();
+  }
+
+  @Override public int completeCallStarted(EmailDeliveryAttempt attempt, UUID expectedClaimToken) {
+    return jdbc.sql("""
+        UPDATE email_delivery_attempts SET status = CAST(:status AS email_attempt_status),
+          provider_message_id = :providerMessageId, normalized_error_code = :errorCode,
+          error_message = :message, completed_at = :completedAt, claim_token = NULL
+        WHERE email_delivery_attempt_id = :id AND claim_token = :claimToken
+          AND status = CAST('CALL_STARTED' AS email_attempt_status)
+        """)
+        .param("status", attempt.status().name()).param("providerMessageId", attempt.providerMessageId())
+        .param("errorCode", attempt.normalizedErrorCode()).param("message", attempt.errorMessage())
+        .param("completedAt", Timestamps.toTimestamp(attempt.completedAt())).param("id", attempt.emailDeliveryAttemptId())
+        .param("claimToken", expectedClaimToken).update();
   }
 }

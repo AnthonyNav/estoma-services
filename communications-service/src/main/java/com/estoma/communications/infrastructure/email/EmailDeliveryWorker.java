@@ -34,6 +34,7 @@ public class EmailDeliveryWorker {
   private final EmailDeliveryResultTxService resultService;
   private final EmailTemplateResolver templateResolver;
   private final PreProviderFailureTxService preProviderFailureService;
+  private final ProviderNotStartedRecoveryTxService providerNotStartedRecoveryService;
   private final boolean scheduledEnabled;
 
   private final AtomicReference<String> lastPollError = new AtomicReference<>();
@@ -46,6 +47,7 @@ public class EmailDeliveryWorker {
       EmailDeliveryResultTxService resultService,
       EmailTemplateResolver templateResolver,
       PreProviderFailureTxService preProviderFailureService,
+      ProviderNotStartedRecoveryTxService providerNotStartedRecoveryService,
       @Value("${estoma.communications.email.worker.batch-size:20}") int batchSize,
       @Value("${estoma.communications.email.worker.enabled:true}") boolean scheduledEnabled) {
     this.provider = provider;
@@ -56,6 +58,7 @@ public class EmailDeliveryWorker {
     this.resultService = resultService;
     this.templateResolver = templateResolver;
     this.preProviderFailureService = preProviderFailureService;
+    this.providerNotStartedRecoveryService = providerNotStartedRecoveryService;
     this.scheduledEnabled = scheduledEnabled;
   }
 
@@ -104,7 +107,7 @@ public class EmailDeliveryWorker {
             // could duplicate state/events after a partial failure; roll back.
             throw itemError;
           } else if (itemError instanceof EmailProviderRouter.ProviderNotStartedException) {
-            preProviderFailureService.requeue(claimed);
+            providerNotStartedRecoveryService.recover(claimed);
             // The executor remains unavailable for this poll; do not reclaim
             // the just-requeued delivery in a tight loop.
             break;
@@ -112,8 +115,10 @@ public class EmailDeliveryWorker {
             // Provider execution errors are normalized by EmailProviderRouter.
             // Any other failure here is technical and must not produce a second result write.
             throw itemError;
+          } else if (itemError instanceof PreProviderValidationException validation) {
+            preProviderFailureService.record(claimed, validation.normalizedErrorCode(), validation.sanitizedMessage());
           } else {
-            preProviderFailureService.record(claimed, "PRE_PROVIDER_VALIDATION", "delivery could not be prepared");
+            throw itemError;
           }
         }
       }

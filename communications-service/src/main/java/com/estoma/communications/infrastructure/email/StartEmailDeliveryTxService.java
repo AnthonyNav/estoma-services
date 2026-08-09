@@ -32,6 +32,4 @@ class StartEmailDeliveryTxService {
     }
     return deliveries.findById(delivery.emailDeliveryId()).orElseThrow(LostEmailClaimException::new);
   }
-
-  static final class LostEmailClaimException extends RuntimeException {}
 }

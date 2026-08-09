@@ -52,7 +52,7 @@ class ResolveIndeterminateEmailDeliveryHandler implements CommandHandler {
     if (command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED && !command.riskAcknowledged())
       throw new CommunicationsRejectedException(RejectionCode.RESEND_DUPLICATE_RISK_NOT_ACKNOWLEDGED, "risk acknowledgment is required for resend");
 
-    // The delivery lock is acquired above. Resolve's optional attempt lock must precede its parent lock.
+    // Lock ordering is delivery, optional attempt, then parent communication.
     var lockedAttempt = command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED
         ? java.util.Optional.<EmailDeliveryAttempt>empty()
         : attempts.findLastIndeterminateForUpdate(delivery.emailDeliveryId());

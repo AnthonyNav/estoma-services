@@ -10,9 +10,9 @@ class EmailTemplateResolver {
   EmailProviderPort.EmailSendRequest resolve(EmailProviderPort.EmailSendRequest request) {
     if (request.contentMode() == EmailContentMode.GENERIC) {
       if (request.subject() == null || request.subject().isBlank() || request.textBody() == null || request.textBody().isBlank())
-        throw new IllegalArgumentException("INVALID_FINAL_EMAIL_CONTENT");
+        throw new PreProviderValidationException("INVALID_FINAL_EMAIL_CONTENT", "final email content is invalid");
       return request;
     }
-    throw new IllegalArgumentException("EMAIL_TEMPLATE_RENDERING_NOT_CONFIGURED");
+    throw new PreProviderValidationException("EMAIL_TEMPLATE_RENDERING_NOT_CONFIGURED", "template rendering is not configured");
   }
 }

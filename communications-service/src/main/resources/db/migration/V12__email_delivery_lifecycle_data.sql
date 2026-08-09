@@ -84,6 +84,36 @@ UPDATE email_deliveries SET status = CAST('INDETERMINATE' AS email_delivery_stat
 UPDATE email_delivery_attempts SET status = CAST('INDETERMINATE' AS email_attempt_status), normalized_error_code = 'LEGACY_SENDING_OUTCOME_UNKNOWN',
   error_message = 'legacy SENDING outcome is unknown', claim_token = NULL, completed_at = COALESCE(completed_at, now())
  WHERE status = CAST('CALL_STARTED' AS email_attempt_status);
+UPDATE email_deliveries SET claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL
+ WHERE status <> CAST('SENDING' AS email_delivery_status);
+UPDATE email_delivery_attempts SET claim_token = NULL, call_started_at = NULL, completed_at = NULL
+ WHERE status = CAST('READY_TO_SEND' AS email_attempt_status);
+UPDATE email_delivery_attempts SET claim_token = NULL, completed_at = COALESCE(completed_at, started_at, now())
+ WHERE status IN (CAST('ACCEPTED' AS email_attempt_status), CAST('FAILED' AS email_attempt_status), CAST('INDETERMINATE' AS email_attempt_status));
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_email_deliveries_claim_lifecycle') THEN
+    ALTER TABLE email_deliveries ADD CONSTRAINT ck_email_deliveries_claim_lifecycle CHECK (
+      (status = CAST('SENDING' AS email_delivery_status)
+        AND claim_token IS NOT NULL AND claimed_at IS NOT NULL AND lease_until IS NOT NULL)
+      OR
+      (status <> CAST('SENDING' AS email_delivery_status)
+        AND claim_token IS NULL AND claimed_at IS NULL AND lease_until IS NULL AND worker_id IS NULL)
+    );
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_email_delivery_attempts_lifecycle') THEN
+    ALTER TABLE email_delivery_attempts ADD CONSTRAINT ck_email_delivery_attempts_lifecycle CHECK (
+      (status = CAST('CALL_STARTED' AS email_attempt_status)
+        AND claim_token IS NOT NULL AND call_started_at IS NOT NULL AND completed_at IS NULL)
+      OR
+      (status = CAST('READY_TO_SEND' AS email_attempt_status)
+        AND call_started_at IS NULL AND completed_at IS NULL)
+      OR
+      (status IN (CAST('ACCEPTED' AS email_attempt_status), CAST('FAILED' AS email_attempt_status), CAST('INDETERMINATE' AS email_attempt_status))
+        AND claim_token IS NULL AND completed_at IS NOT NULL)
+    );
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS email_delivery_administrative_actions (
   action_id uuid PRIMARY KEY, command_message_id uuid NOT NULL, email_delivery_id uuid NOT NULL REFERENCES email_deliveries(email_delivery_id),

@@ -26,63 +26,70 @@ class EmailDeliveryResultTxService {
   EmailDeliveryResultTxService(EmailDeliveryRepository d, EmailDeliveryAttemptRepository a, CommunicationRepository c, OutboxPort o, EnvelopeJsonCodec codec, MeterRegistry metrics) {
     deliveries=d; attempts=a; communications=c; outbox=o; this.codec=codec; this.metrics=metrics;
   }
-   @Transactional public void record(EmailDelivery claimed, EmailProviderPort.EmailSendResult result) {
-     Instant now=Instant.now(); int number=claimed.attemptCount();
-     EmailDeliveryAttempt prepared = attempts.findByClaim(claimed.emailDeliveryId(), claimed.claimToken()).orElse(null);
-      if (prepared == null || (prepared.status() != EmailAttemptStatus.CALL_STARTED && prepared.status() != EmailAttemptStatus.READY_TO_SEND)) {
+ @Transactional public void record(EmailDelivery claimed, EmailProviderPort.EmailSendResult result) {
+      Instant now=Instant.now();
+      UUID claimToken = claimed.claimToken();
+      EmailDelivery locked = deliveries.findByIdForUpdate(claimed.emailDeliveryId()).orElseThrow(LostEmailClaimException::new);
+      if (claimToken == null || locked.status() != EmailDeliveryStatus.SENDING || !claimToken.equals(locked.claimToken())
+          || locked.leaseUntil() == null || !locked.leaseUntil().isAfter(now)) {
         metrics.counter("communications.email.claim_lost").increment();
         throw new LostEmailClaimException();
-     }
+      }
+      int number=locked.attemptCount();
+      EmailDeliveryAttempt prepared = attempts.findByClaimForUpdate(locked.emailDeliveryId(), claimToken).orElse(null);
+       if (prepared == null || prepared.status() != EmailAttemptStatus.CALL_STARTED) {
+         metrics.counter("communications.email.claim_lost").increment();
+         throw new LostEmailClaimException();
+       }
     if (result instanceof EmailProviderPort.EmailSendResult.Accepted accepted) {
        metrics.counter("communications.email.provider.calls", "outcome", "accepted").increment();
        metrics.counter("communications.email.accepted.total").increment();
-        EmailDelivery updated=claimed.accepted(now); if (deliveries.updateClaimed(updated, claimed.claimToken()) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
-       if (attempts.update(prepared.accepted(accepted.providerMessageId(), now)) != 1) throw new LostEmailClaimException();
-       Communication communication=communications.findById(claimed.communicationId()).orElseThrow();
+         EmailDelivery updated=locked.accepted(now); if (deliveries.updateClaimed(updated, claimToken) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
+        if (attempts.completeCallStarted(prepared.accepted(accepted.providerMessageId(), now), claimToken) != 1) throw new LostEmailClaimException();
+         Communication communication=communications.findByIdForUpdate(locked.communicationId()).orElseThrow();
         UUID correlationId = ensureCorrelation(communication);
-        communication = communications.findById(communication.communicationId()).orElseThrow();
+         communication = communications.findByIdForUpdate(communication.communicationId()).orElseThrow();
        outbox.append(new OutboxAppendRequest(UUID.randomUUID(), CommunicationsEvent.EMAIL_DELIVERY_ACCEPTED.wireName(), 1,
-          MessageKind.EVENT.name(), claimed.communicationId(), null, correlationId, null,
-          codec.writeValueAsString(new EmailDeliveryAcceptedPayload(claimed.emailDeliveryId(), claimed.communicationId(),
-              communication.recipientAccountId(), accepted.provider(), claimed.contentMode().name(), accepted.providerMessageId(), number, now)), now));
+           MessageKind.EVENT.name(), locked.communicationId(), null, correlationId, null,
+           codec.writeValueAsString(new EmailDeliveryAcceptedPayload(locked.emailDeliveryId(), locked.communicationId(),
+               communication.recipientAccountId(), accepted.provider(), locked.contentMode().name(), accepted.providerMessageId(), number, now)), now));
        if (communication.requestedChannels().isEmpty() || communication.requestedChannels().contains("EMAIL")) completeIfAllChannels(communication, correlationId, now);
       return;
     }
     if (result instanceof EmailProviderPort.EmailSendResult.Indeterminate unknown) {
        metrics.counter("communications.email.provider.calls", "outcome", "indeterminate").increment();
        metrics.counter("communications.email.indeterminate.total").increment();
-        if (deliveries.updateClaimed(claimed.indeterminate(unknown.normalizedErrorCode(), unknown.errorMessage(), now), claimed.claimToken()) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
-        if (attempts.update(prepared.indeterminate(unknown.normalizedErrorCode(), unknown.errorMessage(), now)) != 1) throw new LostEmailClaimException(); return;
+         if (deliveries.updateClaimed(locked.indeterminate(unknown.normalizedErrorCode(), unknown.errorMessage(), now), claimToken) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
+         if (attempts.completeCallStarted(prepared.indeterminate(unknown.normalizedErrorCode(), unknown.errorMessage(), now), claimToken) != 1) throw new LostEmailClaimException(); return;
     }
     EmailProviderPort.EmailSendResult.Failed failed=(EmailProviderPort.EmailSendResult.Failed)result;
      metrics.counter("communications.email.provider.calls", "outcome", failed.retryable() ? "retryable_failure" : "terminal_failure").increment();
-      if (!failed.retryable() || claimed.cycleAttemptCount() >= MAX_CYCLE_ATTEMPTS) {
+       if (!failed.retryable() || locked.cycleAttemptCount() >= MAX_CYCLE_ATTEMPTS) {
         metrics.counter("communications.email.failed.total").increment();
-        if (deliveries.updateClaimed(claimed.failedTerminal(failed.normalizedErrorCode(), failed.errorMessage(), now), claimed.claimToken()) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
-        if (attempts.update(prepared.failed(failed.normalizedErrorCode(), failed.errorMessage(), now)) != 1) throw new LostEmailClaimException();
-       Communication communication=communications.findById(claimed.communicationId()).orElseThrow();
+         if (deliveries.updateClaimed(locked.failedTerminal(failed.normalizedErrorCode(), failed.errorMessage(), now), claimToken) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
+         if (attempts.completeCallStarted(prepared.failed(failed.normalizedErrorCode(), failed.errorMessage(), now), claimToken) != 1) throw new LostEmailClaimException();
+        Communication communication=communications.findByIdForUpdate(locked.communicationId()).orElseThrow();
         UUID correlationId = ensureCorrelation(communication);
-        communication = communications.findById(communication.communicationId()).orElseThrow();
+         communication = communications.findByIdForUpdate(communication.communicationId()).orElseThrow();
        if (communications.update(communication.failed(now)) != 1) throw new LostEmailClaimException();
       outbox.append(new OutboxAppendRequest(UUID.randomUUID(), CommunicationsEvent.EMAIL_DELIVERY_FAILED.wireName(), 1,
-            MessageKind.EVENT.name(), claimed.communicationId(), null, correlationId, null,
-           codec.writeValueAsString(new EmailDeliveryFailedPayload(claimed.emailDeliveryId(), claimed.communicationId(), communication.recipientAccountId(), number, failed.normalizedErrorCode(), now)), now));
+             MessageKind.EVENT.name(), locked.communicationId(), null, correlationId, null,
+            codec.writeValueAsString(new EmailDeliveryFailedPayload(locked.emailDeliveryId(), locked.communicationId(), communication.recipientAccountId(), number, failed.normalizedErrorCode(), now)), now));
        outbox.append(new OutboxAppendRequest(UUID.randomUUID(), CommunicationsEvent.COMMUNICATION_FAILED.wireName(), 1,
-            MessageKind.EVENT.name(), claimed.communicationId(), null, correlationId, null,
+             MessageKind.EVENT.name(), locked.communicationId(), null, correlationId, null,
            codec.writeValueAsString(new CommunicationFailedPayload(communication.communicationId(), communication.recipientAccountId(), communication.systemCode(), communication.communicationType(), List.of("EMAIL"), failed.normalizedErrorCode(), now)), now));
       } else {
         metrics.counter("communications.email.retry_scheduled.total").increment();
-       Instant next = now.plus(BACKOFF[Math.min(claimed.cycleAttemptCount() - 1, BACKOFF.length - 1)]);
-        if (deliveries.updateClaimed(claimed.retryScheduled(failed.normalizedErrorCode(), failed.errorMessage(), next, now), claimed.claimToken()) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
-       if (attempts.update(prepared.failed(failed.normalizedErrorCode(), failed.errorMessage(), now)) != 1) throw new LostEmailClaimException();
-       Communication communication=communications.findById(claimed.communicationId()).orElseThrow();
+        Instant next = now.plus(BACKOFF[Math.min(locked.cycleAttemptCount() - 1, BACKOFF.length - 1)]);
+         if (deliveries.updateClaimed(locked.retryScheduled(failed.normalizedErrorCode(), failed.errorMessage(), next, now), claimToken) != 1) { metrics.counter("communications.email.claim_lost").increment(); throw new LostEmailClaimException(); }
+        if (attempts.completeCallStarted(prepared.failed(failed.normalizedErrorCode(), failed.errorMessage(), now), claimToken) != 1) throw new LostEmailClaimException();
+         Communication communication=communications.findByIdForUpdate(locked.communicationId()).orElseThrow();
         UUID correlationId = ensureCorrelation(communication);
        outbox.append(new OutboxAppendRequest(UUID.randomUUID(), CommunicationsEvent.EMAIL_DELIVERY_RETRY_SCHEDULED.wireName(), 1,
-            MessageKind.EVENT.name(), claimed.communicationId(), null, correlationId, null,
-          codec.writeValueAsString(new EmailDeliveryRetryScheduledPayload(claimed.emailDeliveryId(), claimed.communicationId(), number, failed.normalizedErrorCode(), next, now)), now));
+             MessageKind.EVENT.name(), locked.communicationId(), null, correlationId, null,
+           codec.writeValueAsString(new EmailDeliveryRetryScheduledPayload(locked.emailDeliveryId(), locked.communicationId(), number, failed.normalizedErrorCode(), next, now)), now));
     }
   }
-  private static final class LostEmailClaimException extends RuntimeException {}
    private void completeIfAllChannels(Communication c, UUID correlationId, Instant now) {
     if (c.status() != CommunicationStatus.PROCESSING) return;
      if (communications.update(c.completed(now)) != 1) throw new LostEmailClaimException();

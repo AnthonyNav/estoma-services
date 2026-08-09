@@ -2,7 +2,6 @@ package com.estoma.communications.infrastructure.email;
 
 import com.estoma.communications.application.port.CommunicationRepository;
 import com.estoma.communications.application.port.EmailDeliveryRepository;
-import com.estoma.communications.application.port.EmailDeliveryAttemptRepository;
 import com.estoma.communications.application.port.OutboxAppendRequest;
 import com.estoma.communications.application.port.OutboxPort;
 import com.estoma.communications.contracts.CommunicationsEvent;
@@ -20,15 +19,13 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class PreProviderFailureTxService {
   private final EmailDeliveryRepository deliveries;
-  private final EmailDeliveryAttemptRepository attempts;
   private final CommunicationRepository communications;
   private final OutboxPort outbox;
   private final EnvelopeJsonCodec codec;
 
-  PreProviderFailureTxService(EmailDeliveryRepository deliveries, EmailDeliveryAttemptRepository attempts, CommunicationRepository communications,
+  PreProviderFailureTxService(EmailDeliveryRepository deliveries, CommunicationRepository communications,
       OutboxPort outbox, EnvelopeJsonCodec codec) {
     this.deliveries = deliveries;
-    this.attempts = attempts;
     this.communications = communications;
     this.outbox = outbox;
     this.codec = codec;
@@ -37,8 +34,9 @@ class PreProviderFailureTxService {
   @Transactional
   void record(com.estoma.communications.domain.email.EmailDelivery delivery, String code, String message) {
     Instant now = Instant.now();
-    if (deliveries.failPreProvider(delivery.emailDeliveryId(), delivery.claimToken(), code, message, now) != 1) return;
-    Communication communication = communications.findById(delivery.communicationId()).orElseThrow();
+    if (deliveries.failPreProvider(delivery.emailDeliveryId(), delivery.claimToken(), code, message, now) != 1)
+      throw new LostEmailClaimException();
+    Communication communication = communications.findByIdForUpdate(delivery.communicationId()).orElseThrow(LostEmailClaimException::new);
     if (communication.correlationId() == null) {
       communication = communication.withCorrelationId(UUID.randomUUID());
       if (communications.update(communication) != 1) throw new IllegalStateException("communication claim lost while tracing failure");
@@ -55,9 +53,4 @@ class PreProviderFailureTxService {
     }
   }
 
-  @Transactional
-  void requeue(com.estoma.communications.domain.email.EmailDelivery delivery) {
-    if (attempts.resetUnstarted(delivery.emailDeliveryId(), delivery.claimToken()) != 1) return;
-    deliveries.requeueUnstarted(delivery.emailDeliveryId(), delivery.claimToken(), Instant.now());
-  }
 }
