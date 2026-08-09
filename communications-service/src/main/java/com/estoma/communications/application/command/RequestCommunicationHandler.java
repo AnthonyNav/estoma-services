@@ -26,6 +26,6 @@ class RequestCommunicationHandler implements CommandHandler {
   @Override
   public CommandHandlerResult handle(MessageEnvelope envelope) {
     RequestCommunicationCommand command = codec.convertPayload(envelope, RequestCommunicationCommand.class);
-    return service.create(command);
+    return service.create(command, envelope);
   }
 }
