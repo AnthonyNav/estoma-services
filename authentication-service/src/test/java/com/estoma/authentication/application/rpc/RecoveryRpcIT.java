@@ -7,6 +7,7 @@ import com.estoma.authentication.application.RpcOutcome;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.CredentialRepository;
 import com.estoma.authentication.application.port.PasswordHasher;
+import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.LoginType;
@@ -38,6 +39,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Autowired private PasswordRecoveryRepository recoveryRepository;
   @Autowired private PasswordHasher passwordHasher;
   @Autowired private TokenHasher tokenHasher;
+  @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
 
   @Test
   void validateRecoveryCodeAcceptsTheCorrectCode() {
@@ -135,6 +137,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   private UUID insertActiveAccountWithPassword() {
     Account account = Account.createNew(UUID.randomUUID(), UUID.randomUUID(), LoginIdentifier.of(LoginType.USERNAME, "recovery-" + UUID.randomUUID()), Instant.now());
     accountRepository.insert(account);
+    personStatusProjectionRepository.upsertIfNewer(account.personId(), "ACTIVE", 1, Instant.now());
     credentialRepository.insert(Credential.configure(account.accountId(), passwordHasher.hash(OLD_PASSWORD), Instant.now()));
     Account activated = account.activated(Instant.now());
     accountRepository.update(activated, account.version());

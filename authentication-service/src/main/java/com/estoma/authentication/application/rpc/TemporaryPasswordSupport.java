@@ -94,7 +94,9 @@ class TemporaryPasswordSupport {
   }
 
   Account markMustChangePassword(Account account, Instant expiresAtOrNull, Instant now) {
-    Instant expiresAt = expiresAtOrNull != null ? expiresAtOrNull : now.plus(DEFAULT_EXPIRATION);
+    // Administrative callers cannot extend or shorten the contractually fixed
+    // 24-hour lifetime through a payload value.
+    Instant expiresAt = now.plus(DEFAULT_EXPIRATION);
     Account updated = account.withTemporaryPasswordSet(expiresAt, now);
     accountRepository.update(updated, account.version());
     return updated;

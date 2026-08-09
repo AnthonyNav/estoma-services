@@ -117,6 +117,6 @@ public class AuthenticateAccountHandler {
 
   private boolean isPersonActive(UUID personId) {
     var status = personStatusProjectionRepository.findByPersonId(personId);
-    return status.isEmpty() || "ACTIVE".equals(status.get().status());
+    return status.isPresent() && "ACTIVE".equals(status.get().status());
   }
 }

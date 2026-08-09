@@ -52,7 +52,9 @@ public class RefreshSessionHandler {
 
   public RpcHandlerOutcome<RefreshSessionResponse> handle(RefreshSessionRequest request) {
     Session session =
-        sessionRepository.findById(request.sessionId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
+        sessionRepository
+            .findByIdForUpdate(request.sessionId())
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
 
     if (session.revokedAt() != null) {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_REVOKED, "session " + session.sessionId() + " was revoked");
@@ -86,7 +88,7 @@ public class RefreshSessionHandler {
 
   private boolean isPersonActive(UUID personId) {
     var status = personStatusProjectionRepository.findByPersonId(personId);
-    return status.isEmpty() || "ACTIVE".equals(status.get().status());
+    return status.isPresent() && "ACTIVE".equals(status.get().status());
   }
 
   private static Instant minInstant(Instant a, Instant b) {

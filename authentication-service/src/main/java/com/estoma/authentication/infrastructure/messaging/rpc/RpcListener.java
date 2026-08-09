@@ -3,6 +3,7 @@ package com.estoma.authentication.infrastructure.messaging.rpc;
 import com.estoma.authentication.application.RpcDispatcher;
 import com.estoma.authentication.application.RpcOutcome;
 import com.estoma.authentication.contracts.MessagingNames;
+import com.estoma.authentication.contracts.AuthenticationRpcOperation;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -49,9 +50,13 @@ public class RpcListener {
     UUID correlationId = parseCorrelationId(requestProps.getCorrelationId());
 
     RpcResponseEnvelope response;
-    if (operationType == null || !router.supports(operationType)) {
+    if (correlationId == null || requestProps.getReplyTo() == null || requestProps.getReplyTo().isBlank()) {
+      response = RpcResponseEnvelope.rejected("INVALID_RPC_ENVELOPE");
+    } else if (operationType == null || !router.supports(operationType)) {
       log.error("unrecognized RPC operation type={} correlationId={}", operationType, correlationId);
       response = RpcResponseEnvelope.rejected("UNRECOGNIZED_OPERATION");
+    } else if (!isAllowedProducer(operationType, requestProps)) {
+      response = RpcResponseEnvelope.rejected("PRODUCER_NOT_AUTHORIZED");
     } else {
       response = handle(operationType, correlationId, message.getBody());
     }
@@ -83,6 +88,15 @@ public class RpcListener {
     return new Message(codec.encodeValue(response), replyProps);
   }
 
+  private static boolean isAllowedProducer(String operationType, MessageProperties properties) {
+    if (!AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName().equals(operationType)) {
+      return true;
+    }
+    return "communications".equals(properties.getHeader("x-estoma-producer"))
+        && "SYSTEM".equals(properties.getHeader("x-estoma-actor-type"))
+        && "communications".equals(properties.getHeader("x-estoma-actor-service"));
+  }
+
   private static UUID parseCorrelationId(String raw) {
     if (raw != null) {
       try {
@@ -91,7 +105,7 @@ public class RpcListener {
         // fall through to the random fallback below
       }
     }
-    log.warn("RPC request missing a valid correlationId; generating one for internal use only");
-    return UUID.randomUUID();
+    log.warn("RPC request missing a valid correlationId");
+    return null;
   }
 }

@@ -6,6 +6,7 @@ import com.estoma.authentication.application.port.CredentialRepository;
 import com.estoma.authentication.application.port.PasswordHasher;
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.SessionRepository;
+import com.estoma.authentication.application.port.RecoveryCodeDeriver;
 import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayload;
@@ -34,6 +35,7 @@ public class ResetPasswordHandler {
   private final CredentialRepository credentialRepository;
   private final SessionRepository sessionRepository;
   private final PasswordHasher passwordHasher;
+  private final RecoveryCodeDeriver codeDeriver;
   private final TokenHasher tokenHasher;
 
   ResetPasswordHandler(
@@ -42,12 +44,14 @@ public class ResetPasswordHandler {
       CredentialRepository credentialRepository,
       SessionRepository sessionRepository,
       PasswordHasher passwordHasher,
+      RecoveryCodeDeriver codeDeriver,
       TokenHasher tokenHasher) {
     this.recoveryRepository = recoveryRepository;
     this.accountRepository = accountRepository;
     this.credentialRepository = credentialRepository;
     this.sessionRepository = sessionRepository;
     this.passwordHasher = passwordHasher;
+    this.codeDeriver = codeDeriver;
     this.tokenHasher = tokenHasher;
   }
 
@@ -65,12 +69,12 @@ public class ResetPasswordHandler {
     if (recovery.failedAttempts() >= ValidateRecoveryCodeHandler.ATTEMPT_LIMIT) {
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery request exceeded its validation attempt limit");
     }
-    if (!recovery.tokenHash().equals(tokenHasher.sha256Hex(request.code()))) {
+    if (!matches(recovery, request.code())) {
       recoveryRepository.update(recovery.attemptFailed());
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery code is incorrect");
     }
-    if (request.newPassword() == null || request.newPassword().length() < 10) {
-      throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "password must be at least 10 characters");
+    if (request.newPassword() == null || request.newPassword().length() < 15) {
+      throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "password must be at least 15 characters");
     }
 
     int consumed = recoveryRepository.markUsedIfValid(recovery.recoveryId(), now, now);
@@ -83,6 +87,7 @@ public class ResetPasswordHandler {
             .findById(recovery.accountId())
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + recovery.accountId() + " no longer exists"));
 
+    rejectPasswordReuse(account, request.newPassword());
     updateCredential(account, request.newPassword(), now);
     Account cleared = account.withPasswordChangeCompleted(now);
     accountRepository.update(cleared, account.version());
@@ -107,5 +112,22 @@ public class ResetPasswordHandler {
     } else {
       credentialRepository.insert(Credential.configure(account.accountId(), hash, now));
     }
+  }
+
+  private void rejectPasswordReuse(Account account, String newPassword) {
+    credentialRepository
+        .findByAccountId(account.accountId())
+        .filter(credential -> passwordHasher.matches(newPassword, credential.hash()))
+        .ifPresent(
+            ignored -> {
+              throw new AuthenticationRejectedException(
+                  RejectionCode.INVALID_PASSWORD, "new password must differ from the current password");
+            });
+  }
+
+  private boolean matches(PasswordRecoveryRequest recovery, String code) {
+    return "v1-hmac".equals(recovery.tokenHash())
+        ? codeDeriver.matches(recovery.recoveryId(), code)
+        : recovery.tokenHash().equals(tokenHasher.sha256Hex(code));
   }
 }

@@ -7,6 +7,7 @@ import com.estoma.authentication.application.RpcOutcome;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.CredentialRepository;
 import com.estoma.authentication.application.port.PasswordHasher;
+import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.SessionRepository;
 import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.rpc.AuthenticateAccountRequest;
@@ -36,6 +37,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
   @Autowired private CredentialRepository credentialRepository;
   @Autowired private SessionRepository sessionRepository;
   @Autowired private PasswordHasher passwordHasher;
+  @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
 
   @Test
   void authenticateSucceedsWithCorrectCredentials() {
@@ -147,6 +149,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
   private UUID insertActiveAccountWithPassword(String identifier, String password) {
     Account account = Account.createNew(UUID.randomUUID(), UUID.randomUUID(), LoginIdentifier.of(LoginType.USERNAME, identifier), Instant.now());
     accountRepository.insert(account);
+    personStatusProjectionRepository.upsertIfNewer(account.personId(), "ACTIVE", 1, Instant.now());
     credentialRepository.insert(Credential.configure(account.accountId(), passwordHasher.hash(password), Instant.now()));
     Account activated = account.activated(Instant.now());
     accountRepository.update(activated, account.version());

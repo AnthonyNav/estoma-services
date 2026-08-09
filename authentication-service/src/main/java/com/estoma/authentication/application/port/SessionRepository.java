@@ -10,6 +10,9 @@ public interface SessionRepository {
 
   Optional<Session> findById(UUID sessionId);
 
+  /** Acquires the session row lock for refresh, replay and password flows. */
+  Optional<Session> findByIdForUpdate(UUID sessionId);
+
   Optional<Session> findByRefreshTokenHash(String refreshTokenHash);
 
   void insert(Session session);

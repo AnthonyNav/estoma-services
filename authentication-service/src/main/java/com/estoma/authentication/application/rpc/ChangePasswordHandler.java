@@ -64,8 +64,8 @@ public class ChangePasswordHandler {
     if (!passwordHasher.matches(request.currentPassword(), credential.hash())) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "current password is incorrect");
     }
-    if (request.newPassword() == null || request.newPassword().length() < 10) {
-      throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "password must be at least 10 characters");
+    if (request.newPassword() == null || request.newPassword().length() < 15) {
+      throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "password must be at least 15 characters");
     }
     if (passwordHasher.matches(request.newPassword(), credential.hash())) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "new password must differ from the current password");
@@ -84,6 +84,6 @@ public class ChangePasswordHandler {
 
   private boolean isPersonActive(UUID personId) {
     var status = personStatusProjectionRepository.findByPersonId(personId);
-    return status.isEmpty() || "ACTIVE".equals(status.get().status());
+    return status.isPresent() && "ACTIVE".equals(status.get().status());
   }
 }

@@ -2,6 +2,7 @@ package com.estoma.authentication.infrastructure.messaging.rpc;
 
 import com.estoma.authentication.application.rpc.AuthenticateAccountHandler;
 import com.estoma.authentication.application.rpc.ChangePasswordHandler;
+import com.estoma.authentication.application.rpc.GetRecoveryCodeForDeliveryHandler;
 import com.estoma.authentication.application.rpc.RefreshSessionHandler;
 import com.estoma.authentication.application.rpc.RegenerateTemporaryPasswordHandler;
 import com.estoma.authentication.application.rpc.ResetPasswordHandler;
@@ -12,6 +13,7 @@ import com.estoma.authentication.application.rpc.ValidateRecoveryCodeHandler;
 import com.estoma.authentication.contracts.AuthenticationRpcOperation;
 import com.estoma.authentication.contracts.rpc.AuthenticateAccountRequest;
 import com.estoma.authentication.contracts.rpc.ChangePasswordRequest;
+import com.estoma.authentication.contracts.rpc.GetRecoveryCodeForDeliveryRequest;
 import com.estoma.authentication.contracts.rpc.RefreshSessionRequest;
 import com.estoma.authentication.contracts.rpc.RegenerateTemporaryPasswordRequest;
 import com.estoma.authentication.contracts.rpc.ResetPasswordRequest;
@@ -45,6 +47,7 @@ public class RpcOperationRouter {
       ValidateRecoveryCodeHandler validateRecoveryCodeHandler,
       ResetPasswordHandler resetPasswordHandler,
       ChangePasswordHandler changePasswordHandler,
+      GetRecoveryCodeForDeliveryHandler getRecoveryCodeForDeliveryHandler,
       SetTemporaryPasswordHandler setTemporaryPasswordHandler,
       RegenerateTemporaryPasswordHandler regenerateTemporaryPasswordHandler) {
     this.codec = codec;
@@ -56,6 +59,10 @@ public class RpcOperationRouter {
             binding(AuthenticationRpcOperation.VALIDATE_RECOVERY_CODE, ValidateRecoveryCodeRequest.class, validateRecoveryCodeHandler::handle),
             binding(AuthenticationRpcOperation.RESET_PASSWORD, ResetPasswordRequest.class, resetPasswordHandler::handle),
             binding(AuthenticationRpcOperation.CHANGE_PASSWORD, ChangePasswordRequest.class, changePasswordHandler::handle),
+            binding(
+                AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY,
+                GetRecoveryCodeForDeliveryRequest.class,
+                getRecoveryCodeForDeliveryHandler::handle),
             binding(AuthenticationRpcOperation.SET_TEMPORARY_PASSWORD, SetTemporaryPasswordRequest.class, setTemporaryPasswordHandler::handle),
             binding(
                 AuthenticationRpcOperation.REGENERATE_TEMPORARY_PASSWORD,

@@ -33,7 +33,7 @@ import org.springframework.stereotype.Component;
 class RequestPasswordRecoveryHandler implements CommandHandler {
 
   private static final int CODE_DIGITS = 6;
-  private static final java.time.Duration RECOVERY_EXPIRATION = java.time.Duration.ofMinutes(30);
+  private static final java.time.Duration RECOVERY_EXPIRATION = java.time.Duration.ofMinutes(10);
 
   private final AccountRepository accountRepository;
   private final PasswordRecoveryRepository passwordRecoveryRepository;
@@ -71,9 +71,9 @@ class RequestPasswordRecoveryHandler implements CommandHandler {
     }
 
     Instant now = Instant.now();
-    String code = randomGenerator.randomNumericCode(CODE_DIGITS);
     PasswordRecoveryRequest request =
-        PasswordRecoveryRequest.createNew(UUID.randomUUID(), account.get().accountId(), tokenHasher.sha256Hex(code), now, now.plus(RECOVERY_EXPIRATION));
+        PasswordRecoveryRequest.createNew(
+            UUID.randomUUID(), account.get().accountId(), "v1-hmac", now, now.plus(RECOVERY_EXPIRATION));
     passwordRecoveryRepository.insert(request);
 
     PasswordRecoveryRequestedPayload eventPayload =

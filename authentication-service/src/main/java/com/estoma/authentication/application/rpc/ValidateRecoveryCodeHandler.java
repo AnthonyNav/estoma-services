@@ -1,6 +1,7 @@
 package com.estoma.authentication.application.rpc;
 
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
+import com.estoma.authentication.application.port.RecoveryCodeDeriver;
 import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse;
@@ -19,10 +20,12 @@ public class ValidateRecoveryCodeHandler {
   static final int ATTEMPT_LIMIT = 5;
 
   private final PasswordRecoveryRepository repository;
+  private final RecoveryCodeDeriver codeDeriver;
   private final TokenHasher tokenHasher;
 
-  ValidateRecoveryCodeHandler(PasswordRecoveryRepository repository, TokenHasher tokenHasher) {
+  ValidateRecoveryCodeHandler(PasswordRecoveryRepository repository, RecoveryCodeDeriver codeDeriver, TokenHasher tokenHasher) {
     this.repository = repository;
+    this.codeDeriver = codeDeriver;
     this.tokenHasher = tokenHasher;
   }
 
@@ -43,7 +46,7 @@ public class ValidateRecoveryCodeHandler {
     if (recovery.failedAttempts() >= ATTEMPT_LIMIT) {
       return result("INVALID");
     }
-    if (!recovery.tokenHash().equals(tokenHasher.sha256Hex(request.code()))) {
+    if (!matches(recovery, request.code())) {
       repository.update(recovery.attemptFailed());
       return result("INVALID");
     }
@@ -52,5 +55,11 @@ public class ValidateRecoveryCodeHandler {
 
   private static RpcHandlerOutcome<ValidateRecoveryCodeResponse> result(String value) {
     return RpcHandlerOutcome.withoutEvents(new ValidateRecoveryCodeResponse(value));
+  }
+
+  private boolean matches(com.estoma.authentication.domain.recovery.PasswordRecoveryRequest recovery, String code) {
+    return "v1-hmac".equals(recovery.tokenHash())
+        ? codeDeriver.matches(recovery.recoveryId(), code)
+        : recovery.tokenHash().equals(tokenHasher.sha256Hex(code));
   }
 }

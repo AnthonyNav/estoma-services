@@ -35,6 +35,14 @@ class JdbcSessionRepository implements SessionRepository {
   }
 
   @Override
+  public Optional<Session> findByIdForUpdate(UUID sessionId) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM sessions WHERE session_id = :sessionId FOR UPDATE")
+        .param("sessionId", sessionId)
+        .query(JdbcSessionRepository::mapRow)
+        .optional();
+  }
+
+  @Override
   public Optional<Session> findByRefreshTokenHash(String refreshTokenHash) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM sessions WHERE refresh_token_hash = :hash")
         .param("hash", refreshTokenHash)
