@@ -23,9 +23,13 @@ public final class Envelopes {
     JsonNode payloadNode = MAPPER.valueToTree(payload);
     JsonNode accountIdNode = payloadNode.get("accountId");
     UUID accountId = accountIdNode == null ? UUID.randomUUID() : UUID.fromString(accountIdNode.asString());
+    boolean publicRecovery = "RequestPasswordRecovery".equals(messageType);
+    Actor actor = publicRecovery
+        ? new Actor("ANONYMOUS", null, null, "PUBLIC", null)
+        : new Actor("SYSTEM", null, "bff", "GLOBAL", null);
     return new MessageEnvelope(
         messageId, messageType, 1, MessageKind.COMMAND, "bff", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(),
-        "authentication-service", accountId, null, new Actor("ACCOUNT", accountId, null, "SELF", null), payloadNode);
+        "authentication-service", publicRecovery ? null : accountId, null, actor, payloadNode);
   }
 
   public static MessageEnvelope event(String messageType, Object payload, UUID aggregateId, int aggregateVersion) {

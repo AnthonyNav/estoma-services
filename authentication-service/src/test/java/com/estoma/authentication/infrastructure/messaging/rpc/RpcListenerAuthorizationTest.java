@@ -2,58 +2,67 @@ package com.estoma.authentication.infrastructure.messaging.rpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.AuthenticationRpcOperation;
-import java.util.UUID;
+import com.estoma.authentication.contracts.MessageEnvelope;
+import com.estoma.authentication.contracts.MessageKind;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
-import org.springframework.amqp.core.MessageProperties;
 
 class RpcListenerAuthorizationTest {
 
   @Test
   void rejectsAnInvalidProducer() {
-    MessageProperties properties = selfProperties();
-    properties.setHeader("x-estoma-producer", "users-service");
+    MessageEnvelope request = selfRequest(AuthenticationRpcOperation.CHANGE_PASSWORD);
+    request = new MessageEnvelope(
+        request.messageId(), request.messageType(), request.messageVersion(), request.messageKind(), "users-service",
+        request.occurredAt(), request.correlationId(), request.causationId(), request.operationId(), request.idempotencyKey(),
+        request.aggregateId(), request.aggregateVersion(), request.actor(), request.payload());
 
-    assertThat(RpcListener.isAllowedProducer(AuthenticationRpcOperation.CHANGE_PASSWORD.wireName(), properties)).isFalse();
+    assertThat(RpcListener.isAllowedProducer(request)).isFalse();
   }
 
   @Test
   void rejectsAnInvalidActor() {
-    MessageProperties properties = selfProperties();
-    properties.setHeader("x-estoma-actor-type", "SYSTEM");
+    MessageEnvelope request = selfRequest(AuthenticationRpcOperation.CHANGE_PASSWORD);
+    request = new MessageEnvelope(
+        request.messageId(), request.messageType(), request.messageVersion(), request.messageKind(), request.producer(),
+        request.occurredAt(), request.correlationId(), request.causationId(), request.operationId(), request.idempotencyKey(),
+        request.aggregateId(), request.aggregateVersion(), new Actor("SYSTEM", null, "bff", "SELF", null), request.payload());
 
-    assertThat(RpcListener.isAllowedProducer(AuthenticationRpcOperation.CHANGE_PASSWORD.wireName(), properties)).isFalse();
+    assertThat(RpcListener.isAllowedProducer(request)).isFalse();
   }
 
   @Test
   void rejectsAnInvalidScope() {
-    MessageProperties properties = selfProperties();
-    properties.setHeader("x-estoma-actor-scope", "GLOBAL");
+    MessageEnvelope request = selfRequest(AuthenticationRpcOperation.CHANGE_PASSWORD);
+    request = new MessageEnvelope(
+        request.messageId(), request.messageType(), request.messageVersion(), request.messageKind(), request.producer(),
+        request.occurredAt(), request.correlationId(), request.causationId(), request.operationId(), request.idempotencyKey(),
+        request.aggregateId(), request.aggregateVersion(), new Actor("ACCOUNT", request.aggregateId(), null, "GLOBAL", null), request.payload());
 
-    assertThat(RpcListener.isAllowedProducer(AuthenticationRpcOperation.CHANGE_PASSWORD.wireName(), properties)).isFalse();
+    assertThat(RpcListener.isAllowedProducer(request)).isFalse();
   }
 
   @Test
   void permitsRecoveryCodeOnlyForCommunicationsSystemIdentity() {
-    MessageProperties properties = new MessageProperties();
-    properties.setHeader("x-estoma-producer", "communications");
-    properties.setHeader("x-estoma-actor-type", "SYSTEM");
-    properties.setHeader("x-estoma-actor-service", "communications");
-    properties.setHeader("x-estoma-actor-scope", "GLOBAL");
+    MessageEnvelope request = new MessageEnvelope(
+        java.util.UUID.randomUUID(), AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName(), 1,
+        MessageKind.RPC_REQUEST, "communications", Instant.now(), java.util.UUID.randomUUID(), null, null, null, null,
+        null, new Actor("SYSTEM", null, "communications", "GLOBAL", null), null);
 
-    assertThat(RpcListener.isAllowedProducer(AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName(), properties)).isTrue();
-    properties.setHeader("x-estoma-producer", "bff");
-    assertThat(RpcListener.isAllowedProducer(AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName(), properties)).isFalse();
+    assertThat(RpcListener.isAllowedProducer(request)).isTrue();
+    request = new MessageEnvelope(
+        request.messageId(), request.messageType(), request.messageVersion(), request.messageKind(), "bff", request.occurredAt(),
+        request.correlationId(), request.causationId(), request.operationId(), request.idempotencyKey(), request.aggregateId(),
+        request.aggregateVersion(), request.actor(), request.payload());
+    assertThat(RpcListener.isAllowedProducer(request)).isFalse();
   }
 
-  private static MessageProperties selfProperties() {
-    UUID accountId = UUID.randomUUID();
-    MessageProperties properties = new MessageProperties();
-    properties.setHeader("x-estoma-producer", "bff");
-    properties.setHeader("x-estoma-actor-type", "ACCOUNT");
-    properties.setHeader("x-estoma-actor-scope", "SELF");
-    properties.setHeader("x-estoma-actor-account-id", accountId.toString());
-    properties.setHeader("x-estoma-target-account-id", accountId.toString());
-    return properties;
+  private static MessageEnvelope selfRequest(AuthenticationRpcOperation operation) {
+    java.util.UUID accountId = java.util.UUID.randomUUID();
+    return new MessageEnvelope(
+        java.util.UUID.randomUUID(), operation.wireName(), 1, MessageKind.RPC_REQUEST, "bff", Instant.now(),
+        java.util.UUID.randomUUID(), null, null, null, accountId, null, new Actor("ACCOUNT", accountId, null, "SELF", null), null);
   }
 }

@@ -2,8 +2,14 @@ package com.estoma.authentication.infrastructure.messaging.rpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.estoma.authentication.contracts.Actor;
+import com.estoma.authentication.contracts.AuthenticationRpcOperation;
 import com.estoma.authentication.contracts.LoginType;
+import com.estoma.authentication.contracts.MessageEnvelope;
+import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.contracts.MessagingNames;
+import com.estoma.authentication.contracts.result.ResultPayload;
+import com.estoma.authentication.contracts.result.ResultStatus;
 import com.estoma.authentication.contracts.rpc.AuthenticateAccountRequest;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.authentication.testsupport.AbstractRabbitMqIT;
@@ -30,15 +36,21 @@ class RpcRoundTripIT extends AbstractRabbitMqIT {
     var requestPayload =
         new AuthenticateAccountRequest(LoginType.MATRICULA, "no-such-login-" + System.nanoTime(), "irrelevant-password", null, null, null);
 
+    MessageEnvelope request = new MessageEnvelope(
+        java.util.UUID.randomUUID(), AuthenticationRpcOperation.AUTHENTICATE_ACCOUNT.wireName(), 1, MessageKind.RPC_REQUEST,
+        "bff", java.time.Instant.now(), java.util.UUID.randomUUID(), null, null, null, null, null,
+        new Actor("ANONYMOUS", null, null, "PUBLIC", null), codec.toJsonNode(requestPayload));
     MessageProperties requestProps = new MessageProperties();
     requestProps.setContentType(MessageProperties.CONTENT_TYPE_JSON);
-    requestProps.setType("AuthenticateAccount");
-    Message requestMessage = new Message(codec.encodeValue(requestPayload), requestProps);
+    Message requestMessage = new Message(codec.encode(request), requestProps);
 
     Message reply = rabbitTemplate.sendAndReceive(MessagingNames.SECURITY_RPC_EXCHANGE, MessagingNames.AUTHENTICATION_RPC_QUEUE, requestMessage);
 
     assertThat(reply).isNotNull();
-    RpcResponseEnvelope response = codec.decodeValue(reply.getBody(), RpcResponseEnvelope.class);
-    assertThat(response.status()).isEqualTo("REJECTED");
+    MessageEnvelope response = codec.decode(reply.getBody());
+    assertThat(response.messageKind()).isEqualTo(MessageKind.RPC_RESPONSE);
+    assertThat(response.correlationId()).isEqualTo(request.correlationId());
+    assertThat(response.causationId()).isEqualTo(request.messageId());
+    assertThat(codec.convertPayload(response, ResultPayload.class).status()).isEqualTo(ResultStatus.REJECTED);
   }
 }

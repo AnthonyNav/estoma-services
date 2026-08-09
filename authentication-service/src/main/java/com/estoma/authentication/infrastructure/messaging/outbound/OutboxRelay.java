@@ -93,7 +93,7 @@ public class OutboxRelay {
         switch (kind) {
           case EVENT -> routingKeyResolver.resolveEvent(record.messageType());
           case RESULT -> routingKeyResolver.resolveResult();
-          case COMMAND -> throw new IllegalStateException("authentication-service never publishes COMMAND messages");
+          case COMMAND, RPC_REQUEST, RPC_RESPONSE -> throw new IllegalStateException("authentication-service only publishes durable RESULT and EVENT messages");
         };
 
     MessageEnvelope envelope = buildEnvelope(record, kind);
@@ -107,7 +107,7 @@ public class OutboxRelay {
     switch (kind) {
       case RESULT -> publisher.publishRequiredRoute(destination.exchange(), destination.routingKey(), message);
       case EVENT -> publisher.publishEvent(destination.exchange(), destination.routingKey(), message);
-      case COMMAND -> throw new IllegalStateException("authentication-service never publishes COMMAND messages");
+      case COMMAND, RPC_REQUEST, RPC_RESPONSE -> throw new IllegalStateException("authentication-service only publishes durable RESULT and EVENT messages");
     }
   }
 

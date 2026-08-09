@@ -13,11 +13,15 @@ import com.estoma.authentication.application.rpc.RefreshSessionHandler;
 import com.estoma.authentication.application.rpc.ResetPasswordHandler;
 import com.estoma.authentication.application.rpc.SetTemporaryPasswordHandler;
 import com.estoma.authentication.application.rpc.ValidateRecoveryCodeHandler;
+import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.AuthenticationCommand;
 import com.estoma.authentication.contracts.AuthenticationRpcOperation;
 import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.MessageEnvelope;
+import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.contracts.MessagingNames;
+import com.estoma.authentication.contracts.result.ResultPayload;
+import com.estoma.authentication.contracts.result.ResultStatus;
 import com.estoma.authentication.contracts.command.ActivateAccountCommand;
 import com.estoma.authentication.contracts.command.CreateAccountCommand;
 import com.estoma.authentication.contracts.command.RequestPasswordRecoveryCommand;
@@ -37,7 +41,6 @@ import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.session.Session;
-import com.estoma.authentication.infrastructure.messaging.rpc.RpcResponseEnvelope;
 import com.estoma.authentication.testsupport.AbstractRabbitMqIT;
 import com.estoma.authentication.testsupport.Envelopes;
 import java.util.List;
@@ -51,7 +54,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * V1 account lifecycle smoke test. Durable Person/command edges use RabbitMQ;
- * operation-specific security bodies use the dispatcher except for the
+ * operation-specific security payloads use the dispatcher except for the
  * communications-only recovery delivery RPC, which crosses RabbitMQ too.
  */
 class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
@@ -149,21 +152,21 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
   private String requestRecoveryCodeAsCommunicationsSystem(UUID recoveryId) {
     MessageProperties properties = new MessageProperties();
     properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
-    properties.setType(AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName());
-    properties.setCorrelationId(UUID.randomUUID().toString());
-    properties.setHeader("x-estoma-producer", "communications");
-    properties.setHeader("x-estoma-actor-type", "SYSTEM");
-    properties.setHeader("x-estoma-actor-service", "communications");
-    properties.setHeader("x-estoma-actor-scope", "GLOBAL");
+    MessageEnvelope request = new MessageEnvelope(
+        UUID.randomUUID(), AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName(), 1, MessageKind.RPC_REQUEST,
+        "communications", java.time.Instant.now(), UUID.randomUUID(), null, null, null, null, null,
+        new Actor("SYSTEM", null, "communications", "GLOBAL", null),
+        codec.toJsonNode(new GetRecoveryCodeForDeliveryRequest(recoveryId)));
     Message reply = rabbitTemplate.sendAndReceive(
         MessagingNames.SECURITY_RPC_EXCHANGE,
         MessagingNames.AUTHENTICATION_RPC_QUEUE,
-        new Message(codec.encodeValue(new GetRecoveryCodeForDeliveryRequest(recoveryId)), properties));
+        new Message(codec.encode(request), properties));
 
     assertThat(reply).isNotNull();
-    RpcResponseEnvelope response = codec.decodeValue(reply.getBody(), RpcResponseEnvelope.class);
-    assertThat(response.status()).isEqualTo("SUCCEEDED");
-    return codec.toJsonNode(response.data()).get("code").asString();
+    MessageEnvelope response = codec.decode(reply.getBody());
+    ResultPayload result = codec.convertPayload(response, ResultPayload.class);
+    assertThat(result.status()).isEqualTo(ResultStatus.SUCCEEDED);
+    return codec.toJsonNode(result.data()).get("code").asString();
   }
 
   private UUID awaitRecoveryId(UUID accountId) throws InterruptedException {

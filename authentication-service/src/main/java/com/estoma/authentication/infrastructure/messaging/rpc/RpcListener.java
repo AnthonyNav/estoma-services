@@ -2,9 +2,13 @@ package com.estoma.authentication.infrastructure.messaging.rpc;
 
 import com.estoma.authentication.application.RpcDispatcher;
 import com.estoma.authentication.application.RpcOutcome;
+import com.estoma.authentication.contracts.AuthenticationAuthorizationMatrix;
 import com.estoma.authentication.contracts.MessagingNames;
-import com.estoma.authentication.contracts.AuthenticationRpcOperation;
+import com.estoma.authentication.contracts.MessageEnvelope;
+import com.estoma.authentication.contracts.MessageKind;
+import com.estoma.authentication.contracts.result.ResultPayload;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
+import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,93 +49,56 @@ public class RpcListener {
 
   @RabbitListener(queues = MessagingNames.AUTHENTICATION_RPC_QUEUE, containerFactory = "rpcContainerFactory")
   public Message onMessage(Message message) {
+    MessageEnvelope request = codec.decode(message.getBody());
     MessageProperties requestProps = message.getMessageProperties();
-    String operationType = requestProps.getType();
-    UUID correlationId = parseCorrelationId(requestProps.getCorrelationId());
 
-    RpcResponseEnvelope response;
-    if (correlationId == null || requestProps.getReplyTo() == null || requestProps.getReplyTo().isBlank()) {
-      response = RpcResponseEnvelope.rejected("INVALID_RPC_ENVELOPE");
-    } else if (operationType == null || !router.supports(operationType)) {
-      log.error("unrecognized RPC operation type={} correlationId={}", operationType, correlationId);
-      response = RpcResponseEnvelope.rejected("UNRECOGNIZED_OPERATION");
-    } else if (!isAllowedProducer(operationType, requestProps)) {
-      response = RpcResponseEnvelope.rejected("PRODUCER_NOT_AUTHORIZED");
+    ResultPayload result;
+    if (request.messageKind() != MessageKind.RPC_REQUEST || request.correlationId() == null || request.operationId() != null
+        || requestProps.getReplyTo() == null || requestProps.getReplyTo().isBlank()) {
+      result = ResultPayload.rejected("INVALID_RPC_ENVELOPE");
+    } else if (!router.supports(request.messageType())) {
+      log.error("unrecognized RPC operation type={} correlationId={}", request.messageType(), request.correlationId());
+      result = ResultPayload.rejected("UNRECOGNIZED_OPERATION");
+    } else if (!isAllowedProducer(request)) {
+      result = ResultPayload.rejected("PRODUCER_NOT_AUTHORIZED");
     } else {
-      response = handle(operationType, correlationId, message.getBody());
+      result = handle(request);
     }
 
-    return buildReply(response, requestProps);
+    return buildReply(response(request, result));
   }
 
-  private RpcResponseEnvelope handle(String operationType, UUID correlationId, byte[] body) {
+  private ResultPayload handle(MessageEnvelope request) {
     try {
-      RpcOutcome<Object> outcome = dispatcher.execute(correlationId, () -> router.invoke(operationType, body));
+      RpcOutcome<Object> outcome = dispatcher.execute(
+          request.correlationId(), () -> router.invoke(request.messageType(), codec.encodeValue(request.payload())));
       return switch (outcome) {
-        case RpcOutcome.Success<Object> success -> RpcResponseEnvelope.succeeded(success.response());
-        case RpcOutcome.Rejected<Object> rejected -> RpcResponseEnvelope.rejected(rejected.code().name());
+        case RpcOutcome.Success<Object> success -> ResultPayload.succeeded(success.response());
+        case RpcOutcome.Rejected<Object> rejected -> ResultPayload.rejected(rejected.code().name());
       };
     } catch (Exception e) {
       // Never a DLQ, never a retry (system_contract.md "RPC Security
       // Rules") -- a technical failure just becomes a controlled error
       // response; the BFF's own timeout/failure handling
       // (messaging-architecture.md §6.1) takes it from there.
-      log.error("RPC operation {} (correlationId={}) failed technically: {}", operationType, correlationId, e.toString());
-      return RpcResponseEnvelope.rejected("TECHNICAL_FAILURE");
+      log.error("RPC operation {} (correlationId={}) failed technically: {}", request.messageType(), request.correlationId(), e.toString());
+      return ResultPayload.failed("TECHNICAL_FAILURE");
     }
   }
 
-  private Message buildReply(RpcResponseEnvelope response, MessageProperties requestProps) {
+  private MessageEnvelope response(MessageEnvelope request, ResultPayload result) {
+    return new MessageEnvelope(
+        UUID.randomUUID(), request.messageType(), 1, MessageKind.RPC_RESPONSE, "authentication", Instant.now(),
+        request.correlationId(), request.messageId(), null, null, request.aggregateId(), null, request.actor(), codec.toJsonNode(result));
+  }
+
+  private Message buildReply(MessageEnvelope response) {
     MessageProperties replyProps = new MessageProperties();
     replyProps.setContentType(MessageProperties.CONTENT_TYPE_JSON);
-    replyProps.setCorrelationId(requestProps.getCorrelationId());
-    return new Message(codec.encodeValue(response), replyProps);
+    return new Message(codec.encode(response), replyProps);
   }
 
-  static boolean isAllowedProducer(String operationType, MessageProperties properties) {
-    String producer = header(properties, "x-estoma-producer");
-    String actorType = header(properties, "x-estoma-actor-type");
-    String actorService = header(properties, "x-estoma-actor-service");
-    String scope = header(properties, "x-estoma-actor-scope");
-    if (AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName().equals(operationType)) {
-      return "communications".equals(producer)
-          && "SYSTEM".equals(actorType)
-          && "communications".equals(actorService)
-          && "GLOBAL".equals(scope);
-    }
-    return "bff".equals(producer)
-        && "ACCOUNT".equals(actorType)
-        && "SELF".equals(scope)
-        && validSelfTarget(properties);
-  }
-
-  private static boolean validSelfTarget(MessageProperties properties) {
-    String actorAccountId = header(properties, "x-estoma-actor-account-id");
-    String targetAccountId = header(properties, "x-estoma-target-account-id");
-    if (actorAccountId == null || targetAccountId == null) {
-      return false;
-    }
-    try {
-      return UUID.fromString(actorAccountId).equals(UUID.fromString(targetAccountId));
-    } catch (IllegalArgumentException ignored) {
-      return false;
-    }
-  }
-
-  private static String header(MessageProperties properties, String name) {
-    Object value = properties.getHeader(name);
-    return value instanceof String string ? string : null;
-  }
-
-  private static UUID parseCorrelationId(String raw) {
-    if (raw != null) {
-      try {
-        return UUID.fromString(raw);
-      } catch (IllegalArgumentException ignored) {
-        // fall through to the random fallback below
-      }
-    }
-    log.warn("RPC request missing a valid correlationId");
-    return null;
+  static boolean isAllowedProducer(MessageEnvelope request) {
+    return AuthenticationAuthorizationMatrix.permits(request);
   }
 }

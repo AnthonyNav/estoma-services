@@ -15,9 +15,7 @@ import org.springframework.stereotype.Component;
  * NOT domain validation -- that happens inside the transactional
  * dispatcher and produces a functional rejection, not a DLQ'd message.
  *
- * <p>Does not assert on {@code targetService}: messaging-architecture.md
- * §8 explicitly says the envelope no longer carries it -- routing already
- * determines the destination.
+ * <p>Routing information is not part of the envelope contract.
  */
 @Component
 public class EnvelopeValidator {

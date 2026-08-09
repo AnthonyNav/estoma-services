@@ -7,7 +7,7 @@ import com.estoma.authentication.application.port.OutboxAppendRequest;
 import com.estoma.authentication.application.port.OutboxPort;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
-import com.estoma.authentication.contracts.result.RejectedPayload;
+import com.estoma.authentication.contracts.result.ResultPayload;
 import com.estoma.authentication.contracts.result.SucceededPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
@@ -86,7 +86,7 @@ public class CommandDispatcher {
 
   private void appendSucceededResult(MessageEnvelope envelope, CommandHandlerResult result) {
     String resultType = envelope.messageType() + "Succeeded";
-    SucceededPayload payload = new SucceededPayload(result.aggregateId(), result.aggregateVersion());
+    ResultPayload payload = ResultPayload.succeeded(new SucceededPayload(result.aggregateId(), result.aggregateVersion()));
     outbox.append(
         new OutboxAppendRequest(
             UUID.randomUUID(), resultType, 1, MessageKind.RESULT.name(), result.aggregateId(), result.aggregateVersion(),
@@ -96,7 +96,7 @@ public class CommandDispatcher {
 
   private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected) {
     String resultType = envelope.messageType() + "Rejected";
-    RejectedPayload payload = RejectedPayload.of(rejected.code().name(), rejected.getMessage());
+    ResultPayload payload = ResultPayload.rejected(rejected.code().name());
     outbox.append(
         new OutboxAppendRequest(
             UUID.randomUUID(), resultType, 1, MessageKind.RESULT.name(), null, null, envelope.correlationId(), envelope.messageId(),
