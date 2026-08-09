@@ -14,6 +14,7 @@ import com.estoma.authentication.testsupport.AbstractRabbitMqIT;
 import com.estoma.authentication.testsupport.Envelopes;
 import java.time.Instant;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.BindingBuilder;
@@ -22,6 +23,7 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * End-to-end proof that {@code CommandListener} and {@code OutboxRelay}
@@ -38,6 +40,12 @@ class CommandFlowIT extends AbstractRabbitMqIT {
   @Autowired private OutboxRelay outboxRelay;
   @Autowired private AccountRepository accountRepository;
   @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
+  @Autowired private JdbcClient jdbc;
+
+  @BeforeEach
+  void clearOutbox() {
+    jdbc.sql("DELETE FROM outbox_messages").update();
+  }
 
   @Test
   void createAccountCommandFlowsThroughToAPublishedResult() throws InterruptedException {
@@ -60,9 +68,7 @@ class CommandFlowIT extends AbstractRabbitMqIT {
     awaitAccountPersisted(accountId);
     outboxRelay.relay();
 
-    Message received = rabbitTemplate.receive(resultsQueue.getName(), 5_000);
-    assertThat(received).isNotNull();
-    MessageEnvelope result = codec.decode(received.getBody());
+    MessageEnvelope result = awaitResult(resultsQueue, envelope.correlationId());
     assertThat(result.messageType()).isEqualTo("CreateAccountSucceeded");
     assertThat(result.correlationId()).isEqualTo(envelope.correlationId());
   }
@@ -76,5 +82,19 @@ class CommandFlowIT extends AbstractRabbitMqIT {
       Thread.sleep(100);
     }
     throw new AssertionError("account " + accountId + " was not persisted within the deadline");
+  }
+
+  private MessageEnvelope awaitResult(Queue queue, UUID correlationId) {
+    long deadline = System.currentTimeMillis() + 5_000;
+    while (System.currentTimeMillis() < deadline) {
+      Message received = rabbitTemplate.receive(queue.getName(), 100);
+      if (received != null) {
+        MessageEnvelope result = codec.decode(received.getBody());
+        if (correlationId.equals(result.correlationId())) {
+          return result;
+        }
+      }
+    }
+    throw new AssertionError("result for correlationId " + correlationId + " was not received within the deadline");
   }
 }

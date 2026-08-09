@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.estoma.authentication.application.RpcDispatcher;
 import com.estoma.authentication.application.RpcOutcome;
 import com.estoma.authentication.application.port.AccountRepository;
+import com.estoma.authentication.application.port.CredentialRepository;
 import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.rpc.RegenerateTemporaryPasswordRequest;
 import com.estoma.authentication.contracts.rpc.SetTemporaryPasswordRequest;
@@ -23,6 +24,7 @@ class TemporaryPasswordRpcIT extends AbstractPostgresIT {
   @Autowired private SetTemporaryPasswordHandler setHandler;
   @Autowired private RegenerateTemporaryPasswordHandler regenerateHandler;
   @Autowired private AccountRepository accountRepository;
+  @Autowired private CredentialRepository credentialRepository;
 
   @Test
   void setTemporaryPasswordSucceedsAndSetsMustChangePassword() {
@@ -34,7 +36,7 @@ class TemporaryPasswordRpcIT extends AbstractPostgresIT {
     assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
     var response = ((RpcOutcome.Success<?>) outcome).response();
     assertThat(response).isInstanceOf(com.estoma.authentication.contracts.rpc.SetTemporaryPasswordResponse.class);
-    assertThat(accountRepository.findById(accountId).orElseThrow().mustChangePassword()).isTrue();
+    assertThat(credentialRepository.findByAccountId(accountId).orElseThrow().mustChangePassword()).isTrue();
   }
 
   @Test

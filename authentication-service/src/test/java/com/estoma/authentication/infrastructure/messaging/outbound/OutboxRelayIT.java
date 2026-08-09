@@ -8,6 +8,7 @@ import com.estoma.authentication.testsupport.AbstractRabbitMqIT;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -28,12 +29,17 @@ class OutboxRelayIT extends AbstractRabbitMqIT {
   @Autowired private OutboxRelay outboxRelay;
   @Autowired private JdbcClient jdbc;
 
+  @BeforeEach
+  void clearOutbox() {
+    jdbc.sql("DELETE FROM outbox_messages").update();
+  }
+
   @Test
   void aRowWithNoConfiguredRoutingKeyIsBackedOffNotDropped() {
     UUID messageId = UUID.randomUUID();
     outboxRepository.append(
         new OutboxAppendRequest(
-            messageId, "NoSuchEventType", 1, "EVENT", null, null, UUID.randomUUID(), null, "{}", Instant.now()));
+            messageId, "NoSuchEventType", 1, "EVENT", null, null, UUID.randomUUID(), null, null, null, null, "{}", Instant.now()));
 
     outboxRelay.relay();
 

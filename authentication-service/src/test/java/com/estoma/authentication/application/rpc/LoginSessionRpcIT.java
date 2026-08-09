@@ -56,6 +56,25 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
   }
 
   @Test
+  void temporaryCredentialCreatesShortPasswordChangeSessionWithoutRefreshToken() {
+    String identifier = "temporary-" + UUID.randomUUID();
+    UUID accountId = insertActiveAccountWithPassword(identifier, PASSWORD);
+    Instant now = Instant.now();
+    Credential temporary = credentialRepository.findByAccountId(accountId).orElseThrow()
+        .temporaryPassword(passwordHasher.hash(PASSWORD), now.plusSeconds(60), now);
+    credentialRepository.update(temporary);
+
+    var outcome = dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(
+        new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
+
+    var response = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) outcome).response();
+    assertThat(response.refreshToken()).isNull();
+    assertThat(response.mustChangePassword()).isTrue();
+    assertThat(sessionRepository.findById(response.sessionId()).orElseThrow().authState().name()).isEqualTo("PASSWORD_CHANGE_REQUIRED");
+    assertThat(credentialRepository.findByAccountId(accountId).orElseThrow().temporaryPasswordConsumedAt()).isNotNull();
+  }
+
+  @Test
   void authenticateFailsWithWrongPasswordAndIncrementsFailedAttempts() {
     String identifier = "user-" + UUID.randomUUID();
     UUID accountId = insertActiveAccountWithPassword(identifier, PASSWORD);
@@ -96,7 +115,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
   }
 
   @Test
-  void refreshRotatesTheTokenAndOldTokenNoLongerWorksImplicitly() {
+  void refreshAcceptsThePreviousTokenWithinTheGracePeriod() {
     String identifier = "user-" + UUID.randomUUID();
     insertActiveAccountWithPassword(identifier, PASSWORD);
     var authOutcome =
@@ -112,7 +131,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     assertThat(refreshResponse.refreshToken()).isNotEqualTo(authResponse.refreshToken());
 
     var reuseOldToken = dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authResponse.sessionId(), authResponse.refreshToken())));
-    assertThat(((RpcOutcome.Rejected<?>) reuseOldToken).code()).isEqualTo(RejectionCode.INVALID_REFRESH_TOKEN);
+    assertThat(reuseOldToken).isInstanceOf(RpcOutcome.Success.class);
   }
 
   @Test

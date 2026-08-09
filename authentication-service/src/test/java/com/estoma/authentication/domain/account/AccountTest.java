@@ -78,19 +78,6 @@ class AccountTest {
     assertThat(reset.isLocked(now)).isFalse();
   }
 
-  @Test
-  void temporaryPasswordSetThenPasswordChangeCompletedRoundTrips() {
-    Account account = newInactiveAccount().activated(now);
-
-    Account withTemp = account.withTemporaryPasswordSet(now.plusSeconds(86400), now);
-    assertThat(withTemp.mustChangePassword()).isTrue();
-    assertThat(withTemp.temporaryPasswordExpiresAt()).isNotNull();
-
-    Account changed = withTemp.withPasswordChangeCompleted(now);
-    assertThat(changed.mustChangePassword()).isFalse();
-    assertThat(changed.temporaryPasswordExpiresAt()).isNull();
-  }
-
   private Account newInactiveAccount() {
     return Account.createNew(UUID.randomUUID(), UUID.randomUUID(), loginIdentifier, now);
   }

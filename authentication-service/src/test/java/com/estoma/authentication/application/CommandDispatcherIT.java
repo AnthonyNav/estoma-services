@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.CredentialRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
+import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.SessionRepository;
 import com.estoma.authentication.contracts.AuthenticationCommand;
 import com.estoma.authentication.contracts.LoginType;
@@ -20,6 +21,7 @@ import com.estoma.authentication.domain.account.LoginIdentifier;
 import com.estoma.authentication.domain.credential.Credential;
 import com.estoma.authentication.domain.credential.PasswordHash;
 import com.estoma.authentication.domain.session.Session;
+import com.estoma.authentication.domain.recovery.PasswordRecoveryRequest;
 import com.estoma.authentication.testsupport.AbstractPostgresIT;
 import com.estoma.authentication.testsupport.Envelopes;
 import java.time.Instant;
@@ -34,6 +36,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   @Autowired private CredentialRepository credentialRepository;
   @Autowired private SessionRepository sessionRepository;
   @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
+  @Autowired private PasswordRecoveryRepository passwordRecoveryRepository;
 
   @Test
   void createAccountSucceedsForAnActivePerson() {
@@ -105,7 +108,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   @Test
   void deactivateAccountRevokesActiveSessions() {
     UUID accountId = insertActiveAccountWithCredential(activePerson());
-    Session session = Session.createNew(UUID.randomUUID(), accountId, "hash-" + UUID.randomUUID(), null, null, null, Instant.now(), Instant.now().plusSeconds(900));
+    Session session = normalSession(accountId, "hash-" + UUID.randomUUID());
     sessionRepository.insert(session);
 
     var outcome =
@@ -134,7 +137,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   @Test
   void revokeAllAccountSessionsRevokesEveryValidSession() {
     UUID accountId = insertActiveAccountWithCredential(activePerson());
-    sessionRepository.insert(Session.createNew(UUID.randomUUID(), accountId, "s1-" + UUID.randomUUID(), null, null, null, Instant.now(), Instant.now().plusSeconds(900)));
+    sessionRepository.insert(normalSession(accountId, "s1-" + UUID.randomUUID()));
 
     var outcome =
         dispatcher.dispatch(
@@ -162,6 +165,39 @@ class CommandDispatcherIT extends AbstractPostgresIT {
             Envelopes.command(AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(), new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
 
     assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(null));
+    assertThat(passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId)).isPresent();
+  }
+
+  @Test
+  void requestPasswordRecoveryKeepsTheActiveRequestDuringCooldown() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+    String identifier = accountRepository.findById(accountId).orElseThrow().loginIdentifier().value();
+
+    dispatcher.dispatch(
+        Envelopes.command(AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(), new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
+    UUID firstRecoveryId = passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId).orElseThrow().recoveryId();
+
+    var outcome = dispatcher.dispatch(
+        Envelopes.command(AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(), new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(null));
+    assertThat(passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId).orElseThrow().recoveryId()).isEqualTo(firstRecoveryId);
+  }
+
+  @Test
+  void requestPasswordRecoveryInvalidatesAnActiveRequestAfterCooldown() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+    String identifier = accountRepository.findById(accountId).orElseThrow().loginIdentifier().value();
+    PasswordRecoveryRequest previous = PasswordRecoveryRequest.createNew(
+        UUID.randomUUID(), accountId, "previous-" + UUID.randomUUID(), Instant.now().minusSeconds(301), Instant.now().plusSeconds(299));
+    passwordRecoveryRepository.insert(previous);
+
+    dispatcher.dispatch(
+        Envelopes.command(AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(), new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
+
+    assertThat(passwordRecoveryRepository.findById(previous.recoveryId()).orElseThrow().status())
+        .isEqualTo(PasswordRecoveryRequest.Status.INVALIDATED);
+    assertThat(passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId)).isPresent();
   }
 
   private UUID activePerson() {
@@ -174,6 +210,11 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     Account account = Account.createNew(UUID.randomUUID(), personId, LoginIdentifier.of(LoginType.MATRICULA, "acct-" + UUID.randomUUID()), Instant.now());
     accountRepository.insert(account);
     return account.accountId();
+  }
+
+  private static Session normalSession(UUID accountId, String hash) {
+    Instant now = Instant.now();
+    return Session.createNormal(UUID.randomUUID(), accountId, hash, null, null, null, now, now.plusSeconds(900), now.plusSeconds(1800));
   }
 
   private UUID insertActiveAccountWithCredential(UUID personId) {

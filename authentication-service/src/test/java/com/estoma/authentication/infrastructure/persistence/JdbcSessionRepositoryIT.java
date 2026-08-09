@@ -22,7 +22,7 @@ class JdbcSessionRepositoryIT extends AbstractPostgresIT {
   @Test
   void insertThenFindByRefreshTokenHash() {
     UUID accountId = insertAccount();
-    Session session = Session.createNew(UUID.randomUUID(), accountId, "hash-" + UUID.randomUUID(), "Chrome", "127.0.0.1", "UA", Instant.now(), Instant.now().plusSeconds(900));
+    Session session = normalSession(accountId, "hash-" + UUID.randomUUID());
 
     repository.insert(session);
 
@@ -32,10 +32,10 @@ class JdbcSessionRepositoryIT extends AbstractPostgresIT {
   @Test
   void rotationUpdatesTokenHashAndExpiry() {
     UUID accountId = insertAccount();
-    Session session = Session.createNew(UUID.randomUUID(), accountId, "original-hash", null, null, null, Instant.now(), Instant.now().plusSeconds(900));
+    Session session = normalSession(accountId, "original-hash");
     repository.insert(session);
 
-    Session rotated = session.rotated("rotated-hash", Instant.now(), Instant.now().plusSeconds(1800));
+    Session rotated = session.rotated("rotated-hash", Instant.now(), Instant.now().plusSeconds(1800), Instant.now().plusSeconds(30));
     repository.update(rotated);
 
     Session found = repository.findById(session.sessionId()).orElseThrow();
@@ -45,8 +45,8 @@ class JdbcSessionRepositoryIT extends AbstractPostgresIT {
   @Test
   void revokeAllActiveForAccountRevokesOnlyValidSessions() {
     UUID accountId = insertAccount();
-    Session valid = Session.createNew(UUID.randomUUID(), accountId, "valid-" + UUID.randomUUID(), null, null, null, Instant.now(), Instant.now().plusSeconds(900));
-    Session alreadyRevoked = Session.createNew(UUID.randomUUID(), accountId, "revoked-" + UUID.randomUUID(), null, null, null, Instant.now(), Instant.now().plusSeconds(900))
+    Session valid = normalSession(accountId, "valid-" + UUID.randomUUID());
+    Session alreadyRevoked = normalSession(accountId, "revoked-" + UUID.randomUUID())
         .revoked("previous", Instant.now());
     repository.insert(valid);
     repository.insert(alreadyRevoked);
@@ -62,5 +62,10 @@ class JdbcSessionRepositoryIT extends AbstractPostgresIT {
         UUID.randomUUID(), UUID.randomUUID(), LoginIdentifier.of(LoginType.MATRICULA, "sess-" + UUID.randomUUID()), Instant.now());
     accountRepository.insert(account);
     return account.accountId();
+  }
+
+  private static Session normalSession(UUID accountId, String hash) {
+    Instant now = Instant.now();
+    return Session.createNormal(UUID.randomUUID(), accountId, hash, null, null, null, now, now.plusSeconds(900), now.plusSeconds(1800));
   }
 }

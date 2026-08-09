@@ -45,14 +45,18 @@ class JdbcPasswordRecoveryRepositoryIT extends AbstractPostgresIT {
   }
 
   @Test
-  void updatePersistsFailedAttempts() {
+  void failedAttemptsTransitionToAttemptsExhaustedOnTheFifthAttempt() {
     UUID accountId = insertAccount();
     PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, "token-hash-3", Instant.now(), Instant.now().plusSeconds(1800));
     repository.insert(request);
 
-    repository.update(request.attemptFailed().attemptFailed());
+    for (int attempt = 0; attempt < 5; attempt++) {
+      repository.recordFailedAttempt(request.recoveryId(), Instant.now(), 5);
+    }
 
-    assertThat(repository.findById(request.recoveryId()).orElseThrow().failedAttempts()).isEqualTo(2);
+    var persisted = repository.findById(request.recoveryId()).orElseThrow();
+    assertThat(persisted.failedAttempts()).isEqualTo(5);
+    assertThat(persisted.status()).isEqualTo(PasswordRecoveryRequest.Status.ATTEMPTS_EXHAUSTED);
   }
 
   private UUID insertAccount() {
