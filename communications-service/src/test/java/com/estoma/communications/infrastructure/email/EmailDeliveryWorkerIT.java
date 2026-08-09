@@ -39,7 +39,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
     "estoma.communications.email.worker.poll-interval-ms=3600000",
     "estoma.communications.email.worker.sweeper-interval-ms=3600000",
     "estoma.communications.email.worker.enabled=false",
-    "estoma.communications.email.worker.batch-size=10000"
+    "estoma.communications.email.worker.batch-size=10000",
+    "estoma.communications.email.templates=WELCOME"
 })
 class EmailDeliveryWorkerIT extends AbstractPostgresIT {
 
@@ -97,6 +98,32 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
     assertThat(recordingProvider.calledWithTransactionActive.get()).isFalse();
   }
 
+  @Test
+  void templateContentIsRenderedAndPersistedForRetries() {
+    UUID communicationId = insertCommunication();
+    EmailDelivery delivery = EmailDelivery.template(UUID.randomUUID(), communicationId, "alumno@estoma.edu", "Alumno",
+        "Estoma", "no-reply@estoma.edu", null, "WELCOME", "{\"name\":\"Alumno\"}", Instant.now());
+    emailDeliveryRepository.insert(delivery);
+    recordingProvider.nextResult.set(new EmailProviderPort.EmailSendResult.Failed("stub", "TEMPORARY", "retry", true));
+
+    worker.pollAndProcess();
+
+    EmailDelivery rendered = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
+    assertThat(rendered.subject()).isEqualTo("Local template");
+    String renderedText = rendered.textBody();
+    assertThat(renderedText).contains("Alumno");
+    assertThat(rendered.contentMode()).isEqualTo(com.estoma.communications.contracts.EmailContentMode.TEMPLATE);
+    assertThat(recordingProvider.lastRequest.get().contentMode()).isEqualTo(com.estoma.communications.contracts.EmailContentMode.GENERIC);
+    assertThat(recordingProvider.lastRequest.get().templateCode()).isNull();
+
+    jdbc.sql("UPDATE email_deliveries SET next_attempt_at = now() WHERE email_delivery_id = :id")
+        .param("id", delivery.emailDeliveryId()).update();
+    worker.pollAndProcess();
+    EmailDelivery retried = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
+    assertThat(retried.subject()).isEqualTo("Local template");
+    assertThat(retried.textBody()).isEqualTo(renderedText);
+  }
+
   private UUID insertCommunication() {
     Communication communication =
         Communication.requested(
@@ -130,9 +157,11 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
 
     final AtomicReference<EmailSendResult> nextResult = new AtomicReference<>();
     final AtomicBoolean calledWithTransactionActive = new AtomicBoolean(false);
+    final AtomicReference<EmailSendRequest> lastRequest = new AtomicReference<>();
 
     @Override
     public EmailSendResult send(EmailSendRequest request) {
+      lastRequest.set(request);
       if (TransactionSynchronizationManager.isActualTransactionActive()) {
         calledWithTransactionActive.set(true);
       }

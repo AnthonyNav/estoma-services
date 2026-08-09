@@ -7,7 +7,12 @@ import com.estoma.communications.contracts.CommunicationsEvent;
 import com.estoma.communications.contracts.MessageEnvelope;
 import com.estoma.communications.contracts.command.ResolveIndeterminateEmailDeliveryCommand;
 import com.estoma.communications.application.EventToAppend;
-import com.estoma.communications.contracts.event.EmailDeliveryIndeterminateResolvedPayload;
+import com.estoma.communications.contracts.event.EmailDeliveryAcceptedPayload;
+import com.estoma.communications.contracts.event.EmailDeliveryFailedPayload;
+import com.estoma.communications.contracts.event.CommunicationCompletedPayload;
+import com.estoma.communications.contracts.event.CommunicationFailedPayload;
+import com.estoma.communications.contracts.event.EmailDeliveryRetryScheduledPayload;
+import com.estoma.communications.application.port.EmailDeliveryAttemptRepository;
 import com.estoma.communications.domain.CommunicationsRejectedException;
 import com.estoma.communications.domain.RejectionCode;
 import com.estoma.communications.infrastructure.messaging.EnvelopeJsonCodec;
@@ -15,6 +20,8 @@ import org.springframework.stereotype.Component;
 import com.estoma.communications.application.port.CommunicationRepository;
 import com.estoma.communications.domain.communication.Communication;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Administrative resolution entry point; SYSTEM actor authorization is enforced by the dispatcher policy. */
 @Component
@@ -24,9 +31,10 @@ class ResolveIndeterminateEmailDeliveryHandler implements CommandHandler {
   private final CommunicationAdminActionRepository actions;
   private final CommunicationRepository communications;
   private final MeterRegistry metrics;
+  private final EmailDeliveryAttemptRepository attempts;
   ResolveIndeterminateEmailDeliveryHandler(EmailDeliveryRepository repository, EnvelopeJsonCodec codec,
-      CommunicationAdminActionRepository actions, CommunicationRepository communications, MeterRegistry metrics) {
-    this.repository=repository; this.codec=codec; this.actions=actions; this.communications=communications; this.metrics=metrics;
+      CommunicationAdminActionRepository actions, CommunicationRepository communications, MeterRegistry metrics, EmailDeliveryAttemptRepository attempts) {
+    this.repository=repository; this.codec=codec; this.actions=actions; this.communications=communications; this.metrics=metrics; this.attempts=attempts;
   }
   @Override public String commandMessageType() { return CommunicationsCommand.RESOLVE_INDETERMINATE_EMAIL_DELIVERY.wireName(); }
   @Override public CommandHandlerResult handle(MessageEnvelope envelope) {
@@ -42,18 +50,40 @@ class ResolveIndeterminateEmailDeliveryHandler implements CommandHandler {
       throw new CommunicationsRejectedException(RejectionCode.RESEND_DUPLICATE_RISK_NOT_ACKNOWLEDGED, "risk acknowledgment is required for resend");
     java.time.Instant now = java.time.Instant.now();
     actions.record(java.util.UUID.randomUUID(), envelope.messageId(), delivery.emailDeliveryId(), command.resolution().name(),
-        envelope.actor().service(), command.reason() == null ? command.resolution().name() : command.reason(), "{}",
+        codec.writeValueAsString(envelope.actor()), command.reason() == null ? command.resolution().name() : command.reason(), "{}",
         command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED ? delivery.retryCycle() + 1 : delivery.retryCycle(),
         command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED, now);
     Communication communication = communications.findById(delivery.communicationId()).orElseThrow();
+    List<EventToAppend> events = new ArrayList<>();
     switch (command.resolution()) {
-      case RESEND_AUTHORIZED -> repository.update(delivery.resendAuthorized(now));
-      case RECONCILED_ACCEPTED -> { repository.update(delivery.accepted(now)); if (communication.status() == com.estoma.communications.contracts.CommunicationStatus.PROCESSING) communications.update(communication.completed(now)); }
-      case RECONCILED_FAILED -> { repository.update(delivery.failedTerminal("OPERATOR_RESOLVED_FAILED", "resolved by operator", now)); if (communication.status() == com.estoma.communications.contracts.CommunicationStatus.PROCESSING) communications.update(communication.failed(now)); }
+      case RESEND_AUTHORIZED -> {
+        var retried = delivery.resendAuthorized(now);
+        if (repository.update(retried) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "delivery changed while resending");
+        events.add(new EventToAppend(CommunicationsEvent.EMAIL_DELIVERY_RETRY_SCHEDULED.wireName(),
+            new EmailDeliveryRetryScheduledPayload(delivery.emailDeliveryId(), delivery.communicationId(), retried.attemptCount(), delivery.lastErrorCode(), now, now)));
+      }
+      case RECONCILED_ACCEPTED -> {
+        var attempt = attempts.findLastIndeterminate(delivery.emailDeliveryId()).orElseThrow(
+            () -> new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE,
+                "accepted reconciliation requires a real indeterminate attempt"));
+        if (repository.update(delivery.accepted(now)) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "delivery changed while resolving");
+        events.add(new EventToAppend(CommunicationsEvent.EMAIL_DELIVERY_ACCEPTED.wireName(), new EmailDeliveryAcceptedPayload(delivery.emailDeliveryId(), delivery.communicationId(), communication.recipientAccountId(), attempt.provider(), delivery.contentMode().name(), attempt.providerMessageId(), attempt.attemptNumber(), now)));
+        if (communication.status() == com.estoma.communications.contracts.CommunicationStatus.PROCESSING) {
+          if (communications.update(communication.completed(now)) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "communication changed while resolving");
+          events.add(new EventToAppend(CommunicationsEvent.COMMUNICATION_COMPLETED.wireName(), new CommunicationCompletedPayload(communication.communicationId(), communication.recipientAccountId(), communication.systemCode(), communication.communicationType(), communication.requestedChannels(), now)));
+        }
+      }
+      case RECONCILED_FAILED -> {
+        if (repository.update(delivery.failedTerminal("OPERATOR_RESOLVED_FAILED", "resolved by operator", now)) != 1)
+          throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "delivery changed while resolving");
+        if (communication.status() == com.estoma.communications.contracts.CommunicationStatus.PROCESSING) {
+          if (communications.update(communication.failed(now)) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "communication changed while resolving");
+          events.add(new EventToAppend(CommunicationsEvent.COMMUNICATION_FAILED.wireName(), new CommunicationFailedPayload(communication.communicationId(), communication.recipientAccountId(), communication.systemCode(), communication.communicationType(), List.of("EMAIL"), "OPERATOR_RESOLVED_FAILED", now)));
+        }
+        events.add(new EventToAppend(CommunicationsEvent.EMAIL_DELIVERY_FAILED.wireName(), new EmailDeliveryFailedPayload(delivery.emailDeliveryId(), delivery.communicationId(), communication.recipientAccountId(), delivery.attemptCount(), "OPERATOR_RESOLVED_FAILED", now)));
+      }
     }
     metrics.counter("communications.email.indeterminate_resolved.total").increment();
-    return CommandHandlerResult.of(command.emailDeliveryId(), delivery.attemptCount(), new EventToAppend(
-        CommunicationsEvent.EMAIL_DELIVERY_INDETERMINATE_RESOLVED.wireName(),
-        new EmailDeliveryIndeterminateResolvedPayload(delivery.emailDeliveryId(), delivery.communicationId(), command.resolution().name(), now)));
+    return CommandHandlerResult.of(command.emailDeliveryId(), delivery.attemptCount(), events.toArray(EventToAppend[]::new));
   }
 }

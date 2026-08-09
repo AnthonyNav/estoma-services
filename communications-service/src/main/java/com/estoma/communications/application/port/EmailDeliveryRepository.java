@@ -13,6 +13,8 @@ public interface EmailDeliveryRepository {
 
   int update(EmailDelivery delivery);
 
+  int persistRenderedContent(EmailDelivery delivery, UUID claimToken);
+
   /**
    * Atomically claims up to {@code batchSize} due {@code PENDING}/{@code
    * RETRY_SCHEDULED} rows (row-locked, skip-locked) and transitions them to

@@ -27,7 +27,11 @@ class StubEmailProvider implements EmailProviderPort {
   public EmailSendResult send(EmailSendRequest request) {
     if ("retryable".equals(mode)) return new EmailSendResult.Failed(PROVIDER_NAME, "PROVIDER_RETRYABLE", "provider rejected temporarily", true);
     if ("terminal".equals(mode)) return new EmailSendResult.Failed(PROVIDER_NAME, "PROVIDER_TERMINAL", "provider rejected", false);
-    if ("indeterminate".equals(mode) || "timeout".equals(mode)) return new EmailSendResult.Indeterminate(PROVIDER_NAME, "PROVIDER_INDETERMINATE", mode);
+    if ("timeout".equals(mode)) {
+      try { Thread.sleep(60_000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+      return new EmailSendResult.Indeterminate(PROVIDER_NAME, "PROVIDER_TIMEOUT", "provider call timed out");
+    }
+    if ("indeterminate".equals(mode)) return new EmailSendResult.Indeterminate(PROVIDER_NAME, "PROVIDER_INDETERMINATE", mode);
     if ("exception".equals(mode)) throw new IllegalStateException("provider exception");
     return new EmailSendResult.Accepted(PROVIDER_NAME, UUID.randomUUID().toString());
   }

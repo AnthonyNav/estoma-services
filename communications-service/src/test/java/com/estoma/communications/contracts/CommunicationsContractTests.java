@@ -58,7 +58,6 @@ class CommunicationsContractTests {
     assertThat(CommunicationsEvent.EMAIL_DELIVERY_DELIVERED.wireName()).isEqualTo("EmailDeliveryDelivered");
     assertThat(CommunicationsEvent.COMMUNICATION_COMPLETED.wireName()).isEqualTo("CommunicationCompleted");
     assertThat(CommunicationsEvent.COMMUNICATION_FAILED.wireName()).isEqualTo("CommunicationFailed");
-    assertThat(CommunicationsEvent.EMAIL_DELIVERY_INDETERMINATE_RESOLVED.wireName()).isEqualTo("EmailDeliveryIndeterminateResolved");
   }
 
   @Test

@@ -52,11 +52,12 @@ class RetryEmailDeliveryHandler implements CommandHandler {
 
     Instant now = Instant.now();
     EmailDelivery retried = delivery.retriedByOperator(now);
-    repository.update(retried);
+    if (repository.update(retried) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FAILED, "delivery changed while retrying");
     var communication = communications.findById(delivery.communicationId()).orElseThrow();
-    communications.update(communication.reopenedForRetry(now));
+    if (communications.update(communication.reopenedForRetry(now)) != 1)
+      throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FAILED, "communication changed while retrying");
     actions.record(UUID.randomUUID(), envelope.messageId(), delivery.emailDeliveryId(), "RETRY_EMAIL_DELIVERY",
-        envelope.actor().service(), command.reason(), "{}", retried.retryCycle(), false, now);
+        codec.writeValueAsString(envelope.actor()), command.reason() == null ? "manual retry" : command.reason(), "{}", retried.retryCycle(), false, now);
     metrics.counter("communications.email.manual_retry.total").increment();
 
     return CommandHandlerResult.of(

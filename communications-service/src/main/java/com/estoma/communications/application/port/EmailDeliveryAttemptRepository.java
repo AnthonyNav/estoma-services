@@ -9,5 +9,6 @@ public interface EmailDeliveryAttemptRepository {
   int update(EmailDeliveryAttempt attempt);
   java.util.Optional<EmailDeliveryAttempt> findByClaim(UUID deliveryId, UUID claimToken);
   java.util.Optional<EmailDeliveryAttempt> findReadyByDelivery(UUID deliveryId);
+  java.util.Optional<EmailDeliveryAttempt> findLastIndeterminate(UUID deliveryId);
   int reassignClaim(UUID attemptId, UUID previousToken, UUID newToken);
 }

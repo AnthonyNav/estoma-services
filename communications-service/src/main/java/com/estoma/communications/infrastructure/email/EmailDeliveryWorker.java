@@ -1,6 +1,7 @@
 package com.estoma.communications.infrastructure.email;
 
 import com.estoma.communications.application.port.EmailProviderPort;
+import com.estoma.communications.contracts.EmailContentMode;
 import com.estoma.communications.domain.email.EmailDelivery;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,7 +26,7 @@ import org.slf4j.LoggerFactory;
 public class EmailDeliveryWorker {
   private static final Logger LOGGER = LoggerFactory.getLogger(EmailDeliveryWorker.class);
 
-  private final ObjectProvider<EmailProviderPort> providers;
+  private final EmailProviderRouter provider;
   private final int batchSize;
   private final ClaimEmailDeliveriesTxService claimService;
   private final PrepareEmailDeliveryTxService prepareService;
@@ -38,7 +39,7 @@ public class EmailDeliveryWorker {
   private final AtomicReference<String> lastPollError = new AtomicReference<>();
 
   EmailDeliveryWorker(
-      ObjectProvider<EmailProviderPort> providers,
+      EmailProviderRouter provider,
       ClaimEmailDeliveriesTxService claimService,
       PrepareEmailDeliveryTxService prepareService,
       StartEmailDeliveryTxService startService,
@@ -47,7 +48,7 @@ public class EmailDeliveryWorker {
       PreProviderFailureTxService preProviderFailureService,
       @Value("${estoma.communications.email.worker.batch-size:20}") int batchSize,
       @Value("${estoma.communications.email.worker.enabled:true}") boolean scheduledEnabled) {
-    this.providers = providers;
+    this.provider = provider;
     this.batchSize = batchSize;
     this.claimService = claimService;
     this.prepareService = prepareService;
@@ -71,19 +72,28 @@ public class EmailDeliveryWorker {
           EmailProviderPort.EmailSendRequest request = new EmailProviderPort.EmailSendRequest(
               claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
               claimed.contentMode(), claimed.subject(), claimed.textBody(), claimed.htmlBody(), claimed.templateCode(), claimed.templateData());
-          EmailProviderPort.EmailSendRequest resolved = templateResolver.resolve(request);
-          claimed = prepareService.prepare(claimed);
+          boolean finalContentPresent = claimed.subject() != null && claimed.textBody() != null;
+          EmailProviderPort.EmailSendRequest resolved;
+          if (claimed.contentMode() == com.estoma.communications.contracts.EmailContentMode.TEMPLATE && !finalContentPresent) {
+            resolved = templateResolver.resolve(request);
+            claimed = prepareService.prepare(claimed, resolved);
+          } else {
+            resolved = new EmailProviderPort.EmailSendRequest(claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(),
+                claimed.fromAddress(), claimed.replyToAddress(), EmailContentMode.GENERIC, claimed.subject(), claimed.textBody(),
+                claimed.htmlBody(), null, null);
+            claimed = prepareService.prepare(claimed);
+          }
           claimed = startService.start(claimed);
           providerCallStarted = true;
           // No transaction is open here: this is the only place the provider is called.
-          EmailProviderPort.EmailSendResult result = provider().send(resolved);
+           EmailProviderPort.EmailSendResult result = provider.send(resolved);
           resultService.record(claimed, result);
         } catch (RuntimeException itemError) {
           LOGGER.warn("email delivery item failed: deliveryId={}, providerCallStarted={}, error={}",
               claimed.emailDeliveryId(), providerCallStarted, itemError.toString());
           if (providerCallStarted) {
             resultService.record(claimed,
-                new EmailProviderPort.EmailSendResult.Indeterminate("stub", "PROVIDER_EXCEPTION", "provider call outcome unknown"));
+                new EmailProviderPort.EmailSendResult.Indeterminate("unknown", "PROVIDER_EXCEPTION", "provider call outcome unknown"));
           } else {
             preProviderFailureService.record(claimed, "PRE_PROVIDER_VALIDATION", "delivery could not be prepared");
           }
@@ -94,11 +104,6 @@ public class EmailDeliveryWorker {
       lastPollError.set(e.getMessage());
       throw e;
     }
-  }
-
-  private EmailProviderPort provider() {
-    EmailProviderPort selected = providers.getIfUnique();
-    return selected != null ? selected : providers.stream().filter(p -> p instanceof EmailProviderRouter).findFirst().orElseThrow();
   }
 
   /**

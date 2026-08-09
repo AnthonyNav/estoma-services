@@ -116,6 +116,19 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
   }
 
   @Override
+  public int persistRenderedContent(EmailDelivery delivery, UUID claimToken) {
+    return jdbc.sql("""
+        UPDATE email_deliveries SET subject = :subject, text_body = :textBody, html_body = :htmlBody, updated_at = :updatedAt
+         WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > :now
+           AND status = CAST('SENDING' AS email_delivery_status)
+           AND subject IS NULL AND text_body IS NULL AND html_body IS NULL
+        """)
+        .param("subject", delivery.subject()).param("textBody", delivery.textBody()).param("htmlBody", delivery.htmlBody())
+        .param("updatedAt", Timestamps.toTimestamp(delivery.updatedAt())).param("id", delivery.emailDeliveryId()).param("token", claimToken)
+        .param("now", Timestamps.toTimestamp(Instant.now())).update();
+  }
+
+  @Override
   public List<EmailDelivery> claimDue(int batchSize) {
     return claimDue(batchSize, "legacy-worker");
   }
@@ -152,19 +165,10 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
 
   @Override
   public int releaseExpiredLeases() {
-    jdbc.sql("""
-        UPDATE email_delivery_attempts a SET status = CAST('INDETERMINATE' AS email_attempt_status),
-          normalized_error_code = 'LEASE_EXPIRED', error_message = 'provider call may have started', completed_at = now()
-        FROM email_deliveries d
-        WHERE a.email_delivery_id = d.email_delivery_id AND a.claim_token = d.claim_token
-          AND a.status = CAST('CALL_STARTED' AS email_attempt_status)
-          AND d.status = CAST('SENDING' AS email_delivery_status)
-          AND d.lease_until IS NOT NULL AND d.lease_until < now()
-        """).update();
     int recovered = jdbc.sql("""
         UPDATE email_deliveries d
            SET status = CASE WHEN EXISTS (
-                 SELECT 1 FROM email_delivery_attempts a
+                  SELECT 1 FROM email_delivery_attempts a
                   WHERE a.email_delivery_id = d.email_delivery_id
                     AND a.claim_token = d.claim_token
                     AND a.status = CAST('INDETERMINATE' AS email_attempt_status)
@@ -176,10 +180,20 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
                     AND a.claim_token = d.claim_token
                     AND a.status = CAST('INDETERMINATE' AS email_attempt_status)
                ) THEN NULL ELSE now() END,
-               claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL, updated_at = now()
-         WHERE d.status = CAST('SENDING' AS email_delivery_status)
+                updated_at = now()
+          WHERE d.status = CAST('SENDING' AS email_delivery_status)
            AND d.lease_until IS NOT NULL AND d.lease_until < now()
+         """).update();
+    jdbc.sql("""
+        UPDATE email_delivery_attempts a SET status = CAST('INDETERMINATE' AS email_attempt_status),
+          normalized_error_code = 'LEASE_EXPIRED', error_message = 'provider call may have started', completed_at = now()
+        FROM email_deliveries d
+        WHERE a.email_delivery_id = d.email_delivery_id AND a.claim_token = d.claim_token
+          AND a.status = CAST('CALL_STARTED' AS email_attempt_status)
+          AND d.status = CAST('INDETERMINATE' AS email_delivery_status)
+          AND d.lease_until IS NOT NULL AND d.lease_until < now()
         """).update();
+    jdbc.sql("UPDATE email_deliveries SET claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL WHERE status = CAST('INDETERMINATE' AS email_delivery_status) AND lease_until < now()").update();
     return recovered;
   }
 

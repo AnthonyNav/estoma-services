@@ -96,6 +96,14 @@ public final class EmailDelivery {
         EmailContentMode.TEMPLATE, null, null, null, templateCode, templateData, now);
   }
 
+  public static EmailDelivery withRenderedContent(EmailDelivery source, String subject, String textBody, String htmlBody) {
+    return new EmailDelivery(source.emailDeliveryId, source.communicationId, source.recipientAddress, source.recipientName,
+        source.fromName, source.fromAddress, source.replyToAddress, source.contentMode, subject, textBody, htmlBody,
+        source.templateCode, source.templateData, source.status, source.attemptCount, source.retryCycle, source.cycleAttemptCount,
+        source.nextAttemptAt, source.acceptedAt, source.deliveredAt, source.failedAt, source.lastErrorCode, source.lastErrorMessage,
+        source.createdAt, source.updatedAt, source.claimToken, source.claimedAt, source.leaseUntil, source.workerId);
+  }
+
   private static EmailDelivery base(UUID id, UUID communicationId, String recipientAddress, String recipientName,
       String fromName, String fromAddress, String replyToAddress, EmailContentMode mode, String subject,
       String textBody, String htmlBody, String templateCode, String templateData, Instant now) {

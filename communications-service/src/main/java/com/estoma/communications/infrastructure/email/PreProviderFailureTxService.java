@@ -7,6 +7,7 @@ import com.estoma.communications.application.port.OutboxPort;
 import com.estoma.communications.contracts.CommunicationsEvent;
 import com.estoma.communications.contracts.MessageKind;
 import com.estoma.communications.contracts.event.CommunicationFailedPayload;
+import com.estoma.communications.contracts.event.EmailDeliveryFailedPayload;
 import com.estoma.communications.domain.communication.Communication;
 import com.estoma.communications.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
@@ -35,12 +36,19 @@ class PreProviderFailureTxService {
     Instant now = Instant.now();
     if (deliveries.failPreProvider(delivery.emailDeliveryId(), delivery.claimToken(), code, message, now) != 1) return;
     Communication communication = communications.findById(delivery.communicationId()).orElseThrow();
+    if (communication.correlationId() == null) {
+      communication = communication.withCorrelationId(UUID.randomUUID());
+      if (communications.update(communication) != 1) throw new IllegalStateException("communication claim lost while tracing failure");
+    }
+    outbox.append(new OutboxAppendRequest(UUID.randomUUID(), CommunicationsEvent.EMAIL_DELIVERY_FAILED.wireName(), 1,
+        MessageKind.EVENT.name(), communication.communicationId(), null, communication.correlationId(), null,
+        codec.writeValueAsString(new EmailDeliveryFailedPayload(delivery.emailDeliveryId(), delivery.communicationId(), communication.recipientAccountId(), delivery.attemptCount(), code, now)), now));
     if (communication.status() == com.estoma.communications.contracts.CommunicationStatus.PROCESSING) {
-      communications.update(communication.failed(now));
+      if (communications.update(communication.failed(now)) != 1) throw new IllegalStateException("communication claim lost while failing");
       outbox.append(new OutboxAppendRequest(UUID.randomUUID(), CommunicationsEvent.COMMUNICATION_FAILED.wireName(), 1,
           MessageKind.EVENT.name(), communication.communicationId(), null, communication.correlationId(), null,
           codec.writeValueAsString(new CommunicationFailedPayload(communication.communicationId(), communication.recipientAccountId(),
-              communication.systemCode(), communication.communicationType(), java.util.List.of("EMAIL"), now)), now));
+               communication.systemCode(), communication.communicationType(), java.util.List.of("EMAIL"), code, now)), now));
     }
   }
 }
