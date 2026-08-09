@@ -35,7 +35,22 @@ class PasswordRecoveryRequestTest {
     assertThat(used.usedAt()).isEqualTo(now.plusSeconds(10));
   }
 
+  @Test
+  void createNewAlwaysUsesCanonicalDerivationContext() {
+    assertThat(newRequest().codeDerivationContext()).isEqualTo(RecoveryCodeDerivationContext.HMAC_SHA256_V1);
+    assertThat(newRequest().hasCanonicalCodeDerivationContext()).isTrue();
+  }
+
+  @Test
+  void reconstitutedUnknownContextIsNotCanonical() {
+    PasswordRecoveryRequest request = PasswordRecoveryRequest.reconstitute(
+        UUID.randomUUID(), UUID.randomUUID(), "legacy-sha256", now, expiresAt, null,
+        PasswordRecoveryRequest.Status.ACTIVE, null, 0);
+
+    assertThat(request.hasCanonicalCodeDerivationContext()).isFalse();
+  }
+
   private PasswordRecoveryRequest newRequest() {
-    return PasswordRecoveryRequest.createNew(UUID.randomUUID(), UUID.randomUUID(), "token-hash", now, expiresAt);
+    return PasswordRecoveryRequest.createNew(UUID.randomUUID(), UUID.randomUUID(), now, expiresAt);
   }
 }

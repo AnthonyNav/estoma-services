@@ -101,9 +101,12 @@ public class ChangePasswordHandler {
 
     String refreshToken = randomGenerator.randomUrlSafeToken(32);
     Instant absoluteExpiresAt = currentSession.authState() == Session.AuthState.PASSWORD_CHANGE_REQUIRED
-        ? now.plus(ABSOLUTE_SESSION_LIFETIME)
+        ? currentSession.createdAt().plus(ABSOLUTE_SESSION_LIFETIME)
         : currentSession.absoluteExpiresAt();
     Instant idleExpiresAt = minInstant(now.plus(IDLE_SESSION_LIFETIME), absoluteExpiresAt);
+    if (!idleExpiresAt.isAfter(now) || !absoluteExpiresAt.isAfter(now)) {
+      throw new AuthenticationRejectedException(RejectionCode.SESSION_EXPIRED, "session absolute expiry has passed");
+    }
     Session renewedSession = currentSession.passwordChanged(tokenHasher.sha256Hex(refreshToken), now, idleExpiresAt, absoluteExpiresAt);
     credentialRepository.update(credential.changed(passwordHasher.hash(request.newPassword()), now));
     sessionRepository.update(renewedSession);

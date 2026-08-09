@@ -14,7 +14,7 @@ public final class PasswordRecoveryRequest {
 
   private final UUID recoveryId;
   private final UUID accountId;
-  private final String tokenHash;
+  private final String codeDerivationContext;
   private final Instant createdAt;
   private final Instant expiresAt;
   private final Instant usedAt;
@@ -23,11 +23,11 @@ public final class PasswordRecoveryRequest {
   private final int failedAttempts;
 
   private PasswordRecoveryRequest(
-      UUID recoveryId, UUID accountId, String tokenHash, Instant createdAt, Instant expiresAt, Instant usedAt,
+      UUID recoveryId, UUID accountId, String codeDerivationContext, Instant createdAt, Instant expiresAt, Instant usedAt,
       Status status, Instant invalidatedAt, int failedAttempts) {
     this.recoveryId = requireNonNull(recoveryId, "recoveryId");
     this.accountId = requireNonNull(accountId, "accountId");
-    this.tokenHash = requireNonNull(tokenHash, "tokenHash");
+    this.codeDerivationContext = requireNonNull(codeDerivationContext, "codeDerivationContext");
     this.createdAt = requireNonNull(createdAt, "createdAt");
     this.expiresAt = requireNonNull(expiresAt, "expiresAt");
     if (!expiresAt.isAfter(createdAt)) {
@@ -42,24 +42,25 @@ public final class PasswordRecoveryRequest {
     this.failedAttempts = failedAttempts;
   }
 
-  public static PasswordRecoveryRequest createNew(UUID recoveryId, UUID accountId, String tokenHash, Instant now, Instant expiresAt) {
-    return new PasswordRecoveryRequest(recoveryId, accountId, tokenHash, now, expiresAt, null, Status.ACTIVE, null, 0);
+  public static PasswordRecoveryRequest createNew(UUID recoveryId, UUID accountId, Instant now, Instant expiresAt) {
+    return new PasswordRecoveryRequest(recoveryId, accountId, RecoveryCodeDerivationContext.HMAC_SHA256_V1,
+        now, expiresAt, null, Status.ACTIVE, null, 0);
   }
 
   public static PasswordRecoveryRequest reconstitute(
-      UUID recoveryId, UUID accountId, String tokenHash, Instant createdAt, Instant expiresAt, Instant usedAt,
+      UUID recoveryId, UUID accountId, String codeDerivationContext, Instant createdAt, Instant expiresAt, Instant usedAt,
       Status status, Instant invalidatedAt, int failedAttempts) {
-    return new PasswordRecoveryRequest(recoveryId, accountId, tokenHash, createdAt, expiresAt, usedAt, status, invalidatedAt, failedAttempts);
+    return new PasswordRecoveryRequest(recoveryId, accountId, codeDerivationContext, createdAt, expiresAt, usedAt, status, invalidatedAt, failedAttempts);
   }
 
   public PasswordRecoveryRequest attemptFailed() {
     Status nextStatus = failedAttempts + 1 >= 5 ? Status.ATTEMPTS_EXHAUSTED : status;
-    return new PasswordRecoveryRequest(recoveryId, accountId, tokenHash, createdAt, expiresAt, usedAt, nextStatus, invalidatedAt, failedAttempts + 1);
+    return new PasswordRecoveryRequest(recoveryId, accountId, codeDerivationContext, createdAt, expiresAt, usedAt, nextStatus, invalidatedAt, failedAttempts + 1);
   }
 
   /** {@code ResetPassword} (commands.md §8.5): consumes the request. */
   public PasswordRecoveryRequest used(Instant now) {
-    return new PasswordRecoveryRequest(recoveryId, accountId, tokenHash, createdAt, expiresAt, now, Status.USED, invalidatedAt, failedAttempts);
+    return new PasswordRecoveryRequest(recoveryId, accountId, codeDerivationContext, createdAt, expiresAt, now, Status.USED, invalidatedAt, failedAttempts);
   }
 
   public boolean isUsed() {
@@ -71,7 +72,7 @@ public final class PasswordRecoveryRequest {
   }
 
   public boolean isActiveAndUsable(Instant now) {
-    return status == Status.ACTIVE && !isExpired(now);
+    return status == Status.ACTIVE && hasCanonicalCodeDerivationContext() && !isExpired(now);
   }
 
   public UUID recoveryId() {
@@ -82,8 +83,12 @@ public final class PasswordRecoveryRequest {
     return accountId;
   }
 
-  public String tokenHash() {
-    return tokenHash;
+  public String codeDerivationContext() {
+    return codeDerivationContext;
+  }
+
+  public boolean hasCanonicalCodeDerivationContext() {
+    return RecoveryCodeDerivationContext.isCanonical(codeDerivationContext);
   }
 
   public Instant createdAt() {

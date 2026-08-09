@@ -28,6 +28,9 @@ public class GetRecoveryCodeForDeliveryHandler {
             .findByIdForUpdate(request.recoveryId())
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_CODE_INVALID, "recovery request does not exist"));
     Instant now = Instant.now();
+    if (!recovery.hasCanonicalCodeDerivationContext()) {
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_CODE_INVALID, "recovery derivation context is unsupported");
+    }
     if (recovery.isExpired(now)) {
       repository.expireIfActive(recovery.recoveryId(), now);
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_CODE_EXPIRED, "recovery request has expired");
@@ -38,7 +41,8 @@ public class GetRecoveryCodeForDeliveryHandler {
           : RejectionCode.RECOVERY_CODE_INVALID;
       throw new AuthenticationRejectedException(code, "recovery request is no longer usable");
     }
-    return RpcHandlerOutcome.withoutEvents(new GetRecoveryCodeForDeliveryResponse(codeDeriver.derive(recovery.recoveryId())));
+    return RpcHandlerOutcome.withoutEvents(new GetRecoveryCodeForDeliveryResponse(
+        codeDeriver.derive(recovery.recoveryId(), recovery.codeDerivationContext())));
   }
 
   public RpcHandlerOutcome<GetRecoveryCodeForDeliveryResponse> handle(RpcRequestContext context, GetRecoveryCodeForDeliveryRequest request) {

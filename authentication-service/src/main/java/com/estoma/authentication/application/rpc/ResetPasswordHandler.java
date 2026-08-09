@@ -8,7 +8,6 @@ import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.SessionRepository;
 import com.estoma.authentication.application.port.RecoveryCodeDeriver;
-import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayload;
 import com.estoma.authentication.contracts.event.PasswordChangedPayload;
@@ -40,7 +39,6 @@ public class ResetPasswordHandler {
   private final PasswordHasher passwordHasher;
   private final PasswordPolicy passwordPolicy;
   private final RecoveryCodeDeriver codeDeriver;
-  private final TokenHasher tokenHasher;
 
   ResetPasswordHandler(
       PasswordRecoveryRepository recoveryRepository,
@@ -50,8 +48,7 @@ public class ResetPasswordHandler {
       SessionRepository sessionRepository,
       PasswordHasher passwordHasher,
       PasswordPolicy passwordPolicy,
-      RecoveryCodeDeriver codeDeriver,
-      TokenHasher tokenHasher) {
+      RecoveryCodeDeriver codeDeriver) {
     this.recoveryRepository = recoveryRepository;
     this.accountRepository = accountRepository;
     this.personStatusProjectionRepository = personStatusProjectionRepository;
@@ -60,7 +57,6 @@ public class ResetPasswordHandler {
     this.passwordHasher = passwordHasher;
     this.passwordPolicy = passwordPolicy;
     this.codeDeriver = codeDeriver;
-    this.tokenHasher = tokenHasher;
   }
 
   public RpcHandlerOutcome<ResetPasswordResponse> handle(ResetPasswordRequest request) {
@@ -81,6 +77,9 @@ public class ResetPasswordHandler {
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "no active recovery request exists"));
 
     Instant now = Instant.now();
+    if (!recovery.hasCanonicalCodeDerivationContext()) {
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery derivation context is unsupported");
+    }
     if (recovery.isExpired(now)) {
       recoveryRepository.expireIfActive(recovery.recoveryId(), now);
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery request has expired");
@@ -126,9 +125,7 @@ public class ResetPasswordHandler {
   }
 
   private boolean matches(PasswordRecoveryRequest recovery, String code) {
-    return "v1-hmac".equals(recovery.tokenHash())
-        ? codeDeriver.matches(recovery.recoveryId(), code)
-        : recovery.tokenHash().equals(tokenHasher.sha256Hex(code));
+    return codeDeriver.matches(recovery.recoveryId(), recovery.codeDerivationContext(), code);
   }
 
   private boolean isPersonActive(java.util.UUID personId) {

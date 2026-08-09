@@ -14,7 +14,7 @@ import org.springframework.stereotype.Repository;
 @Repository
 class JdbcPasswordRecoveryRepository implements PasswordRecoveryRepository {
 
-  private static final String COLUMNS = "recovery_id, account_id, token_hash, created_at, expires_at, used_at, status, invalidated_at, failed_attempts";
+  private static final String COLUMNS = "recovery_id, account_id, code_derivation_context, created_at, expires_at, used_at, status, invalidated_at, failed_attempts";
 
   private final JdbcClient jdbc;
 
@@ -50,12 +50,12 @@ class JdbcPasswordRecoveryRepository implements PasswordRecoveryRepository {
   public void insert(PasswordRecoveryRequest request) {
     jdbc.sql(
             """
-            INSERT INTO password_recovery_requests (recovery_id, account_id, token_hash, created_at, expires_at, used_at, status, invalidated_at, failed_attempts)
-            VALUES (:recoveryId, :accountId, :tokenHash, :createdAt, :expiresAt, :usedAt, :status, :invalidatedAt, :failedAttempts)
+            INSERT INTO password_recovery_requests (recovery_id, account_id, code_derivation_context, created_at, expires_at, used_at, status, invalidated_at, failed_attempts)
+            VALUES (:recoveryId, :accountId, :codeDerivationContext, :createdAt, :expiresAt, :usedAt, :status, :invalidatedAt, :failedAttempts)
             """)
         .param("recoveryId", request.recoveryId())
         .param("accountId", request.accountId())
-        .param("tokenHash", request.tokenHash())
+        .param("codeDerivationContext", request.codeDerivationContext())
         .param("createdAt", Timestamps.toTimestamp(request.createdAt()))
         .param("expiresAt", Timestamps.toTimestamp(request.expiresAt()))
         .param("usedAt", Timestamps.toTimestamp(request.usedAt()))
@@ -113,7 +113,7 @@ class JdbcPasswordRecoveryRepository implements PasswordRecoveryRepository {
     return PasswordRecoveryRequest.reconstitute(
         rs.getObject("recovery_id", UUID.class),
         rs.getObject("account_id", UUID.class),
-        rs.getString("token_hash"),
+        rs.getString("code_derivation_context"),
         Timestamps.toInstant(rs, "created_at"),
         Timestamps.toInstant(rs, "expires_at"),
         Timestamps.toInstant(rs, "used_at"),

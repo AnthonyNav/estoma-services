@@ -1,6 +1,7 @@
 package com.estoma.authentication.infrastructure.security;
 
 import com.estoma.authentication.application.port.RecoveryCodeDeriver;
+import com.estoma.authentication.domain.recovery.RecoveryCodeDerivationContext;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -28,11 +29,12 @@ class HmacRecoveryCodeDeriver implements RecoveryCodeDeriver {
   }
 
   @Override
-  public String derive(UUID recoveryId) {
+  public String derive(UUID recoveryId, String codeDerivationContext) {
+    String derivationInput = derivationInput(recoveryId, codeDerivationContext);
     try {
       Mac mac = Mac.getInstance(ALGORITHM);
       mac.init(new SecretKeySpec(secret, ALGORITHM));
-      byte[] digest = mac.doFinal(("authentication-recovery-v1:" + recoveryId).getBytes(StandardCharsets.UTF_8));
+      byte[] digest = mac.doFinal(derivationInput.getBytes(StandardCharsets.UTF_8));
       int value = Math.floorMod(ByteBuffer.wrap(digest, 0, Integer.BYTES).getInt(), 1_000_000);
       return "%06d".formatted(value);
     } catch (GeneralSecurityException e) {
@@ -41,10 +43,23 @@ class HmacRecoveryCodeDeriver implements RecoveryCodeDeriver {
   }
 
   @Override
-  public boolean matches(UUID recoveryId, String candidate) {
+  public boolean matches(UUID recoveryId, String codeDerivationContext, String candidate) {
     if (candidate == null) {
       return false;
     }
-    return MessageDigest.isEqual(derive(recoveryId).getBytes(StandardCharsets.US_ASCII), candidate.getBytes(StandardCharsets.US_ASCII));
+    return MessageDigest.isEqual(derive(recoveryId, codeDerivationContext).getBytes(StandardCharsets.US_ASCII), candidate.getBytes(StandardCharsets.US_ASCII));
+  }
+
+  private static void requireSupportedContext(String context) {
+    if (!RecoveryCodeDerivationContext.isCanonical(context)) {
+      throw new IllegalArgumentException("unsupported recovery code derivation context: " + context);
+    }
+  }
+
+  private static String derivationInput(UUID recoveryId, String context) {
+    requireSupportedContext(context);
+    // HMAC_SHA256_V1 intentionally retains the pre-V17 input label so V17
+    // can migrate the old marker without invalidating issued codes.
+    return "authentication-recovery-v1:" + recoveryId;
   }
 }

@@ -9,8 +9,8 @@ import com.estoma.authentication.application.port.CredentialRepository;
 import com.estoma.authentication.application.port.PasswordHasher;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
+import com.estoma.authentication.application.port.RecoveryCodeDeriver;
 import com.estoma.authentication.application.port.SessionRepository;
-import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.rpc.ChangePasswordRequest;
 import com.estoma.authentication.contracts.rpc.ResetPasswordRequest;
@@ -40,13 +40,13 @@ class RecoveryRpcIT extends AbstractPostgresIT {
 
   @Autowired private RpcDispatcher dispatcher;
   @Autowired private ValidateRecoveryCodeHandler validateHandler;
+  @Autowired private RecoveryCodeDeriver codeDeriver;
   @Autowired private ResetPasswordHandler resetHandler;
   @Autowired private ChangePasswordHandler changeHandler;
   @Autowired private AccountRepository accountRepository;
   @Autowired private CredentialRepository credentialRepository;
   @Autowired private PasswordRecoveryRepository recoveryRepository;
   @Autowired private PasswordHasher passwordHasher;
-  @Autowired private TokenHasher tokenHasher;
   @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
   @Autowired private SessionRepository sessionRepository;
   @Autowired private JdbcClient jdbc;
@@ -54,8 +54,8 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Test
   void validateRecoveryCodeAcceptsTheCorrectCode() {
     UUID accountId = insertActiveAccountWithPassword();
-    String code = uniqueCode("100001");
-    var recovery = insertRecoveryRequest(accountId, code);
+    var recovery = insertRecoveryRequest(accountId);
+    String code = codeDeriver.derive(recovery.recoveryId(), recovery.codeDerivationContext());
 
     var outcome = dispatcher.execute(context(accountId), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), code)));
 
@@ -66,7 +66,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Test
   void validateRecoveryCodeRejectsAWrongCodeWithoutThrowing() {
     UUID accountId = insertActiveAccountWithPassword();
-    var recovery = insertRecoveryRequest(accountId, uniqueCode("100002"));
+    var recovery = insertRecoveryRequest(accountId);
 
     var outcome = dispatcher.execute(context(accountId), () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), "000000")));
 
@@ -77,7 +77,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Test
   void fifthInvalidRecoveryCodeExhaustsTheRequest() {
     UUID accountId = insertActiveAccountWithPassword();
-    PasswordRecoveryRequest recovery = insertRecoveryRequest(accountId, uniqueCode("100003"));
+    PasswordRecoveryRequest recovery = insertRecoveryRequest(accountId);
 
     for (int attempt = 0; attempt < 5; attempt++) {
       var outcome = dispatcher.execute(
@@ -95,8 +95,8 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Test
   void resetPasswordChangesTheCredentialAndConsumesTheRequest() {
     UUID accountId = insertActiveAccountWithPassword();
-    String code = uniqueCode("200001");
-    var recovery = insertRecoveryRequest(accountId, code);
+    var recovery = insertRecoveryRequest(accountId);
+    String code = codeDeriver.derive(recovery.recoveryId(), recovery.codeDerivationContext());
 
     var outcome = dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
 
@@ -108,8 +108,8 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Test
   void resetPasswordCannotBeRepeatedWithTheSameCode() {
     UUID accountId = insertActiveAccountWithPassword();
-    String code = uniqueCode("200002");
-    var recovery = insertRecoveryRequest(accountId, code);
+    var recovery = insertRecoveryRequest(accountId);
+    String code = codeDeriver.derive(recovery.recoveryId(), recovery.codeDerivationContext());
     dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
 
     var second = dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, "yet-another-password")));
@@ -121,9 +121,9 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   void resetPasswordRejectsAnExpiredRequest() {
     UUID accountId = insertActiveAccountWithPassword();
     Instant past = Instant.now().minusSeconds(60);
-    String code = uniqueCode("200003");
-    var recovery = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, tokenHasher.sha256Hex(code), past.minusSeconds(1800), past);
+    var recovery = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, past.minusSeconds(1800), past);
     recoveryRepository.insert(recovery);
+    String code = codeDeriver.derive(recovery.recoveryId(), recovery.codeDerivationContext());
 
     var outcome = dispatcher.execute(context(accountId), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
 
@@ -224,6 +224,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     Session restricted = Session.createPasswordChangeRequired(
         UUID.randomUUID(), accountId, null, null, null, now, now.plusSeconds(900));
     sessionRepository.insert(restricted);
+    Session persistedRestricted = sessionRepository.findById(restricted.sessionId()).orElseThrow();
 
     var invalid = dispatcher.execute(
          context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(restricted.sessionId(), null, "passwordpassword")));
@@ -240,10 +241,8 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     assertThat(renewed.authState()).isEqualTo(Session.AuthState.NORMAL);
     assertThat(renewed.refreshTokenHash()).isNotNull();
     assertThat(renewed.previousRefreshTokenHash()).isNull();
-  }
-
-  private String uniqueCode(String base) {
-    return base + "-" + UUID.randomUUID();
+    assertThat(renewed.absoluteExpiresAt()).isEqualTo(
+        persistedRestricted.createdAt().plusSeconds(30 * 24 * 60 * 60));
   }
 
   private UUID insertActiveAccountWithPassword() {
@@ -256,8 +255,8 @@ class RecoveryRpcIT extends AbstractPostgresIT {
     return account.accountId();
   }
 
-  private PasswordRecoveryRequest insertRecoveryRequest(UUID accountId, String code) {
-    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, tokenHasher.sha256Hex(code), Instant.now(), Instant.now().plusSeconds(1800));
+  private PasswordRecoveryRequest insertRecoveryRequest(UUID accountId) {
+    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, Instant.now(), Instant.now().plusSeconds(1800));
     recoveryRepository.insert(request);
     return request;
   }

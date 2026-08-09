@@ -13,17 +13,24 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 class JdbcPasswordRecoveryRepositoryIT extends AbstractPostgresIT {
 
   @Autowired private AccountRepository accountRepository;
   @Autowired private PasswordRecoveryRepository repository;
+  @Autowired private JdbcClient jdbc;
 
   @Test
   void markUsedIfValidSucceedsOnce() {
     UUID accountId = insertAccount();
-    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, "token-hash", Instant.now(), Instant.now().plusSeconds(1800));
+    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, Instant.now(), Instant.now().plusSeconds(1800));
     repository.insert(request);
+
+    var persisted = repository.findById(request.recoveryId()).orElseThrow();
+    assertThat(persisted.codeDerivationContext()).isEqualTo("HMAC_SHA256_V1");
+    assertThat(jdbc.sql("SELECT token_hash FROM password_recovery_requests WHERE recovery_id = :recoveryId")
+        .param("recoveryId", request.recoveryId()).query(String.class).optional()).isEmpty();
 
     int first = repository.markUsedIfValid(request.recoveryId(), Instant.now(), Instant.now());
     int second = repository.markUsedIfValid(request.recoveryId(), Instant.now(), Instant.now());
@@ -36,7 +43,7 @@ class JdbcPasswordRecoveryRepositoryIT extends AbstractPostgresIT {
   void markUsedIfValidFailsWhenExpired() {
     UUID accountId = insertAccount();
     Instant past = Instant.now().minusSeconds(10);
-    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, "token-hash-2", past.minusSeconds(3600), past);
+    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, past.minusSeconds(3600), past);
     repository.insert(request);
 
     int rowsAffected = repository.markUsedIfValid(request.recoveryId(), Instant.now(), Instant.now());
@@ -47,7 +54,7 @@ class JdbcPasswordRecoveryRepositoryIT extends AbstractPostgresIT {
   @Test
   void failedAttemptsTransitionToAttemptsExhaustedOnTheFifthAttempt() {
     UUID accountId = insertAccount();
-    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, "token-hash-3", Instant.now(), Instant.now().plusSeconds(1800));
+    PasswordRecoveryRequest request = PasswordRecoveryRequest.createNew(UUID.randomUUID(), accountId, Instant.now(), Instant.now().plusSeconds(1800));
     repository.insert(request);
 
     for (int attempt = 0; attempt < 5; attempt++) {

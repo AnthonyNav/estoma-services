@@ -431,7 +431,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     UUID accountId = insertActiveAccountWithCredential(activePerson());
     String identifier = accountRepository.findById(accountId).orElseThrow().loginIdentifier().value();
     PasswordRecoveryRequest previous = PasswordRecoveryRequest.createNew(
-        UUID.randomUUID(), accountId, "previous-" + UUID.randomUUID(), Instant.now().minusSeconds(301), Instant.now().plusSeconds(299));
+        UUID.randomUUID(), accountId, Instant.now().minusSeconds(301), Instant.now().plusSeconds(299));
     passwordRecoveryRepository.insert(previous);
 
     dispatcher.dispatch(

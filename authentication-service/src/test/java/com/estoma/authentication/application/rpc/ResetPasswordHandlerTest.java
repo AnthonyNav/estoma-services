@@ -14,10 +14,10 @@ import com.estoma.authentication.application.port.PersonStatusProjectionReposito
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository.PersonStatusProjectionRecord;
 import com.estoma.authentication.application.port.RecoveryCodeDeriver;
 import com.estoma.authentication.application.port.SessionRepository;
-import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.rpc.ResetPasswordRequest;
 import com.estoma.authentication.domain.account.Account;
+import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.recovery.PasswordRecoveryRequest;
 import com.estoma.authentication.domain.credential.PasswordHash;
 import java.time.Instant;
@@ -40,7 +40,6 @@ class ResetPasswordHandlerTest {
     PasswordHasher hasher = mock(PasswordHasher.class);
     PasswordPolicy policy = mock(PasswordPolicy.class);
     RecoveryCodeDeriver deriver = mock(RecoveryCodeDeriver.class);
-    TokenHasher tokenHasher = mock(TokenHasher.class);
     Account account = mock(Account.class);
     Instant now = Instant.now();
 
@@ -52,8 +51,8 @@ class ResetPasswordHandlerTest {
     when(accounts.findByLoginIdentifierForUpdate(LoginType.USERNAME, "user")).thenReturn(Optional.of(account));
     when(statuses.findByPersonId(personId)).thenReturn(Optional.of(mockStatus("ACTIVE")));
     when(recoveries.findActiveByAccountIdForUpdate(accountId)).thenReturn(Optional.of(
-        PasswordRecoveryRequest.createNew(recoveryId, accountId, "v1-hmac", now, now.plusSeconds(60))));
-    when(deriver.matches(recoveryId, "123456")).thenReturn(true);
+        PasswordRecoveryRequest.createNew(recoveryId, accountId, now, now.plusSeconds(60))));
+    when(deriver.matches(recoveryId, "HMAC_SHA256_V1", "123456")).thenReturn(true);
     when(recoveries.markUsedIfValid(org.mockito.ArgumentMatchers.eq(recoveryId), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(1);
     when(credentials.findByAccountId(accountId)).thenReturn(Optional.empty());
     when(credentials.existsByAccountId(accountId)).thenReturn(false);
@@ -61,7 +60,7 @@ class ResetPasswordHandlerTest {
     when(accounts.update(account, 3)).thenReturn(0);
 
     ResetPasswordHandler handler = new ResetPasswordHandler(
-        recoveries, accounts, statuses, credentials, sessions, hasher, policy, deriver, tokenHasher);
+        recoveries, accounts, statuses, credentials, sessions, hasher, policy, deriver);
 
     assertThatThrownBy(() -> handler.handle(new ResetPasswordRequest(LoginType.USERNAME, "user", "123456", "new-password")))
         .isInstanceOf(IllegalStateException.class)
@@ -69,6 +68,36 @@ class ResetPasswordHandlerTest {
     verify(recoveries).markUsedIfValid(org.mockito.ArgumentMatchers.eq(recoveryId), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     verifyNoInteractions(sessions);
     verify(recoveries, org.mockito.Mockito.never()).invalidateActiveForAccount(org.mockito.ArgumentMatchers.eq(accountId), org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void unsupportedDerivationContextIsUnavailable() {
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    AccountRepository accounts = mock(AccountRepository.class);
+    PasswordRecoveryRepository recoveries = mock(PasswordRecoveryRepository.class);
+    PersonStatusProjectionRepository statuses = mock(PersonStatusProjectionRepository.class);
+    RecoveryCodeDeriver deriver = mock(RecoveryCodeDeriver.class);
+    Account account = mock(Account.class);
+    Instant now = Instant.now();
+
+    when(account.accountId()).thenReturn(accountId);
+    when(account.personId()).thenReturn(personId);
+    when(account.isActive()).thenReturn(true);
+    when(accounts.findByLoginIdentifierForUpdate(LoginType.USERNAME, "user")).thenReturn(Optional.of(account));
+    when(statuses.findByPersonId(personId)).thenReturn(Optional.of(mockStatus("ACTIVE")));
+    when(recoveries.findActiveByAccountIdForUpdate(accountId)).thenReturn(Optional.of(
+        PasswordRecoveryRequest.reconstitute(UUID.randomUUID(), accountId, "legacy-sha256", now, now.plusSeconds(60), null,
+            PasswordRecoveryRequest.Status.ACTIVE, null, 0)));
+
+    ResetPasswordHandler handler = new ResetPasswordHandler(
+        recoveries, accounts, statuses, mock(CredentialRepository.class), mock(SessionRepository.class),
+        mock(PasswordHasher.class), mock(PasswordPolicy.class), deriver);
+
+    assertThatThrownBy(() -> handler.handle(new ResetPasswordRequest(LoginType.USERNAME, "user", "123456", "new-password")))
+        .isInstanceOf(AuthenticationRejectedException.class)
+        .hasMessageContaining("unsupported");
+    verifyNoInteractions(deriver);
   }
 
   private static PersonStatusProjectionRecord mockStatus(String status) {

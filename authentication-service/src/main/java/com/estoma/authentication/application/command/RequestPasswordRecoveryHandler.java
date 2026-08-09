@@ -4,8 +4,6 @@ import com.estoma.authentication.application.EventToAppend;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
-import com.estoma.authentication.application.port.SecureRandomGenerator;
-import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.contracts.AuthenticationCommand;
 import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.MessageEnvelope;
@@ -33,29 +31,22 @@ import org.springframework.stereotype.Component;
 @Component
 class RequestPasswordRecoveryHandler implements CommandHandler {
 
-  private static final int CODE_DIGITS = 6;
   private static final java.time.Duration RECOVERY_EXPIRATION = java.time.Duration.ofMinutes(10);
   private static final java.time.Duration RECOVERY_COOLDOWN = java.time.Duration.ofMinutes(5);
 
   private final AccountRepository accountRepository;
   private final PasswordRecoveryRepository passwordRecoveryRepository;
   private final PersonStatusProjectionRepository personStatusProjectionRepository;
-  private final SecureRandomGenerator randomGenerator;
-  private final TokenHasher tokenHasher;
   private final EnvelopeJsonCodec codec;
 
   RequestPasswordRecoveryHandler(
       AccountRepository accountRepository,
       PasswordRecoveryRepository passwordRecoveryRepository,
       PersonStatusProjectionRepository personStatusProjectionRepository,
-      SecureRandomGenerator randomGenerator,
-      TokenHasher tokenHasher,
       EnvelopeJsonCodec codec) {
     this.accountRepository = accountRepository;
     this.passwordRecoveryRepository = passwordRecoveryRepository;
     this.personStatusProjectionRepository = personStatusProjectionRepository;
-    this.randomGenerator = randomGenerator;
-    this.tokenHasher = tokenHasher;
     this.codec = codec;
   }
 
@@ -84,7 +75,7 @@ class RequestPasswordRecoveryHandler implements CommandHandler {
     passwordRecoveryRepository.invalidateActiveForAccount(account.get().accountId(), now);
     PasswordRecoveryRequest request =
         PasswordRecoveryRequest.createNew(
-            UUID.randomUUID(), account.get().accountId(), "v1-hmac", now, now.plus(RECOVERY_EXPIRATION));
+            UUID.randomUUID(), account.get().accountId(), now, now.plus(RECOVERY_EXPIRATION));
     passwordRecoveryRepository.insert(request);
     Account updatedAccount = account.get().withRecoveryRequested(now);
     accountRepository.update(updatedAccount, account.get().version());

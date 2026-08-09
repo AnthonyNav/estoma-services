@@ -2,7 +2,6 @@ package com.estoma.authentication.application.rpc;
 
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.RecoveryCodeDeriver;
-import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
@@ -26,19 +25,16 @@ public class ValidateRecoveryCodeHandler {
   private final AccountRepository accountRepository;
   private final PersonStatusProjectionRepository personStatusProjectionRepository;
   private final RecoveryCodeDeriver codeDeriver;
-  private final TokenHasher tokenHasher;
 
   ValidateRecoveryCodeHandler(
       PasswordRecoveryRepository repository,
       AccountRepository accountRepository,
       PersonStatusProjectionRepository personStatusProjectionRepository,
-      RecoveryCodeDeriver codeDeriver,
-      TokenHasher tokenHasher) {
+      RecoveryCodeDeriver codeDeriver) {
     this.repository = repository;
     this.accountRepository = accountRepository;
     this.personStatusProjectionRepository = personStatusProjectionRepository;
     this.codeDeriver = codeDeriver;
-    this.tokenHasher = tokenHasher;
   }
 
   public RpcHandlerOutcome<ValidateRecoveryCodeResponse> handle(ValidateRecoveryCodeRequest request) {
@@ -54,6 +50,9 @@ public class ValidateRecoveryCodeHandler {
     var recovery = found.get();
     Instant now = Instant.now();
 
+    if (!recovery.hasCanonicalCodeDerivationContext()) {
+      return result("INVALID");
+    }
     if (recovery.isExpired(now)) {
       repository.expireIfActive(recovery.recoveryId(), now);
       return result("INVALID");
@@ -70,9 +69,7 @@ public class ValidateRecoveryCodeHandler {
   }
 
   private boolean matches(com.estoma.authentication.domain.recovery.PasswordRecoveryRequest recovery, String code) {
-    return "v1-hmac".equals(recovery.tokenHash())
-        ? codeDeriver.matches(recovery.recoveryId(), code)
-        : recovery.tokenHash().equals(tokenHasher.sha256Hex(code));
+    return codeDeriver.matches(recovery.recoveryId(), recovery.codeDerivationContext(), code);
   }
 
   private boolean isPersonActive(java.util.UUID personId) {
