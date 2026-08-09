@@ -33,7 +33,7 @@ public class PasswordPolicy {
     }
     if (currentHash != null && passwordHasher.matches(password, currentHash)) {
       throw new AuthenticationRejectedException(
-          RejectionCode.INVALID_PASSWORD, "new password must differ from the current password");
+          RejectionCode.PASSWORD_REUSE, "new password must differ from the current password");
     }
   }
 }

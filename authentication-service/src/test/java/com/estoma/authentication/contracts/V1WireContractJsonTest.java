@@ -94,15 +94,24 @@ class V1WireContractJsonTest {
     UUID accountId = UUID.randomUUID();
     Instant now = Instant.parse("2026-08-08T00:00:00Z");
 
-    var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "password_reset", now, true)));
-    var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.MATRICULA, "command", 3, now)));
-    var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, UUID.randomUUID(), "INACTIVE", 3, "ADMINISTRATIVE", now)));
-    var sessions = mapper.readTree(mapper.writeValueAsBytes(new AllAccountSessionsRevokedPayload(accountId, "person_deactivated", now)));
+    var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "PASSWORD_RESET", now)));
+    var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.MATRICULA, "COMMAND", now)));
+    var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE", null, now)));
+    var created = mapper.readTree(mapper.writeValueAsBytes(new AccountCreatedPayload(accountId, UUID.randomUUID(), LoginType.USERNAME, "INACTIVE", now)));
+    var activated = mapper.readTree(mapper.writeValueAsBytes(new AccountActivatedPayload(accountId, "INACTIVE", "ACTIVE", "COMMAND", now)));
+    var sessions = mapper.readTree(mapper.writeValueAsBytes(new AllAccountSessionsRevokedPayload(accountId, "PERSON_DEACTIVATED", now)));
 
-    assertThat(password.get("changeSource").asString()).isEqualTo("password_reset");
-    assertThat(login.get("changeSource").asString()).isEqualTo("command");
+    assertThat(password.get("changeSource").asString()).isEqualTo("PASSWORD_RESET");
+    assertThat(password.has("sessionsRevoked")).isFalse();
+    assertThat(login.get("changeSource").asString()).isEqualTo("COMMAND");
+    assertThat(login.has("version")).isFalse();
+    assertThat(created.has("version")).isFalse();
+    assertThat(activated.get("previousStatus").asString()).isEqualTo("INACTIVE");
+    assertThat(activated.get("activationReason").asString()).isEqualTo("COMMAND");
+    assertThat(deactivation.get("previousStatus").asString()).isEqualTo("ACTIVE");
+    assertThat(deactivation.get("reasonDetail").isNull()).isTrue();
     assertThat(deactivation.get("reasonCode").asString()).isEqualTo("ADMINISTRATIVE");
-    assertThat(sessions.get("reasonCode").asString()).isEqualTo("person_deactivated");
+    assertThat(sessions.get("reasonCode").asString()).isEqualTo("PERSON_DEACTIVATED");
     assertThat(sessions.has("reason")).isFalse();
   }
 

@@ -92,7 +92,8 @@ class ActivateAccountHandler implements CommandHandler {
             UUID.randomUUID(), activated.accountId(), account.status(), activated.status(), null, null, envelope.actor(), envelope.correlationId(), now,
             activated.version()));
 
-    AccountActivatedPayload eventPayload = new AccountActivatedPayload(activated.accountId(), activated.personId(), activated.status().name(), activated.version(), now);
+    String activationReason = isStudentImportActivation(envelope) ? "STUDENT_IMPORT" : "COMMAND";
+    AccountActivatedPayload eventPayload = new AccountActivatedPayload(activated.accountId(), account.status().name(), activated.status().name(), activationReason, now);
     return CommandHandlerResult.of(activated.accountId(), activated.version(), new EventToAppend(AuthenticationEvent.ACCOUNT_ACTIVATED.wireName(), eventPayload));
   }
 

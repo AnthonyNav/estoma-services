@@ -43,12 +43,12 @@ public class SetTemporaryPasswordHandler {
 
     Instant now = Instant.now();
     TemporaryPasswordSupport.IssuedTemporaryPassword issued = support.issueNewSecretAndUpdateCredential(account, now);
-    sessionRepository.revokeAllActiveForAccount(account.accountId(), "temporary_password_set", now);
+    sessionRepository.revokeAllActiveForAccount(account.accountId(), "TEMPORARY_PASSWORD_SET", now);
 
     support.markCompleted(OPERATION_TYPE, context.idempotencyKey(), now);
 
     TemporaryPasswordSetPayload setEvent = new TemporaryPasswordSetPayload(account.accountId(), true, issued.credential().temporaryPasswordExpiresAt(), now);
-    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "temporary_password_set", now);
+    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "TEMPORARY_PASSWORD_SET", now);
 
     return RpcHandlerOutcome.of(
         new SetTemporaryPasswordResponse(issued.password(), issued.credential().temporaryPasswordExpiresAt()),

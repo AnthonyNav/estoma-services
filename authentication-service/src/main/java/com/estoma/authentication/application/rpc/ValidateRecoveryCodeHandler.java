@@ -14,8 +14,8 @@ import org.springframework.stereotype.Component;
 /**
  * Handles {@code ValidateRecoveryCode} (commands.md §8.4). Unlike the other
  * RPC operations, this one never rejects: the result is always a
- * successful response carrying {@code VALID}/{@code INVALID}/{@code
- * EXPIRED}, revealing no additional detail about the account.
+ * successful response carrying only {@code VALID}/{@code INVALID}, revealing
+ * no additional detail about the account or recovery request.
  */
 @Component
 public class ValidateRecoveryCodeHandler {
@@ -56,7 +56,7 @@ public class ValidateRecoveryCodeHandler {
 
     if (recovery.isExpired(now)) {
       repository.expireIfActive(recovery.recoveryId(), now);
-      return result("EXPIRED");
+      return result("INVALID");
     }
     if (!matches(recovery, request.code())) {
       repository.recordFailedAttempt(recovery.recoveryId(), now, ATTEMPT_LIMIT);

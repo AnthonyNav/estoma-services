@@ -62,7 +62,7 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     }
     Account account = accountOpt.get();
     if (account.loginIdentifier().type() != LoginType.MATRICULA) {
-      return fail(envelope, payload, "ACCOUNT_LOGIN_TYPE_MISMATCH", now);
+      return fail(envelope, payload, RejectionCode.LOGIN_TYPE_NOT_SUPPORTED.name(), now);
     }
     LoginIdentifier newIdentifier = LoginIdentifier.of(LoginType.MATRICULA, payload.newStudentNumber());
     var collision = accountRepository.findByLoginIdentifier(LoginType.MATRICULA, newIdentifier.normalized());
@@ -80,7 +80,7 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     }
 
     syncRepository.markSynchronized(account.accountId(), payload.studentNumberVersion(), now);
-    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(updated.accountId(), LoginType.MATRICULA, "student_number_corrected", updated.version(), now);
+    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(updated.accountId(), LoginType.MATRICULA, "STUDENT_NUMBER_CORRECTED", now);
     return ProjectionHandlerResult.of(new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), event));
   }
 

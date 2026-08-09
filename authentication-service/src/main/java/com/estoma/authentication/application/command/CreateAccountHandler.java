@@ -72,7 +72,7 @@ class CreateAccountHandler implements CommandHandler {
             account.version()));
 
     AccountCreatedPayload eventPayload =
-        new AccountCreatedPayload(account.accountId(), account.personId(), account.loginIdentifier().type(), account.status().name(), account.version(), account.createdAt());
+        new AccountCreatedPayload(account.accountId(), account.personId(), account.loginIdentifier().type(), account.status().name(), account.createdAt());
 
     return CommandHandlerResult.of(
         account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.ACCOUNT_CREATED.wireName(), eventPayload));

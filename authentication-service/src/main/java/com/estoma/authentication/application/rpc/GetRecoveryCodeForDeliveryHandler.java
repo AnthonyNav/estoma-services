@@ -26,13 +26,17 @@ public class GetRecoveryCodeForDeliveryHandler {
     var recovery =
         repository
             .findByIdForUpdate(request.recoveryId())
-            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery request does not exist"));
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_CODE_INVALID, "recovery request does not exist"));
     Instant now = Instant.now();
     if (recovery.isExpired(now)) {
       repository.expireIfActive(recovery.recoveryId(), now);
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_CODE_EXPIRED, "recovery request has expired");
     }
     if (!recovery.isActiveAndUsable(now)) {
-      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery request is no longer usable");
+      RejectionCode code = recovery.status() == com.estoma.authentication.domain.recovery.PasswordRecoveryRequest.Status.ATTEMPTS_EXHAUSTED
+          ? RejectionCode.RECOVERY_CODE_ATTEMPTS_EXHAUSTED
+          : RejectionCode.RECOVERY_CODE_INVALID;
+      throw new AuthenticationRejectedException(code, "recovery request is no longer usable");
     }
     return RpcHandlerOutcome.withoutEvents(new GetRecoveryCodeForDeliveryResponse(codeDeriver.derive(recovery.recoveryId())));
   }

@@ -42,6 +42,9 @@ class ChangeLoginIdentifierHandler implements CommandHandler {
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
 
     Instant now = Instant.now();
+    if (account.loginIdentifier().type() == com.estoma.authentication.contracts.LoginType.MATRICULA) {
+      throw new AuthenticationRejectedException(RejectionCode.LOGIN_TYPE_NOT_SUPPORTED, "MATRICULA login identifiers cannot be changed");
+    }
     LoginIdentifier newIdentifier = LoginIdentifier.of(account.loginIdentifier().type(), command.newLoginIdentifier());
     Account updated = account.withLoginIdentifierChanged(newIdentifier, now);
 
@@ -51,7 +54,7 @@ class ChangeLoginIdentifierHandler implements CommandHandler {
       AccountUpdateGuard.rejectForFailedUpdate(accountRepository, command.accountId(), command.expectedVersion());
     }
 
-    LoginIdentifierChangedPayload eventPayload = new LoginIdentifierChangedPayload(updated.accountId(), updated.loginIdentifier().type(), "command", updated.version(), now);
+    LoginIdentifierChangedPayload eventPayload = new LoginIdentifierChangedPayload(updated.accountId(), updated.loginIdentifier().type(), "COMMAND", now);
     return CommandHandlerResult.of(updated.accountId(), updated.version(), new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), eventPayload));
   }
 }

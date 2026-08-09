@@ -68,42 +68,42 @@ public class ResetPasswordHandler {
     Account account =
         accountRepository
             .findByLoginIdentifier(identifier.type(), identifier.normalized())
-            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery account does not exist"));
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery account does not exist"));
     if (!account.isActive()) {
-      throw new AuthenticationRejectedException(RejectionCode.ACCOUNT_INACTIVE, "account " + account.accountId() + " is not active");
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery account is not active");
     }
     if (!isPersonActive(account.personId())) {
-      throw new AuthenticationRejectedException(RejectionCode.PERSON_INACTIVE, "person " + account.personId() + " is not active");
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery person is not active");
     }
     PasswordRecoveryRequest recovery =
         recoveryRepository
             .findActiveByAccountIdForUpdate(account.accountId())
-            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "no active recovery request exists"));
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "no active recovery request exists"));
 
     Instant now = Instant.now();
     if (recovery.isExpired(now)) {
       recoveryRepository.expireIfActive(recovery.recoveryId(), now);
-      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_EXPIRED, "recovery request has expired");
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery request has expired");
     }
     if (!matches(recovery, request.code())) {
       recoveryRepository.recordFailedAttempt(recovery.recoveryId(), now, ValidateRecoveryCodeHandler.ATTEMPT_LIMIT);
-      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery code is incorrect");
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery code is incorrect");
     }
     Credential currentCredential = credentialRepository.findByAccountId(account.accountId()).orElse(null);
     passwordPolicy.validate(request.newPassword(), currentCredential == null ? null : currentCredential.hash());
 
     int consumed = recoveryRepository.markUsedIfValid(recovery.recoveryId(), now, now);
     if (consumed == 0) {
-      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_ALREADY_USED, "recovery request was consumed concurrently");
+      throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery request was consumed concurrently");
     }
 
     updateCredential(account, request.newPassword(), now);
     accountRepository.update(account.withAttemptsReset(now), account.version());
     recoveryRepository.invalidateActiveForAccount(account.accountId(), now);
-    sessionRepository.revokeAllActiveForAccount(account.accountId(), "password_reset", now);
+    sessionRepository.revokeAllActiveForAccount(account.accountId(), "PASSWORD_RESET", now);
 
-    PasswordChangedPayload passwordEvent = new PasswordChangedPayload(account.accountId(), "password_reset", now, true);
-    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "password_reset", now);
+    PasswordChangedPayload passwordEvent = new PasswordChangedPayload(account.accountId(), "PASSWORD_RESET", now);
+    AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "PASSWORD_RESET", now);
 
     return RpcHandlerOutcome.of(
         new ResetPasswordResponse(true),

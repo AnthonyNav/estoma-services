@@ -72,9 +72,9 @@ public class RefreshSessionHandler {
     }
     Session.RefreshTokenMatch tokenMatch = session.classifyRefreshTokenHash(tokenHasher.sha256Hex(request.refreshToken()), now);
     if (tokenMatch == Session.RefreshTokenMatch.PREVIOUS_OUTSIDE_GRACE) {
-      Session revoked = session.revoked("refresh_token_replay", now);
+      Session revoked = session.revoked("REFRESH_TOKEN_REPLAY", now);
       sessionRepository.update(revoked);
-      SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "refresh_token_replay", now);
+      SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "REFRESH_TOKEN_REPLAY", now);
       return RpcHandlerOutcome.rejected(
           RejectionCode.REFRESH_TOKEN_REPLAY,
           revoked.sessionId(),

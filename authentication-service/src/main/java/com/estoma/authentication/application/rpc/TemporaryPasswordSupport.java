@@ -74,12 +74,16 @@ class TemporaryPasswordSupport {
 
   Account requireAccount(UUID accountId) {
     return accountRepository
-        .findById(accountId)
+        .findByIdForUpdate(accountId)
         .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + accountId + " does not exist"));
   }
 
   /** Generates a new temporary password, stores only its hash, and returns the plain-text secret (never persisted). */
   IssuedTemporaryPassword issueNewSecretAndUpdateCredential(Account account, Instant now) {
+    Account resetAccount = account.withAttemptsReset(now);
+    if (accountRepository.update(resetAccount, account.version()) != 1) {
+      throw new AuthenticationRejectedException(RejectionCode.ACCOUNT_VERSION_CONFLICT, "account changed while issuing temporary password");
+    }
     String temporaryPassword = randomGenerator.randomTemporaryPassword();
     PasswordHash hash = passwordHasher.hash(temporaryPassword);
     Instant expiresAt = now.plus(DEFAULT_EXPIRATION);

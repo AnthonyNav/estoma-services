@@ -41,10 +41,10 @@ public class RevokeSessionHandler {
     }
 
     Instant now = Instant.now();
-    Session revoked = session.revoked("actor_requested", now);
+    Session revoked = session.revoked("ACTOR_REQUESTED", now);
     sessionRepository.update(revoked);
 
-    SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "actor_requested", now);
+    SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "ACTOR_REQUESTED", now);
     return RpcHandlerOutcome.of(new RevokeSessionResponse(true), revoked.sessionId(), null, new EventToAppend(AuthenticationEvent.SESSION_REVOKED.wireName(), event));
   }
 

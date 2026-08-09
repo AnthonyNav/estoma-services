@@ -108,18 +108,18 @@ public class ChangePasswordHandler {
     credentialRepository.update(credential.changed(passwordHasher.hash(request.newPassword()), now));
     sessionRepository.update(renewedSession);
     int revokedOtherSessions =
-        sessionRepository.revokeOtherActiveForAccount(account.accountId(), currentSession.sessionId(), "password_changed", now);
+        sessionRepository.revokeOtherActiveForAccount(account.accountId(), currentSession.sessionId(), "PASSWORD_CHANGED", now);
     TokenIssuer.IssuedAccessToken accessToken =
         tokenIssuer.issueAccessToken(account.accountId(), account.personId(), renewedSession.sessionId(), Session.AuthState.NORMAL.name());
     ChangePasswordResponse response = new ChangePasswordResponse(renewedSession.sessionId(), accessToken.token(), refreshToken, AuthState.NORMAL);
 
-    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), "password_change", now, revokedOtherSessions > 0);
+    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), "PASSWORD_CHANGE", now);
     if (revokedOtherSessions == 0) {
       return RpcHandlerOutcome.of(
           response, account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event));
     }
     OtherAccountSessionsRevokedPayload sessionsRevoked =
-        new OtherAccountSessionsRevokedPayload(account.accountId(), currentSession.sessionId(), "password_changed", now);
+        new OtherAccountSessionsRevokedPayload(account.accountId(), currentSession.sessionId(), "PASSWORD_CHANGED", now);
     return RpcHandlerOutcome.of(
         response,
         account.accountId(),

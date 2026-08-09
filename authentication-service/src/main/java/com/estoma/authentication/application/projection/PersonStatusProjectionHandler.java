@@ -52,9 +52,9 @@ class PersonStatusProjectionHandler implements ProjectionHandler {
     boolean applied = repository.upsertIfNewer(payload.personId(), payload.status(), envelope.aggregateVersion(), now);
     if (applied && ConsumedEventTypes.PERSON_DEACTIVATED.equals(envelope.messageType())) {
       var events = accountRepository.findIdsByPersonId(payload.personId()).stream()
-          .filter(accountId -> sessionRepository.revokeAllActiveForAccount(accountId, "person_deactivated", now) > 0)
+          .filter(accountId -> sessionRepository.revokeAllActiveForAccount(accountId, "PERSON_DEACTIVATED", now) > 0)
           .map(accountId -> new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(),
-              new AllAccountSessionsRevokedPayload(accountId, "person_deactivated", now)))
+              new AllAccountSessionsRevokedPayload(accountId, "PERSON_DEACTIVATED", now)))
           .toList();
       return new ProjectionHandlerResult(events);
     }

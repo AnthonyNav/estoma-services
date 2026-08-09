@@ -109,7 +109,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
 
     var second = dispatcher.execute(UUID.randomUUID(), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, "yet-another-password")));
 
-    assertThat(((RpcOutcome.Rejected<?>) second).code()).isEqualTo(RejectionCode.RECOVERY_TOKEN_INVALID);
+    assertThat(((RpcOutcome.Rejected<?>) second).code()).isEqualTo(RejectionCode.RECOVERY_NOT_AVAILABLE);
   }
 
   @Test
@@ -122,7 +122,7 @@ class RecoveryRpcIT extends AbstractPostgresIT {
 
     var outcome = dispatcher.execute(UUID.randomUUID(), () -> resetHandler.handle(new ResetPasswordRequest(LoginType.USERNAME, accountLogin(accountId), code, NEW_PASSWORD)));
 
-    assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.RECOVERY_TOKEN_EXPIRED);
+    assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.RECOVERY_NOT_AVAILABLE);
   }
 
   @Test
