@@ -11,6 +11,7 @@ package com.estoma.communications.contracts;
  */
 public enum MessageKind {
   COMMAND,
+  QUERY,
   RESULT,
   EVENT
 }

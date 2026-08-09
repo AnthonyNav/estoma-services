@@ -20,9 +20,10 @@ import com.estoma.authentication.contracts.rpc.ResetPasswordRequest;
 import com.estoma.authentication.contracts.rpc.RevokeSessionRequest;
 import com.estoma.authentication.contracts.rpc.SetTemporaryPasswordRequest;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 import org.springframework.stereotype.Component;
 
 /**
@@ -37,7 +38,7 @@ import org.springframework.stereotype.Component;
 public class RpcOperationRouter {
 
   private final EnvelopeJsonCodec codec;
-  private final Map<String, Function<byte[], RpcHandlerOutcome<Object>>> handlersByOperation;
+  private final Map<String, BiFunction<RpcRequestContext, byte[], RpcHandlerOutcome<Object>>> handlersByOperation;
 
   public RpcOperationRouter(
       EnvelopeJsonCodec codec,
@@ -53,21 +54,21 @@ public class RpcOperationRouter {
     this.codec = codec;
     this.handlersByOperation =
         Map.ofEntries(
-            binding(AuthenticationRpcOperation.AUTHENTICATE_ACCOUNT, AuthenticateAccountRequest.class, authenticateAccountHandler::handle),
-            binding(AuthenticationRpcOperation.REFRESH_SESSION, RefreshSessionRequest.class, refreshSessionHandler::handle),
-            binding(AuthenticationRpcOperation.REVOKE_SESSION, RevokeSessionRequest.class, revokeSessionHandler::handle),
-            binding(AuthenticationRpcOperation.VALIDATE_RECOVERY_CODE, ValidateRecoveryCodeRequest.class, validateRecoveryCodeHandler::handle),
-            binding(AuthenticationRpcOperation.RESET_PASSWORD, ResetPasswordRequest.class, resetPasswordHandler::handle),
-            binding(AuthenticationRpcOperation.CHANGE_PASSWORD, ChangePasswordRequest.class, changePasswordHandler::handle),
+             binding(AuthenticationRpcOperation.AUTHENTICATE_ACCOUNT, AuthenticateAccountRequest.class, (context, request) -> authenticateAccountHandler.handle(request)),
+             binding(AuthenticationRpcOperation.REFRESH_SESSION, RefreshSessionRequest.class, refreshSessionHandler::handle),
+             binding(AuthenticationRpcOperation.REVOKE_SESSION, RevokeSessionRequest.class, revokeSessionHandler::handle),
+             binding(AuthenticationRpcOperation.VALIDATE_RECOVERY_CODE, ValidateRecoveryCodeRequest.class, (context, request) -> validateRecoveryCodeHandler.handle(request)),
+             binding(AuthenticationRpcOperation.RESET_PASSWORD, ResetPasswordRequest.class, (context, request) -> resetPasswordHandler.handle(request)),
+             binding(AuthenticationRpcOperation.CHANGE_PASSWORD, ChangePasswordRequest.class, changePasswordHandler::handle),
             binding(
                 AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY,
-                GetRecoveryCodeForDeliveryRequest.class,
-                getRecoveryCodeForDeliveryHandler::handle),
-            binding(AuthenticationRpcOperation.SET_TEMPORARY_PASSWORD, SetTemporaryPasswordRequest.class, setTemporaryPasswordHandler::handle),
+                 GetRecoveryCodeForDeliveryRequest.class,
+                 getRecoveryCodeForDeliveryHandler::handle),
+             binding(AuthenticationRpcOperation.SET_TEMPORARY_PASSWORD, SetTemporaryPasswordRequest.class, setTemporaryPasswordHandler::handle),
             binding(
                 AuthenticationRpcOperation.REGENERATE_TEMPORARY_PASSWORD,
                 RegenerateTemporaryPasswordRequest.class,
-                regenerateTemporaryPasswordHandler::handle));
+                 regenerateTemporaryPasswordHandler::handle));
   }
 
   public boolean supports(String operationWireName) {
@@ -75,12 +76,12 @@ public class RpcOperationRouter {
   }
 
   /** @throws IllegalArgumentException if {@code operationWireName} is not a recognized RPC operation -- checked by the caller via {@link #supports} first. */
-  public RpcHandlerOutcome<Object> invoke(String operationWireName, byte[] body) {
-    Function<byte[], RpcHandlerOutcome<Object>> handler = handlersByOperation.get(operationWireName);
+  public RpcHandlerOutcome<Object> invoke(String operationWireName, byte[] body, RpcRequestContext context) {
+    BiFunction<RpcRequestContext, byte[], RpcHandlerOutcome<Object>> handler = handlersByOperation.get(operationWireName);
     if (handler == null) {
       throw new IllegalArgumentException("unrecognized RPC operation " + operationWireName);
     }
-    return handler.apply(body);
+    return handler.apply(context, body);
   }
 
   /**
@@ -95,10 +96,10 @@ public class RpcOperationRouter {
    * wildcard capture at that call site.
    */
   @SuppressWarnings("unchecked")
-  private <Req, Res> Map.Entry<String, Function<byte[], RpcHandlerOutcome<Object>>> binding(
-      AuthenticationRpcOperation operation, Class<Req> requestType, Function<Req, RpcHandlerOutcome<Res>> handle) {
-    Function<byte[], RpcHandlerOutcome<Object>> decodeAndHandle =
-        body -> (RpcHandlerOutcome<Object>) (RpcHandlerOutcome<?>) handle.apply(codec.decodeValue(body, requestType));
+   private <Req, Res> Map.Entry<String, BiFunction<RpcRequestContext, byte[], RpcHandlerOutcome<Object>>> binding(
+       AuthenticationRpcOperation operation, Class<Req> requestType, BiFunction<RpcRequestContext, Req, RpcHandlerOutcome<Res>> handle) {
+    BiFunction<RpcRequestContext, byte[], RpcHandlerOutcome<Object>> decodeAndHandle =
+        (context, body) -> (RpcHandlerOutcome<Object>) (RpcHandlerOutcome<?>) handle.apply(context, codec.decodeValue(body, requestType));
     return Map.entry(operation.wireName(), decodeAndHandle);
   }
 }

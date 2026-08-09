@@ -1,6 +1,5 @@
 package com.estoma.authentication.contracts.rpc;
 
-import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -9,4 +8,9 @@ import java.util.UUID;
  * SetTemporaryPassword}.
  */
 public record RegenerateTemporaryPasswordRequest(
-    UUID accountId, Instant expiresAt, UUID requestedByAccountId, String idempotencyKey) {}
+    UUID accountId, String idempotencyKey) {
+  @Deprecated
+  public RegenerateTemporaryPasswordRequest(UUID accountId, java.time.Instant ignoredExpiresAt, UUID ignoredRequestedBy, String idempotencyKey) {
+    this(accountId, idempotencyKey);
+  }
+}

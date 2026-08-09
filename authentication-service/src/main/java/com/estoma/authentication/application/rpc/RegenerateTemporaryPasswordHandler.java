@@ -6,6 +6,7 @@ import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.event.TemporaryPasswordRegeneratedPayload;
 import com.estoma.authentication.contracts.rpc.RegenerateTemporaryPasswordRequest;
 import com.estoma.authentication.contracts.rpc.RegenerateTemporaryPasswordResponse;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.account.Account;
 import java.time.Instant;
 import org.springframework.stereotype.Component;
@@ -30,16 +31,20 @@ public class RegenerateTemporaryPasswordHandler {
     this.tokenHasher = tokenHasher;
   }
 
-  public RpcHandlerOutcome<RegenerateTemporaryPasswordResponse> handle(RegenerateTemporaryPasswordRequest request) {
-    Account account = support.requireAccount(request.accountId());
+  public RpcHandlerOutcome<RegenerateTemporaryPasswordResponse> handle(RpcRequestContext context, RegenerateTemporaryPasswordRequest request) {
+    if (!java.util.Objects.equals(context.targetAccountId(), request.accountId()) || !java.util.Objects.equals(context.idempotencyKey(), request.idempotencyKey())) {
+      throw new com.estoma.authentication.domain.AuthenticationRejectedException(
+          com.estoma.authentication.domain.RejectionCode.ACTOR_NOT_AUTHORIZED, "RPC context does not match request");
+    }
+    Account account = support.requireAccount(context.targetAccountId());
 
     String fingerprint = fingerprint(request);
-    support.claimOrThrow(OPERATION_TYPE, request.idempotencyKey(), request.accountId(), request.requestedByAccountId(), fingerprint);
+    support.claimOrThrow(OPERATION_TYPE, context.idempotencyKey(), context.targetAccountId(), context.actor().accountId(), fingerprint);
 
     Instant now = Instant.now();
     TemporaryPasswordSupport.IssuedTemporaryPassword issued = support.issueNewSecretAndUpdateCredential(account, now);
 
-    support.markCompleted(OPERATION_TYPE, request.idempotencyKey(), now);
+    support.markCompleted(OPERATION_TYPE, context.idempotencyKey(), now);
 
     TemporaryPasswordRegeneratedPayload event = new TemporaryPasswordRegeneratedPayload(account.accountId(), true, issued.credential().temporaryPasswordExpiresAt(), now);
 
@@ -50,7 +55,12 @@ public class RegenerateTemporaryPasswordHandler {
         new EventToAppend(AuthenticationEvent.TEMPORARY_PASSWORD_REGENERATED.wireName(), event));
   }
 
+  @Deprecated
+  public RpcHandlerOutcome<RegenerateTemporaryPasswordResponse> handle(RegenerateTemporaryPasswordRequest request) {
+    return handle(new RpcRequestContext(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("SYSTEM", null, "bff", "GLOBAL", null), request.accountId(), request.idempotencyKey()), request);
+  }
+
   private String fingerprint(RegenerateTemporaryPasswordRequest request) {
-    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.requestedByAccountId() + "|" + request.expiresAt());
+    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.idempotencyKey());
   }
 }

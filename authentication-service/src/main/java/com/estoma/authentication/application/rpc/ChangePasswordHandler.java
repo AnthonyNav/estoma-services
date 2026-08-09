@@ -14,6 +14,7 @@ import com.estoma.authentication.contracts.event.OtherAccountSessionsRevokedPayl
 import com.estoma.authentication.contracts.event.PasswordChangedPayload;
 import com.estoma.authentication.contracts.rpc.ChangePasswordRequest;
 import com.estoma.authentication.contracts.rpc.ChangePasswordResponse;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
@@ -68,11 +69,11 @@ public class ChangePasswordHandler {
     this.randomGenerator = randomGenerator;
   }
 
-  public RpcHandlerOutcome<ChangePasswordResponse> handle(ChangePasswordRequest request) {
+  public RpcHandlerOutcome<ChangePasswordResponse> handle(RpcRequestContext context, ChangePasswordRequest request) {
     Account account =
         accountRepository
-            .findById(request.accountId())
-            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + request.accountId() + " does not exist"));
+            .findById(context.targetAccountId())
+            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + context.targetAccountId() + " does not exist"));
     if (!account.isActive()) {
       throw new AuthenticationRejectedException(RejectionCode.ACCOUNT_INACTIVE, "account " + account.accountId() + " is not active");
     }
@@ -124,6 +125,12 @@ public class ChangePasswordHandler {
         account.version(),
         new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event),
         new EventToAppend(AuthenticationEvent.OTHER_ACCOUNT_SESSIONS_REVOKED.wireName(), sessionsRevoked));
+  }
+
+  @Deprecated
+  public RpcHandlerOutcome<ChangePasswordResponse> handle(ChangePasswordRequest request) {
+    Session session = sessionRepository.findById(request.sessionId()).orElseThrow();
+    return handle(new RpcRequestContext(UUID.randomUUID(), UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", session.accountId(), null, "SELF", null), session.accountId(), null), request);
   }
 
   private boolean isPersonActive(UUID personId) {

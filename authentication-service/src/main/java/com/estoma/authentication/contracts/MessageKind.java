@@ -7,6 +7,7 @@ package com.estoma.authentication.contracts;
  */
 public enum MessageKind {
   COMMAND,
+  QUERY,
   RESULT,
   EVENT,
   RPC_REQUEST,

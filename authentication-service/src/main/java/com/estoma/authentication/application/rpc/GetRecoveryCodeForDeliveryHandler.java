@@ -4,6 +4,7 @@ import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.RecoveryCodeDeriver;
 import com.estoma.authentication.contracts.rpc.GetRecoveryCodeForDeliveryRequest;
 import com.estoma.authentication.contracts.rpc.GetRecoveryCodeForDeliveryResponse;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import java.time.Instant;
@@ -34,5 +35,9 @@ public class GetRecoveryCodeForDeliveryHandler {
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery request is no longer usable");
     }
     return RpcHandlerOutcome.withoutEvents(new GetRecoveryCodeForDeliveryResponse(codeDeriver.derive(recovery.recoveryId())));
+  }
+
+  public RpcHandlerOutcome<GetRecoveryCodeForDeliveryResponse> handle(RpcRequestContext context, GetRecoveryCodeForDeliveryRequest request) {
+    return handle(request);
   }
 }

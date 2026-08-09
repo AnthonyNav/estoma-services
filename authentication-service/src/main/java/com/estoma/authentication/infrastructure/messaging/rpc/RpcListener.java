@@ -2,11 +2,13 @@ package com.estoma.authentication.infrastructure.messaging.rpc;
 
 import com.estoma.authentication.application.RpcDispatcher;
 import com.estoma.authentication.application.RpcOutcome;
+import com.estoma.authentication.application.AccountAuthorizationPolicy;
 import com.estoma.authentication.contracts.AuthenticationAuthorizationMatrix;
 import com.estoma.authentication.contracts.MessagingNames;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.contracts.result.ResultPayload;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
 import java.util.UUID;
@@ -40,16 +42,23 @@ public class RpcListener {
   private final EnvelopeJsonCodec codec;
   private final RpcOperationRouter router;
   private final RpcDispatcher dispatcher;
+  private final AccountAuthorizationPolicy authorizationPolicy;
 
-  public RpcListener(EnvelopeJsonCodec codec, RpcOperationRouter router, RpcDispatcher dispatcher) {
+  public RpcListener(EnvelopeJsonCodec codec, RpcOperationRouter router, RpcDispatcher dispatcher, AccountAuthorizationPolicy authorizationPolicy) {
     this.codec = codec;
     this.router = router;
     this.dispatcher = dispatcher;
+    this.authorizationPolicy = authorizationPolicy;
   }
 
   @RabbitListener(queues = MessagingNames.AUTHENTICATION_RPC_QUEUE, containerFactory = "rpcContainerFactory")
   public Message onMessage(Message message) {
-    MessageEnvelope request = codec.decode(message.getBody());
+    MessageEnvelope request;
+    try {
+      request = codec.decode(message.getBody());
+    } catch (Exception malformed) {
+      return buildReply(response(null, ResultPayload.rejected("INVALID_RPC_ENVELOPE")));
+    }
     MessageProperties requestProps = message.getMessageProperties();
 
     ResultPayload result;
@@ -59,8 +68,6 @@ public class RpcListener {
     } else if (!router.supports(request.messageType())) {
       log.error("unrecognized RPC operation type={} correlationId={}", request.messageType(), request.correlationId());
       result = ResultPayload.rejected("UNRECOGNIZED_OPERATION");
-    } else if (!isAllowedProducer(request)) {
-      result = ResultPayload.rejected("PRODUCER_NOT_AUTHORIZED");
     } else {
       result = handle(request);
     }
@@ -71,7 +78,10 @@ public class RpcListener {
   private ResultPayload handle(MessageEnvelope request) {
     try {
       RpcOutcome<Object> outcome = dispatcher.execute(
-          request.correlationId(), () -> router.invoke(request.messageType(), codec.encodeValue(request.payload())));
+           request.correlationId(), () -> {
+             authorizationPolicy.check(request);
+             return router.invoke(request.messageType(), codec.encodeValue(request.payload()), RpcRequestContext.from(request));
+           });
       return switch (outcome) {
         case RpcOutcome.Success<Object> success -> ResultPayload.succeeded(success.response());
         case RpcOutcome.Rejected<Object> rejected -> ResultPayload.rejected(rejected.code().name());
@@ -87,6 +97,11 @@ public class RpcListener {
   }
 
   private MessageEnvelope response(MessageEnvelope request, ResultPayload result) {
+    if (request == null) {
+      return new MessageEnvelope(
+          UUID.randomUUID(), "RPC", 1, MessageKind.RPC_RESPONSE, "authentication", Instant.now(),
+          UUID.randomUUID(), null, null, null, null, null, null, codec.toJsonNode(result));
+    }
     return new MessageEnvelope(
         UUID.randomUUID(), request.messageType(), 1, MessageKind.RPC_RESPONSE, "authentication", Instant.now(),
         request.correlationId(), request.messageId(), null, null, request.aggregateId(), null, request.actor(), codec.toJsonNode(result));

@@ -9,6 +9,7 @@ import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.application.port.TokenIssuer;
 import com.estoma.authentication.contracts.rpc.RefreshSessionRequest;
 import com.estoma.authentication.contracts.rpc.RefreshSessionResponse;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.event.SessionRevokedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
@@ -53,7 +54,7 @@ public class RefreshSessionHandler {
     this.randomGenerator = randomGenerator;
   }
 
-  public RpcHandlerOutcome<RefreshSessionResponse> handle(RefreshSessionRequest request) {
+  public RpcHandlerOutcome<RefreshSessionResponse> handle(RpcRequestContext context, RefreshSessionRequest request) {
     Session session =
         sessionRepository
             .findByIdForUpdate(request.sessionId())
@@ -61,6 +62,9 @@ public class RefreshSessionHandler {
 
     if (session.revokedAt() != null) {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_REVOKED, "session " + session.sessionId() + " was revoked");
+    }
+    if (!session.accountId().equals(context.targetAccountId()) || !session.accountId().equals(context.actor().accountId())) {
+      throw new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist");
     }
     Instant now = Instant.now();
     if (!session.isValid(now)) {
@@ -100,6 +104,13 @@ public class RefreshSessionHandler {
 
     // SessionRenewed is internal, not published in v1 (events.md §5).
     return RpcHandlerOutcome.withoutEvents(new RefreshSessionResponse(accessToken.token(), newRefreshToken, cappedExpiresAt));
+  }
+
+  /** Direct application callers must supply transport context; retained only for existing non-messaging tests. */
+  @Deprecated
+  public RpcHandlerOutcome<RefreshSessionResponse> handle(RefreshSessionRequest request) {
+    Session session = sessionRepository.findById(request.sessionId()).orElseThrow();
+    return handle(new RpcRequestContext(UUID.randomUUID(), UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", session.accountId(), null, "SELF", null), session.accountId(), null), request);
   }
 
   private boolean isPersonActive(UUID personId) {
