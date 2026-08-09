@@ -45,15 +45,15 @@ Acceptance criteria:
 
 Single milestone covering all functional behavior against a real database, without a live RabbitMQ broker. No external approvals block sub-parts of this phase — every technical decision needed to implement it was resolved in Phase 1. Suggested internal order:
 
-1. **Database migrations**: Flyway migrations under `src/main/resources/db/migration/` implementing the full schema documented in the platform's `data-model.md` (`communications`, `inbox_messages`, `inbox_visits`, `email_deliveries`, `email_delivery_attempts`, `recipient_projection`, `processed_messages`, `outbox_messages`), with the constraints and indexes already specified there, including the `uq_communication_origin_recipient_type` idempotency index.
+1. **Database migrations**: Flyway enum additions are isolated in V11; V12 owns lifecycle columns, constraints, administrative actions, and legacy backfills. Request idempotency is the durable `(source_service, idempotency_key)` key with fingerprint comparison.
 2. **Runtime infrastructure completion**: `SchemaVersionHealthIndicator` joins the `startup` health group now that migrations exist; `TransactionManagerConfig` if a nested-transaction/savepoint fix is needed once real repositories exist.
 3. **Domain aggregates**: `Communication`, `InboxMessage`, `InboxVisit`, `EmailDelivery`, `EmailDeliveryAttempt`, plus `CommunicationsRejectedException` and `RejectionCode` (the 10 rejection codes from `commands.md` §2.1). No framework dependency, unit-tested directly.
 4. **JDBC repositories** implementing the ports declared in `application/port`, using `JdbcClient`.
-5. **`RequestCommunication` handler**: applies the composite idempotency key (`commands.md` §6), creates `Communication` and at most one `InboxMessage`/`EmailDelivery`, appends `CommunicationRequested` (and `InboxMessageCreated` if applicable) to Outbox in the same transaction. `EmailDelivery` is written `PENDING` only — no provider call here.
+5. **`RequestCommunication` handler**: requires correlation and idempotency metadata, creates `Communication` and at most one `InboxMessage`/`EmailDelivery`, and appends events in the same transaction. `EmailDelivery` is written `PENDING` only — no provider call here.
 6. **`RegisterInboxVisit`, `RetryEmailDelivery`, `ExpireInboxMessages` handlers**, dispatched by a single transactional `CommandDispatcher` (Consumer Inbox first, functional rejection caught inside the transaction, non-sensitive events appended to Outbox). No correlated result is actually published to `platform.results` until the messaging shell exists (Phase 3); the dispatcher's Outbox write is the durable, testable proof of correctness in the meantime.
 7. **`recipient_projection` consumer**: consumes `PersonCreated/Updated/Activated/Deactivated` and `AccountCreated/Activated/Deactivated/LoginIdentifierChanged`, updates `recipient_projection` idempotently using `person_source_version`/`account_source_version` monotonicity, via the same `ProjectionDispatcher` pattern. Implemented against the conceptual payload already assumed by this service's own `events.md`/`data-model.md` — Phase 3 formalizes this against what `users-service`/`authentication-service` actually publish.
 8. **`AppointmentCancelled` adapter**: filters on `cancellationType = CLINIC` and `cancellationSubreason = CAPACITY_LOSS`, and on match invokes the `RequestCommunication` handling logic **in-process, in the same transaction as its own Consumer Inbox write** — not as a RabbitMQ round trip (see `system_contract.md`'s "Internal Architecture"). Other values must not trigger it.
-9. **Email provider port and stub implementation**: a neutral `send(...)` port with normalized success/error, no SDK/exception leakage, and a deterministic stub implementation so the delivery worker and its tests run without a real provider account. Real provider selection/fallback stays out of scope.
+9. **Email provider port and stub implementation**: a neutral `send(...)` port with normalized success/error, no SDK/exception leakage, and a deterministic stub implementation. Provider timeout is enforced by a bounded executor; template codes come only from explicit configuration.
 10. **Email delivery worker**: implements the "Email Delivery Operational Policy" from `system_contract.md` — claims due rows, calls the provider port with no open transaction, records the attempt and resulting state/event in a second transaction.
 11. **`ExpireInboxMessages` scheduled trigger**: same in-process pattern as the email delivery worker, no RabbitMQ self-command needed.
 12. `readiness` health group gains `emailWorker` as a checkable component.
@@ -69,6 +69,11 @@ Acceptance criteria:
 
 - All 4 commands and their handlers are implemented and tested (unit tests for domain, Testcontainers integration tests for repositories and dispatchers).
 - All mandatory invariants from `system_contract.md` hold under test, including the idempotency key and the max-one-inbox/max-one-email invariants.
+- Same `idempotencyKey` plus the same fingerprint returns the existing `Communication` without new events or domain effects.
+- Legacy `SENDING` rows become `INDETERMINATE` with `LEGACY_SENDING_OUTCOME_UNKNOWN`; without a real attempt, `RECONCILED_ACCEPTED` is rejected and only `RECONCILED_FAILED` or `RESEND_AUTHORIZED` is allowed.
+- Every future operation over a legacy `Communication` without correlation establishes a new boundary `correlationId` before writing Outbox.
+- `TEMPLATE` content is rendered and persisted once; retries reuse the persisted final content.
+- The provider executor is managed and bounded, startup rejects `leaseDuration <= providerTimeout + safetyMargin`, and `EmailProviderRouter` is injected directly into the worker.
 - A test proves the email provider is never called while a database transaction is open.
 - `title`, `body`, and email content never appear in any log line.
 - Service is deployable and passes its own health checks against a real database (no RabbitMQ required yet).

@@ -15,6 +15,7 @@ These require agreement with other services' teams, or vendor/operational decisi
 - Future webhook support and the criterion for when `EmailDeliveryDelivered`/`DELIVERED` becomes reachable.
 - Final RabbitMQ topology details beyond the platform-wide defaults Phase 3 applies (exact prefetch, exact retention, exact message size limits — `messaging-architecture.md` §20 lists these as globally pending, not specific to this service).
 - Retention policy for `email_delivery_attempts`.
+- The canonical normalized provider-error-code catalog remains deferred; timeout, ambiguous outcomes, and legacy `SENDING` rows use durable indeterminate codes.
 - Whether the `commands.communications-service` string in the platform docs (`03-services/shared/communications-service/commands.md` §1 and `interfaces.md` §3) should be corrected upstream to match this contract's `commands.communications` (see `system_contract.md`, "Functional Input Interfaces").
 
 ## Out Of This Service's Control
