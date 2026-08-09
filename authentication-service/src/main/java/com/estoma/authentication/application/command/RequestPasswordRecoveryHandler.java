@@ -69,27 +69,25 @@ class RequestPasswordRecoveryHandler implements CommandHandler {
     RequestPasswordRecoveryCommand command = codec.convertPayload(envelope, RequestPasswordRecoveryCommand.class);
 
     LoginIdentifier identifier = LoginIdentifier.of(command.loginType(), command.loginIdentifier());
-    Optional<Account> account = accountRepository.findByLoginIdentifier(identifier.type(), identifier.normalized());
+    // The account row serializes the initial-request case, when no recovery row exists to lock.
+    Optional<Account> account = accountRepository.findByLoginIdentifierForUpdate(identifier.type(), identifier.normalized());
 
     if (account.isEmpty() || !account.get().isActive() || !isPersonActive(account.get().personId())) {
       return new CommandHandlerResult(null, null, List.of());
     }
 
     Instant now = Instant.now();
-    Optional<PasswordRecoveryRequest> active = passwordRecoveryRepository.findActiveByAccountIdForUpdate(account.get().accountId());
-    if (active.isPresent()) {
-      if (active.get().isExpired(now)) {
-        passwordRecoveryRepository.expireIfActive(active.get().recoveryId(), now);
-      } else if (active.get().createdAt().plus(RECOVERY_COOLDOWN).isAfter(now)) {
-        return new CommandHandlerResult(null, null, List.of());
-      } else {
-        passwordRecoveryRepository.invalidateActiveForAccount(account.get().accountId(), now);
-      }
+    if (account.get().lastRecoveryRequestedAt() != null
+        && account.get().lastRecoveryRequestedAt().plus(RECOVERY_COOLDOWN).isAfter(now)) {
+      return new CommandHandlerResult(null, null, List.of());
     }
+    passwordRecoveryRepository.invalidateActiveForAccount(account.get().accountId(), now);
     PasswordRecoveryRequest request =
         PasswordRecoveryRequest.createNew(
             UUID.randomUUID(), account.get().accountId(), "v1-hmac", now, now.plus(RECOVERY_EXPIRATION));
     passwordRecoveryRepository.insert(request);
+    Account updatedAccount = account.get().withRecoveryRequested(now);
+    accountRepository.update(updatedAccount, account.get().version());
 
     PasswordRecoveryRequestedPayload eventPayload =
         new PasswordRecoveryRequestedPayload(request.recoveryId(), request.accountId(), account.get().personId(), request.expiresAt(), now);

@@ -30,6 +30,10 @@ import com.estoma.authentication.testsupport.Envelopes;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -243,6 +247,75 @@ class CommandDispatcherIT extends AbstractPostgresIT {
 
     assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(null));
     assertThat(passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId).orElseThrow().recoveryId()).isEqualTo(firstRecoveryId);
+  }
+
+  @Test
+  void simultaneousInitialRecoveryRequestsCreateOnlyOneActiveRequest() throws Exception {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+    String identifier = accountRepository.findById(accountId).orElseThrow().loginIdentifier().value();
+    int callers = 10;
+    CountDownLatch ready = new CountDownLatch(callers);
+    CountDownLatch start = new CountDownLatch(1);
+
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = java.util.stream.IntStream.range(0, callers)
+          .mapToObj(
+              ignored ->
+                  executor.submit(
+                      () -> {
+                        ready.countDown();
+                        start.await();
+                        return dispatcher.dispatch(
+                            Envelopes.command(
+                                AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(),
+                                new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
+                      }))
+          .toList();
+      assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      for (var future : futures) {
+        assertThat(future.get(10, TimeUnit.SECONDS)).isEqualTo(new CommandOutcome.Succeeded(null));
+      }
+    }
+
+    assertThat(passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId)).isPresent();
+    assertThat(
+            jdbc.sql("SELECT count(*) FROM password_recovery_requests WHERE account_id = :accountId")
+                .param("accountId", accountId)
+                .query(Long.class)
+                .single())
+        .isEqualTo(1L);
+  }
+
+  @Test
+  void requestPasswordRecoveryKeepsTerminalRecoveryUntouchedDuringCooldown() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+    String identifier = accountRepository.findById(accountId).orElseThrow().loginIdentifier().value();
+
+    dispatcher.dispatch(
+        Envelopes.command(
+            AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(),
+            new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
+    PasswordRecoveryRequest first = passwordRecoveryRepository.findActiveByAccountIdForUpdate(accountId).orElseThrow();
+    passwordRecoveryRepository.markUsedIfValid(first.recoveryId(), Instant.now(), Instant.now());
+    Instant requestedAt = accountRepository.findById(accountId).orElseThrow().lastRecoveryRequestedAt();
+
+    var outcome = dispatcher.dispatch(
+        Envelopes.command(
+            AuthenticationCommand.REQUEST_PASSWORD_RECOVERY.wireName(),
+            new RequestPasswordRecoveryCommand(LoginType.MATRICULA, identifier)));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(null));
+    assertThat(passwordRecoveryRepository.findById(first.recoveryId()).orElseThrow().status())
+        .isEqualTo(PasswordRecoveryRequest.Status.USED);
+    assertThat(accountRepository.findById(accountId).orElseThrow().lastRecoveryRequestedAt())
+        .isEqualTo(requestedAt);
+    assertThat(
+            jdbc.sql("SELECT count(*) FROM password_recovery_requests WHERE account_id = :accountId")
+                .param("accountId", accountId)
+                .query(Long.class)
+                .single())
+        .isEqualTo(1L);
   }
 
   @Test

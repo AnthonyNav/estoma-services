@@ -70,6 +70,24 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   }
 
   @Test
+  void fifthInvalidRecoveryCodeExhaustsTheRequest() {
+    UUID accountId = insertActiveAccountWithPassword();
+    PasswordRecoveryRequest recovery = insertRecoveryRequest(accountId, uniqueCode("100003"));
+
+    for (int attempt = 0; attempt < 5; attempt++) {
+      var outcome = dispatcher.execute(
+          UUID.randomUUID(),
+          () -> validateHandler.handle(new ValidateRecoveryCodeRequest(LoginType.USERNAME, accountLogin(accountId), "000000")));
+      assertThat(((com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeResponse) ((RpcOutcome.Success<?>) outcome).response()).result())
+          .isEqualTo("INVALID");
+    }
+
+    PasswordRecoveryRequest exhausted = recoveryRepository.findById(recovery.recoveryId()).orElseThrow();
+    assertThat(exhausted.failedAttempts()).isEqualTo(5);
+    assertThat(exhausted.status()).isEqualTo(PasswordRecoveryRequest.Status.ATTEMPTS_EXHAUSTED);
+  }
+
+  @Test
   void resetPasswordChangesTheCredentialAndConsumesTheRequest() {
     UUID accountId = insertActiveAccountWithPassword();
     String code = uniqueCode("200001");

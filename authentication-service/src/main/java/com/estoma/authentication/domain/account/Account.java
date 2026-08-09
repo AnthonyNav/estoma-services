@@ -159,6 +159,23 @@ public final class Account {
         accountId, personId, loginIdentifier, status, 0, null, version, createdAt, now, deactivatedAt, deactivationReasonCode, lastRecoveryRequestedAt);
   }
 
+  /** Records a newly issued password recovery request for cooldown enforcement. */
+  public Account withRecoveryRequested(Instant now) {
+    return new Account(
+        accountId,
+        personId,
+        loginIdentifier,
+        status,
+        failedAttempts,
+        lockedUntil,
+        version + 1,
+        createdAt,
+        now,
+        deactivatedAt,
+        deactivationReasonCode,
+        now);
+  }
+
   public boolean isLocked(Instant now) {
     return lockedUntil != null && lockedUntil.isAfter(now);
   }
