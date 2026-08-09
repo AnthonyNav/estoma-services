@@ -16,6 +16,7 @@ public final class EmailDelivery {
   private final String fromName;
   private final String fromAddress;
   private final String replyToAddress;
+  private final String senderCode;
   private final EmailContentMode contentMode;
   private final String subject;
   private final String textBody;
@@ -40,7 +41,7 @@ public final class EmailDelivery {
   private final String workerId;
 
   private EmailDelivery(UUID id, UUID communicationId, String recipientAddress, String recipientName,
-      String fromName, String fromAddress, String replyToAddress, EmailContentMode contentMode,
+       String fromName, String fromAddress, String replyToAddress, String senderCode, EmailContentMode contentMode,
       String subject, String textBody, String htmlBody, String templateCode, String templateData,
       EmailDeliveryStatus status, int attemptCount, int retryCycle, int cycleAttemptCount,
       Instant nextAttemptAt, Instant acceptedAt, Instant deliveredAt, Instant failedAt,
@@ -53,6 +54,7 @@ public final class EmailDelivery {
     this.fromName = nonBlank(fromName, "fromName");
     this.fromAddress = nonBlank(fromAddress, "fromAddress");
     this.replyToAddress = replyToAddress;
+    this.senderCode = senderCode;
     this.contentMode = required(contentMode, "contentMode");
     this.subject = subject;
     this.textBody = textBody;
@@ -86,41 +88,52 @@ public final class EmailDelivery {
   public static EmailDelivery generic(UUID id, UUID communicationId, String recipientAddress, String recipientName,
       String fromName, String fromAddress, String replyToAddress, String subject, String textBody,
       String htmlBody, Instant now) {
+    return generic(id, communicationId, recipientAddress, recipientName, fromName, fromAddress, replyToAddress,
+        null, subject, textBody, htmlBody, now);
+  }
+  public static EmailDelivery generic(UUID id, UUID communicationId, String recipientAddress, String recipientName,
+      String fromName, String fromAddress, String replyToAddress, String senderCode, String subject, String textBody,
+      String htmlBody, Instant now) {
     return base(id, communicationId, recipientAddress, recipientName, fromName, fromAddress, replyToAddress,
-        EmailContentMode.GENERIC, subject, textBody, htmlBody, null, null, now);
+        senderCode, EmailContentMode.GENERIC, subject, textBody, htmlBody, null, null, now);
   }
 
   public static EmailDelivery template(UUID id, UUID communicationId, String recipientAddress, String recipientName,
       String fromName, String fromAddress, String replyToAddress, String templateCode, String templateData, Instant now) {
+    return template(id, communicationId, recipientAddress, recipientName, fromName, fromAddress, replyToAddress,
+        null, templateCode, templateData, now);
+  }
+  public static EmailDelivery template(UUID id, UUID communicationId, String recipientAddress, String recipientName,
+      String fromName, String fromAddress, String replyToAddress, String senderCode, String templateCode, String templateData, Instant now) {
     return base(id, communicationId, recipientAddress, recipientName, fromName, fromAddress, replyToAddress,
-        EmailContentMode.TEMPLATE, null, null, null, templateCode, templateData, now);
+        senderCode, EmailContentMode.TEMPLATE, null, null, null, templateCode, templateData, now);
   }
 
   public static EmailDelivery withRenderedContent(EmailDelivery source, String subject, String textBody, String htmlBody) {
     return new EmailDelivery(source.emailDeliveryId, source.communicationId, source.recipientAddress, source.recipientName,
-        source.fromName, source.fromAddress, source.replyToAddress, source.contentMode, subject, textBody, htmlBody,
+        source.fromName, source.fromAddress, source.replyToAddress, source.senderCode, source.contentMode, subject, textBody, htmlBody,
         source.templateCode, source.templateData, source.status, source.attemptCount, source.retryCycle, source.cycleAttemptCount,
         source.nextAttemptAt, source.acceptedAt, source.deliveredAt, source.failedAt, source.lastErrorCode, source.lastErrorMessage,
         source.createdAt, source.updatedAt, source.claimToken, source.claimedAt, source.leaseUntil, source.workerId);
   }
 
   private static EmailDelivery base(UUID id, UUID communicationId, String recipientAddress, String recipientName,
-      String fromName, String fromAddress, String replyToAddress, EmailContentMode mode, String subject,
+       String fromName, String fromAddress, String replyToAddress, String senderCode, EmailContentMode mode, String subject,
       String textBody, String htmlBody, String templateCode, String templateData, Instant now) {
     return new EmailDelivery(id, communicationId, recipientAddress, recipientName, fromName, fromAddress,
-        replyToAddress, mode, subject, textBody, htmlBody, templateCode, templateData,
+        replyToAddress, senderCode, mode, subject, textBody, htmlBody, templateCode, templateData,
         EmailDeliveryStatus.PENDING, 0, 1, 0, null, null, null, null, null, null, now, now,
         null, null, null, null);
   }
 
   public static EmailDelivery reconstitute(UUID id, UUID communicationId, String recipientAddress, String recipientName,
-      String fromName, String fromAddress, String replyToAddress, EmailContentMode mode, String subject,
+       String fromName, String fromAddress, String replyToAddress, String senderCode, EmailContentMode mode, String subject,
       String textBody, String htmlBody, String templateCode, String templateData, EmailDeliveryStatus status,
       int attemptCount, Instant nextAttemptAt, Instant acceptedAt, Instant deliveredAt, Instant failedAt,
       String errorCode, String errorMessage, Instant createdAt, Instant updatedAt, UUID claimToken,
       Instant claimedAt, Instant leaseUntil, String workerId, int retryCycle, int cycleAttemptCount) {
     return new EmailDelivery(id, communicationId, recipientAddress, recipientName, fromName, fromAddress,
-        replyToAddress, mode, subject, textBody, htmlBody, templateCode, templateData, status, attemptCount,
+        replyToAddress, senderCode, mode, subject, textBody, htmlBody, templateCode, templateData, status, attemptCount,
         retryCycle, cycleAttemptCount, nextAttemptAt, acceptedAt, deliveredAt, failedAt, errorCode, errorMessage,
         createdAt, updatedAt, claimToken, claimedAt, leaseUntil, workerId);
   }
@@ -132,7 +145,7 @@ public final class EmailDelivery {
       int attemptCount, Instant nextAttemptAt, Instant acceptedAt, Instant deliveredAt, Instant failedAt,
       String errorCode, String errorMessage, Instant createdAt, Instant updatedAt, UUID claimToken, Instant leaseUntil) {
     return reconstitute(id, communicationId, recipientAddress, recipientName, fromName, fromAddress, replyToAddress,
-        mode, subject, textBody, htmlBody, templateCode, templateData, status, attemptCount, nextAttemptAt,
+        null, mode, subject, textBody, htmlBody, templateCode, templateData, status, attemptCount, nextAttemptAt,
         acceptedAt, deliveredAt, failedAt, errorCode, errorMessage, createdAt, updatedAt, claimToken, null,
         leaseUntil, null, 1, 0);
   }
@@ -150,20 +163,20 @@ public final class EmailDelivery {
   public EmailDelivery retriedByOperator(Instant now) {
     if (status != EmailDeliveryStatus.FAILED) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FAILED, "delivery is not FAILED");
     return new EmailDelivery(emailDeliveryId, communicationId, recipientAddress, recipientName, fromName, fromAddress,
-        replyToAddress, contentMode, subject, textBody, htmlBody, templateCode, templateData, EmailDeliveryStatus.PENDING,
+        replyToAddress, senderCode, contentMode, subject, textBody, htmlBody, templateCode, templateData, EmailDeliveryStatus.PENDING,
         attemptCount, retryCycle + 1, 0, now, acceptedAt, deliveredAt, null, null, null, createdAt, now,
         null, null, null, null);
   }
   public EmailDelivery resendAuthorized(Instant now) {
     if (status != EmailDeliveryStatus.INDETERMINATE) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FAILED, "delivery is not INDETERMINATE");
     return new EmailDelivery(emailDeliveryId, communicationId, recipientAddress, recipientName, fromName, fromAddress,
-        replyToAddress, contentMode, subject, textBody, htmlBody, templateCode, templateData, EmailDeliveryStatus.PENDING,
+        replyToAddress, senderCode, contentMode, subject, textBody, htmlBody, templateCode, templateData, EmailDeliveryStatus.PENDING,
         attemptCount, retryCycle + 1, 0, now, acceptedAt, deliveredAt, null, null, null, createdAt, now,
         null, null, null, null);
   }
   public EmailDelivery claimed(UUID token, Instant now, Instant until, String worker) {
     return new EmailDelivery(emailDeliveryId, communicationId, recipientAddress, recipientName, fromName, fromAddress,
-        replyToAddress, contentMode, subject, textBody, htmlBody, templateCode, templateData, status, attemptCount,
+        replyToAddress, senderCode, contentMode, subject, textBody, htmlBody, templateCode, templateData, status, attemptCount,
         retryCycle, cycleAttemptCount, nextAttemptAt, acceptedAt, deliveredAt, failedAt, lastErrorCode, lastErrorMessage,
         createdAt, now, token, now, until, worker);
   }
@@ -176,7 +189,7 @@ public final class EmailDelivery {
     if (claimToken == null || leaseUntil == null || leaseUntil.isBefore(now))
       throw new IllegalStateException("delivery claim is not active");
     return new EmailDelivery(emailDeliveryId, communicationId, recipientAddress, recipientName, fromName, fromAddress,
-        replyToAddress, contentMode, subject, textBody, htmlBody, templateCode, templateData, EmailDeliveryStatus.SENDING,
+        replyToAddress, senderCode, contentMode, subject, textBody, htmlBody, templateCode, templateData, EmailDeliveryStatus.SENDING,
         attemptCount + 1, retryCycle, cycleAttemptCount + 1, nextAttemptAt, acceptedAt, deliveredAt, failedAt,
         lastErrorCode, lastErrorMessage, createdAt, now, claimToken, claimedAt, leaseUntil, workerId);
   }
@@ -184,7 +197,7 @@ public final class EmailDelivery {
   private EmailDelivery transition(EmailDeliveryStatus newStatus, Instant now, Instant next, String code, String message,
       Instant failed, int attempts, int cycleAttempts) {
     return new EmailDelivery(emailDeliveryId, communicationId, recipientAddress, recipientName, fromName, fromAddress,
-        replyToAddress, contentMode, subject, textBody, htmlBody, templateCode, templateData, newStatus, attempts,
+        replyToAddress, senderCode, contentMode, subject, textBody, htmlBody, templateCode, templateData, newStatus, attempts,
         retryCycle, cycleAttempts, next, newStatus == EmailDeliveryStatus.ACCEPTED ? now : acceptedAt, deliveredAt,
         failed, code, message, createdAt, now, null, null, null, null);
   }
@@ -196,6 +209,7 @@ public final class EmailDelivery {
   public String fromName() { return fromName; }
   public String fromAddress() { return fromAddress; }
   public String replyToAddress() { return replyToAddress; }
+  public String senderCode() { return senderCode; }
   public EmailContentMode contentMode() { return contentMode; }
   public String subject() { return subject; }
   public String textBody() { return textBody; }

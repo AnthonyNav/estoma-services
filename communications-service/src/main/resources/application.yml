@@ -47,7 +47,6 @@ estoma:
       default-sender-address: ${COMM_EMAIL_DEFAULT_SENDER_ADDRESS:no-reply@estoma.edu}
       fake:
         mode: ${COMM_EMAIL_FAKE_MODE:accepted}
-      templates: ${COMM_EMAIL_TEMPLATES:}
       worker:
         lease-duration-ms: "${COMM_EMAIL_WORKER_LEASE_MS:30000}"
         provider-timeout-ms: "${COMM_EMAIL_PROVIDER_TIMEOUT_MS:10000}"

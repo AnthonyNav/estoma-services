@@ -66,9 +66,16 @@ public class EmailDeliveryWorker {
 
   public void pollAndProcess() {
     try {
-      for (EmailDelivery claimed : claimService.claim(batchSize)) {
+      // A lease starts when a row is claimed. Claiming a batch and then processing
+      // it serially wastes leases for items waiting behind a slow provider call.
+      for (int i = 0; i < batchSize; i++) {
+        List<EmailDelivery> claimedRows = claimService.claim(1);
+        if (claimedRows.isEmpty()) break;
+        EmailDelivery claimed = claimedRows.getFirst();
         boolean providerCallStarted = false;
+        boolean recordingResult = false;
         try {
+          EmailProviderRouter.ProviderSelection selection = provider.select();
           EmailProviderPort.EmailSendRequest request = new EmailProviderPort.EmailSendRequest(
               claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
               claimed.contentMode(), claimed.subject(), claimed.textBody(), claimed.htmlBody(), claimed.templateCode(), claimed.templateData());
@@ -76,24 +83,35 @@ public class EmailDeliveryWorker {
           EmailProviderPort.EmailSendRequest resolved;
           if (claimed.contentMode() == com.estoma.communications.contracts.EmailContentMode.TEMPLATE && !finalContentPresent) {
             resolved = templateResolver.resolve(request);
-            claimed = prepareService.prepare(claimed, resolved);
+            claimed = prepareService.prepare(claimed, resolved, selection.providerCode());
           } else {
             resolved = new EmailProviderPort.EmailSendRequest(claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(),
                 claimed.fromAddress(), claimed.replyToAddress(), EmailContentMode.GENERIC, claimed.subject(), claimed.textBody(),
                 claimed.htmlBody(), null, null);
-            claimed = prepareService.prepare(claimed);
+            claimed = prepareService.prepare(claimed, selection.providerCode());
           }
           claimed = startService.start(claimed);
           providerCallStarted = true;
           // No transaction is open here: this is the only place the provider is called.
-           EmailProviderPort.EmailSendResult result = provider.send(resolved);
-          resultService.record(claimed, result);
+            EmailProviderPort.EmailSendResult result = provider.send(selection, resolved);
+           recordingResult = true;
+           resultService.record(claimed, result);
         } catch (RuntimeException itemError) {
           LOGGER.warn("email delivery item failed: deliveryId={}, providerCallStarted={}, error={}",
               claimed.emailDeliveryId(), providerCallStarted, itemError.toString());
-          if (providerCallStarted) {
-            resultService.record(claimed,
-                new EmailProviderPort.EmailSendResult.Indeterminate("unknown", "PROVIDER_EXCEPTION", "provider call outcome unknown"));
+          if (recordingResult) {
+            // Result persistence is the transaction of record. Retrying it here
+            // could duplicate state/events after a partial failure; roll back.
+            throw itemError;
+          } else if (itemError instanceof EmailProviderRouter.ProviderNotStartedException) {
+            preProviderFailureService.requeue(claimed);
+            // The executor remains unavailable for this poll; do not reclaim
+            // the just-requeued delivery in a tight loop.
+            break;
+          } else if (providerCallStarted) {
+            // Provider execution errors are normalized by EmailProviderRouter.
+            // Any other failure here is technical and must not produce a second result write.
+            throw itemError;
           } else {
             preProviderFailureService.record(claimed, "PRE_PROVIDER_VALIDATION", "delivery could not be prepared");
           }

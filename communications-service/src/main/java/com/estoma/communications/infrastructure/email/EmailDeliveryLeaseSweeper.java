@@ -13,7 +13,9 @@ class EmailDeliveryLeaseSweeper {
   private final MeterRegistry metrics;
   private final boolean scheduledEnabled;
   EmailDeliveryLeaseSweeper(EmailDeliveryRepository repository, MeterRegistry metrics,
-      @org.springframework.beans.factory.annotation.Value("${estoma.communications.email.worker.enabled:true}") boolean scheduledEnabled) {
+      @org.springframework.beans.factory.annotation.Value("${estoma.communications.email.worker.enabled:true}") boolean scheduledEnabled,
+      @org.springframework.beans.factory.annotation.Value("${estoma.communications.email.worker.sweeper-interval-ms:5000}") long sweeperIntervalMs) {
+    if (sweeperIntervalMs <= 0) throw new IllegalStateException("email sweeper interval must be positive");
     this.repository = repository;
     this.metrics = metrics;
     this.scheduledEnabled = scheduledEnabled;

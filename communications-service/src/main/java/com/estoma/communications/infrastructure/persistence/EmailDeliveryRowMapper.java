@@ -25,6 +25,7 @@ final class EmailDeliveryRowMapper implements RowMapper<EmailDelivery> {
         rs.getString("from_name"),
         rs.getString("from_address"),
         rs.getString("reply_to_address"),
+        rs.getString("sender_code"),
         EmailContentMode.valueOf(rs.getString("content_mode")),
         rs.getString("subject"),
         rs.getString("text_body"),

@@ -18,12 +18,12 @@ class PrepareEmailDeliveryTxService {
   PrepareEmailDeliveryTxService(EmailDeliveryRepository repository, EmailDeliveryAttemptRepository attempts) {
     this.repository = repository; this.attempts = attempts;
   }
-  @Transactional public EmailDelivery prepare(EmailDelivery delivery) {
-    return prepare(delivery, null);
+  @Transactional public EmailDelivery prepare(EmailDelivery delivery, String providerCode) {
+    return prepare(delivery, null, providerCode);
   }
 
   @Transactional
-  EmailDelivery prepare(EmailDelivery delivery, EmailProviderPort.EmailSendRequest rendered) {
+  EmailDelivery prepare(EmailDelivery delivery, EmailProviderPort.EmailSendRequest rendered, String providerCode) {
     if (delivery.claimToken() == null || delivery.leaseUntil() == null || delivery.leaseUntil().isBefore(Instant.now()))
       throw new IllegalStateException("claim is missing or expired");
     if (rendered != null && delivery.contentMode() == com.estoma.communications.contracts.EmailContentMode.TEMPLATE
@@ -38,7 +38,7 @@ class PrepareEmailDeliveryTxService {
       Instant now = Instant.now();
       attempt = EmailDeliveryAttempt.readyToSend(UUID.randomUUID(), delivery.emailDeliveryId(),
           delivery.attemptCount() + 1, delivery.retryCycle(), delivery.cycleAttemptCount() + 1,
-           delivery.claimToken(), "unknown", delivery.contentMode(), now);
+            delivery.claimToken(), providerCode, delivery.contentMode(), now);
       attempts.insert(attempt);
       attempt = attempts.findReadyByDelivery(delivery.emailDeliveryId()).orElseThrow(
           () -> new IllegalStateException("prepared attempt was not persisted"));

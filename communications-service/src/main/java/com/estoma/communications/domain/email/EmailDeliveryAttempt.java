@@ -59,6 +59,14 @@ public final class EmailDeliveryAttempt {
   public EmailDeliveryAttempt indeterminate(String code, String message, Instant now) {
     return copy(EmailAttemptStatus.INDETERMINATE, null, code, message, callStartedAt, now);
   }
+  public EmailDeliveryAttempt reconciledAccepted(Instant now) {
+    if (status != EmailAttemptStatus.INDETERMINATE) throw new IllegalStateException("attempt is not indeterminate");
+    return copy(EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, callStartedAt, now);
+  }
+  public EmailDeliveryAttempt reconciledFailed(String code, String message, Instant now) {
+    if (status != EmailAttemptStatus.INDETERMINATE) throw new IllegalStateException("attempt is not indeterminate");
+    return copy(EmailAttemptStatus.FAILED, providerMessageId, code, message, callStartedAt, now);
+  }
   private EmailDeliveryAttempt copy(EmailAttemptStatus newStatus, String providerMessageId, String code, String message,
       Instant newCallStartedAt, Instant completedAt) {
     return new EmailDeliveryAttempt(id, deliveryId, attemptNumber, retryCycle, cycleAttemptNumber, claimToken, provider,

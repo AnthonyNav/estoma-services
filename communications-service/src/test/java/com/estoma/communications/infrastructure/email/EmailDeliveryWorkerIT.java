@@ -12,8 +12,10 @@ import com.estoma.communications.domain.communication.Communication;
 import com.estoma.communications.domain.email.EmailDelivery;
 import com.estoma.communications.testsupport.AbstractPostgresIT;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +23,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -49,6 +54,7 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
   @Autowired private CommunicationRepository communicationRepository;
   @Autowired private RecordingEmailProviderPort recordingProvider;
   @Autowired private JdbcClient jdbc;
+  @Autowired @Qualifier("emailProviderExecutor") private ThreadPoolTaskExecutor providerExecutor;
 
   @BeforeEach
   void isolateDeliveryData() {
@@ -58,6 +64,9 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
     jdbc.sql("DELETE FROM inbox_messages").update();
     jdbc.sql("DELETE FROM communications").update();
     jdbc.sql("DELETE FROM outbox_messages").update();
+    recordingProvider.calls.set(0);
+    recordingProvider.lastRequest.set(null);
+    recordingProvider.calledWithTransactionActive.set(false);
   }
 
   @Test
@@ -99,29 +108,69 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
   }
 
   @Test
-  void templateContentIsRenderedAndPersistedForRetries() {
+  void templateWithoutRendererFailsBeforeProviderAttempt() {
     UUID communicationId = insertCommunication();
     EmailDelivery delivery = EmailDelivery.template(UUID.randomUUID(), communicationId, "alumno@estoma.edu", "Alumno",
         "Estoma", "no-reply@estoma.edu", null, "WELCOME", "{\"name\":\"Alumno\"}", Instant.now());
     emailDeliveryRepository.insert(delivery);
-    recordingProvider.nextResult.set(new EmailProviderPort.EmailSendResult.Failed("stub", "TEMPORARY", "retry", true));
+    worker.pollAndProcess();
+
+    EmailDelivery failed = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
+    assertThat(failed.status()).isEqualTo(EmailDeliveryStatus.FAILED);
+    assertThat(failed.attemptCount()).isZero();
+    assertThat(recordingProvider.lastRequest.get()).isNull();
+  }
+
+  @Test
+  void retriesExactlySixPhysicalCallsUsingTheDocumentedBackoffThenFailsTerminally() {
+    UUID communicationId = insertCommunication();
+    EmailDelivery delivery = insertPendingDelivery(communicationId);
+    recordingProvider.nextResult.set(new EmailProviderPort.EmailSendResult.Failed("ignored", "PROVIDER_TIMEOUT", "timed out"));
+    Duration[] gaps = {Duration.ofMinutes(1), Duration.ofMinutes(5), Duration.ofMinutes(30), Duration.ofHours(2), Duration.ofHours(24)};
+
+    for (int call = 0; call < 6; call++) {
+      Instant before = Instant.now();
+      worker.pollAndProcess();
+      EmailDelivery found = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
+      assertThat(found.attemptCount()).isEqualTo(call + 1);
+      assertThat(found.cycleAttemptCount()).isEqualTo(call + 1);
+      if (call < 5) {
+        assertThat(found.status()).isEqualTo(EmailDeliveryStatus.RETRY_SCHEDULED);
+        assertThat(found.nextAttemptAt()).isBetween(before.plus(gaps[call]).minusSeconds(1), Instant.now().plus(gaps[call]).plusSeconds(1));
+        jdbc.sql("UPDATE email_deliveries SET next_attempt_at = now() WHERE email_delivery_id = :id")
+            .param("id", delivery.emailDeliveryId()).update();
+      } else {
+        assertThat(found.status()).isEqualTo(EmailDeliveryStatus.FAILED);
+      }
+    }
+
+    assertThat(recordingProvider.calls.get()).isEqualTo(6);
+    assertThat(jdbc.sql("SELECT count(*) FROM email_delivery_attempts WHERE email_delivery_id = :id")
+        .param("id", delivery.emailDeliveryId()).query(Long.class).single()).isEqualTo(6);
+    assertThat(jdbc.sql("SELECT count(*) FROM email_delivery_attempts WHERE email_delivery_id = :id AND provider = 'unknown'")
+        .param("id", delivery.emailDeliveryId()).query(Long.class).single()).isZero();
+  }
+
+  @Test
+  @DirtiesContext(methodMode = DirtiesContext.MethodMode.AFTER_METHOD)
+  void executorRejectionRequeuesTheSamePreparedAttemptWithoutCountingACall() {
+    UUID communicationId = insertCommunication();
+    EmailDelivery delivery = insertPendingDelivery(communicationId);
+    providerExecutor.shutdown();
 
     worker.pollAndProcess();
 
-    EmailDelivery rendered = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
-    assertThat(rendered.subject()).isEqualTo("Local template");
-    String renderedText = rendered.textBody();
-    assertThat(renderedText).contains("Alumno");
-    assertThat(rendered.contentMode()).isEqualTo(com.estoma.communications.contracts.EmailContentMode.TEMPLATE);
-    assertThat(recordingProvider.lastRequest.get().contentMode()).isEqualTo(com.estoma.communications.contracts.EmailContentMode.GENERIC);
-    assertThat(recordingProvider.lastRequest.get().templateCode()).isNull();
-
-    jdbc.sql("UPDATE email_deliveries SET next_attempt_at = now() WHERE email_delivery_id = :id")
-        .param("id", delivery.emailDeliveryId()).update();
-    worker.pollAndProcess();
-    EmailDelivery retried = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
-    assertThat(retried.subject()).isEqualTo("Local template");
-    assertThat(retried.textBody()).isEqualTo(renderedText);
+    EmailDelivery found = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
+    assertThat(found.status()).isEqualTo(EmailDeliveryStatus.PENDING);
+    assertThat(found.attemptCount()).isZero();
+    assertThat(found.cycleAttemptCount()).isZero();
+    assertThat(found.claimToken()).isNull();
+    assertThat(jdbc.sql("SELECT status::text FROM email_delivery_attempts WHERE email_delivery_id = :id")
+        .param("id", delivery.emailDeliveryId()).query(String.class).single()).isEqualTo("READY_TO_SEND");
+    assertThat(jdbc.sql("SELECT claim_token FROM email_delivery_attempts WHERE email_delivery_id = :id")
+        .param("id", delivery.emailDeliveryId()).query(UUID.class).optional()).isEmpty();
+    assertThat(jdbc.sql("SELECT count(*) FROM email_delivery_attempts WHERE email_delivery_id = :id AND provider = 'unknown'")
+        .param("id", delivery.emailDeliveryId()).query(Long.class).single()).isZero();
   }
 
   private UUID insertCommunication() {
@@ -157,10 +206,12 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
 
     final AtomicReference<EmailSendResult> nextResult = new AtomicReference<>();
     final AtomicBoolean calledWithTransactionActive = new AtomicBoolean(false);
+    final AtomicInteger calls = new AtomicInteger();
     final AtomicReference<EmailSendRequest> lastRequest = new AtomicReference<>();
 
     @Override
     public EmailSendResult send(EmailSendRequest request) {
+      calls.incrementAndGet();
       lastRequest.set(request);
       if (TransactionSynchronizationManager.isActualTransactionActive()) {
         calledWithTransactionActive.set(true);

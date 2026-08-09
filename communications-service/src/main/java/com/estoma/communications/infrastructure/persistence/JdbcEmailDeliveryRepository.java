@@ -14,7 +14,7 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
 
   private static final String COLUMNS =
       """
-      email_delivery_id, communication_id, recipient_address, recipient_name, from_name, from_address, reply_to_address,
+       email_delivery_id, communication_id, recipient_address, recipient_name, from_name, from_address, reply_to_address, sender_code,
       content_mode, subject, text_body, html_body, template_code, template_data,
       status, attempt_count, next_attempt_at, accepted_at, delivered_at, failed_at, last_error_code, last_error_message,
        created_at, updated_at, claim_token, claimed_at, lease_until, worker_id, retry_cycle, cycle_attempt_count
@@ -36,18 +36,22 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
         .query(EmailDeliveryRowMapper.INSTANCE)
         .optional();
   }
+  @Override public Optional<EmailDelivery> findByIdForUpdate(UUID emailDeliveryId) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM email_deliveries WHERE email_delivery_id = :emailDeliveryId FOR UPDATE")
+        .param("emailDeliveryId", emailDeliveryId).query(EmailDeliveryRowMapper.INSTANCE).optional();
+  }
 
   @Override
   public void insert(EmailDelivery delivery) {
     jdbc.sql(
             """
             INSERT INTO email_deliveries (
-              email_delivery_id, communication_id, recipient_address, recipient_name, from_name, from_address, reply_to_address,
+               email_delivery_id, communication_id, recipient_address, recipient_name, from_name, from_address, reply_to_address, sender_code,
               content_mode, subject, text_body, html_body, template_code, template_data,
               status, attempt_count, next_attempt_at, accepted_at, delivered_at, failed_at, last_error_code, last_error_message,
                 created_at, updated_at, claim_token, claimed_at, lease_until, worker_id, retry_cycle, cycle_attempt_count
             ) VALUES (
-              :emailDeliveryId, :communicationId, :recipientAddress, :recipientName, :fromName, :fromAddress, :replyToAddress,
+               :emailDeliveryId, :communicationId, :recipientAddress, :recipientName, :fromName, :fromAddress, :replyToAddress, :senderCode,
               CAST(:contentMode AS email_content_mode), :subject, :textBody, :htmlBody, :templateCode, CAST(:templateData AS jsonb),
               CAST(:status AS email_delivery_status), :attemptCount, :nextAttemptAt, :acceptedAt, :deliveredAt, :failedAt, :lastErrorCode, :lastErrorMessage,
                 :createdAt, :updatedAt, :claimToken, :claimedAt, :leaseUntil, :workerId, :retryCycle, :cycleAttemptCount
@@ -59,7 +63,8 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
         .param("recipientName", delivery.recipientName())
         .param("fromName", delivery.fromName())
         .param("fromAddress", delivery.fromAddress())
-        .param("replyToAddress", delivery.replyToAddress())
+         .param("replyToAddress", delivery.replyToAddress())
+         .param("senderCode", delivery.senderCode())
         .param("contentMode", delivery.contentMode().name())
         .param("subject", delivery.subject())
         .param("textBody", delivery.textBody())
@@ -151,7 +156,7 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
             FROM due
             WHERE e.email_delivery_id = due.email_delivery_id
             RETURNING
-              e.email_delivery_id, e.communication_id, e.recipient_address, e.recipient_name, e.from_name, e.from_address, e.reply_to_address,
+               e.email_delivery_id, e.communication_id, e.recipient_address, e.recipient_name, e.from_name, e.from_address, e.reply_to_address, e.sender_code,
               e.content_mode, e.subject, e.text_body, e.html_body, e.template_code, e.template_data,
               e.status, e.attempt_count, e.next_attempt_at, e.accepted_at, e.delivered_at, e.failed_at, e.last_error_code, e.last_error_message,
               e.created_at, e.updated_at, e.claim_token, e.claimed_at, e.lease_until, e.worker_id, e.retry_cycle, e.cycle_attempt_count
@@ -165,36 +170,38 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
 
   @Override
   public int releaseExpiredLeases() {
-    int recovered = jdbc.sql("""
-        UPDATE email_deliveries d
-           SET status = CASE WHEN EXISTS (
-                  SELECT 1 FROM email_delivery_attempts a
-                  WHERE a.email_delivery_id = d.email_delivery_id
-                    AND a.claim_token = d.claim_token
-                    AND a.status = CAST('INDETERMINATE' AS email_attempt_status)
-               ) THEN CAST('INDETERMINATE' AS email_delivery_status)
-               ELSE CAST('PENDING' AS email_delivery_status) END,
-               next_attempt_at = CASE WHEN EXISTS (
-                 SELECT 1 FROM email_delivery_attempts a
-                  WHERE a.email_delivery_id = d.email_delivery_id
-                    AND a.claim_token = d.claim_token
-                    AND a.status = CAST('INDETERMINATE' AS email_attempt_status)
-               ) THEN NULL ELSE now() END,
-                updated_at = now()
-          WHERE d.status = CAST('SENDING' AS email_delivery_status)
-           AND d.lease_until IS NOT NULL AND d.lease_until < now()
-         """).update();
-    jdbc.sql("""
-        UPDATE email_delivery_attempts a SET status = CAST('INDETERMINATE' AS email_attempt_status),
-          normalized_error_code = 'LEASE_EXPIRED', error_message = 'provider call may have started', completed_at = now()
-        FROM email_deliveries d
-        WHERE a.email_delivery_id = d.email_delivery_id AND a.claim_token = d.claim_token
-          AND a.status = CAST('CALL_STARTED' AS email_attempt_status)
-          AND d.status = CAST('INDETERMINATE' AS email_delivery_status)
-          AND d.lease_until IS NOT NULL AND d.lease_until < now()
+    // Lock order is delivery then its attempt. READY attempts are retained for
+    // reuse; CALL_STARTED means a provider call may have escaped the process.
+    return jdbc.sql("""
+        WITH expired AS (
+          SELECT d.email_delivery_id, d.claim_token FROM email_deliveries d
+           WHERE d.status = CAST('SENDING' AS email_delivery_status)
+             AND d.lease_until IS NOT NULL AND d.lease_until < now()
+           FOR UPDATE SKIP LOCKED
+        ), locked_attempts AS (
+          SELECT a.email_delivery_attempt_id, a.email_delivery_id, a.status
+            FROM email_delivery_attempts a JOIN expired e ON e.email_delivery_id = a.email_delivery_id
+           WHERE a.claim_token = e.claim_token FOR UPDATE
+        ), started AS (
+          UPDATE email_delivery_attempts a SET status = CAST('INDETERMINATE' AS email_attempt_status),
+            normalized_error_code = 'LEASE_EXPIRED', error_message = 'provider call may have started',
+            completed_at = now(), claim_token = NULL
+           FROM locked_attempts l WHERE a.email_delivery_attempt_id = l.email_delivery_attempt_id
+             AND l.status = CAST('CALL_STARTED' AS email_attempt_status)
+          RETURNING a.email_delivery_id
+        ), ready AS (
+          UPDATE email_delivery_attempts a SET claim_token = NULL
+           FROM locked_attempts l WHERE a.email_delivery_attempt_id = l.email_delivery_attempt_id
+             AND l.status = CAST('READY_TO_SEND' AS email_attempt_status)
+        )
+        UPDATE email_deliveries d SET
+          status = CASE WHEN EXISTS (SELECT 1 FROM started s WHERE s.email_delivery_id = d.email_delivery_id)
+                    THEN CAST('INDETERMINATE' AS email_delivery_status) ELSE CAST('PENDING' AS email_delivery_status) END,
+          next_attempt_at = CASE WHEN EXISTS (SELECT 1 FROM started s WHERE s.email_delivery_id = d.email_delivery_id)
+                    THEN NULL ELSE now() END,
+          claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL, updated_at = now()
+         FROM expired e WHERE d.email_delivery_id = e.email_delivery_id
         """).update();
-    jdbc.sql("UPDATE email_deliveries SET claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL WHERE status = CAST('INDETERMINATE' AS email_delivery_status) AND lease_until < now()").update();
-    return recovered;
   }
 
   @Override
@@ -203,7 +210,7 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
         UPDATE email_deliveries SET status = CAST('SENDING' AS email_delivery_status),
           attempt_count = attempt_count + 1, cycle_attempt_count = cycle_attempt_count + 1, updated_at = :now
         WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > :now
-          AND status IN (CAST('PENDING' AS email_delivery_status), CAST('RETRY_SCHEDULED' AS email_delivery_status), CAST('SENDING' AS email_delivery_status))
+          AND status = CAST('SENDING' AS email_delivery_status)
         """)
         .param("id", deliveryId).param("token", claimToken).param("now", Timestamps.toTimestamp(now)).update();
   }
@@ -218,6 +225,17 @@ class JdbcEmailDeliveryRepository implements EmailDeliveryRepository {
           (CAST('PENDING' AS email_delivery_status), CAST('RETRY_SCHEDULED' AS email_delivery_status), CAST('SENDING' AS email_delivery_status))
         """).param("now", Timestamps.toTimestamp(now)).param("code", code).param("message", message)
         .param("id", deliveryId).param("token", claimToken).param("now", Timestamps.toTimestamp(now)).update();
+  }
+
+  @Override
+  public int requeueUnstarted(UUID deliveryId, UUID claimToken, Instant now) {
+    return jdbc.sql("""
+        UPDATE email_deliveries SET status = CAST('PENDING' AS email_delivery_status), next_attempt_at = :now,
+          attempt_count = attempt_count - 1, cycle_attempt_count = cycle_attempt_count - 1,
+          claim_token = NULL, claimed_at = NULL, lease_until = NULL, worker_id = NULL, updated_at = :now
+         WHERE email_delivery_id = :id AND claim_token = :token AND lease_until > :now
+           AND status = CAST('SENDING' AS email_delivery_status)
+        """).param("id", deliveryId).param("token", claimToken).param("now", Timestamps.toTimestamp(now)).update();
   }
 
   @Override

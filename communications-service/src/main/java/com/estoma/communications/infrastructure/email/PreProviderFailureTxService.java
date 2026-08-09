@@ -2,6 +2,7 @@ package com.estoma.communications.infrastructure.email;
 
 import com.estoma.communications.application.port.CommunicationRepository;
 import com.estoma.communications.application.port.EmailDeliveryRepository;
+import com.estoma.communications.application.port.EmailDeliveryAttemptRepository;
 import com.estoma.communications.application.port.OutboxAppendRequest;
 import com.estoma.communications.application.port.OutboxPort;
 import com.estoma.communications.contracts.CommunicationsEvent;
@@ -19,13 +20,15 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class PreProviderFailureTxService {
   private final EmailDeliveryRepository deliveries;
+  private final EmailDeliveryAttemptRepository attempts;
   private final CommunicationRepository communications;
   private final OutboxPort outbox;
   private final EnvelopeJsonCodec codec;
 
-  PreProviderFailureTxService(EmailDeliveryRepository deliveries, CommunicationRepository communications,
+  PreProviderFailureTxService(EmailDeliveryRepository deliveries, EmailDeliveryAttemptRepository attempts, CommunicationRepository communications,
       OutboxPort outbox, EnvelopeJsonCodec codec) {
     this.deliveries = deliveries;
+    this.attempts = attempts;
     this.communications = communications;
     this.outbox = outbox;
     this.codec = codec;
@@ -50,5 +53,11 @@ class PreProviderFailureTxService {
           codec.writeValueAsString(new CommunicationFailedPayload(communication.communicationId(), communication.recipientAccountId(),
                communication.systemCode(), communication.communicationType(), java.util.List.of("EMAIL"), code, now)), now));
     }
+  }
+
+  @Transactional
+  void requeue(com.estoma.communications.domain.email.EmailDelivery delivery) {
+    if (attempts.resetUnstarted(delivery.emailDeliveryId(), delivery.claimToken()) != 1) return;
+    deliveries.requeueUnstarted(delivery.emailDeliveryId(), delivery.claimToken(), Instant.now());
   }
 }
