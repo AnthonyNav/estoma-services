@@ -1,6 +1,6 @@
 package com.estoma.authentication.application;
 
-import com.estoma.authentication.contracts.Actor;
+import com.estoma.authentication.contracts.MessageEnvelope;
 
 /**
  * Authorization for durable commands and RPC operations against an
@@ -9,5 +9,5 @@ import com.estoma.authentication.contracts.Actor;
  */
 public interface AccountAuthorizationPolicy {
 
-  void check(Actor actor, String operation);
+  void check(MessageEnvelope envelope);
 }

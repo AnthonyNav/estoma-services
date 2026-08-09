@@ -1,6 +1,5 @@
 package com.estoma.authentication.infrastructure.messaging.outbound;
 
-import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.infrastructure.messaging.AmqpNames;
@@ -133,11 +132,11 @@ public class OutboxRelay {
         record.occurredAt(),
         record.correlationId(),
         record.causationId(),
-        null, // operationId: not tracked by this service's Outbox schema
-        null, // targetService only applies to COMMAND messages
+        record.operationId(),
+        record.idempotencyKey(),
         record.aggregateId(),
         record.aggregateVersion(),
-        (Actor) null,
+        record.actor(),
         codec.readTree(record.payloadJson()));
   }
 }

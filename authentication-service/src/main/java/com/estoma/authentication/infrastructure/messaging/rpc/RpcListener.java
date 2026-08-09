@@ -88,13 +88,39 @@ public class RpcListener {
     return new Message(codec.encodeValue(response), replyProps);
   }
 
-  private static boolean isAllowedProducer(String operationType, MessageProperties properties) {
-    if (!AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName().equals(operationType)) {
-      return true;
+  static boolean isAllowedProducer(String operationType, MessageProperties properties) {
+    String producer = header(properties, "x-estoma-producer");
+    String actorType = header(properties, "x-estoma-actor-type");
+    String actorService = header(properties, "x-estoma-actor-service");
+    String scope = header(properties, "x-estoma-actor-scope");
+    if (AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName().equals(operationType)) {
+      return "communications".equals(producer)
+          && "SYSTEM".equals(actorType)
+          && "communications".equals(actorService)
+          && "GLOBAL".equals(scope);
     }
-    return "communications".equals(properties.getHeader("x-estoma-producer"))
-        && "SYSTEM".equals(properties.getHeader("x-estoma-actor-type"))
-        && "communications".equals(properties.getHeader("x-estoma-actor-service"));
+    return "bff".equals(producer)
+        && "ACCOUNT".equals(actorType)
+        && "SELF".equals(scope)
+        && validSelfTarget(properties);
+  }
+
+  private static boolean validSelfTarget(MessageProperties properties) {
+    String actorAccountId = header(properties, "x-estoma-actor-account-id");
+    String targetAccountId = header(properties, "x-estoma-target-account-id");
+    if (actorAccountId == null || targetAccountId == null) {
+      return false;
+    }
+    try {
+      return UUID.fromString(actorAccountId).equals(UUID.fromString(targetAccountId));
+    } catch (IllegalArgumentException ignored) {
+      return false;
+    }
+  }
+
+  private static String header(MessageProperties properties, String name) {
+    Object value = properties.getHeader(name);
+    return value instanceof String string ? string : null;
   }
 
   private static UUID parseCorrelationId(String raw) {

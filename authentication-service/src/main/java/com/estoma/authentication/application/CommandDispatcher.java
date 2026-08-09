@@ -66,7 +66,7 @@ public class CommandDispatcher {
       return new CommandOutcome.Duplicate();
     }
 
-    authorizationPolicy.check(envelope.actor(), envelope.messageType());
+    authorizationPolicy.check(envelope);
 
     CommandHandler handler = handlersByMessageType.get(envelope.messageType());
     if (handler == null) {
@@ -90,7 +90,8 @@ public class CommandDispatcher {
     outbox.append(
         new OutboxAppendRequest(
             UUID.randomUUID(), resultType, 1, MessageKind.RESULT.name(), result.aggregateId(), result.aggregateVersion(),
-            envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(payload), Instant.now()));
+            envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
+            codec.writeValueAsString(payload), Instant.now()));
   }
 
   private void appendRejectedResult(MessageEnvelope envelope, AuthenticationRejectedException rejected) {
@@ -99,13 +100,14 @@ public class CommandDispatcher {
     outbox.append(
         new OutboxAppendRequest(
             UUID.randomUUID(), resultType, 1, MessageKind.RESULT.name(), null, null, envelope.correlationId(), envelope.messageId(),
-            codec.writeValueAsString(payload), Instant.now()));
+            envelope.operationId(), envelope.idempotencyKey(), envelope.actor(), codec.writeValueAsString(payload), Instant.now()));
   }
 
   private void appendEvent(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
     outbox.append(
         new OutboxAppendRequest(
             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion,
-            envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(event.payload()), Instant.now()));
+            envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
+            codec.writeValueAsString(event.payload()), Instant.now()));
   }
 }

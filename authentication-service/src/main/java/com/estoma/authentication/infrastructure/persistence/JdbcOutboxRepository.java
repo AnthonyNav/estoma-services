@@ -2,6 +2,8 @@ package com.estoma.authentication.infrastructure.persistence;
 
 import com.estoma.authentication.application.port.OutboxAppendRequest;
 import com.estoma.authentication.application.port.OutboxPort;
+import com.estoma.authentication.contracts.Actor;
+import tools.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -20,9 +22,11 @@ import org.springframework.stereotype.Repository;
 public class JdbcOutboxRepository implements OutboxPort {
 
   private final JdbcClient jdbc;
+  private final ObjectMapper mapper;
 
-  JdbcOutboxRepository(JdbcClient jdbc) {
+  JdbcOutboxRepository(JdbcClient jdbc, ObjectMapper mapper) {
     this.jdbc = jdbc;
+    this.mapper = mapper;
   }
 
   @Override
@@ -31,10 +35,10 @@ public class JdbcOutboxRepository implements OutboxPort {
             """
             INSERT INTO outbox_messages (
               message_id, message_type, message_version, message_kind, aggregate_id, aggregate_version,
-              correlation_id, causation_id, payload, status, attempts, occurred_at, available_at
+               correlation_id, causation_id, operation_id, idempotency_key, actor, payload, status, attempts, occurred_at, available_at
             ) VALUES (
               :messageId, :messageType, :messageVersion, :messageKind, :aggregateId, :aggregateVersion,
-              :correlationId, :causationId, CAST(:payload AS jsonb),
+               :correlationId, :causationId, :operationId, :idempotencyKey, CAST(:actor AS jsonb), CAST(:payload AS jsonb),
               CAST('PENDING' AS outbox_status), 0, :occurredAt, :occurredAt
             )
             """)
@@ -46,6 +50,9 @@ public class JdbcOutboxRepository implements OutboxPort {
         .param("aggregateVersion", request.aggregateVersion())
         .param("correlationId", request.correlationId())
         .param("causationId", request.causationId())
+        .param("operationId", request.operationId())
+        .param("idempotencyKey", request.idempotencyKey())
+        .param("actor", request.actor() == null ? null : mapper.writeValueAsString(request.actor()))
         .param("payload", request.payloadJson())
         .param("occurredAt", Timestamps.toTimestamp(request.occurredAt()))
         .update();
@@ -66,7 +73,7 @@ public class JdbcOutboxRepository implements OutboxPort {
     return jdbc.sql(
             """
             SELECT message_id, message_type, message_version, message_kind, aggregate_id, aggregate_version,
-                   correlation_id, causation_id, payload::text AS payload, attempts, occurred_at
+                    correlation_id, causation_id, operation_id, idempotency_key, actor::text AS actor, payload::text AS payload, attempts, occurred_at
             FROM outbox_messages
             WHERE status = 'PENDING' AND available_at <= now()
             ORDER BY occurred_at
@@ -85,6 +92,9 @@ public class JdbcOutboxRepository implements OutboxPort {
                     rs.getObject("aggregate_version") == null ? null : rs.getInt("aggregate_version"),
                     (UUID) rs.getObject("correlation_id"),
                     (UUID) rs.getObject("causation_id"),
+                    (UUID) rs.getObject("operation_id"),
+                    rs.getString("idempotency_key"),
+                    rs.getString("actor") == null ? null : mapper.readValue(rs.getString("actor"), Actor.class),
                     rs.getString("payload"),
                     rs.getInt("attempts"),
                     Timestamps.toInstant(rs, "occurred_at")))

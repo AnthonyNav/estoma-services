@@ -38,9 +38,10 @@ public class RoutingKeyResolver {
           Map.entry(AuthenticationEvent.TEMPORARY_PASSWORD_SET.wireName(), AmqpNames.ROUTING_KEY_TEMPORARY_PASSWORD_SET),
           Map.entry(
               AuthenticationEvent.TEMPORARY_PASSWORD_REGENERATED.wireName(), AmqpNames.ROUTING_KEY_TEMPORARY_PASSWORD_REGENERATED),
-          Map.entry(AuthenticationEvent.SESSION_REVOKED.wireName(), AmqpNames.ROUTING_KEY_SESSION_REVOKED),
-          Map.entry(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), AmqpNames.ROUTING_KEY_ALL_ACCOUNT_SESSIONS_REVOKED),
-          Map.entry(AuthenticationEvent.PASSWORD_RECOVERY_REQUESTED.wireName(), AmqpNames.ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED));
+           Map.entry(AuthenticationEvent.SESSION_REVOKED.wireName(), AmqpNames.ROUTING_KEY_SESSION_REVOKED),
+           Map.entry(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), AmqpNames.ROUTING_KEY_ALL_ACCOUNT_SESSIONS_REVOKED),
+           Map.entry(AuthenticationEvent.OTHER_ACCOUNT_SESSIONS_REVOKED.wireName(), AmqpNames.ROUTING_KEY_OTHER_ACCOUNT_SESSIONS_REVOKED),
+           Map.entry(AuthenticationEvent.PASSWORD_RECOVERY_REQUESTED.wireName(), AmqpNames.ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED));
 
   public record Destination(String exchange, String routingKey) {}
 

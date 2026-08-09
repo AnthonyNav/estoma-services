@@ -2,6 +2,7 @@ package com.estoma.authentication.infrastructure.messaging.inbound;
 
 import com.estoma.authentication.application.CommandDispatcher;
 import com.estoma.authentication.application.CommandOutcome;
+import com.estoma.authentication.application.AccountAuthorizationPolicy;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessagingNames;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
@@ -33,14 +34,16 @@ public class CommandListener {
 
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
+  private final AccountAuthorizationPolicy authorizationPolicy;
   private final CommandDispatcher dispatcher;
   private final TransientFailureClassifier classifier;
   private final FailureRouter failureRouter;
 
   public CommandListener(
-      EnvelopeJsonCodec codec, EnvelopeValidator validator, CommandDispatcher dispatcher, TransientFailureClassifier classifier, FailureRouter failureRouter) {
+      EnvelopeJsonCodec codec, EnvelopeValidator validator, AccountAuthorizationPolicy authorizationPolicy, CommandDispatcher dispatcher, TransientFailureClassifier classifier, FailureRouter failureRouter) {
     this.codec = codec;
     this.validator = validator;
+    this.authorizationPolicy = authorizationPolicy;
     this.dispatcher = dispatcher;
     this.classifier = classifier;
     this.failureRouter = failureRouter;
@@ -57,6 +60,7 @@ public class CommandListener {
     try {
       envelope = codec.decode(message.getBody());
       validator.validateCommand(envelope);
+      authorizationPolicy.check(envelope);
     } catch (Exception e) {
       log.error("invalid message on {}: {}", MessagingNames.AUTHENTICATION_COMMAND_QUEUE, e.toString());
       try {

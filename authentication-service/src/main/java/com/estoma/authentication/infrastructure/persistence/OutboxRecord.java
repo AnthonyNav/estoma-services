@@ -1,5 +1,6 @@
 package com.estoma.authentication.infrastructure.persistence;
 
+import com.estoma.authentication.contracts.Actor;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -13,6 +14,9 @@ public record OutboxRecord(
     Integer aggregateVersion,
     UUID correlationId,
     UUID causationId,
+    UUID operationId,
+    String idempotencyKey,
+    Actor actor,
     String payloadJson,
     int attempts,
     Instant occurredAt) {}
