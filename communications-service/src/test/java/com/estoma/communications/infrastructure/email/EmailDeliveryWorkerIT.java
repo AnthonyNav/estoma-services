@@ -16,11 +16,13 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
@@ -33,13 +35,29 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * @TestPropertySource} so tests call {@link EmailDeliveryWorker#pollAndProcess()}
  * directly and deterministically, instead of racing the real schedule.
  */
-@TestPropertySource(properties = "estoma.communications.email.worker.poll-interval-ms=3600000")
+@TestPropertySource(properties = {
+    "estoma.communications.email.worker.poll-interval-ms=3600000",
+    "estoma.communications.email.worker.sweeper-interval-ms=3600000",
+    "estoma.communications.email.worker.enabled=false",
+    "estoma.communications.email.worker.batch-size=10000"
+})
 class EmailDeliveryWorkerIT extends AbstractPostgresIT {
 
   @Autowired private EmailDeliveryWorker worker;
   @Autowired private EmailDeliveryRepository emailDeliveryRepository;
   @Autowired private CommunicationRepository communicationRepository;
   @Autowired private RecordingEmailProviderPort recordingProvider;
+  @Autowired private JdbcClient jdbc;
+
+  @BeforeEach
+  void isolateDeliveryData() {
+    jdbc.sql("DELETE FROM email_delivery_administrative_actions").update();
+    jdbc.sql("DELETE FROM email_delivery_attempts").update();
+    jdbc.sql("DELETE FROM email_deliveries").update();
+    jdbc.sql("DELETE FROM inbox_messages").update();
+    jdbc.sql("DELETE FROM communications").update();
+    jdbc.sql("DELETE FROM outbox_messages").update();
+  }
 
   @Test
   void acceptedDeliveryCompletesTheCommunication() {
@@ -83,7 +101,8 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
     Communication communication =
         Communication.requested(
             UUID.randomUUID(), UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
-            "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, Instant.now());
+            "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, java.util.List.of("EMAIL"),
+            UUID.randomUUID(), UUID.randomUUID(), "fingerprint", UUID.randomUUID(), null, Instant.now());
     communicationRepository.insert(communication);
     return communication.communicationId();
   }

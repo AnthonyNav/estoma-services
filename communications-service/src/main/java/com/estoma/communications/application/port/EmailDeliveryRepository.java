@@ -21,4 +21,14 @@ public interface EmailDeliveryRepository {
    * Operational Policy").
    */
   List<EmailDelivery> claimDue(int batchSize);
+
+  int releaseExpiredLeases();
+
+  default List<EmailDelivery> claimDue(int batchSize, String workerId) { return claimDue(batchSize); }
+
+  int startSending(UUID deliveryId, UUID claimToken, java.time.Instant now);
+
+  int failPreProvider(UUID deliveryId, UUID claimToken, String code, String message, java.time.Instant now);
+
+  default int updateClaimed(EmailDelivery delivery, UUID claimToken) { return update(delivery); }
 }
