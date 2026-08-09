@@ -14,6 +14,4 @@ public record StudentLoginIdentifierSynchronizationFailedPayload(
     UUID studentAcademicProfileId,
     int studentNumberVersion,
     String errorCode,
-    Instant failedAt,
-    UUID correlationId,
-    UUID causationId) {}
+    Instant failedAt) {}

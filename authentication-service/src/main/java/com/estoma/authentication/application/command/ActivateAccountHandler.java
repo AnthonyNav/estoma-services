@@ -87,19 +87,19 @@ class ActivateAccountHandler implements CommandHandler {
     if (rowsAffected == 0) {
       AccountUpdateGuard.rejectForFailedUpdate(accountRepository, command.accountId(), command.expectedVersion());
     }
+    String activationReason = isStudentImportActivation(envelope) ? "ACADEMIC_ABSENCE" : "ADMINISTRATIVE";
     statusHistoryRepository.insert(
         new AccountStatusChange(
-            UUID.randomUUID(), activated.accountId(), account.status(), activated.status(), null, null, envelope.actor(), envelope.correlationId(), now,
+            UUID.randomUUID(), activated.accountId(), account.status(), activated.status(), activationReason, null, envelope.actor(), envelope.correlationId(), now,
             activated.version()));
 
-    String activationReason = isStudentImportActivation(envelope) ? "STUDENT_IMPORT" : "COMMAND";
     AccountActivatedPayload eventPayload = new AccountActivatedPayload(activated.accountId(), account.status().name(), activated.status().name(), activationReason, now);
     return CommandHandlerResult.of(activated.accountId(), activated.version(), new EventToAppend(AuthenticationEvent.ACCOUNT_ACTIVATED.wireName(), eventPayload));
   }
 
   private static boolean isStudentImportActivation(MessageEnvelope envelope) {
-    return "academic".equals(envelope.producer())
+    return "student-import-process".equals(envelope.producer())
         && envelope.actor() != null
-        && "student-import-process".equals(envelope.actor().systemId());
+        && "academic".equals(envelope.actor().service());
   }
 }

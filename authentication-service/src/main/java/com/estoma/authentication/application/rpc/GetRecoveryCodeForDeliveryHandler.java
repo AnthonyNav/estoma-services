@@ -34,7 +34,7 @@ public class GetRecoveryCodeForDeliveryHandler {
     }
     if (!recovery.isActiveAndUsable(now)) {
       RejectionCode code = recovery.status() == com.estoma.authentication.domain.recovery.PasswordRecoveryRequest.Status.ATTEMPTS_EXHAUSTED
-          ? RejectionCode.RECOVERY_CODE_ATTEMPTS_EXHAUSTED
+          ? RejectionCode.RECOVERY_ATTEMPTS_EXHAUSTED
           : RejectionCode.RECOVERY_CODE_INVALID;
       throw new AuthenticationRejectedException(code, "recovery request is no longer usable");
     }

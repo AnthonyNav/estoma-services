@@ -151,10 +151,11 @@ public class CommandDispatcher {
   }
 
   private void appendEvent(MessageEnvelope envelope, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
+    UUID eventAggregateId = event.inheritHandlerAggregate() ? aggregateId : event.aggregateId();
+    Integer eventAggregateVersion = event.inheritHandlerAggregate() ? aggregateVersion : event.aggregateVersion();
     outbox.append(
         new OutboxAppendRequest(
-            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), event.aggregateId() != null ? event.aggregateId() : aggregateId,
-            event.aggregateVersion() != null ? event.aggregateVersion() : aggregateVersion,
+            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), eventAggregateId, eventAggregateVersion,
             envelope.correlationId(), envelope.messageId(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor(),
             null, codec.writeValueAsString(event.payload()), Instant.now()));
   }

@@ -168,7 +168,7 @@ public final class Account {
         status,
         failedAttempts,
         lockedUntil,
-        version + 1,
+        version,
         createdAt,
         now,
         deactivatedAt,

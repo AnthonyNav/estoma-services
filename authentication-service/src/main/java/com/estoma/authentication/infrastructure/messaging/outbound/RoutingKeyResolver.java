@@ -11,12 +11,9 @@ import org.springframework.stereotype.Component;
  * claimed row to. Only RESULT and EVENT kinds are resolved here --
  * {@code authentication-service} never publishes COMMAND messages.
  *
- * <p>RESULT routing is a fixed constant, unlike {@code users-service}'s
- * per-row destination: system_contract.md lists {@code results.bff} as
- * the only requester for this service's durable commands in v1, and this
- * service's Outbox schema carries no per-row destination metadata (see
- * {@code OutboxAppendRequest}'s docstring) -- if a second requester is
- * ever introduced, this is the one place that needs to change.
+ * <p>RESULT routing is resolved from the internal V1 requester whitelist.
+ * The requester is Outbox transport metadata only; it is not serialized into
+ * the common envelope and does not represent message ownership.
  *
  * <p>EVENT routing keys are a fixed, static table: exactly one key per
  * event {@code messageType}, in the {@code authentication.<subject>.

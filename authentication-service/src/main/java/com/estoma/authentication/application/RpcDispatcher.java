@@ -61,9 +61,11 @@ public class RpcDispatcher {
   }
 
   private void appendEvent(UUID correlationId, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
+    UUID eventAggregateId = event.inheritHandlerAggregate() ? aggregateId : event.aggregateId();
+    Integer eventAggregateVersion = event.inheritHandlerAggregate() ? aggregateVersion : event.aggregateVersion();
     outbox.append(
         new OutboxAppendRequest(
-             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion, correlationId, null,
+             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), eventAggregateId, eventAggregateVersion, correlationId, null,
              null, null, null, null, codec.writeValueAsString(event.payload()), Instant.now()));
   }
 }

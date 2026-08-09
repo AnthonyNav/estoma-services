@@ -8,9 +8,4 @@ import java.util.UUID;
  * mandatory and protected by {@code security_rpc_idempotency_records}.
  */
 public record SetTemporaryPasswordRequest(
-    UUID accountId, String idempotencyKey) {
-  @Deprecated
-  public SetTemporaryPasswordRequest(UUID accountId, java.time.Instant ignoredExpiresAt, UUID ignoredRequestedBy, String idempotencyKey) {
-    this(accountId, idempotencyKey);
-  }
-}
+    UUID accountId, UUID requestedByAccountId, String idempotencyKey) {}

@@ -59,6 +59,12 @@ class DeactivateAccountHandler implements CommandHandler {
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
 
     AccountDeactivationReason reason = parseReason(command.reasonCode());
+    if (isStudentImport(envelope)
+        && (reason != AccountDeactivationReason.ACADEMIC_ABSENCE
+            || account.loginIdentifier().type() != com.estoma.authentication.contracts.LoginType.MATRICULA)) {
+      throw new AuthenticationRejectedException(RejectionCode.ACTOR_NOT_AUTHORIZED,
+          "student import may only deactivate academic-absence matricula accounts");
+    }
     Instant now = Instant.now();
     Account deactivated = account.deactivated(now, reason);
 
@@ -92,5 +98,12 @@ class DeactivateAccountHandler implements CommandHandler {
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("reasonCode is not a recognized value: " + reasonCode, e);
     }
+  }
+
+  private static boolean isStudentImport(MessageEnvelope envelope) {
+    return "student-import-process".equals(envelope.producer())
+        && envelope.actor() != null
+        && "SYSTEM".equals(envelope.actor().type())
+        && "academic".equals(envelope.actor().service());
   }
 }

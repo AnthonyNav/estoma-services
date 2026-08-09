@@ -10,6 +10,7 @@ import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.contracts.result.ResultPayload;
 import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
+import com.estoma.authentication.infrastructure.messaging.inbound.EnvelopeValidator;
 import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -43,12 +44,14 @@ public class RpcListener {
   private final RpcOperationRouter router;
   private final RpcDispatcher dispatcher;
   private final AccountAuthorizationPolicy authorizationPolicy;
+  private final EnvelopeValidator envelopeValidator;
 
-  public RpcListener(EnvelopeJsonCodec codec, RpcOperationRouter router, RpcDispatcher dispatcher, AccountAuthorizationPolicy authorizationPolicy) {
+  public RpcListener(EnvelopeJsonCodec codec, RpcOperationRouter router, RpcDispatcher dispatcher, AccountAuthorizationPolicy authorizationPolicy, EnvelopeValidator envelopeValidator) {
     this.codec = codec;
     this.router = router;
     this.dispatcher = dispatcher;
     this.authorizationPolicy = authorizationPolicy;
+    this.envelopeValidator = envelopeValidator;
   }
 
   @RabbitListener(queues = MessagingNames.AUTHENTICATION_RPC_QUEUE, containerFactory = "rpcContainerFactory")
@@ -61,18 +64,13 @@ public class RpcListener {
     }
     MessageProperties requestProps = message.getMessageProperties();
 
-    ResultPayload result;
-    if (request.messageKind() != MessageKind.RPC_REQUEST || request.correlationId() == null || request.operationId() != null
-        || requestProps.getReplyTo() == null || requestProps.getReplyTo().isBlank()) {
-      result = ResultPayload.rejected("INVALID_RPC_ENVELOPE");
-    } else if (!router.supports(request.messageType())) {
-      log.error("unrecognized RPC operation type={} correlationId={}", request.messageType(), request.correlationId());
-      result = ResultPayload.rejected("UNRECOGNIZED_OPERATION");
-    } else {
-      result = handle(request);
+    try {
+      envelopeValidator.validateRpc(request, requestProps.getReplyTo());
+    } catch (Exception invalid) {
+      return buildReply(response(request, ResultPayload.rejected("INVALID_RPC_ENVELOPE")));
     }
 
-    return buildReply(response(request, result));
+    return buildReply(response(request, handle(request)));
   }
 
   private ResultPayload handle(MessageEnvelope request) {

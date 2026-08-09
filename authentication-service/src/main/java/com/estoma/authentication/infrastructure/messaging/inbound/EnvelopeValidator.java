@@ -1,6 +1,8 @@
 package com.estoma.authentication.infrastructure.messaging.inbound;
 
 import com.estoma.authentication.contracts.AuthenticationCommand;
+import com.estoma.authentication.contracts.AuthenticationRpcOperation;
+import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import java.util.Arrays;
@@ -29,7 +31,7 @@ public class EnvelopeValidator {
     validateCommon(envelope);
     if (envelope.messageKind() != MessageKind.COMMAND) {
       throw new InvalidMessageException(
-          "expected messageKind=COMMAND on commands.authentication-service, got " + envelope.messageKind());
+           "expected messageKind=COMMAND on commands.authentication, got " + envelope.messageKind());
     }
     if (!COMMAND_MESSAGE_TYPES.contains(envelope.messageType())) {
       throw new InvalidMessageException("unrecognized command messageType " + envelope.messageType());
@@ -41,7 +43,7 @@ public class EnvelopeValidator {
     validateCommon(envelope);
     if (envelope.messageKind() != MessageKind.EVENT) {
       throw new InvalidMessageException(
-          "expected messageKind=EVENT on events.authentication-service, got " + envelope.messageKind());
+           "expected messageKind=EVENT on events.authentication, got " + envelope.messageKind());
     }
     // messageType is not checked against a closed set here: this queue
     // deliberately accepts events from producers this service does not
@@ -53,10 +55,52 @@ public class EnvelopeValidator {
     // than an immediate DLQ, so an operator has a window to react.
   }
 
+  public void validateRpc(MessageEnvelope envelope, String replyTo) {
+    validateCommon(envelope);
+    if (envelope.messageKind() != MessageKind.RPC_REQUEST || envelope.operationId() != null
+        || envelope.payload() == null || replyTo == null || replyTo.isBlank()) {
+      throw new InvalidMessageException("invalid RPC envelope structure");
+    }
+    if (Arrays.stream(AuthenticationRpcOperation.values()).noneMatch(operation -> operation.wireName().equals(envelope.messageType()))) {
+      throw new InvalidMessageException("unrecognized RPC messageType " + envelope.messageType());
+    }
+    validateActor(envelope.actor());
+    if ((AuthenticationRpcOperation.SET_TEMPORARY_PASSWORD.wireName().equals(envelope.messageType())
+        || AuthenticationRpcOperation.REGENERATE_TEMPORARY_PASSWORD.wireName().equals(envelope.messageType()))
+        && (envelope.idempotencyKey() == null || envelope.idempotencyKey().isBlank())) {
+      throw new InvalidMessageException("idempotencyKey must not be blank for temporary-password RPC");
+    }
+  }
+
+  private static void validateActor(Actor actor) {
+    if (actor == null || actor.type() == null || actor.scope() == null || actor.scope().isBlank()) {
+      throw new InvalidMessageException("actor is invalid");
+    }
+    switch (actor.type()) {
+      case "ANONYMOUS" -> {
+        if (actor.accountId() != null || actor.service() != null || actor.systemId() != null) {
+          throw new InvalidMessageException("anonymous actor is invalid");
+        }
+      }
+      case "ACCOUNT" -> {
+        if (actor.accountId() == null || actor.service() != null) {
+          throw new InvalidMessageException("account actor is invalid");
+        }
+      }
+      case "SYSTEM" -> {
+        if (actor.accountId() != null || actor.service() == null || actor.service().isBlank()) {
+          throw new InvalidMessageException("system actor is invalid");
+        }
+      }
+      default -> throw new InvalidMessageException("unrecognized actor type " + actor.type());
+    }
+  }
+
   private void validateCommon(MessageEnvelope envelope) {
     requireNonNull(envelope, "envelope");
     requireNonNull(envelope.messageId(), "messageId");
     requireNonNull(envelope.correlationId(), "correlationId");
+    requireNonNull(envelope.occurredAt(), "occurredAt");
     requireNonBlank(envelope.messageType(), "messageType");
     requireNonBlank(envelope.producer(), "producer");
     requireNonNull(envelope.messageKind(), "messageKind");

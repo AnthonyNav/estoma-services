@@ -8,9 +8,4 @@ import java.util.UUID;
  * SetTemporaryPassword}.
  */
 public record RegenerateTemporaryPasswordRequest(
-    UUID accountId, String idempotencyKey) {
-  @Deprecated
-  public RegenerateTemporaryPasswordRequest(UUID accountId, java.time.Instant ignoredExpiresAt, UUID ignoredRequestedBy, String idempotencyKey) {
-    this(accountId, idempotencyKey);
-  }
-}
+    UUID accountId, UUID requestedByAccountId, String idempotencyKey) {}

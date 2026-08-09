@@ -36,6 +36,7 @@ public class SetTemporaryPasswordHandler {
 
   public RpcHandlerOutcome<SetTemporaryPasswordResponse> handle(RpcRequestContext context, SetTemporaryPasswordRequest request) {
     requireContextConsistency(context, request.accountId(), request.idempotencyKey());
+    requireRequester(context, request.requestedByAccountId());
     Account account = support.requireAccount(context.targetAccountId());
 
     String fingerprint = fingerprint(request);
@@ -60,17 +61,24 @@ public class SetTemporaryPasswordHandler {
 
   @Deprecated
   public RpcHandlerOutcome<SetTemporaryPasswordResponse> handle(SetTemporaryPasswordRequest request) {
-    return handle(new RpcRequestContext(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("SYSTEM", null, "bff", "GLOBAL", null), request.accountId(), request.idempotencyKey()), request);
+    return handle(new RpcRequestContext(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", request.requestedByAccountId(), null, "GLOBAL", null), request.accountId(), request.idempotencyKey()), request);
   }
 
   private String fingerprint(SetTemporaryPasswordRequest request) {
-    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.idempotencyKey());
+    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.requestedByAccountId() + "|" + request.idempotencyKey());
   }
 
   private static void requireContextConsistency(RpcRequestContext context, java.util.UUID accountId, String idempotencyKey) {
     if (!java.util.Objects.equals(context.targetAccountId(), accountId) || !java.util.Objects.equals(context.idempotencyKey(), idempotencyKey)) {
       throw new com.estoma.authentication.domain.AuthenticationRejectedException(
           com.estoma.authentication.domain.RejectionCode.ACTOR_NOT_AUTHORIZED, "RPC context does not match request");
+    }
+  }
+
+  private static void requireRequester(RpcRequestContext context, java.util.UUID requestedByAccountId) {
+    if (!java.util.Objects.equals(context.actor().accountId(), requestedByAccountId)) {
+      throw new com.estoma.authentication.domain.AuthenticationRejectedException(
+          com.estoma.authentication.domain.RejectionCode.ACTOR_NOT_AUTHORIZED, "requester does not match actor");
     }
   }
 }

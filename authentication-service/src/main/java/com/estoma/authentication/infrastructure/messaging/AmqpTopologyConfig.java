@@ -27,7 +27,7 @@ import org.springframework.context.annotation.Configuration;
  *
  * <p>Every queue below sets its dead-letter routing key explicitly rather
  * than relying on the default of preserving the original routing key: a
- * command dead-lettered from {@code commands.authentication-service}
+ * command dead-lettered from {@code commands.authentication}
  * would otherwise arrive at {@code platform.dlx} with key {@code
  * authentication} ({@link AmqpNames#PRODUCER}, this service's routing
  * key on {@code platform.commands}), colliding with the commands
@@ -96,7 +96,7 @@ public class AmqpTopologyConfig {
   }
 
   /**
-   * {@code events.authentication-service}, its own DLQ, and a single 5s
+   * the Authentication events queue, its own DLQ, and a single 5s
    * retry tier -- simpler than the command queue's 3 tiers because
    * consumed events (`PersonCreated`/`PersonActivated`/`PersonDeactivated`/
    * `StudentNumberCorrected`) are idempotent projections; one retry

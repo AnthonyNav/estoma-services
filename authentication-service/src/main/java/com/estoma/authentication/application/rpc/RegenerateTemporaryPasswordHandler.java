@@ -36,6 +36,10 @@ public class RegenerateTemporaryPasswordHandler {
       throw new com.estoma.authentication.domain.AuthenticationRejectedException(
           com.estoma.authentication.domain.RejectionCode.ACTOR_NOT_AUTHORIZED, "RPC context does not match request");
     }
+    if (!java.util.Objects.equals(context.actor().accountId(), request.requestedByAccountId())) {
+      throw new com.estoma.authentication.domain.AuthenticationRejectedException(
+          com.estoma.authentication.domain.RejectionCode.ACTOR_NOT_AUTHORIZED, "requester does not match actor");
+    }
     Account account = support.requireAccount(context.targetAccountId());
 
     String fingerprint = fingerprint(request);
@@ -57,10 +61,10 @@ public class RegenerateTemporaryPasswordHandler {
 
   @Deprecated
   public RpcHandlerOutcome<RegenerateTemporaryPasswordResponse> handle(RegenerateTemporaryPasswordRequest request) {
-    return handle(new RpcRequestContext(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("SYSTEM", null, "bff", "GLOBAL", null), request.accountId(), request.idempotencyKey()), request);
+    return handle(new RpcRequestContext(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", request.requestedByAccountId(), null, "GLOBAL", null), request.accountId(), request.idempotencyKey()), request);
   }
 
   private String fingerprint(RegenerateTemporaryPasswordRequest request) {
-    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.idempotencyKey());
+    return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.requestedByAccountId() + "|" + request.idempotencyKey());
   }
 }

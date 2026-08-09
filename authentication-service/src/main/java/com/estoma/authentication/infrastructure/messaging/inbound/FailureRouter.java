@@ -27,14 +27,14 @@ import org.springframework.stereotype.Component;
 @Component
 public class FailureRouter {
 
-  /** Retry tiers for {@code commands.authentication-service}: 5s, 30s, 300s, all dead-lettering back onto the same routing key. */
+  /** Retry tiers for {@code commands.authentication}: 5s, 30s, 300s, all dead-lettering back onto the same routing key. */
   public static final RetryTopology COMMAND_TOPOLOGY =
       new RetryTopology(
           List.of(AmqpNames.ROUTING_KEY_COMMANDS_RETRY_5S, AmqpNames.ROUTING_KEY_COMMANDS_RETRY_30S, AmqpNames.ROUTING_KEY_COMMANDS_RETRY_300S),
           AmqpNames.ROUTING_KEY_COMMANDS_DLQ,
           3);
 
-  /** A single 5s retry tier for {@code events.authentication-service}. */
+  /** A single 5s retry tier for the Authentication events queue. */
   public static final RetryTopology EVENTS_TOPOLOGY =
       new RetryTopology(List.of(AmqpNames.ROUTING_KEY_EVENTS_RETRY_5S), AmqpNames.ROUTING_KEY_EVENTS_DLQ, 1);
 
