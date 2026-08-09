@@ -4,6 +4,7 @@ import com.estoma.authentication.application.port.OutboxAppendRequest;
 import com.estoma.authentication.application.port.OutboxPort;
 import com.estoma.authentication.application.rpc.RpcHandlerOutcome;
 import com.estoma.authentication.contracts.MessageKind;
+import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
@@ -29,7 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>Generic over the response type because each RPC operation has its own
  * request/response shape (commands.md §7-§8) -- one handler bean per
  * operation, invoked directly by name rather than looked up by message
- * type, since there are exactly eight, all statically known.
+ * type, since the supported operations are all statically known.
  *
  * <p>No RabbitMQ dependency: {@link #execute} takes a handler call already
  * decoupled from any transport, fully testable against a real database
@@ -47,10 +48,10 @@ public class RpcDispatcher {
   }
 
   @Transactional
-  public <T> RpcOutcome<T> execute(UUID correlationId, Supplier<RpcHandlerOutcome<T>> handlerCall) {
+  public <T> RpcOutcome<T> execute(RpcRequestContext context, Supplier<RpcHandlerOutcome<T>> handlerCall) {
     try {
       RpcHandlerOutcome<T> outcome = handlerCall.get();
-      outcome.events().forEach(event -> appendEvent(correlationId, outcome.aggregateId(), outcome.aggregateVersion(), event));
+      outcome.events().forEach(event -> appendEvent(context, outcome.aggregateId(), outcome.aggregateVersion(), event));
       if (outcome.rejectionCode() != null) {
         return new RpcOutcome.Rejected<>(outcome.rejectionCode());
       }
@@ -60,12 +61,13 @@ public class RpcDispatcher {
     }
   }
 
-  private void appendEvent(UUID correlationId, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
+  private void appendEvent(RpcRequestContext context, UUID aggregateId, Integer aggregateVersion, EventToAppend event) {
     UUID eventAggregateId = event.inheritHandlerAggregate() ? aggregateId : event.aggregateId();
     Integer eventAggregateVersion = event.inheritHandlerAggregate() ? aggregateVersion : event.aggregateVersion();
     outbox.append(
         new OutboxAppendRequest(
-             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), eventAggregateId, eventAggregateVersion, correlationId, null,
-             null, null, null, null, codec.writeValueAsString(event.payload()), Instant.now()));
+             UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), eventAggregateId, eventAggregateVersion,
+             context.correlationId(), context.messageId(), null, context.idempotencyKey(), context.actor(), null,
+             codec.writeValueAsString(event.payload()), Instant.now()));
   }
 }

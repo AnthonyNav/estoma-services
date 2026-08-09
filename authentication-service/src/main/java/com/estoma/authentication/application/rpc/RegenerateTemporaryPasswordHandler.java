@@ -59,11 +59,6 @@ public class RegenerateTemporaryPasswordHandler {
         new EventToAppend(AuthenticationEvent.TEMPORARY_PASSWORD_REGENERATED.wireName(), event));
   }
 
-  @Deprecated
-  public RpcHandlerOutcome<RegenerateTemporaryPasswordResponse> handle(RegenerateTemporaryPasswordRequest request) {
-    return handle(new RpcRequestContext(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", request.requestedByAccountId(), null, "GLOBAL", null), request.accountId(), request.idempotencyKey()), request);
-  }
-
   private String fingerprint(RegenerateTemporaryPasswordRequest request) {
     return tokenHasher.sha256Hex(OPERATION_TYPE + "|" + request.accountId() + "|" + request.requestedByAccountId() + "|" + request.idempotencyKey());
   }

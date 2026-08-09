@@ -29,7 +29,7 @@ public class RevokeSessionHandler {
 
   public RpcHandlerOutcome<RevokeSessionResponse> handle(RpcRequestContext context, RevokeSessionRequest request) {
     Session session =
-        sessionRepository.findById(request.sessionId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
+        sessionRepository.findByIdForUpdate(request.sessionId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
 
     if (!session.accountId().equals(context.targetAccountId()) || !session.accountId().equals(context.actor().accountId())) {
       // Do not reveal that a session exists under a different account.
@@ -48,9 +48,4 @@ public class RevokeSessionHandler {
     return RpcHandlerOutcome.of(new RevokeSessionResponse(true), revoked.sessionId(), null, new EventToAppend(AuthenticationEvent.SESSION_REVOKED.wireName(), event));
   }
 
-  @Deprecated
-  public RpcHandlerOutcome<RevokeSessionResponse> handle(RevokeSessionRequest request) {
-    Session session = sessionRepository.findById(request.sessionId()).orElseThrow();
-    return handle(new RpcRequestContext(java.util.UUID.randomUUID(), java.util.UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", session.accountId(), null, "SELF", null), session.accountId(), null), request);
-  }
 }

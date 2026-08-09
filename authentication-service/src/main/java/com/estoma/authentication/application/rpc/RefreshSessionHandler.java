@@ -106,13 +106,6 @@ public class RefreshSessionHandler {
     return RpcHandlerOutcome.withoutEvents(new RefreshSessionResponse(accessToken.token(), newRefreshToken, cappedExpiresAt));
   }
 
-  /** Direct application callers must supply transport context; retained only for existing non-messaging tests. */
-  @Deprecated
-  public RpcHandlerOutcome<RefreshSessionResponse> handle(RefreshSessionRequest request) {
-    Session session = sessionRepository.findById(request.sessionId()).orElseThrow();
-    return handle(new RpcRequestContext(UUID.randomUUID(), UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", session.accountId(), null, "SELF", null), session.accountId(), null), request);
-  }
-
   private boolean isPersonActive(UUID personId) {
     var status = personStatusProjectionRepository.findByPersonId(personId);
     return status.isPresent() && "ACTIVE".equals(status.get().status());

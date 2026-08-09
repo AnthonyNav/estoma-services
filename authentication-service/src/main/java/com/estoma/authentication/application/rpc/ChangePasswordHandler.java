@@ -113,7 +113,7 @@ public class ChangePasswordHandler {
         tokenIssuer.issueAccessToken(account.accountId(), account.personId(), renewedSession.sessionId(), Session.AuthState.NORMAL.name());
     ChangePasswordResponse response = new ChangePasswordResponse(renewedSession.sessionId(), accessToken.token(), refreshToken, AuthState.NORMAL);
 
-    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), "PASSWORD_CHANGE", now);
+    PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), "CHANGE_PASSWORD", now);
     if (revokedOtherSessions == 0) {
       return RpcHandlerOutcome.of(
           response, account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event));
@@ -126,12 +126,6 @@ public class ChangePasswordHandler {
         account.version(),
         new EventToAppend(AuthenticationEvent.PASSWORD_CHANGED.wireName(), event),
         new EventToAppend(AuthenticationEvent.OTHER_ACCOUNT_SESSIONS_REVOKED.wireName(), sessionsRevoked));
-  }
-
-  @Deprecated
-  public RpcHandlerOutcome<ChangePasswordResponse> handle(ChangePasswordRequest request) {
-    Session session = sessionRepository.findById(request.sessionId()).orElseThrow();
-    return handle(new RpcRequestContext(UUID.randomUUID(), UUID.randomUUID(), "bff", new com.estoma.authentication.contracts.Actor("ACCOUNT", session.accountId(), null, "SELF", null), session.accountId(), null), request);
   }
 
   private boolean isPersonActive(UUID personId) {

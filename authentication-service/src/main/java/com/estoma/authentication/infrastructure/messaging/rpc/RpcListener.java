@@ -75,11 +75,12 @@ public class RpcListener {
 
   private ResultPayload handle(MessageEnvelope request) {
     try {
+      RpcRequestContext context = RpcRequestContext.from(request);
       RpcOutcome<Object> outcome = dispatcher.execute(
-           request.correlationId(), () -> {
-             authorizationPolicy.check(request);
-             return router.invoke(request.messageType(), codec.encodeValue(request.payload()), RpcRequestContext.from(request));
-           });
+              context, () -> {
+              authorizationPolicy.check(request);
+              return router.invoke(request.messageType(), codec.encodeValue(request.payload()), context);
+            });
       return switch (outcome) {
         case RpcOutcome.Success<Object> success -> ResultPayload.succeeded(success.response());
         case RpcOutcome.Rejected<Object> rejected -> ResultPayload.rejected(rejected.code().name());

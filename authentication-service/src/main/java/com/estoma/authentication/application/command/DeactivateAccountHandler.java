@@ -79,7 +79,8 @@ class DeactivateAccountHandler implements CommandHandler {
 
     sessionRepository.revokeAllActiveForAccount(command.accountId(), "ACCOUNT_DEACTIVATED", now);
 
-    AccountDeactivatedPayload accountEvent = new AccountDeactivatedPayload(deactivated.accountId(), account.status().name(), deactivated.status().name(), reason.name(), command.reasonDetail(), now);
+    AccountDeactivatedPayload accountEvent = new AccountDeactivatedPayload(
+        deactivated.accountId(), deactivated.personId(), account.status().name(), deactivated.status().name(), reason.name(), command.reasonDetail(), now);
     AllAccountSessionsRevokedPayload sessionsEvent = new AllAccountSessionsRevokedPayload(deactivated.accountId(), "ACCOUNT_DEACTIVATED", now);
 
     return CommandHandlerResult.of(

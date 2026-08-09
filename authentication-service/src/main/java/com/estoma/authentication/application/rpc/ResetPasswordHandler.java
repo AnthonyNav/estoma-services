@@ -67,7 +67,7 @@ public class ResetPasswordHandler {
     LoginIdentifier identifier = LoginIdentifier.of(request.loginType(), request.loginIdentifier());
     Account account =
         accountRepository
-            .findByLoginIdentifier(identifier.type(), identifier.normalized())
+            .findByLoginIdentifierForUpdate(identifier.type(), identifier.normalized())
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery account does not exist"));
     if (!account.isActive()) {
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_NOT_AVAILABLE, "recovery account is not active");
@@ -98,11 +98,13 @@ public class ResetPasswordHandler {
     }
 
     updateCredential(account, request.newPassword(), now);
-    accountRepository.update(account.withAttemptsReset(now), account.version());
+    if (accountRepository.update(account.withAttemptsReset(now), account.version()) != 1) {
+      throw new IllegalStateException("reset password account update affected zero rows");
+    }
     recoveryRepository.invalidateActiveForAccount(account.accountId(), now);
     sessionRepository.revokeAllActiveForAccount(account.accountId(), "PASSWORD_RESET", now);
 
-    PasswordChangedPayload passwordEvent = new PasswordChangedPayload(account.accountId(), "PASSWORD_RESET", now);
+    PasswordChangedPayload passwordEvent = new PasswordChangedPayload(account.accountId(), "RESET_PASSWORD", now);
     AllAccountSessionsRevokedPayload revokedEvent = new AllAccountSessionsRevokedPayload(account.accountId(), "PASSWORD_RESET", now);
 
     return RpcHandlerOutcome.of(

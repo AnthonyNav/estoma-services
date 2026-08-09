@@ -90,7 +90,7 @@ public class RpcOperationRouter {
    * caller of {@link #invoke} only ever reads {@code response()} as an
    * {@code Object} to serialize it back out -- it never needs {@code Res}
    * as a static type. This is what lets a single {@code Map} hold
-   * bindings for eight different response types without a wildcard
+    * bindings for the different response types without a wildcard
    * flowing into {@link com.estoma.authentication.application.RpcDispatcher#execute}'s
    * generic {@code Supplier} parameter, which resists straightforward
    * wildcard capture at that call site.

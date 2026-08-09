@@ -63,7 +63,7 @@ public final class AmqpNames {
   public static final String ROUTING_KEY_SESSION_REVOKED = "authentication.session.revoked";
   public static final String ROUTING_KEY_ALL_ACCOUNT_SESSIONS_REVOKED = "authentication.session.all-revoked";
   public static final String ROUTING_KEY_OTHER_ACCOUNT_SESSIONS_REVOKED = "authentication.session.other-revoked";
-  public static final String ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED = "authentication.recovery.requested";
+  public static final String ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED = "authentication.password-recovery.requested";
 
   public static final String ROUTING_KEY_RESULTS_BFF = "results.bff";
   public static final String ROUTING_KEY_RESULTS_STUDENT_IMPORT_PROCESS = "results.student-import-process";
