@@ -1,14 +1,12 @@
 package com.estoma.communications.application.command;
 
 import com.estoma.communications.application.EventToAppend;
-import com.estoma.communications.application.RequestFingerprint;
 import com.estoma.communications.application.port.CommunicationRepository;
 import com.estoma.communications.application.port.EmailDeliveryRepository;
 import com.estoma.communications.application.port.EmailSenderDirectory;
 import com.estoma.communications.application.port.InboxMessageRepository;
 import com.estoma.communications.application.port.RecipientProjectionRepository;
 import com.estoma.communications.contracts.CommunicationsEvent;
-import com.estoma.communications.contracts.MessageEnvelope;
 import com.estoma.communications.contracts.command.RequestCommunicationCommand;
 import com.estoma.communications.contracts.event.CommunicationCompletedPayload;
 import com.estoma.communications.contracts.event.CommunicationRequestedPayload;
@@ -67,10 +65,6 @@ public class RequestCommunicationService {
   }
 
   public CommandHandlerResult create(RequestCommunicationCommand command) {
-    return create(command, null);
-  }
-
-  public CommandHandlerResult create(RequestCommunicationCommand command, MessageEnvelope envelope) {
     if (command.inbox() == null && command.email() == null) {
       throw new CommunicationsRejectedException(RejectionCode.NO_CHANNEL_SELECTED, "at least one channel (inbox or email) is required");
     }
@@ -92,67 +86,25 @@ public class RequestCommunicationService {
           RejectionCode.RECIPIENT_NOT_FOUND, "recipient " + command.recipientAccountId() + " has no known institutional email yet");
     }
 
-    if (envelope != null && envelope.correlationId() == null) {
-      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "correlationId is required for new communications");
-    }
     Instant now = Instant.now();
     UUID communicationId = UUID.randomUUID();
-    List<String> requestedChannels = command.requestedChannels() == null
-        ? deriveChannels(command) : List.copyOf(command.requestedChannels());
-    if (requestedChannels.isEmpty()) {
-      throw new CommunicationsRejectedException(RejectionCode.NO_CHANNEL_SELECTED, "requestedChannels must not be empty");
-    }
-    if (!requestedChannels.equals(deriveChannels(command))) {
-      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT,
-          "requestedChannels must match the supplied inbox and email channels");
-    }
-    String fingerprint = RequestFingerprint.sha256(command.recipientAccountId().toString(), command.systemCode(),
-        command.communicationType(), command.sourceService(), command.sourceReferenceType(), command.sourceReferenceId(),
-        String.join(",", requestedChannels),
-        command.inbox() == null ? null : command.inbox().title(),
-        command.inbox() == null ? null : command.inbox().body(),
-        command.inbox() == null || command.inbox().expiresAt() == null ? null : command.inbox().expiresAt().toString(),
-        command.email() == null ? null : command.email().contentMode().name(),
-        command.email() == null ? null : command.email().senderCode(),
-        command.email() == null ? null : command.email().subject(),
-        command.email() == null ? null : command.email().textBody(),
-        command.email() == null ? null : command.email().htmlBody(),
-        command.email() == null ? null : command.email().templateCode(),
-        command.email() == null ? null : command.email().templateData());
-    if (envelope != null && envelope.idempotencyKey() != null) {
-      var existing = communicationRepository.findBySourceAndIdempotency(command.sourceService(), envelope.idempotencyKey());
-      if (existing.isPresent()) {
-        if (!fingerprint.equals(existing.get().requestFingerprint())) {
-          throw new CommunicationsRejectedException(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST,
-              "idempotency key was reused with a different request");
-        }
-        return CommandHandlerResult.of(existing.get().communicationId(), 1);
-      }
-    }
     Communication communication =
         Communication.requested(
             communicationId, command.recipientAccountId(), command.systemCode(), command.communicationType(), command.priority(),
-            command.sourceService(), command.sourceReferenceType(), command.sourceReferenceId(), command.initiatedByAccountId(),
-            requestedChannels, envelope == null ? null : envelope.messageId(), envelope == null ? null : envelope.idempotencyKey(),
-         fingerprint, envelope == null ? null : envelope.correlationId(), envelope == null ? null : envelope.causationId(), now);
-     if (envelope != null && envelope.idempotencyKey() != null) {
-       var existing = communicationRepository.findBySourceAndIdempotency(command.sourceService(), envelope.idempotencyKey());
-       if (existing.isPresent()) {
-         if (!fingerprint.equals(existing.get().requestFingerprint()))
-           throw new CommunicationsRejectedException(RejectionCode.COMMUNICATION_ALREADY_EXISTS, "idempotency key was reused with a different request");
-         return CommandHandlerResult.of(existing.get().communicationId(), 1);
-       }
-     }
+            command.sourceService(), command.sourceReferenceType(), command.sourceReferenceId(), command.initiatedByAccountId(), now);
     communicationRepository.insert(communication);
 
+    List<String> requestedChannels = new ArrayList<>();
     List<EventToAppend> events = new ArrayList<>();
 
     InboxMessage inboxMessage = null;
     if (command.inbox() != null) {
+      requestedChannels.add("INBOX");
       inboxMessage = InboxMessage.create(UUID.randomUUID(), communicationId, command.inbox().title(), command.inbox().body(), command.inbox().expiresAt(), now);
       inboxMessageRepository.insert(inboxMessage);
     }
     if (command.email() != null) {
+      requestedChannels.add("EMAIL");
       EmailSenderDirectory.ResolvedSender sender = emailSenderDirectory.resolve(command.email().senderCode());
       EmailDelivery delivery =
           command.email().contentMode() == com.estoma.communications.contracts.EmailContentMode.TEMPLATE
@@ -211,12 +163,5 @@ public class RequestCommunicationService {
 
   private static boolean isBlank(String value) {
     return value == null || value.isBlank();
-  }
-
-  private static List<String> deriveChannels(RequestCommunicationCommand command) {
-    List<String> channels = new ArrayList<>();
-    if (command.inbox() != null) channels.add("INBOX");
-    if (command.email() != null) channels.add("EMAIL");
-    return channels;
   }
 }

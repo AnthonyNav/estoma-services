@@ -29,8 +29,7 @@ class JdbcCommunicationRepository implements CommunicationRepository {
       """
       communication_id, recipient_account_id, system_code, communication_type, priority,
       source_service, source_reference_type, source_reference_id, initiated_by_account_id,
-       status, created_at, completed_at, failed_at, requested_channels, source_message_id, idempotency_key,
-       request_fingerprint, correlation_id, causation_id
+      status, created_at, completed_at, failed_at
       """;
 
   private final JdbcClient jdbc;
@@ -48,37 +47,19 @@ class JdbcCommunicationRepository implements CommunicationRepository {
   }
 
   @Override
-  public Optional<Communication> findBySourceAndIdempotency(String sourceService, UUID idempotencyKey) {
-    return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE source_service = :sourceService AND idempotency_key = :idempotencyKey")
-        .param("sourceService", sourceService).param("idempotencyKey", idempotencyKey.toString()).query(CommunicationRowMapper.INSTANCE).optional();
-  }
-
-  @Override
-  public Optional<Communication> findLegacyByOrigin(Communication c) {
-    return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE idempotency_key IS NULL AND source_service = :sourceService AND source_reference_type = :sourceType AND source_reference_id = :sourceId AND recipient_account_id = :recipient AND system_code = :system AND communication_type = :type")
-        .param("sourceService", c.sourceService()).param("sourceType", c.sourceReferenceType()).param("sourceId", c.sourceReferenceId())
-        .param("recipient", c.recipientAccountId()).param("system", c.systemCode()).param("type", c.communicationType())
-        .query(CommunicationRowMapper.INSTANCE).optional();
-  }
-
-  @Override
   @Transactional(propagation = Propagation.NESTED)
   public void insert(Communication communication) {
     try {
-      if (communication.idempotencyKey() == null && findLegacyByOrigin(communication).isPresent())
-        throw new CommunicationsRejectedException(RejectionCode.COMMUNICATION_ALREADY_EXISTS, "legacy communication origin already exists");
       jdbc.sql(
               """
               INSERT INTO communications (
                 communication_id, recipient_account_id, system_code, communication_type, priority,
                 source_service, source_reference_type, source_reference_id, initiated_by_account_id,
-                 status, created_at, completed_at, failed_at, requested_channels, source_message_id, idempotency_key,
-                 request_fingerprint, correlation_id, causation_id
+                status, created_at, completed_at, failed_at
               ) VALUES (
                 :communicationId, :recipientAccountId, :systemCode, :communicationType, CAST(:priority AS communication_priority),
                 :sourceService, :sourceReferenceType, :sourceReferenceId, :initiatedByAccountId,
-                 CAST(:status AS communication_status), :createdAt, :completedAt, :failedAt, :requestedChannels,
-                 :sourceMessageId, :idempotencyKey, :requestFingerprint, :correlationId, :causationId
+                CAST(:status AS communication_status), :createdAt, :completedAt, :failedAt
               )
               """)
           .param("communicationId", communication.communicationId())
@@ -94,12 +75,6 @@ class JdbcCommunicationRepository implements CommunicationRepository {
           .param("createdAt", Timestamps.toTimestamp(communication.createdAt()))
           .param("completedAt", Timestamps.toTimestamp(communication.completedAt()))
           .param("failedAt", Timestamps.toTimestamp(communication.failedAt()))
-          .param("requestedChannels", communication.requestedChannels().toArray(String[]::new))
-          .param("sourceMessageId", communication.sourceMessageId())
-           .param("idempotencyKey", communication.idempotencyKey() == null ? null : communication.idempotencyKey().toString())
-          .param("requestFingerprint", communication.requestFingerprint())
-          .param("correlationId", communication.correlationId())
-          .param("causationId", communication.causationId())
           .update();
     } catch (DuplicateKeyException e) {
       throw new CommunicationsRejectedException(

@@ -14,8 +14,6 @@ import java.util.UUID;
 public interface CommunicationRepository {
 
   Optional<Communication> findById(UUID communicationId);
-  Optional<Communication> findBySourceAndIdempotency(String sourceService, UUID idempotencyKey);
-  Optional<Communication> findLegacyByOrigin(Communication communication);
 
   /**
    * @throws com.estoma.communications.domain.CommunicationsRejectedException with {@code

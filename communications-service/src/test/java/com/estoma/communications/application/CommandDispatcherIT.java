@@ -192,7 +192,6 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     emailDeliveryRepository.insert(delivery);
     EmailDelivery failed = delivery.claimedForSending(Instant.now()).failedTerminal("PROVIDER_REJECTED", "rejected", Instant.now());
     emailDeliveryRepository.update(failed);
-    communicationRepository.update(communicationRepository.findById(communicationId).orElseThrow().failed(Instant.now()));
     return delivery.emailDeliveryId();
   }
 
@@ -206,8 +205,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     Communication communication =
         Communication.requested(
             UUID.randomUUID(), UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
-            "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, java.util.List.of("EMAIL"),
-            UUID.randomUUID(), UUID.randomUUID(), "fingerprint-" + UUID.randomUUID(), UUID.randomUUID(), null, Instant.now());
+            "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, Instant.now());
     communicationRepository.insert(communication);
     return communication.communicationId();
   }

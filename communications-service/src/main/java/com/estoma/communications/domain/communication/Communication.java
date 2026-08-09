@@ -6,7 +6,6 @@ import com.estoma.communications.domain.CommunicationsRejectedException;
 import com.estoma.communications.domain.RejectionCode;
 import java.time.Instant;
 import java.util.UUID;
-import java.util.List;
 
 /**
  * The aggregate root this service owns: one request to deliver a
@@ -39,12 +38,6 @@ public final class Communication {
   private final Instant createdAt;
   private final Instant completedAt;
   private final Instant failedAt;
-  private final List<String> requestedChannels;
-  private final UUID sourceMessageId;
-  private final UUID idempotencyKey;
-  private final String requestFingerprint;
-  private final UUID correlationId;
-  private final UUID causationId;
 
   private Communication(
       UUID communicationId,
@@ -59,8 +52,7 @@ public final class Communication {
       CommunicationStatus status,
       Instant createdAt,
       Instant completedAt,
-       Instant failedAt, List<String> requestedChannels, UUID sourceMessageId, UUID idempotencyKey,
-       String requestFingerprint, UUID correlationId, UUID causationId) {
+      Instant failedAt) {
     this.communicationId = requireNonNull(communicationId, "communicationId");
     this.recipientAccountId = requireNonNull(recipientAccountId, "recipientAccountId");
     this.systemCode = requireNonBlank(systemCode, "systemCode");
@@ -74,12 +66,6 @@ public final class Communication {
     this.createdAt = requireNonNull(createdAt, "createdAt");
     this.completedAt = completedAt;
     this.failedAt = failedAt;
-    this.requestedChannels = List.copyOf(requireNonNull(requestedChannels, "requestedChannels"));
-    this.sourceMessageId = sourceMessageId;
-    this.idempotencyKey = idempotencyKey;
-    this.requestFingerprint = requestFingerprint;
-    this.correlationId = correlationId;
-    this.causationId = causationId;
   }
 
   /**
@@ -103,18 +89,7 @@ public final class Communication {
       Instant now) {
     return new Communication(
         communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
-        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.PROCESSING, now, null, null,
-        List.of(), null, null, null, null, null);
-  }
-
-  public static Communication requested(
-      UUID communicationId, UUID recipientAccountId, String systemCode, String communicationType,
-      CommunicationPriority priority, String sourceService, String sourceReferenceType, String sourceReferenceId,
-      UUID initiatedByAccountId, List<String> requestedChannels, UUID sourceMessageId, UUID idempotencyKey,
-      String requestFingerprint, UUID correlationId, UUID causationId, Instant now) {
-    return new Communication(communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
-        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.PROCESSING, now, null, null,
-        requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint, correlationId, causationId);
+        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.PROCESSING, now, null, null);
   }
 
   /** Reconstructs a Communication from a persisted row. */
@@ -134,19 +109,7 @@ public final class Communication {
       Instant failedAt) {
     return new Communication(
         communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
-        sourceReferenceType, sourceReferenceId, initiatedByAccountId, status, createdAt, completedAt, failedAt,
-        List.of(), null, null, null, null, null);
-  }
-
-  public static Communication reconstitute(
-      UUID communicationId, UUID recipientAccountId, String systemCode, String communicationType,
-      CommunicationPriority priority, String sourceService, String sourceReferenceType, String sourceReferenceId,
-      UUID initiatedByAccountId, CommunicationStatus status, Instant createdAt, Instant completedAt, Instant failedAt,
-      List<String> requestedChannels, UUID sourceMessageId, UUID idempotencyKey, String requestFingerprint,
-      UUID correlationId, UUID causationId) {
-    return new Communication(communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
-        sourceReferenceType, sourceReferenceId, initiatedByAccountId, status, createdAt, completedAt, failedAt,
-        requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint, correlationId, causationId);
+        sourceReferenceType, sourceReferenceId, initiatedByAccountId, status, createdAt, completedAt, failedAt);
   }
 
   /** Every requested channel reached its terminal successful state. */
@@ -157,8 +120,7 @@ public final class Communication {
     }
     return new Communication(
         communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
-        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.COMPLETED, createdAt, now, failedAt,
-        requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint, correlationId, causationId);
+        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.COMPLETED, createdAt, now, failedAt);
   }
 
   /** A required channel failed definitively (commands.md §4, events.md §2 "CommunicationFailed"). */
@@ -169,26 +131,7 @@ public final class Communication {
     }
     return new Communication(
         communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
-        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.FAILED, createdAt, completedAt, now,
-        requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint, correlationId, causationId);
-  }
-
-  /** Reopens a failed communication as part of an administrative email retry. */
-  public Communication reopenedForRetry(Instant now) {
-    if (status != CommunicationStatus.FAILED) {
-      throw new CommunicationsRejectedException(
-          RejectionCode.COMMUNICATION_ALREADY_EXISTS, "communication " + communicationId + " is not FAILED");
-    }
-    return new Communication(communicationId, recipientAccountId, systemCode, communicationType, priority,
-        sourceService, sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.PROCESSING,
-        createdAt, null, null, requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint,
-        correlationId, causationId);
-  }
-  public Communication reopenForRetry(Instant now) {
-    if (status != CommunicationStatus.FAILED) throw new IllegalStateException("communication is not FAILED");
-    return new Communication(communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
-        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.PROCESSING, createdAt, null, null,
-        requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint, correlationId, causationId);
+        sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.FAILED, createdAt, completedAt, now);
   }
 
   public UUID communicationId() {
@@ -242,13 +185,6 @@ public final class Communication {
   public Instant failedAt() {
     return failedAt;
   }
-
-  public List<String> requestedChannels() { return requestedChannels; }
-  public UUID sourceMessageId() { return sourceMessageId; }
-  public UUID idempotencyKey() { return idempotencyKey; }
-  public String requestFingerprint() { return requestFingerprint; }
-  public UUID correlationId() { return correlationId; }
-  public UUID causationId() { return causationId; }
 
   private static <T> T requireNonNull(T value, String fieldName) {
     if (value == null) {
