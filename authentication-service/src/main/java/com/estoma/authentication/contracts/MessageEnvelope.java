@@ -7,9 +7,8 @@ import tools.jackson.databind.JsonNode;
 /**
  * The one physical envelope every durable command, result, and event
  * shares (messaging-architecture.md §8). A single type covers all three
- * {@link MessageKind}s -- fields that only apply to one kind ({@code
- * operationId}, {@code targetService} for COMMAND; {@code operationId} for
- * RESULT) are simply null on the others.
+ * {@link MessageKind}s. Routing chooses the destination, so the V1 envelope
+ * deliberately has no {@code targetService} field.
  *
  * <p>{@code payload} is kept as a raw {@link JsonNode} because the concrete
  * shape varies by {@code messageType}; callers convert it to the specific
@@ -31,8 +30,10 @@ public record MessageEnvelope(
     UUID correlationId,
     UUID causationId,
     UUID operationId,
-    String targetService,
+    String idempotencyKey,
     UUID aggregateId,
     Integer aggregateVersion,
     Actor actor,
-    JsonNode payload) {}
+    JsonNode payload) {
+
+}

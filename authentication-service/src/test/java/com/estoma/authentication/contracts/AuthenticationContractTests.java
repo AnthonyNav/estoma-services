@@ -32,6 +32,7 @@ class AuthenticationContractTests {
     assertThat(AuthenticationRpcOperation.CHANGE_PASSWORD.wireName()).isEqualTo("ChangePassword");
     assertThat(AuthenticationRpcOperation.SET_TEMPORARY_PASSWORD.wireName()).isEqualTo("SetTemporaryPassword");
     assertThat(AuthenticationRpcOperation.REGENERATE_TEMPORARY_PASSWORD.wireName()).isEqualTo("RegenerateTemporaryPassword");
+    assertThat(AuthenticationRpcOperation.GET_RECOVERY_CODE_FOR_DELIVERY.wireName()).isEqualTo("GetRecoveryCodeForDelivery");
   }
 
   @Test
@@ -56,7 +57,7 @@ class AuthenticationContractTests {
     assertThat(MessagingNames.RESULTS_EXCHANGE).isEqualTo("platform.results");
     assertThat(MessagingNames.EVENTS_EXCHANGE).isEqualTo("platform.events");
     assertThat(MessagingNames.SECURITY_RPC_EXCHANGE).isEqualTo("platform.security.rpc");
-    assertThat(MessagingNames.AUTHENTICATION_COMMAND_QUEUE).isEqualTo("commands.authentication-service");
+    assertThat(MessagingNames.AUTHENTICATION_COMMAND_QUEUE).isEqualTo("commands.authentication");
     assertThat(MessagingNames.AUTHENTICATION_RPC_QUEUE).isEqualTo("rpc.authentication");
     assertThat(MessagingNames.BFF_RESULTS_QUEUE).isEqualTo("results.bff");
   }

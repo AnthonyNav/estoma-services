@@ -21,17 +21,17 @@ public final class AmqpNames {
 
   public static final String EXCHANGE_DLX = "platform.dlx";
 
-  // ---- Commands: commands.authentication-service, its DLQ, and 3 retry tiers ----
-  public static final String QUEUE_COMMANDS_DLQ = "commands.authentication-service.dlq";
-  public static final String ROUTING_KEY_COMMANDS_DLQ = "dlq.commands.authentication-service";
+  // ---- Commands: commands.authentication, its DLQ, and 3 retry tiers ----
+  public static final String QUEUE_COMMANDS_DLQ = "commands.authentication.dlq";
+  public static final String ROUTING_KEY_COMMANDS_DLQ = "dlq.commands.authentication";
 
-  public static final String QUEUE_COMMANDS_RETRY_5S = "commands.authentication-service.retry.5s";
-  public static final String QUEUE_COMMANDS_RETRY_30S = "commands.authentication-service.retry.30s";
-  public static final String QUEUE_COMMANDS_RETRY_300S = "commands.authentication-service.retry.300s";
+  public static final String QUEUE_COMMANDS_RETRY_5S = "commands.authentication.retry.5s";
+  public static final String QUEUE_COMMANDS_RETRY_30S = "commands.authentication.retry.30s";
+  public static final String QUEUE_COMMANDS_RETRY_300S = "commands.authentication.retry.300s";
 
-  public static final String ROUTING_KEY_COMMANDS_RETRY_5S = "retry.commands.authentication-service.5s";
-  public static final String ROUTING_KEY_COMMANDS_RETRY_30S = "retry.commands.authentication-service.30s";
-  public static final String ROUTING_KEY_COMMANDS_RETRY_300S = "retry.commands.authentication-service.300s";
+  public static final String ROUTING_KEY_COMMANDS_RETRY_5S = "retry.commands.authentication.5s";
+  public static final String ROUTING_KEY_COMMANDS_RETRY_30S = "retry.commands.authentication.30s";
+  public static final String ROUTING_KEY_COMMANDS_RETRY_300S = "retry.commands.authentication.300s";
 
   public static final long RETRY_TTL_5S_MS = 5_000L;
   public static final long RETRY_TTL_30S_MS = 30_000L;
