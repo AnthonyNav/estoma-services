@@ -31,6 +31,8 @@ final class AccountRowMapper implements RowMapper<Account> {
         rs.getInt("version"),
         Timestamps.toInstant(rs, "created_at"),
         Timestamps.toInstant(rs, "updated_at"),
-        Timestamps.toInstant(rs, "deactivated_at"));
+        Timestamps.toInstant(rs, "deactivated_at"),
+        rs.getString("deactivation_reason_code"),
+        Timestamps.toInstant(rs, "last_recovery_requested_at"));
   }
 }

@@ -74,7 +74,7 @@ public class AuthenticateAccountHandler {
 
   public RpcHandlerOutcome<AuthenticateAccountResponse> handle(AuthenticateAccountRequest request) {
     LoginIdentifier identifier = LoginIdentifier.of(request.loginType(), request.loginIdentifier());
-    Optional<Account> accountOpt = accountRepository.findByLoginIdentifier(identifier.type(), identifier.normalized());
+    Optional<Account> accountOpt = accountRepository.findByLoginIdentifierForUpdate(identifier.type(), identifier.normalized());
     if (accountOpt.isEmpty()) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "identifier or password is incorrect");
     }

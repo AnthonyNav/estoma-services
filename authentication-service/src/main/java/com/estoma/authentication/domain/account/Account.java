@@ -36,6 +36,8 @@ public final class Account {
   private final Instant createdAt;
   private final Instant updatedAt;
   private final Instant deactivatedAt;
+  private final String deactivationReasonCode;
+  private final Instant lastRecoveryRequestedAt;
 
   private Account(
       UUID accountId,
@@ -47,7 +49,9 @@ public final class Account {
       int version,
       Instant createdAt,
       Instant updatedAt,
-      Instant deactivatedAt) {
+      Instant deactivatedAt,
+      String deactivationReasonCode,
+      Instant lastRecoveryRequestedAt) {
     this.accountId = requireNonNull(accountId, "accountId");
     this.personId = requireNonNull(personId, "personId");
     this.loginIdentifier = requireNonNull(loginIdentifier, "loginIdentifier");
@@ -64,11 +68,13 @@ public final class Account {
     this.createdAt = requireNonNull(createdAt, "createdAt");
     this.updatedAt = requireNonNull(updatedAt, "updatedAt");
     this.deactivatedAt = deactivatedAt;
+    this.deactivationReasonCode = deactivationReasonCode;
+    this.lastRecoveryRequestedAt = lastRecoveryRequestedAt;
   }
 
   /** A brand-new account: version 1, INACTIVE, no credential, no lock. */
   public static Account createNew(UUID accountId, UUID personId, LoginIdentifier loginIdentifier, Instant now) {
-    return new Account(accountId, personId, loginIdentifier, AccountStatus.INACTIVE, 0, null, 1, now, now, null);
+    return new Account(accountId, personId, loginIdentifier, AccountStatus.INACTIVE, 0, null, 1, now, now, null, null, null);
   }
 
   /** Reconstructs an Account from a persisted row. No invariant re-derivation beyond the constructor's own checks. */
@@ -82,7 +88,9 @@ public final class Account {
       int version,
       Instant createdAt,
       Instant updatedAt,
-      Instant deactivatedAt) {
+      Instant deactivatedAt,
+      String deactivationReasonCode,
+      Instant lastRecoveryRequestedAt) {
     return new Account(
         accountId,
         personId,
@@ -93,7 +101,9 @@ public final class Account {
         version,
         createdAt,
         updatedAt,
-        deactivatedAt);
+        deactivatedAt,
+        deactivationReasonCode,
+        lastRecoveryRequestedAt);
   }
 
   /**
@@ -106,7 +116,8 @@ public final class Account {
       throw new AuthenticationRejectedException(RejectionCode.ACCOUNT_ALREADY_ACTIVE, "account " + accountId + " is already active");
     }
     return new Account(
-        accountId, personId, loginIdentifier, AccountStatus.ACTIVE, failedAttempts, lockedUntil, version + 1, createdAt, now, deactivatedAt);
+        accountId, personId, loginIdentifier, AccountStatus.ACTIVE, failedAttempts, lockedUntil, version + 1, createdAt, now, deactivatedAt, null,
+        lastRecoveryRequestedAt);
   }
 
   /**
@@ -117,15 +128,17 @@ public final class Account {
    * {@code ACCOUNT_VERSION_CONFLICT}), the same disambiguation
    * {@code users-service} uses for its own status transitions.
    */
-  public Account deactivated(Instant now) {
+  public Account deactivated(Instant now, AccountDeactivationReason reason) {
     return new Account(
-        accountId, personId, loginIdentifier, AccountStatus.INACTIVE, failedAttempts, lockedUntil, version + 1, createdAt, now, now);
+        accountId, personId, loginIdentifier, AccountStatus.INACTIVE, failedAttempts, lockedUntil, version + 1, createdAt, now, now, reason.name(),
+        lastRecoveryRequestedAt);
   }
 
   /** {@code ChangeLoginIdentifier} (commands.md §4.4). */
   public Account withLoginIdentifierChanged(LoginIdentifier newLoginIdentifier, Instant now) {
     return new Account(
-        accountId, personId, newLoginIdentifier, status, failedAttempts, lockedUntil, version + 1, createdAt, now, deactivatedAt);
+        accountId, personId, newLoginIdentifier, status, failedAttempts, lockedUntil, version + 1, createdAt, now, deactivatedAt, deactivationReasonCode,
+        lastRecoveryRequestedAt);
   }
 
   /**
@@ -136,13 +149,14 @@ public final class Account {
    */
   public Account withFailedAttemptRecorded(Instant now, Instant lockedUntilOrNull) {
     return new Account(
-        accountId, personId, loginIdentifier, status, failedAttempts + 1, lockedUntilOrNull, version, createdAt, now, deactivatedAt);
+        accountId, personId, loginIdentifier, status, failedAttempts + 1, lockedUntilOrNull, version, createdAt, now, deactivatedAt, deactivationReasonCode,
+        lastRecoveryRequestedAt);
   }
 
   /** A successful authentication (data-model.md §10): resets attempts and clears any lock. */
   public Account withAttemptsReset(Instant now) {
     return new Account(
-        accountId, personId, loginIdentifier, status, 0, null, version, createdAt, now, deactivatedAt);
+        accountId, personId, loginIdentifier, status, 0, null, version, createdAt, now, deactivatedAt, deactivationReasonCode, lastRecoveryRequestedAt);
   }
 
   public boolean isLocked(Instant now) {
@@ -191,6 +205,14 @@ public final class Account {
 
   public Instant deactivatedAt() {
     return deactivatedAt;
+  }
+
+  public String deactivationReasonCode() {
+    return deactivationReasonCode;
+  }
+
+  public Instant lastRecoveryRequestedAt() {
+    return lastRecoveryRequestedAt;
   }
 
   private static <T> T requireNonNull(T value, String fieldName) {

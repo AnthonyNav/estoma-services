@@ -8,7 +8,10 @@ import com.estoma.authentication.application.port.PersonStatusProjectionReposito
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.SessionRepository;
 import com.estoma.authentication.contracts.AuthenticationCommand;
+import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.LoginType;
+import com.estoma.authentication.contracts.MessageEnvelope;
+import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.contracts.command.ActivateAccountCommand;
 import com.estoma.authentication.contracts.command.ChangeLoginIdentifierCommand;
 import com.estoma.authentication.contracts.command.CreateAccountCommand;
@@ -24,10 +27,12 @@ import com.estoma.authentication.domain.session.Session;
 import com.estoma.authentication.domain.recovery.PasswordRecoveryRequest;
 import com.estoma.authentication.testsupport.AbstractPostgresIT;
 import com.estoma.authentication.testsupport.Envelopes;
+import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 class CommandDispatcherIT extends AbstractPostgresIT {
 
@@ -37,6 +42,8 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   @Autowired private SessionRepository sessionRepository;
   @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
   @Autowired private PasswordRecoveryRepository passwordRecoveryRepository;
+  @Autowired private JdbcClient jdbc;
+  @Autowired private EnvelopeJsonCodec codec;
 
   @Test
   void createAccountSucceedsForAnActivePerson() {
@@ -51,6 +58,10 @@ class CommandDispatcherIT extends AbstractPostgresIT {
 
     assertThat(outcome).isInstanceOf(CommandOutcome.Succeeded.class);
     assertThat(accountRepository.findById(accountId)).isPresent();
+    assertThat(jdbc.sql("SELECT count(*) FROM account_status_history WHERE account_id = :accountId")
+        .param("accountId", accountId)
+        .query(Long.class)
+        .single()).isEqualTo(1L);
   }
 
   @Test
@@ -103,6 +114,10 @@ class CommandDispatcherIT extends AbstractPostgresIT {
 
     assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(2));
     assertThat(accountRepository.findById(accountId).orElseThrow().isActive()).isTrue();
+    assertThat(jdbc.sql("SELECT new_status FROM account_status_history WHERE account_id = :accountId")
+        .param("accountId", accountId)
+        .query(String.class)
+        .single()).isEqualTo("ACTIVE");
   }
 
   @Test
@@ -112,11 +127,57 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     sessionRepository.insert(session);
 
     var outcome =
-        dispatcher.dispatch(Envelopes.command(AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName(), new DeactivateAccountCommand(accountId, 2)));
+        dispatcher.dispatch(
+            Envelopes.command(
+                AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName(),
+                new DeactivateAccountCommand(accountId, 2, "ADMINISTRATIVE", "manual review")));
 
     assertThat(outcome).isInstanceOf(CommandOutcome.Succeeded.class);
     assertThat(accountRepository.findById(accountId).orElseThrow().isActive()).isFalse();
     assertThat(sessionRepository.findById(session.sessionId()).orElseThrow().isValid(Instant.now())).isFalse();
+    assertThat(accountRepository.findById(accountId).orElseThrow().deactivationReasonCode()).isEqualTo("ADMINISTRATIVE");
+    assertThat(jdbc.sql("SELECT reason_code FROM account_status_history WHERE account_id = :accountId AND new_status = 'INACTIVE'")
+        .param("accountId", accountId)
+        .query(String.class)
+        .single()).isEqualTo("ADMINISTRATIVE");
+  }
+
+  @Test
+  void activationFailsClosedWhenThePersonProjectionIsMissing() {
+    UUID accountId = insertInactiveAccount(UUID.randomUUID());
+    credentialRepository.insert(Credential.configure(accountId, new PasswordHash("hash", "ARGON2ID", "{}"), Instant.now()));
+
+    var outcome = dispatcher.dispatch(
+        Envelopes.command(AuthenticationCommand.ACTIVATE_ACCOUNT.wireName(), new ActivateAccountCommand(accountId, 1)));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.PERSON_NOT_FOUND));
+  }
+
+  @Test
+  void studentImportMayReactivateOnlyAcademicAbsenceMatriculaAccounts() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+    dispatcher.dispatch(
+        Envelopes.command(
+            AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName(),
+            new DeactivateAccountCommand(accountId, 2, "ACADEMIC_ABSENCE", null)));
+
+    var outcome = dispatcher.dispatch(studentImportActivation(accountId, 3));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(4));
+    assertThat(accountRepository.findById(accountId).orElseThrow().deactivationReasonCode()).isNull();
+  }
+
+  @Test
+  void studentImportCannotReactivateAnAdministrativeDeactivation() {
+    UUID accountId = insertActiveAccountWithCredential(activePerson());
+    dispatcher.dispatch(
+        Envelopes.command(
+            AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName(),
+            new DeactivateAccountCommand(accountId, 2, "ADMINISTRATIVE", null)));
+
+    var outcome = dispatcher.dispatch(studentImportActivation(accountId, 3));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.ACTOR_NOT_AUTHORIZED));
   }
 
   @Test
@@ -223,5 +284,23 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     Account account = accountRepository.findById(accountId).orElseThrow();
     accountRepository.update(account.activated(Instant.now()), account.version());
     return accountId;
+  }
+
+  private MessageEnvelope studentImportActivation(UUID accountId, int expectedVersion) {
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        AuthenticationCommand.ACTIVATE_ACCOUNT.wireName(),
+        1,
+        MessageKind.COMMAND,
+        "academic",
+        Instant.now(),
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        "authentication-service",
+        accountId,
+        null,
+        new Actor("SYSTEM", null, "academic", "GLOBAL", "student-import-process"),
+        codec.toJsonNode(new ActivateAccountCommand(accountId, expectedVersion)));
   }
 }

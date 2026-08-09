@@ -37,7 +37,7 @@ class JdbcAccountRepository implements AccountRepository {
       """
       account_id, person_id, login_type, login_identifier, login_identifier_normalized,
        status, failed_attempts, locked_until,
-      version, created_at, updated_at, deactivated_at
+       version, created_at, updated_at, deactivated_at, deactivation_reason_code, last_recovery_requested_at
       """;
 
   private final JdbcClient jdbc;
@@ -55,10 +55,29 @@ class JdbcAccountRepository implements AccountRepository {
   }
 
   @Override
+  public Optional<Account> findByIdForUpdate(UUID accountId) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM accounts WHERE account_id = :accountId FOR UPDATE")
+        .param("accountId", accountId)
+        .query(AccountRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
   public Optional<Account> findByLoginIdentifier(LoginType loginType, String normalizedIdentifier) {
     return jdbc.sql(
             "SELECT " + COLUMNS + " FROM accounts WHERE login_type = CAST(:loginType AS login_type) "
                 + "AND login_identifier_normalized = :normalized")
+        .param("loginType", loginType.name())
+        .param("normalized", normalizedIdentifier)
+        .query(AccountRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
+  public Optional<Account> findByLoginIdentifierForUpdate(LoginType loginType, String normalizedIdentifier) {
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM accounts WHERE login_type = CAST(:loginType AS login_type) "
+                + "AND login_identifier_normalized = :normalized FOR UPDATE")
         .param("loginType", loginType.name())
         .param("normalized", normalizedIdentifier)
         .query(AccountRowMapper.INSTANCE)
@@ -82,11 +101,11 @@ class JdbcAccountRepository implements AccountRepository {
               INSERT INTO accounts (
                 account_id, person_id, login_type, login_identifier, login_identifier_normalized,
                  status, failed_attempts, locked_until,
-                version, created_at, updated_at, deactivated_at
+                 version, created_at, updated_at, deactivated_at, deactivation_reason_code, last_recovery_requested_at
               ) VALUES (
                 :accountId, :personId, CAST(:loginType AS login_type), :loginIdentifier, :normalized,
                  CAST(:status AS account_status), :failedAttempts, :lockedUntil,
-                :version, :createdAt, :updatedAt, :deactivatedAt
+                 :version, :createdAt, :updatedAt, :deactivatedAt, :deactivationReasonCode, :lastRecoveryRequestedAt
               )
               """)
           .param("accountId", account.accountId())
@@ -101,6 +120,8 @@ class JdbcAccountRepository implements AccountRepository {
           .param("createdAt", Timestamps.toTimestamp(account.createdAt()))
           .param("updatedAt", Timestamps.toTimestamp(account.updatedAt()))
           .param("deactivatedAt", Timestamps.toTimestamp(account.deactivatedAt()))
+          .param("deactivationReasonCode", account.deactivationReasonCode())
+          .param("lastRecoveryRequestedAt", Timestamps.toTimestamp(account.lastRecoveryRequestedAt()))
           .update();
     } catch (DuplicateKeyException e) {
       throw translateInsertConflict(e);
@@ -121,8 +142,10 @@ class JdbcAccountRepository implements AccountRepository {
                 failed_attempts = :failedAttempts,
                  locked_until = :lockedUntil,
                 version = :newVersion,
-                updated_at = :updatedAt,
-                deactivated_at = :deactivatedAt
+                 updated_at = :updatedAt,
+                 deactivated_at = :deactivatedAt,
+                 deactivation_reason_code = :deactivationReasonCode,
+                 last_recovery_requested_at = :lastRecoveryRequestedAt
               WHERE account_id = :accountId AND version = :expectedVersion
               """)
           .param("loginType", updated.loginIdentifier().type().name())
@@ -134,6 +157,8 @@ class JdbcAccountRepository implements AccountRepository {
           .param("newVersion", updated.version())
           .param("updatedAt", Timestamps.toTimestamp(updated.updatedAt()))
           .param("deactivatedAt", Timestamps.toTimestamp(updated.deactivatedAt()))
+          .param("deactivationReasonCode", updated.deactivationReasonCode())
+          .param("lastRecoveryRequestedAt", Timestamps.toTimestamp(updated.lastRecoveryRequestedAt()))
           .param("accountId", updated.accountId())
           .param("expectedVersion", expectedVersion)
           .update();

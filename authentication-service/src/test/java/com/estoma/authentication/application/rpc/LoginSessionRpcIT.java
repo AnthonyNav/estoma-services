@@ -22,6 +22,10 @@ import com.estoma.authentication.domain.credential.Credential;
 import com.estoma.authentication.testsupport.AbstractPostgresIT;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -112,6 +116,36 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
     var lockedOutcome =
         dispatcher.execute(UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)));
     assertThat(((RpcOutcome.Rejected<?>) lockedOutcome).code()).isEqualTo(RejectionCode.ACCOUNT_LOCKED);
+  }
+
+  @Test
+  void concurrentFailuresLockExactlyAtFiveAttempts() throws Exception {
+    String identifier = "user-" + UUID.randomUUID();
+    UUID accountId = insertActiveAccountWithPassword(identifier, PASSWORD);
+    int callers = 10;
+    CountDownLatch ready = new CountDownLatch(callers);
+    CountDownLatch start = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = java.util.stream.IntStream.range(0, callers)
+          .mapToObj(ignored -> executor.submit(() -> {
+            ready.countDown();
+            start.await();
+            return dispatcher.execute(
+                UUID.randomUUID(),
+                () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, "wrong", null, null, null)));
+          }))
+          .toList();
+      assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      for (var future : futures) {
+        future.get(10, TimeUnit.SECONDS);
+      }
+    }
+
+    Account account = accountRepository.findById(accountId).orElseThrow();
+    assertThat(account.failedAttempts()).isEqualTo(5);
+    assertThat(account.lockedUntil()).isAfter(Instant.now().plusSeconds(14 * 60));
+    assertThat(account.lockedUntil()).isBefore(Instant.now().plusSeconds(16 * 60));
   }
 
   @Test

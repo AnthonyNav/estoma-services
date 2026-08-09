@@ -50,10 +50,14 @@ class AccountTest {
   void deactivatedSetsInactiveAndDeactivatedAt() {
     Account account = newInactiveAccount().activated(now);
 
-    Account deactivated = account.deactivated(now.plusSeconds(120));
+    Account deactivated = account.deactivated(now.plusSeconds(120), AccountDeactivationReason.ACADEMIC_ABSENCE);
 
     assertThat(deactivated.status()).isEqualTo(AccountStatus.INACTIVE);
     assertThat(deactivated.deactivatedAt()).isEqualTo(now.plusSeconds(120));
+    assertThat(deactivated.deactivationReasonCode()).isEqualTo("ACADEMIC_ABSENCE");
+
+    Account reactivated = deactivated.activated(now.plusSeconds(180));
+    assertThat(reactivated.deactivationReasonCode()).isNull();
   }
 
   @Test

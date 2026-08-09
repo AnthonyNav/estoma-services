@@ -18,7 +18,11 @@ public interface AccountRepository {
 
   Optional<Account> findById(UUID accountId);
 
+  Optional<Account> findByIdForUpdate(UUID accountId);
+
   Optional<Account> findByLoginIdentifier(LoginType loginType, String normalizedIdentifier);
+
+  Optional<Account> findByLoginIdentifierForUpdate(LoginType loginType, String normalizedIdentifier);
 
   /** Returns every account logically owned by the Person; no cross-service FK is required. */
   List<UUID> findIdsByPersonId(UUID personId);

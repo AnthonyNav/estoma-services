@@ -30,7 +30,8 @@ public final class AuthenticationAuthorizationMatrix {
   private static final List<Rule> RULES = List.of(
       durable(AuthenticationCommand.CREATE_ACCOUNT, "bff", ActorMode.SYSTEM, "GLOBAL", "bff", null, TargetRule.REQUIRED),
       durable(AuthenticationCommand.CREATE_ACCOUNT, "academic", ActorMode.SYSTEM, "GLOBAL", "academic", "student-import-process", TargetRule.REQUIRED),
-      durable(AuthenticationCommand.ACTIVATE_ACCOUNT, "bff", ActorMode.SYSTEM, "GLOBAL", "bff", null, TargetRule.REQUIRED),
+       durable(AuthenticationCommand.ACTIVATE_ACCOUNT, "bff", ActorMode.SYSTEM, "GLOBAL", "bff", null, TargetRule.REQUIRED),
+       durable(AuthenticationCommand.ACTIVATE_ACCOUNT, "academic", ActorMode.SYSTEM, "GLOBAL", "academic", "student-import-process", TargetRule.REQUIRED),
       durable(AuthenticationCommand.DEACTIVATE_ACCOUNT, "bff", ActorMode.SYSTEM, "GLOBAL", "bff", null, TargetRule.REQUIRED),
       durable(AuthenticationCommand.CHANGE_LOGIN_IDENTIFIER, "bff", ActorMode.SYSTEM, "GLOBAL", "bff", null, TargetRule.REQUIRED),
       durable(AuthenticationCommand.CHANGE_LOGIN_IDENTIFIER, "academic", ActorMode.SYSTEM, "GLOBAL", "academic", "student-import-process", TargetRule.REQUIRED),
