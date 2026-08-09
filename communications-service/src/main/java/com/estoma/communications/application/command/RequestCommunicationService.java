@@ -72,6 +72,35 @@ public class RequestCommunicationService {
   }
 
   public CommandHandlerResult create(RequestCommunicationCommand command, MessageEnvelope envelope) {
+    if (command == null || isBlank(command.systemCode()) || isBlank(command.communicationType())
+        || isBlank(command.sourceService()) || isBlank(command.sourceReferenceType()) || isBlank(command.sourceReferenceId())
+        || command.recipientAccountId() == null || command.priority() == null) {
+      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "communication request is structurally incomplete");
+    }
+    if (envelope != null && envelope.correlationId() == null) {
+      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "correlationId is required for new communications");
+    }
+    if (envelope != null && envelope.idempotencyKey() == null) {
+      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "idempotencyKey is required for durable communication requests");
+    }
+    List<String> requestedChannels = command.requestedChannels() == null
+        ? deriveChannels(command) : List.copyOf(command.requestedChannels());
+    if (requestedChannels.isEmpty()) {
+      throw new CommunicationsRejectedException(RejectionCode.NO_CHANNEL_SELECTED, "requestedChannels must not be empty");
+    }
+    if (!requestedChannels.equals(deriveChannels(command))) {
+      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT,
+          "requestedChannels must match the supplied inbox and email channels");
+    }
+    String fingerprint = RequestFingerprint.forCommand(command, requestedChannels);
+    if (envelope != null) {
+      var existing = communicationRepository.findBySourceAndIdempotency(command.sourceService(), envelope.idempotencyKey());
+      if (existing.isPresent()) {
+        if (fingerprint.equals(existing.get().requestFingerprint())) return CommandHandlerResult.of(existing.get().communicationId(), 1);
+        throw new CommunicationsRejectedException(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST,
+            "idempotency key was reused with a different request");
+      }
+    }
     if (command.inbox() == null && command.email() == null) {
       throw new CommunicationsRejectedException(RejectionCode.NO_CHANNEL_SELECTED, "at least one channel (inbox or email) is required");
     }
@@ -93,36 +122,20 @@ public class RequestCommunicationService {
           RejectionCode.RECIPIENT_NOT_FOUND, "recipient " + command.recipientAccountId() + " has no known institutional email yet");
     }
 
-    if (envelope != null && envelope.correlationId() == null) {
-      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "correlationId is required for new communications");
+    EmailSenderDirectory.ResolvedSender sender = null;
+    if (command.email() != null) {
+      try {
+        sender = emailSenderDirectory.resolve(command.email().senderCode());
+        if (sender == null || isBlank(sender.fromName()) || isBlank(sender.fromAddress())) {
+          throw new IllegalArgumentException("email sender is incomplete");
+        }
+      } catch (RuntimeException e) {
+        throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "email sender could not be resolved");
+      }
     }
-    if (envelope != null && envelope.idempotencyKey() == null) {
-      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "idempotencyKey is required for durable communication requests");
-    }
+
     Instant now = Instant.now();
     UUID communicationId = UUID.randomUUID();
-    List<String> requestedChannels = command.requestedChannels() == null
-        ? deriveChannels(command) : List.copyOf(command.requestedChannels());
-    if (requestedChannels.isEmpty()) {
-      throw new CommunicationsRejectedException(RejectionCode.NO_CHANNEL_SELECTED, "requestedChannels must not be empty");
-    }
-    if (!requestedChannels.equals(deriveChannels(command))) {
-      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT,
-          "requestedChannels must match the supplied inbox and email channels");
-    }
-    String fingerprint = RequestFingerprint.sha256(command.recipientAccountId().toString(), command.systemCode(),
-        command.communicationType(), command.sourceService(), command.sourceReferenceType(), command.sourceReferenceId(),
-        String.join(",", requestedChannels),
-        command.inbox() == null ? null : command.inbox().title(),
-        command.inbox() == null ? null : command.inbox().body(),
-        command.inbox() == null || command.inbox().expiresAt() == null ? null : command.inbox().expiresAt().toString(),
-        command.email() == null ? null : command.email().contentMode().name(),
-        command.email() == null ? null : command.email().senderCode(),
-        command.email() == null ? null : command.email().subject(),
-        command.email() == null ? null : command.email().textBody(),
-        command.email() == null ? null : command.email().htmlBody(),
-        command.email() == null ? null : command.email().templateCode(),
-        command.email() == null ? null : command.email().templateData());
     Communication communication =
         Communication.requested(
             communicationId, command.recipientAccountId(), command.systemCode(), command.communicationType(), command.priority(),
@@ -142,15 +155,14 @@ public class RequestCommunicationService {
       inboxMessageRepository.insert(inboxMessage);
     }
     if (command.email() != null) {
-      EmailSenderDirectory.ResolvedSender sender = emailSenderDirectory.resolve(command.email().senderCode());
       EmailDelivery delivery =
           command.email().contentMode() == com.estoma.communications.contracts.EmailContentMode.TEMPLATE
               ? EmailDelivery.template(
                   UUID.randomUUID(), communicationId, recipient.institutionalEmail(), recipient.displayName(), sender.fromName(), sender.fromAddress(),
-                  null, command.email().templateCode(), command.email().templateData(), now)
+                   null, command.email().senderCode() == null ? "default" : command.email().senderCode(), command.email().templateCode(), command.email().templateData(), now)
               : EmailDelivery.generic(
                   UUID.randomUUID(), communicationId, recipient.institutionalEmail(), recipient.displayName(), sender.fromName(), sender.fromAddress(),
-                  null, command.email().subject(), command.email().textBody(), command.email().htmlBody(), now);
+                   null, command.email().senderCode() == null ? "default" : command.email().senderCode(), command.email().subject(), command.email().textBody(), command.email().htmlBody(), now);
       emailDeliveryRepository.insert(delivery);
     }
 
@@ -189,12 +201,25 @@ public class RequestCommunicationService {
     if (email == null) {
       return;
     }
+    if (email.contentMode() == null) {
+      throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "email content mode is required");
+    }
     boolean genericMissingFields =
         email.contentMode() == com.estoma.communications.contracts.EmailContentMode.GENERIC && (isBlank(email.subject()) || isBlank(email.textBody()));
     boolean templateMissingFields =
         email.contentMode() == com.estoma.communications.contracts.EmailContentMode.TEMPLATE && isBlank(email.templateCode());
-    if (genericMissingFields || templateMissingFields) {
+    if (genericMissingFields || templateMissingFields || !isValidJson(email.templateData())) {
       throw new CommunicationsRejectedException(RejectionCode.INVALID_CONTENT, "email content is missing required fields for its content mode");
+    }
+  }
+
+  private static boolean isValidJson(String value) {
+    if (value == null) return true;
+    try {
+      new tools.jackson.databind.ObjectMapper().readValue(value, Object.class);
+      return true;
+    } catch (Exception ignored) {
+      return false;
     }
   }
 

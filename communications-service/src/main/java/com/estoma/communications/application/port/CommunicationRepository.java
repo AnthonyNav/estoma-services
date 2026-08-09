@@ -14,6 +14,7 @@ import java.util.UUID;
 public interface CommunicationRepository {
 
   Optional<Communication> findById(UUID communicationId);
+  default Optional<Communication> findByIdForUpdate(UUID communicationId) { return findById(communicationId); }
   Optional<Communication> findBySourceAndIdempotency(String sourceService, UUID idempotencyKey);
   Optional<Communication> findLegacyByOrigin(Communication communication);
 

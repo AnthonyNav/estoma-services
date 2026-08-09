@@ -50,8 +50,8 @@ Single milestone covering all functional behavior against a real database, witho
 3. **Domain aggregates**: `Communication`, `InboxMessage`, `InboxVisit`, `EmailDelivery`, `EmailDeliveryAttempt`, plus `CommunicationsRejectedException` and `RejectionCode` (the 10 rejection codes from `commands.md` §2.1). No framework dependency, unit-tested directly.
 4. **JDBC repositories** implementing the ports declared in `application/port`, using `JdbcClient`.
 5. **`RequestCommunication` handler**: requires correlation and idempotency metadata, creates `Communication` and at most one `InboxMessage`/`EmailDelivery`, and appends events in the same transaction. `EmailDelivery` is written `PENDING` only — no provider call here.
-6. **`RegisterInboxVisit`, `RetryEmailDelivery`, `ExpireInboxMessages` handlers**, dispatched by a single transactional `CommandDispatcher` (Consumer Inbox first, functional rejection caught inside the transaction, non-sensitive events appended to Outbox). No correlated result is actually published to `platform.results` until the messaging shell exists (Phase 3); the dispatcher's Outbox write is the durable, testable proof of correctness in the meantime.
-7. **`recipient_projection` consumer**: consumes `PersonCreated/Updated/Activated/Deactivated` and `AccountCreated/Activated/Deactivated/LoginIdentifierChanged`, updates `recipient_projection` idempotently using `person_source_version`/`account_source_version` monotonicity, via the same `ProjectionDispatcher` pattern. Implemented against the conceptual payload already assumed by this service's own `events.md`/`data-model.md` — Phase 3 formalizes this against what `users-service`/`authentication-service` actually publish.
+6. **`RegisterInboxVisit`, `RetryEmailDelivery`, `ResolveIndeterminateEmailDelivery`, `ExpireInboxMessages` handlers**, dispatched by a single transactional `CommandDispatcher` (Consumer Inbox first, functional rejection caught inside the transaction, non-sensitive events appended to Outbox). Reconciliation requires a real indeterminate attempt for acceptance and explicit duplicate-risk acknowledgement for resend. No correlated result is actually published to `platform.results` until the messaging shell exists (Phase 3); the dispatcher's Outbox write is the durable, testable proof of correctness in the meantime.
+7. **`recipient_projection` consumer**: consumes `PersonCreated/Updated/Activated/Deactivated` and `AccountCreated/Activated/Deactivated`, updates `recipient_projection` idempotently using `person_source_version`/`account_source_version` monotonicity, via the same `ProjectionDispatcher` pattern. Implemented against the conceptual payload already assumed by this service's own `events.md`/`data-model.md` — Phase 3 formalizes this against what `users-service`/`authentication-service` actually publish.
 8. **`AppointmentCancelled` adapter**: filters on `cancellationType = CLINIC` and `cancellationSubreason = CAPACITY_LOSS`, and on match invokes the `RequestCommunication` handling logic **in-process, in the same transaction as its own Consumer Inbox write** — not as a RabbitMQ round trip (see `system_contract.md`'s "Internal Architecture"). Other values must not trigger it.
 9. **Email provider port and stub implementation**: a neutral `send(...)` port with normalized success/error, no SDK/exception leakage, and a deterministic stub implementation. Provider timeout is enforced by a bounded executor; template codes come only from explicit configuration.
 10. **Email delivery worker**: implements the "Email Delivery Operational Policy" from `system_contract.md` — claims due rows, calls the provider port with no open transaction, records the attempt and resulting state/event in a second transaction.
@@ -67,12 +67,12 @@ Out of scope:
 
 Acceptance criteria:
 
-- All 4 commands and their handlers are implemented and tested (unit tests for domain, Testcontainers integration tests for repositories and dispatchers).
+- All 5 commands and their handlers are implemented and tested (unit tests for domain, Testcontainers integration tests for repositories and dispatchers).
 - All mandatory invariants from `system_contract.md` hold under test, including the idempotency key and the max-one-inbox/max-one-email invariants.
 - Same `idempotencyKey` plus the same fingerprint returns the existing `Communication` without new events or domain effects.
 - Legacy `SENDING` rows become `INDETERMINATE` with `LEGACY_SENDING_OUTCOME_UNKNOWN`; without a real attempt, `RECONCILED_ACCEPTED` is rejected and only `RECONCILED_FAILED` or `RESEND_AUTHORIZED` is allowed.
 - Every future operation over a legacy `Communication` without correlation establishes a new boundary `correlationId` before writing Outbox.
-- `TEMPLATE` content is rendered and persisted once; retries reuse the persisted final content.
+- No real template renderer is configured in this scope: `TEMPLATE` fails before provider invocation, while `GENERIC` reuses its persisted delivery snapshot.
 - The provider executor is managed and bounded, startup rejects `leaseDuration <= providerTimeout + safetyMargin`, and `EmailProviderRouter` is injected directly into the worker.
 - A test proves the email provider is never called while a database transaction is open.
 - `title`, `body`, and email content never appear in any log line.
@@ -85,7 +85,7 @@ Wires the real messaging layer over the business logic already proven in Phase 2
 Scope:
 
 - Add `spring-boot-starter-amqp` and `testcontainers-rabbitmq`; add the `rabbitmq` service to `docker-compose.yml`.
-- `AmqpTopologyConfig`: declares only what this service owns — its own command queue (`commands.communications`) plus DLQ and retry tiers, and its own event consumer queues (one per independently-deployable consumer: `recipient_projection`, the `AppointmentCancelled` adapter). Gated behind `estoma.messaging.topology-declare`, same as `users-service`.
+- `AmqpTopologyConfig`: integrates the platform-owned command, retry, and event topology once its canonical contracts are available. This plan does not assign queues per projection or handler.
 - `InboxMessageCreated`'s restricted binding: bound only to `events.bff-projections` and explicitly authorized queues, enforced at the RabbitMQ permission layer.
 - `CommandListener`/`EventListener`: decode the envelope, route to `CommandDispatcher`/`ProjectionDispatcher`/the adapter built in Phase 2, manual ACK after commit, technical-vs-functional failure classification for retry/DLQ routing.
 - `OutboxRelay`: claim-and-publish with publisher confirms over `outbox_messages`.

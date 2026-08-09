@@ -8,15 +8,14 @@ This file tracks what is genuinely still open after Phase 1 (PR1). Everything th
 
 These require agreement with other services' teams, or vendor/operational decisions outside this service's own technical authority, before they can be finalized. Phase 2 proceeds using the conceptual payloads and the stub provider already documented in this service's own `events.md`/`data-model.md`/`commands.md`; Phase 3 formalizes and reconciles them.
 
-- Exact payload contracts for `PersonCreated`/`PersonUpdated`/`PersonActivated`/`PersonDeactivated` (from `users-service`) and `AccountCreated`/`AccountActivated`/`AccountDeactivated`/`LoginIdentifierChanged` (from `authentication-service`), once those services build their own messaging shells.
-- Definitive email providers and their fallback order (`commands.md` §9).
+- Exact payload contracts for `PersonCreated`/`PersonUpdated`/`PersonActivated`/`PersonDeactivated` (from `users-service`) and `AccountCreated`/`AccountActivated`/`AccountDeactivated` (from `authentication-service`), once those services build their own messaging shells.
+- Definitive real email provider selection, without introducing provider fallback in this scope.
 - Definitive normalized provider-error-code catalog.
 - Secure mechanism for temporary links or secrets carried in email content (`README.md` §9, "pendiente de definición").
 - Future webhook support and the criterion for when `EmailDeliveryDelivered`/`DELIVERED` becomes reachable.
 - Final RabbitMQ topology details beyond the platform-wide defaults Phase 3 applies (exact prefetch, exact retention, exact message size limits — `messaging-architecture.md` §20 lists these as globally pending, not specific to this service).
 - Retention policy for `email_delivery_attempts`.
 - The canonical normalized provider-error-code catalog remains deferred; timeout, ambiguous outcomes, and legacy `SENDING` rows use durable indeterminate codes.
-- Whether the `commands.communications-service` string in the platform docs (`03-services/shared/communications-service/commands.md` §1 and `interfaces.md` §3) should be corrected upstream to match this contract's `commands.communications` (see `system_contract.md`, "Functional Input Interfaces").
 
 ## Out Of This Service's Control
 

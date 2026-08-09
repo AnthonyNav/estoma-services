@@ -76,7 +76,7 @@ class AppointmentCancelledAdapter implements ProjectionHandler {
 
     try {
       MessageEnvelope boundary = new MessageEnvelope(envelope.messageId(), envelope.messageType(), envelope.messageVersion(), envelope.messageKind(),
-          envelope.producer(), envelope.occurredAt(), java.util.UUID.randomUUID(), envelope.messageId(), envelope.operationId(), payload.appointmentId(),
+          envelope.producer(), envelope.occurredAt(), envelope.correlationId() == null ? java.util.UUID.randomUUID() : envelope.correlationId(), envelope.messageId(), envelope.operationId(), payload.appointmentId(),
           envelope.aggregateId(), envelope.aggregateVersion(), envelope.actor(), envelope.payload());
       CommandHandlerResult result = service.create(command, boundary);
       return new ProjectionHandlerResult(result.events());

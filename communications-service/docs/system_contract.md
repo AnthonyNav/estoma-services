@@ -79,13 +79,16 @@ Initial durable commands:
 - `RequestCommunication`
 - `RegisterInboxVisit`
 - `RetryEmailDelivery`
+- `ResolveIndeterminateEmailDelivery`
 - `ExpireInboxMessages`
 
 This service has no ephemeral Security RPC surface: that pattern (`platform.security.rpc` / Direct Reply-To) is scoped exclusively to `authentication-service` (`messaging-architecture.md` §3). Every operation `communications-service` receives is a durable Command.
 
+`ResolveIndeterminateEmailDelivery` is administrative-only: `RECONCILED_ACCEPTED` requires a persisted real indeterminate attempt, while `RESEND_AUTHORIZED` requires explicit duplicate-risk acknowledgement. Both paths append an auditable administrative action in the same transaction as the lifecycle transition and Outbox events.
+
 `ListInboxMessages`, `GetInboxSummary`, and `GetCommunicationStatus` are **not** operations of this service. They are served by BFF `read_models` fed from the events listed below; there is no direct interface from the BFF to `communications-service` for reads (`commands.md` §2, `interfaces.md` §3.1).
 
-**Command queue naming decision:** the queue is `commands.communications`, using the bare `logicalComponentId` (`communications`) rather than a `-service`-suffixed name. This follows `messaging-architecture.md` §4's own canonical `logicalComponentId` list and its own worked routing-key example for this exact service (`communications.email.failed`). It intentionally diverges from the `-service`-suffixed queue names already shipped in `authentication-service` (`commands.authentication-service`) and `users-service` (`commands.users-service`) — those predate this decision and are not reconciled by this contract. The platform docs for this service themselves inconsistently write `commands.communications-service` in `commands.md` §1 and `interfaces.md` §3; this is tracked as a documentation correction in `pending_decisions.md`, not followed here.
+Queue topology is owned by the future platform messaging integration. This service does not currently declare queues, bindings, or per-projection consumers.
 
 ## Events Produced
 
@@ -104,7 +107,7 @@ Initial produced events:
 - `CommunicationCompleted`
 - `CommunicationFailed`
 
-`InboxMessageCreated` is a **restricted integration event**: it carries `title`/`body` so the BFF can build its `mailbox_messages_read_model`. It must bind only to `events.bff-projections` and to explicitly authorized consumer queues — never to a general or open binding. RabbitMQ permissions must prevent unauthorized consumers from reading this queue or its content. `title`/`body` must never appear in logs, metrics, or traces (`events.md` §4).
+`InboxMessageCreated` is a **restricted integration event**: it carries `title`/`body` so the BFF can build its `mailbox_messages_read_model`. Future platform access controls must prevent unauthorized consumption. `title`/`body` must never appear in logs, metrics, or traces (`events.md` §4).
 
 `EmailDeliveryDelivered` is future/conditional: it requires real delivery confirmation (webhook or equivalent), and no webhook support exists in the initial scope. It is listed here because it is part of the documented contract, not because it is reachable in v1.
 
@@ -113,7 +116,7 @@ Initial produced events:
 Initial consumed events:
 
 - `PersonCreated`, `PersonUpdated`, `PersonActivated`, `PersonDeactivated` (from `users-service`) — feed `recipient_projection`.
-- `AccountCreated`, `AccountActivated`, `AccountDeactivated`, `LoginIdentifierChanged` (from `authentication-service`) — feed `recipient_projection`.
+- `AccountCreated`, `AccountActivated`, `AccountDeactivated` (from `authentication-service`) — feed `recipient_projection`.
 - `AppointmentCancelled` (from `appointments-service`) — consumed by a documented adapter, **only** when `cancellationType = CLINIC` and `cancellationSubreason = CAPACITY_LOSS`, translated into an internal `RequestCommunication` for the student (`studentAccountId` from the event) with channel `EMAIL`, `sourceReferenceType = AppointmentCancelled`, `sourceReferenceId = appointmentId`. Other `cancellationType`/`cancellationSubreason` values must not trigger this adapter (`events.md` §5.1).
 
 None of the Person/Account events trigger a communication by themselves — they only maintain `recipient_projection`. Durable event consumption must use Consumer Inbox or equivalent idempotence. ACK happens only after the local transaction commits.
@@ -217,7 +220,7 @@ This section has no equivalent in `authentication-service`: it documents how the
 - Provider calls run in a bounded executor with a configured timeout; timeout or ambiguous provider failure records `INDETERMINATE`.
 - The resulting `EmailDeliveryAttempt`, the `EmailDelivery` status transition, and the derived canonical events (`EmailDeliveryAccepted` / `EmailDeliveryRetryScheduled` / `EmailDeliveryFailed` plus the corresponding `CommunicationCompleted` or `CommunicationFailed`) are recorded together in a second, separate transaction, appended to Outbox in the same commit.
 - v1 operational values: worker polls every 5 seconds, claims a batch of 20; retry backoff schedule on provider failure is `1m, 5m, 30m, 2h, 24h` for six physical calls per retry cycle, then the delivery is marked `FAILED`. Lease duration must exceed provider timeout plus a safety margin.
-- Which concrete providers are used and their fallback order remain pending (`pending_decisions.md`) — the provider port and a stub implementation are enough to build and test this policy in PR2 without that decision being made yet.
+- V1 uses one local fake provider. Real providers and provider fallback are outside this service's current scope.
 
 ## Observability Parameters
 

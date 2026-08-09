@@ -47,23 +47,26 @@ class RetryEmailDeliveryHandler implements CommandHandler {
     RetryEmailDeliveryCommand command = codec.convertPayload(envelope, RetryEmailDeliveryCommand.class);
     EmailDelivery delivery =
         repository
-            .findById(command.emailDeliveryId())
+            .findByIdForUpdate(command.emailDeliveryId())
             .orElseThrow(() -> new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FOUND, "email delivery " + command.emailDeliveryId() + " not found"));
 
     Instant now = Instant.now();
+    // Lock the parent before calculating either transition; delivery is always locked first.
+    var communication = communications.findByIdForUpdate(delivery.communicationId()).orElseThrow();
     EmailDelivery retried = delivery.retriedByOperator(now);
-    if (repository.update(retried) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FAILED, "delivery changed while retrying");
-    var communication = communications.findById(delivery.communicationId()).orElseThrow();
-    if (communications.update(communication.reopenedForRetry(now)) != 1)
-      throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FAILED, "communication changed while retrying");
+    var reopened = communication.withCorrelationId(envelope.correlationId()).reopenedForRetry(now);
+    var event = new EventToAppend(
+        CommunicationsEvent.EMAIL_DELIVERY_RETRY_SCHEDULED.wireName(),
+        new EmailDeliveryRetryScheduledPayload(command.emailDeliveryId(), delivery.communicationId(), retried.attemptCount(), null, now, now));
+
+    if (repository.update(retried) != 1) throw new IllegalStateException("email delivery update lost after retry validation");
+    if (communications.update(reopened) != 1) throw new IllegalStateException("communication update lost after retry validation");
     actions.record(UUID.randomUUID(), envelope.messageId(), delivery.emailDeliveryId(), "RETRY_EMAIL_DELIVERY",
         codec.writeValueAsString(envelope.actor()), command.reason() == null ? "manual retry" : command.reason(), "{}", retried.retryCycle(), false, now);
     metrics.counter("communications.email.manual_retry.total").increment();
 
     return CommandHandlerResult.of(
         command.emailDeliveryId(), retried.attemptCount(),
-        new EventToAppend(
-            CommunicationsEvent.EMAIL_DELIVERY_RETRY_SCHEDULED.wireName(),
-             new EmailDeliveryRetryScheduledPayload(command.emailDeliveryId(), delivery.communicationId(), retried.attemptCount(), null, now, now)));
+        event);
   }
 }

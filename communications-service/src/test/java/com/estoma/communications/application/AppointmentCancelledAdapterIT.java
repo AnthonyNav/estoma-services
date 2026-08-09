@@ -3,6 +3,7 @@ package com.estoma.communications.application;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.estoma.communications.application.port.RecipientProjectionRepository;
+import com.estoma.communications.application.port.CommunicationRepository;
 import com.estoma.communications.contracts.consumed.AppointmentCancelledPayload;
 import com.estoma.communications.contracts.consumed.ConsumedEventTypes;
 import com.estoma.communications.testsupport.AbstractPostgresIT;
@@ -16,20 +17,20 @@ class AppointmentCancelledAdapterIT extends AbstractPostgresIT {
 
   @Autowired private ProjectionDispatcher dispatcher;
   @Autowired private RecipientProjectionRepository recipientProjectionRepository;
+  @Autowired private CommunicationRepository communicationRepository;
 
   @Test
   void capacityLossCancellationByTheClinicCreatesACommunication() {
     UUID studentAccountId = activeRecipient();
     UUID appointmentId = UUID.randomUUID();
 
-    var outcome =
-        dispatcher.dispatch(
-            Envelopes.event(
-                ConsumedEventTypes.APPOINTMENT_CANCELLED,
-                new AppointmentCancelledPayload(appointmentId, studentAccountId, "CLINIC", "CAPACITY_LOSS"),
-                appointmentId, 1));
+    var envelope = Envelopes.event(ConsumedEventTypes.APPOINTMENT_CANCELLED,
+        new AppointmentCancelledPayload(appointmentId, studentAccountId, "CLINIC", "CAPACITY_LOSS"), appointmentId, 1);
+    var outcome = dispatcher.dispatch(envelope);
 
     assertThat(outcome).isInstanceOf(ProjectionOutcome.Applied.class);
+    assertThat(communicationRepository.findBySourceAndIdempotency("appointments-service", appointmentId).orElseThrow().correlationId())
+        .isEqualTo(envelope.correlationId());
   }
 
   @Test

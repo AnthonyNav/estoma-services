@@ -46,6 +46,10 @@ class JdbcCommunicationRepository implements CommunicationRepository {
         .query(CommunicationRowMapper.INSTANCE)
         .optional();
   }
+  @Override public Optional<Communication> findByIdForUpdate(UUID communicationId) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE communication_id = :communicationId FOR UPDATE")
+        .param("communicationId", communicationId).query(CommunicationRowMapper.INSTANCE).optional();
+  }
 
   @Override
   public Optional<Communication> findBySourceAndIdempotency(String sourceService, UUID idempotencyKey) {
@@ -55,7 +59,7 @@ class JdbcCommunicationRepository implements CommunicationRepository {
 
   @Override
   public Optional<Communication> findLegacyByOrigin(Communication c) {
-    return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE idempotency_key IS NULL AND source_service = :sourceService AND source_reference_type = :sourceType AND source_reference_id = :sourceId AND recipient_account_id = :recipient AND system_code = :system AND communication_type = :type")
+    return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE source_service = :sourceService AND source_reference_type = :sourceType AND source_reference_id = :sourceId AND recipient_account_id = :recipient AND system_code = :system AND communication_type = :type")
         .param("sourceService", c.sourceService()).param("sourceType", c.sourceReferenceType()).param("sourceId", c.sourceReferenceId())
         .param("recipient", c.recipientAccountId()).param("system", c.systemCode()).param("type", c.communicationType())
         .query(CommunicationRowMapper.INSTANCE).optional();

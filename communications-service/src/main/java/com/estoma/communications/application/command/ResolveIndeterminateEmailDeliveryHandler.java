@@ -19,6 +19,9 @@ import com.estoma.communications.infrastructure.messaging.EnvelopeJsonCodec;
 import org.springframework.stereotype.Component;
 import com.estoma.communications.application.port.CommunicationRepository;
 import com.estoma.communications.domain.communication.Communication;
+import com.estoma.communications.contracts.CommunicationStatus;
+import com.estoma.communications.domain.email.EmailDelivery;
+import com.estoma.communications.domain.email.EmailDeliveryAttempt;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,7 +42,7 @@ class ResolveIndeterminateEmailDeliveryHandler implements CommandHandler {
   @Override public String commandMessageType() { return CommunicationsCommand.RESOLVE_INDETERMINATE_EMAIL_DELIVERY.wireName(); }
   @Override public CommandHandlerResult handle(MessageEnvelope envelope) {
     ResolveIndeterminateEmailDeliveryCommand command=codec.convertPayload(envelope, ResolveIndeterminateEmailDeliveryCommand.class);
-    var delivery=repository.findById(command.emailDeliveryId()).orElseThrow(() -> new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FOUND, "email delivery not found"));
+    var delivery=repository.findByIdForUpdate(command.emailDeliveryId()).orElseThrow(() -> new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_FOUND, "email delivery not found"));
     if (delivery.status().name().equals("ACCEPTED") || delivery.status().name().equals("DELIVERED")) {
       throw new CommunicationsRejectedException(RejectionCode.EMAIL_ALREADY_ACCEPTED, "email delivery was already accepted");
     }
@@ -48,41 +51,60 @@ class ResolveIndeterminateEmailDeliveryHandler implements CommandHandler {
     }
     if (command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED && !command.riskAcknowledged())
       throw new CommunicationsRejectedException(RejectionCode.RESEND_DUPLICATE_RISK_NOT_ACKNOWLEDGED, "risk acknowledgment is required for resend");
+
+    // The delivery lock is acquired above. Resolve's optional attempt lock must precede its parent lock.
+    var lockedAttempt = command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED
+        ? java.util.Optional.<EmailDeliveryAttempt>empty()
+        : attempts.findLastIndeterminateForUpdate(delivery.emailDeliveryId());
+    Communication communication = communications.findByIdForUpdate(delivery.communicationId()).orElseThrow();
     java.time.Instant now = java.time.Instant.now();
-    actions.record(java.util.UUID.randomUUID(), envelope.messageId(), delivery.emailDeliveryId(), command.resolution().name(),
-        codec.writeValueAsString(envelope.actor()), command.reason() == null ? command.resolution().name() : command.reason(), "{}",
-        command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED ? delivery.retryCycle() + 1 : delivery.retryCycle(),
-        command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED, now);
-    Communication communication = communications.findById(delivery.communicationId()).orElseThrow();
     List<EventToAppend> events = new ArrayList<>();
+    EmailDelivery updatedDelivery;
+    EmailDeliveryAttempt updatedAttempt = null;
+    Communication updatedCommunication = communication.withCorrelationId(envelope.correlationId());
+    boolean communicationChanged = updatedCommunication != communication;
+    boolean emailIsRequired = communication.requestedChannels().isEmpty() || communication.requestedChannels().contains("EMAIL");
+
     switch (command.resolution()) {
       case RESEND_AUTHORIZED -> {
-        var retried = delivery.resendAuthorized(now);
-        if (repository.update(retried) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "delivery changed while resending");
+        updatedDelivery = delivery.resendAuthorized(now);
         events.add(new EventToAppend(CommunicationsEvent.EMAIL_DELIVERY_RETRY_SCHEDULED.wireName(),
-            new EmailDeliveryRetryScheduledPayload(delivery.emailDeliveryId(), delivery.communicationId(), retried.attemptCount(), delivery.lastErrorCode(), now, now)));
+            new EmailDeliveryRetryScheduledPayload(delivery.emailDeliveryId(), delivery.communicationId(), updatedDelivery.attemptCount(), delivery.lastErrorCode(), now, now)));
       }
       case RECONCILED_ACCEPTED -> {
-        var attempt = attempts.findLastIndeterminate(delivery.emailDeliveryId()).orElseThrow(
+        var attempt = lockedAttempt.orElseThrow(
             () -> new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE,
                 "accepted reconciliation requires a real indeterminate attempt"));
-        if (repository.update(delivery.accepted(now)) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "delivery changed while resolving");
+        updatedDelivery = delivery.accepted(now);
+        updatedAttempt = attempt.reconciledAccepted(now);
         events.add(new EventToAppend(CommunicationsEvent.EMAIL_DELIVERY_ACCEPTED.wireName(), new EmailDeliveryAcceptedPayload(delivery.emailDeliveryId(), delivery.communicationId(), communication.recipientAccountId(), attempt.provider(), delivery.contentMode().name(), attempt.providerMessageId(), attempt.attemptNumber(), now)));
-        if (communication.status() == com.estoma.communications.contracts.CommunicationStatus.PROCESSING) {
-          if (communications.update(communication.completed(now)) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "communication changed while resolving");
+        if (communication.status() == CommunicationStatus.PROCESSING && emailIsRequired) {
+          updatedCommunication = updatedCommunication.completed(now);
+          communicationChanged = true;
           events.add(new EventToAppend(CommunicationsEvent.COMMUNICATION_COMPLETED.wireName(), new CommunicationCompletedPayload(communication.communicationId(), communication.recipientAccountId(), communication.systemCode(), communication.communicationType(), communication.requestedChannels(), now)));
         }
       }
       case RECONCILED_FAILED -> {
-        if (repository.update(delivery.failedTerminal("OPERATOR_RESOLVED_FAILED", "resolved by operator", now)) != 1)
-          throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "delivery changed while resolving");
-        if (communication.status() == com.estoma.communications.contracts.CommunicationStatus.PROCESSING) {
-          if (communications.update(communication.failed(now)) != 1) throw new CommunicationsRejectedException(RejectionCode.EMAIL_DELIVERY_NOT_INDETERMINATE, "communication changed while resolving");
+        updatedDelivery = delivery.failedTerminal("OPERATOR_RESOLVED_FAILED", "resolved by operator", now);
+        updatedAttempt = lockedAttempt.map(attempt -> attempt.reconciledFailed("OPERATOR_RESOLVED_FAILED", "resolved by operator", now)).orElse(null);
+        if (communication.status() == CommunicationStatus.PROCESSING && emailIsRequired) {
+          updatedCommunication = updatedCommunication.failed(now);
+          communicationChanged = true;
           events.add(new EventToAppend(CommunicationsEvent.COMMUNICATION_FAILED.wireName(), new CommunicationFailedPayload(communication.communicationId(), communication.recipientAccountId(), communication.systemCode(), communication.communicationType(), List.of("EMAIL"), "OPERATOR_RESOLVED_FAILED", now)));
         }
         events.add(new EventToAppend(CommunicationsEvent.EMAIL_DELIVERY_FAILED.wireName(), new EmailDeliveryFailedPayload(delivery.emailDeliveryId(), delivery.communicationId(), communication.recipientAccountId(), delivery.attemptCount(), "OPERATOR_RESOLVED_FAILED", now)));
       }
+      default -> throw new IllegalStateException("unsupported indeterminate delivery resolution");
     }
+
+    if (updatedAttempt != null && attempts.reconcileIndeterminateWithoutClaim(updatedAttempt) != 1)
+      throw new IllegalStateException("email delivery attempt update lost after resolution validation");
+    if (repository.update(updatedDelivery) != 1) throw new IllegalStateException("email delivery update lost after resolution validation");
+    if (communicationChanged && communications.update(updatedCommunication) != 1)
+      throw new IllegalStateException("communication update lost after resolution validation");
+    actions.record(java.util.UUID.randomUUID(), envelope.messageId(), delivery.emailDeliveryId(), command.resolution().name(),
+        codec.writeValueAsString(envelope.actor()), command.reason() == null ? command.resolution().name() : command.reason(), "{}",
+        updatedDelivery.retryCycle(), command.resolution() == ResolveIndeterminateEmailDeliveryCommand.Resolution.RESEND_AUTHORIZED, now);
     metrics.counter("communications.email.indeterminate_resolved.total").increment();
     return CommandHandlerResult.of(command.emailDeliveryId(), delivery.attemptCount(), events.toArray(EventToAppend[]::new));
   }
