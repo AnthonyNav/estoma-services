@@ -58,6 +58,12 @@ estoma:
   # mandatory "environment" log field (system_contract.md "Observability
   # Parameters").
   environment: ${ESTOMA_ENVIRONMENT:local}
+  jwt:
+    private-key: ${AUTH_JWT_PRIVATE_KEY:}
+    public-key: ${AUTH_JWT_PUBLIC_KEY:}
+    kid: ${AUTH_JWT_KID:local-ephemeral}
+    issuer: ${AUTH_JWT_ISSUER:estoma-authentication}
+    audience: ${AUTH_JWT_AUDIENCE:estoma-clients}
   messaging:
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     publisher-confirm-timeout: 5s
