@@ -45,6 +45,14 @@ estoma:
       # is a pending decision (docs/pending_decisions.md).
       default-sender-name: ${COMM_EMAIL_DEFAULT_SENDER_NAME:Estoma}
       default-sender-address: ${COMM_EMAIL_DEFAULT_SENDER_ADDRESS:no-reply@estoma.edu}
+      fake:
+        mode: ${COMM_EMAIL_FAKE_MODE:accepted}
+      worker:
+        lease-duration-ms: ${COMM_EMAIL_WORKER_LEASE_MS:30000}
+        provider-timeout-ms: ${COMM_EMAIL_PROVIDER_TIMEOUT_MS:10000}
+        sweeper-interval-ms: ${COMM_EMAIL_WORKER_SWEEPER_INTERVAL_MS:5000}
+    admin:
+      system-allowlist: ${COMM_ADMIN_SYSTEM_ALLOWLIST:bff,communications-admin}
 
 server:
   port: 8080

@@ -11,7 +11,8 @@ public enum CommunicationsEvent {
   EMAIL_DELIVERY_FAILED("EmailDeliveryFailed"),
   EMAIL_DELIVERY_DELIVERED("EmailDeliveryDelivered"),
   COMMUNICATION_COMPLETED("CommunicationCompleted"),
-  COMMUNICATION_FAILED("CommunicationFailed");
+  COMMUNICATION_FAILED("CommunicationFailed"),
+  EMAIL_DELIVERY_INDETERMINATE_RESOLVED("EmailDeliveryIndeterminateResolved");
 
   private final String wireName;
 
