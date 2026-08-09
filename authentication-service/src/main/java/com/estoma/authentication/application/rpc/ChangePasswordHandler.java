@@ -42,6 +42,7 @@ public class ChangePasswordHandler {
   private final PersonStatusProjectionRepository personStatusProjectionRepository;
   private final SessionRepository sessionRepository;
   private final PasswordHasher passwordHasher;
+  private final PasswordPolicy passwordPolicy;
   private final TokenIssuer tokenIssuer;
   private final TokenHasher tokenHasher;
   private final SecureRandomGenerator randomGenerator;
@@ -52,6 +53,7 @@ public class ChangePasswordHandler {
       PersonStatusProjectionRepository personStatusProjectionRepository,
       SessionRepository sessionRepository,
       PasswordHasher passwordHasher,
+      PasswordPolicy passwordPolicy,
       TokenIssuer tokenIssuer,
       TokenHasher tokenHasher,
       SecureRandomGenerator randomGenerator) {
@@ -60,6 +62,7 @@ public class ChangePasswordHandler {
     this.personStatusProjectionRepository = personStatusProjectionRepository;
     this.sessionRepository = sessionRepository;
     this.passwordHasher = passwordHasher;
+    this.passwordPolicy = passwordPolicy;
     this.tokenIssuer = tokenIssuer;
     this.tokenHasher = tokenHasher;
     this.randomGenerator = randomGenerator;
@@ -77,18 +80,6 @@ public class ChangePasswordHandler {
       throw new AuthenticationRejectedException(RejectionCode.PERSON_INACTIVE, "person " + account.personId() + " is not active");
     }
 
-    Credential credential =
-        credentialRepository.findByAccountId(account.accountId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.CREDENTIAL_NOT_CONFIGURED, "no credential configured"));
-    if (request.newPassword() == null || request.newPassword().length() < 15) {
-      throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "password must be at least 15 characters");
-    }
-    if (passwordHasher.matches(request.newPassword(), credential.hash())) {
-      throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "new password must differ from the current password");
-    }
-    if (!passwordHasher.matches(request.currentPassword(), credential.hash())) {
-      throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "current password is incorrect");
-    }
-
     Instant now = Instant.now();
     Session currentSession =
         sessionRepository
@@ -97,6 +88,13 @@ public class ChangePasswordHandler {
             .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.SESSION_NOT_FOUND, "session " + request.sessionId() + " does not exist"));
     if (!currentSession.isValid(now)) {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_EXPIRED, "session " + currentSession.sessionId() + " has expired");
+    }
+    Credential credential =
+        credentialRepository.findByAccountId(account.accountId()).orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.CREDENTIAL_NOT_CONFIGURED, "no credential configured"));
+    passwordPolicy.validate(request.newPassword(), credential.hash());
+    if (currentSession.authState() == Session.AuthState.NORMAL
+        && !passwordHasher.matches(request.currentPassword(), credential.hash())) {
+      throw new AuthenticationRejectedException(RejectionCode.INVALID_CREDENTIALS, "current password is incorrect");
     }
 
     String refreshToken = randomGenerator.randomUrlSafeToken(32);
@@ -111,7 +109,7 @@ public class ChangePasswordHandler {
         sessionRepository.revokeOtherActiveForAccount(account.accountId(), currentSession.sessionId(), "password_changed", now);
     TokenIssuer.IssuedAccessToken accessToken =
         tokenIssuer.issueAccessToken(account.accountId(), account.personId(), renewedSession.sessionId(), Session.AuthState.NORMAL.name());
-    ChangePasswordResponse response = new ChangePasswordResponse(true, accessToken.token(), refreshToken, accessToken.expiresAt());
+    ChangePasswordResponse response = new ChangePasswordResponse(accessToken.token(), refreshToken, accessToken.expiresAt());
 
     PasswordChangedPayload event = new PasswordChangedPayload(account.accountId(), now, revokedOtherSessions > 0);
     if (revokedOtherSessions == 0) {

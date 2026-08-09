@@ -30,7 +30,8 @@ class SessionTest {
     assertThat(rotated.refreshTokenHash()).isEqualTo("new-hash");
     assertThat(rotated.idleExpiresAt()).isEqualTo(newExpiry);
     assertThat(rotated.previousRefreshTokenHash()).isEqualTo("hash");
-    assertThat(rotated.matchesRefreshTokenHash("hash", now.plusSeconds(20))).isTrue();
+    assertThat(rotated.classifyRefreshTokenHash("hash", now.plusSeconds(20)))
+        .isEqualTo(Session.RefreshTokenMatch.PREVIOUS_WITHIN_GRACE);
     assertThat(rotated.lastUsedAt()).isEqualTo(now.plusSeconds(10));
   }
 
@@ -42,6 +43,16 @@ class SessionTest {
 
     assertThat(revoked.isValid(now.plusSeconds(6))).isFalse();
     assertThat(revoked.revocationReason()).isEqualTo("password_changed");
+  }
+
+  @Test
+  void classifiesAnExpiredPreviousTokenAsReplay() {
+    Session rotated = newSession().rotated("new-hash", now.plusSeconds(10), idleExpiresAt, now.plusSeconds(20));
+
+    assertThat(rotated.classifyRefreshTokenHash("hash", now.plusSeconds(20)))
+        .isEqualTo(Session.RefreshTokenMatch.PREVIOUS_OUTSIDE_GRACE);
+    assertThat(rotated.classifyRefreshTokenHash("unknown", now.plusSeconds(20)))
+        .isEqualTo(Session.RefreshTokenMatch.NO_MATCH);
   }
 
   @Test

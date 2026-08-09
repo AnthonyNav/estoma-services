@@ -1,5 +1,6 @@
 package com.estoma.authentication.application.rpc;
 
+import com.estoma.authentication.application.EventToAppend;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
 import com.estoma.authentication.application.port.SecureRandomGenerator;
@@ -8,6 +9,8 @@ import com.estoma.authentication.application.port.TokenHasher;
 import com.estoma.authentication.application.port.TokenIssuer;
 import com.estoma.authentication.contracts.rpc.RefreshSessionRequest;
 import com.estoma.authentication.contracts.rpc.RefreshSessionResponse;
+import com.estoma.authentication.contracts.AuthenticationEvent;
+import com.estoma.authentication.contracts.event.SessionRevokedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
@@ -63,7 +66,20 @@ public class RefreshSessionHandler {
     if (!session.isValid(now)) {
       throw new AuthenticationRejectedException(RejectionCode.SESSION_EXPIRED, "session " + session.sessionId() + " has expired");
     }
-    if (session.authState() != Session.AuthState.NORMAL || !session.matchesRefreshTokenHash(tokenHasher.sha256Hex(request.refreshToken()), now)) {
+    Session.RefreshTokenMatch tokenMatch = session.classifyRefreshTokenHash(tokenHasher.sha256Hex(request.refreshToken()), now);
+    if (tokenMatch == Session.RefreshTokenMatch.PREVIOUS_OUTSIDE_GRACE) {
+      Session revoked = session.revoked("refresh_token_replay", now);
+      sessionRepository.update(revoked);
+      SessionRevokedPayload event = new SessionRevokedPayload(revoked.sessionId(), revoked.accountId(), "refresh_token_replay", now);
+      return RpcHandlerOutcome.rejected(
+          RejectionCode.REFRESH_TOKEN_REPLAY,
+          revoked.sessionId(),
+          null,
+          new EventToAppend(AuthenticationEvent.SESSION_REVOKED.wireName(), event));
+    }
+    if (session.authState() != Session.AuthState.NORMAL
+        || (tokenMatch != Session.RefreshTokenMatch.CURRENT
+            && tokenMatch != Session.RefreshTokenMatch.PREVIOUS_WITHIN_GRACE)) {
       throw new AuthenticationRejectedException(RejectionCode.INVALID_REFRESH_TOKEN, "refresh token does not match the current session token");
     }
 

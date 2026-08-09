@@ -159,8 +159,10 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Test
   void changePasswordRejectsWrongCurrentPassword() {
     UUID accountId = insertActiveAccountWithPassword();
+    Session currentSession = normalSession(accountId);
+    sessionRepository.insert(currentSession);
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(accountId, UUID.randomUUID(), "not-the-current-password", NEW_PASSWORD)));
+    var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(accountId, currentSession.sessionId(), "not-the-current-password", NEW_PASSWORD)));
 
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.INVALID_CREDENTIALS);
   }
@@ -168,10 +170,37 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Test
   void changePasswordRejectsReusingTheSamePassword() {
     UUID accountId = insertActiveAccountWithPassword();
+    Session currentSession = normalSession(accountId);
+    sessionRepository.insert(currentSession);
 
-    var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(accountId, UUID.randomUUID(), OLD_PASSWORD, OLD_PASSWORD)));
+    var outcome = dispatcher.execute(UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(accountId, currentSession.sessionId(), OLD_PASSWORD, OLD_PASSWORD)));
 
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.INVALID_PASSWORD);
+  }
+
+  @Test
+  void restrictedSessionDoesNotRequireCurrentPasswordAndRemainsUsableAfterInvalidNewPassword() {
+    UUID accountId = insertActiveAccountWithPassword();
+    Instant now = Instant.now();
+    Session restricted = Session.createPasswordChangeRequired(
+        UUID.randomUUID(), accountId, null, null, null, now, now.plusSeconds(900));
+    sessionRepository.insert(restricted);
+
+    var invalid = dispatcher.execute(
+        UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(accountId, restricted.sessionId(), null, "passwordpassword")));
+
+    assertThat(((RpcOutcome.Rejected<?>) invalid).code()).isEqualTo(RejectionCode.INVALID_PASSWORD);
+    assertThat(sessionRepository.findById(restricted.sessionId()).orElseThrow().authState())
+        .isEqualTo(Session.AuthState.PASSWORD_CHANGE_REQUIRED);
+
+    var changed = dispatcher.execute(
+        UUID.randomUUID(), () -> changeHandler.handle(new ChangePasswordRequest(accountId, restricted.sessionId(), null, NEW_PASSWORD)));
+
+    assertThat(changed).isInstanceOf(RpcOutcome.Success.class);
+    Session renewed = sessionRepository.findById(restricted.sessionId()).orElseThrow();
+    assertThat(renewed.authState()).isEqualTo(Session.AuthState.NORMAL);
+    assertThat(renewed.refreshTokenHash()).isNotNull();
+    assertThat(renewed.previousRefreshTokenHash()).isNull();
   }
 
   private String uniqueCode(String base) {

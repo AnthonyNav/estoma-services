@@ -7,6 +7,7 @@ import java.util.UUID;
 public final class Session {
 
   public enum AuthState { NORMAL, PASSWORD_CHANGE_REQUIRED }
+  public enum RefreshTokenMatch { CURRENT, PREVIOUS_WITHIN_GRACE, PREVIOUS_OUTSIDE_GRACE, NO_MATCH }
 
   private final UUID sessionId;
   private final UUID accountId;
@@ -88,9 +89,16 @@ public final class Session {
   }
 
   public boolean isValid(Instant now) { return revokedAt == null && idleExpiresAt.isAfter(now) && absoluteExpiresAt.isAfter(now); }
+  public RefreshTokenMatch classifyRefreshTokenHash(String hash, Instant now) {
+    if (refreshTokenHash != null && refreshTokenHash.equals(hash)) return RefreshTokenMatch.CURRENT;
+    if (previousRefreshTokenHash == null || !previousRefreshTokenHash.equals(hash)) return RefreshTokenMatch.NO_MATCH;
+    return previousRefreshValidUntil != null && previousRefreshValidUntil.isAfter(now)
+        ? RefreshTokenMatch.PREVIOUS_WITHIN_GRACE
+        : RefreshTokenMatch.PREVIOUS_OUTSIDE_GRACE;
+  }
   public boolean matchesRefreshTokenHash(String hash, Instant now) {
-    return refreshTokenHash != null && (refreshTokenHash.equals(hash) || (previousRefreshTokenHash != null
-        && previousRefreshTokenHash.equals(hash) && previousRefreshValidUntil != null && previousRefreshValidUntil.isAfter(now)));
+    RefreshTokenMatch match = classifyRefreshTokenHash(hash, now);
+    return match == RefreshTokenMatch.CURRENT || match == RefreshTokenMatch.PREVIOUS_WITHIN_GRACE;
   }
   public UUID sessionId() { return sessionId; }
   public UUID accountId() { return accountId; }

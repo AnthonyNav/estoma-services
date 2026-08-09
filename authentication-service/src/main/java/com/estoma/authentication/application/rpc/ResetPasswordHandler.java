@@ -38,6 +38,7 @@ public class ResetPasswordHandler {
   private final CredentialRepository credentialRepository;
   private final SessionRepository sessionRepository;
   private final PasswordHasher passwordHasher;
+  private final PasswordPolicy passwordPolicy;
   private final RecoveryCodeDeriver codeDeriver;
   private final TokenHasher tokenHasher;
 
@@ -48,6 +49,7 @@ public class ResetPasswordHandler {
       CredentialRepository credentialRepository,
       SessionRepository sessionRepository,
       PasswordHasher passwordHasher,
+      PasswordPolicy passwordPolicy,
       RecoveryCodeDeriver codeDeriver,
       TokenHasher tokenHasher) {
     this.recoveryRepository = recoveryRepository;
@@ -56,6 +58,7 @@ public class ResetPasswordHandler {
     this.credentialRepository = credentialRepository;
     this.sessionRepository = sessionRepository;
     this.passwordHasher = passwordHasher;
+    this.passwordPolicy = passwordPolicy;
     this.codeDeriver = codeDeriver;
     this.tokenHasher = tokenHasher;
   }
@@ -86,16 +89,14 @@ public class ResetPasswordHandler {
       recoveryRepository.recordFailedAttempt(recovery.recoveryId(), now, ValidateRecoveryCodeHandler.ATTEMPT_LIMIT);
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_INVALID, "recovery code is incorrect");
     }
-    if (request.newPassword() == null || request.newPassword().length() < 15) {
-      throw new AuthenticationRejectedException(RejectionCode.INVALID_PASSWORD, "password must be at least 15 characters");
-    }
+    Credential currentCredential = credentialRepository.findByAccountId(account.accountId()).orElse(null);
+    passwordPolicy.validate(request.newPassword(), currentCredential == null ? null : currentCredential.hash());
 
     int consumed = recoveryRepository.markUsedIfValid(recovery.recoveryId(), now, now);
     if (consumed == 0) {
       throw new AuthenticationRejectedException(RejectionCode.RECOVERY_TOKEN_ALREADY_USED, "recovery request was consumed concurrently");
     }
 
-    rejectPasswordReuse(account, request.newPassword());
     updateCredential(account, request.newPassword(), now);
     accountRepository.update(account.withAttemptsReset(now), account.version());
     recoveryRepository.invalidateActiveForAccount(account.accountId(), now);
@@ -120,17 +121,6 @@ public class ResetPasswordHandler {
     } else {
       credentialRepository.insert(Credential.configure(account.accountId(), hash, now));
     }
-  }
-
-  private void rejectPasswordReuse(Account account, String newPassword) {
-    credentialRepository
-        .findByAccountId(account.accountId())
-        .filter(credential -> passwordHasher.matches(newPassword, credential.hash()))
-        .ifPresent(
-            ignored -> {
-              throw new AuthenticationRejectedException(
-                  RejectionCode.INVALID_PASSWORD, "new password must differ from the current password");
-            });
   }
 
   private boolean matches(PasswordRecoveryRequest recovery, String code) {

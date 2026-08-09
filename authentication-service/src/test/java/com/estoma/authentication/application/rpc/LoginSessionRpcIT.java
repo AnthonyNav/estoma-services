@@ -19,6 +19,7 @@ import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
 import com.estoma.authentication.domain.account.LoginIdentifier;
 import com.estoma.authentication.domain.credential.Credential;
+import com.estoma.authentication.domain.session.Session;
 import com.estoma.authentication.testsupport.AbstractPostgresIT;
 import java.time.Instant;
 import java.util.UUID;
@@ -28,6 +29,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 class LoginSessionRpcIT extends AbstractPostgresIT {
 
@@ -42,6 +44,7 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
   @Autowired private SessionRepository sessionRepository;
   @Autowired private PasswordHasher passwordHasher;
   @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
+  @Autowired private JdbcClient jdbc;
 
   @Test
   void authenticateSucceedsWithCorrectCredentials() {
@@ -166,6 +169,63 @@ class LoginSessionRpcIT extends AbstractPostgresIT {
 
     var reuseOldToken = dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authResponse.sessionId(), authResponse.refreshToken())));
     assertThat(reuseOldToken).isInstanceOf(RpcOutcome.Success.class);
+  }
+
+  @Test
+  void refreshPreviousTokenOutsideGraceRevokesSessionAndReportsReplay() {
+    String identifier = "user-" + UUID.randomUUID();
+    insertActiveAccountWithPassword(identifier, PASSWORD);
+    var authenticated = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) dispatcher.execute(
+        UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)))).response();
+    dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+    jdbc.sql("UPDATE sessions SET previous_refresh_valid_until = :expired WHERE session_id = :sessionId")
+        .param("expired", java.sql.Timestamp.from(Instant.now().minusSeconds(1)))
+        .param("sessionId", authenticated.sessionId())
+        .update();
+
+    var replay = dispatcher.execute(
+        UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+
+    assertThat(((RpcOutcome.Rejected<?>) replay).code()).isEqualTo(RejectionCode.REFRESH_TOKEN_REPLAY);
+    assertThat(sessionRepository.findById(authenticated.sessionId()).orElseThrow().revocationReason())
+        .isEqualTo("refresh_token_replay");
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE aggregate_id = :sessionId AND message_type = 'SessionRevoked'")
+        .param("sessionId", authenticated.sessionId()).query(Long.class).single()).isEqualTo(1);
+  }
+
+  @Test
+  void concurrentExpiredPreviousTokenRefreshRevokesOnlyOnce() throws Exception {
+    String identifier = "user-" + UUID.randomUUID();
+    insertActiveAccountWithPassword(identifier, PASSWORD);
+    var authenticated = (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) dispatcher.execute(
+        UUID.randomUUID(), () -> authenticateHandler.handle(new AuthenticateAccountRequest(LoginType.USERNAME, identifier, PASSWORD, null, null, null)))).response();
+    dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+    jdbc.sql("UPDATE sessions SET previous_refresh_valid_until = :expired WHERE session_id = :sessionId")
+        .param("expired", java.sql.Timestamp.from(Instant.now().minusSeconds(1)))
+        .param("sessionId", authenticated.sessionId())
+        .update();
+
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var futures = java.util.stream.IntStream.range(0, 2).mapToObj(ignored -> executor.submit(() -> {
+        ready.countDown();
+        start.await();
+        return dispatcher.execute(UUID.randomUUID(), () -> refreshHandler.handle(new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken())));
+      })).toList();
+      assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+      start.countDown();
+      assertThat(futures.stream().map(future -> {
+        try {
+          return future.get(10, TimeUnit.SECONDS);
+        } catch (Exception exception) {
+          throw new AssertionError(exception);
+        }
+      })).anyMatch(outcome -> outcome instanceof RpcOutcome.Rejected<?> rejected
+          && rejected.code() == RejectionCode.REFRESH_TOKEN_REPLAY);
+    }
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE aggregate_id = :sessionId AND message_type = 'SessionRevoked'")
+        .param("sessionId", authenticated.sessionId()).query(Long.class).single()).isEqualTo(1);
   }
 
   @Test

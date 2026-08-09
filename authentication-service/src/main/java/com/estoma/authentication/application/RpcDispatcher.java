@@ -51,6 +51,9 @@ public class RpcDispatcher {
     try {
       RpcHandlerOutcome<T> outcome = handlerCall.get();
       outcome.events().forEach(event -> appendEvent(correlationId, outcome.aggregateId(), outcome.aggregateVersion(), event));
+      if (outcome.rejectionCode() != null) {
+        return new RpcOutcome.Rejected<>(outcome.rejectionCode());
+      }
       return new RpcOutcome.Success<>(outcome.response());
     } catch (AuthenticationRejectedException rejected) {
       return new RpcOutcome.Rejected<>(rejected.code());
