@@ -120,6 +120,44 @@ UPDATE communications c SET requested_channels = ARRAY_REMOVE(ARRAY[
   CASE WHEN EXISTS (SELECT 1 FROM inbox_messages i WHERE i.communication_id = c.communication_id) THEN 'INBOX' END,
   CASE WHEN EXISTS (SELECT 1 FROM email_deliveries e WHERE e.communication_id = c.communication_id) THEN 'EMAIL' END], NULL)
  WHERE c.requested_channels IS NULL OR cardinality(c.requested_channels) = 0;
+
+-- Rebuild the aggregate snapshot from durable channel evidence without emitting historical events.
+UPDATE communications c
+   SET status = CAST('COMPLETED' AS communication_status),
+       completed_at = CASE
+         WHEN d.status = CAST('DELIVERED' AS email_delivery_status)
+           THEN COALESCE(d.delivered_at, d.accepted_at, d.updated_at, d.created_at, c.created_at)
+         ELSE COALESCE(d.accepted_at, d.updated_at, d.created_at, c.created_at)
+       END,
+       failed_at = NULL
+  FROM email_deliveries d
+ WHERE d.communication_id = c.communication_id
+   AND d.status IN (CAST('ACCEPTED' AS email_delivery_status), CAST('DELIVERED' AS email_delivery_status));
+UPDATE communications c
+   SET status = CAST('FAILED' AS communication_status),
+       completed_at = NULL,
+       failed_at = COALESCE(d.failed_at, d.updated_at, d.created_at, c.created_at)
+  FROM email_deliveries d
+ WHERE d.communication_id = c.communication_id
+   AND d.status = CAST('FAILED' AS email_delivery_status);
+UPDATE communications c
+   SET status = CAST('PROCESSING' AS communication_status), completed_at = NULL, failed_at = NULL
+  FROM email_deliveries d
+ WHERE d.communication_id = c.communication_id
+   AND d.status IN (CAST('WAITING_FOR_RECIPIENT' AS email_delivery_status), CAST('PENDING' AS email_delivery_status),
+       CAST('RETRY_SCHEDULED' AS email_delivery_status), CAST('SENDING' AS email_delivery_status), CAST('INDETERMINATE' AS email_delivery_status));
+UPDATE communications c
+   SET status = CAST('COMPLETED' AS communication_status),
+       completed_at = COALESCE(i.created_at, c.created_at), failed_at = NULL
+  FROM inbox_messages i
+ WHERE i.communication_id = c.communication_id
+   AND NOT EXISTS (SELECT 1 FROM email_deliveries d WHERE d.communication_id = c.communication_id);
+-- Legacy records without persisted channel evidence remain non-terminal and require no invented outcome.
+UPDATE communications c
+   SET status = CAST('PROCESSING' AS communication_status), completed_at = NULL, failed_at = NULL
+ WHERE NOT EXISTS (SELECT 1 FROM email_deliveries d WHERE d.communication_id = c.communication_id)
+   AND NOT EXISTS (SELECT 1 FROM inbox_messages i WHERE i.communication_id = c.communication_id);
+
 ALTER TABLE communications ALTER COLUMN requested_channels SET DEFAULT ARRAY[]::text[];
 ALTER TABLE communications ALTER COLUMN requested_channels SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_communications_source_idempotency ON communications (source_service, idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -129,6 +167,14 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_communications_idempotency_fingerprint_pair') THEN
     ALTER TABLE communications ADD CONSTRAINT ck_communications_idempotency_fingerprint_pair
       CHECK ((idempotency_key IS NULL) = (request_fingerprint IS NULL));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_communications_status_timestamps') THEN
+    ALTER TABLE communications ADD CONSTRAINT ck_communications_status_timestamps CHECK (
+      (status = CAST('COMPLETED' AS communication_status) AND completed_at IS NOT NULL AND failed_at IS NULL)
+      OR (status = CAST('FAILED' AS communication_status) AND completed_at IS NULL AND failed_at IS NOT NULL)
+      OR (status IN (CAST('PENDING' AS communication_status), CAST('PROCESSING' AS communication_status))
+        AND completed_at IS NULL AND failed_at IS NULL)
+    );
   END IF;
 END $$;
 

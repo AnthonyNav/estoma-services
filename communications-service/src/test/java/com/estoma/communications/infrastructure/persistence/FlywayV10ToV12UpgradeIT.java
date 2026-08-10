@@ -25,25 +25,31 @@ class FlywayV10ToV12UpgradeIT {
     UUID pendingSecondRetryCommunication = UUID.randomUUID();
     UUID newCommunication = UUID.randomUUID();
     UUID sendingCommunication = UUID.randomUUID();
+    UUID acceptedCommunication = UUID.randomUUID();
+    UUID inboxOnlyCommunication = UUID.randomUUID();
     UUID historicalDelivery = UUID.randomUUID();
     UUID pendingFirstRetryDelivery = UUID.randomUUID();
     UUID pendingSecondRetryDelivery = UUID.randomUUID();
     UUID newDelivery = UUID.randomUUID();
     UUID sendingDelivery = UUID.randomUUID();
+    UUID acceptedDelivery = UUID.randomUUID();
       try (var connection = DriverManager.getConnection(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
            var statement = connection.createStatement()) {
         statement.execute("CREATE ROLE communications_runtime LOGIN PASSWORD 'runtime_password'");
-        insertCommunication(statement, historicalCommunication, "historical");
-        insertCommunication(statement, pendingFirstRetryCommunication, "pending-first-retry");
-        insertCommunication(statement, pendingSecondRetryCommunication, "pending-second-retry");
-        insertCommunication(statement, newCommunication, "new");
-        insertCommunication(statement, sendingCommunication, "sending");
-        statement.execute("INSERT INTO inbox_messages (inbox_message_id, communication_id, title, body, status, created_at) VALUES ('" + UUID.randomUUID() + "', '" + sendingCommunication + "', 'legacy', 'body', 'ACTIVE', now())");
+        insertCommunication(statement, historicalCommunication, "historical", "PROCESSING");
+        insertCommunication(statement, pendingFirstRetryCommunication, "pending-first-retry", "FAILED");
+        insertCommunication(statement, pendingSecondRetryCommunication, "pending-second-retry", "PENDING");
+        insertCommunication(statement, newCommunication, "new", "PENDING");
+        insertCommunication(statement, sendingCommunication, "sending", "FAILED");
+        insertCommunication(statement, acceptedCommunication, "accepted", "PROCESSING");
+        insertCommunication(statement, inboxOnlyCommunication, "inbox-only", "PENDING");
+        statement.execute("INSERT INTO inbox_messages (inbox_message_id, communication_id, title, body, status, created_at) VALUES ('" + UUID.randomUUID() + "', '" + inboxOnlyCommunication + "', 'legacy', 'body', 'ACTIVE', now())");
         insertDelivery(statement, historicalDelivery, historicalCommunication, "FAILED", 5, true);
         insertDelivery(statement, pendingFirstRetryDelivery, pendingFirstRetryCommunication, "PENDING", 5, false);
         insertDelivery(statement, pendingSecondRetryDelivery, pendingSecondRetryCommunication, "PENDING", 6, false);
         insertDelivery(statement, newDelivery, newCommunication, "PENDING", 0, false);
         insertDelivery(statement, sendingDelivery, sendingCommunication, "SENDING", 2, false);
+        insertDelivery(statement, acceptedDelivery, acceptedCommunication, "ACCEPTED", 1, false);
         insertAttempts(statement, historicalDelivery, 7);
         insertAttempts(statement, pendingFirstRetryDelivery, 5);
         insertAttempts(statement, pendingSecondRetryDelivery, 6);
@@ -74,9 +80,15 @@ class FlywayV10ToV12UpgradeIT {
              assertThat(rows.getInt(3)).isEqualTo(attempt <= 5 ? attempt : 1);
            }
          }
-         assertDeliveryCycle(connection, pendingFirstRetryDelivery, 5, 2, 0);
-         assertDeliveryCycle(connection, pendingSecondRetryDelivery, 6, 3, 0);
-         assertDeliveryCycle(connection, newDelivery, 0, 1, 0);
+          assertDeliveryCycle(connection, pendingFirstRetryDelivery, 5, 2, 0);
+          assertDeliveryCycle(connection, pendingSecondRetryDelivery, 6, 3, 0);
+          assertDeliveryCycle(connection, newDelivery, 0, 1, 0);
+          assertCommunicationState(connection, pendingFirstRetryCommunication, "PROCESSING", false, false);
+          assertCommunicationState(connection, historicalCommunication, "FAILED", false, true);
+          assertCommunicationState(connection, acceptedCommunication, "COMPLETED", true, false);
+          assertCommunicationState(connection, sendingCommunication, "PROCESSING", false, false);
+          assertCommunicationState(connection, inboxOnlyCommunication, "COMPLETED", true, false);
+          assertCommunicationState(connection, newCommunication, "PROCESSING", false, false);
          try (var sending = connection.prepareStatement("SELECT status::text, last_error_code, claim_token, claimed_at, lease_until, worker_id FROM email_deliveries WHERE email_delivery_id = ?")) {
            sending.setObject(1, sendingDelivery);
            try (var rows = sending.executeQuery()) {
@@ -97,8 +109,24 @@ class FlywayV10ToV12UpgradeIT {
              .isInstanceOf(java.sql.SQLException.class);
          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE email_deliveries SET failed_at = now() WHERE email_delivery_id = '" + newDelivery + "'"))
              .isInstanceOf(java.sql.SQLException.class);
-         assertThatThrownBy(() -> connection.createStatement().execute("UPDATE email_deliveries SET cycle_attempt_count = 7 WHERE email_delivery_id = '" + newDelivery + "'"))
-             .isInstanceOf(java.sql.SQLException.class);
+          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE email_deliveries SET cycle_attempt_count = 7 WHERE email_delivery_id = '" + newDelivery + "'"))
+              .isInstanceOf(java.sql.SQLException.class);
+          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE communications SET status = 'COMPLETED' WHERE communication_id = '" + newCommunication + "'"))
+              .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_communications_status_timestamps");
+          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE communications SET failed_at = now() WHERE communication_id = '" + acceptedCommunication + "'"))
+              .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_communications_status_timestamps");
+          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE communications SET failed_at = NULL WHERE communication_id = '" + historicalCommunication + "'"))
+              .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_communications_status_timestamps");
+          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE communications SET completed_at = now() WHERE communication_id = '" + historicalCommunication + "'"))
+              .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_communications_status_timestamps");
+          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE communications SET completed_at = now() WHERE communication_id = '" + newCommunication + "'"))
+              .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_communications_status_timestamps");
+          assertThatThrownBy(() -> connection.createStatement().execute("UPDATE communications SET failed_at = now() WHERE communication_id = '" + newCommunication + "'"))
+              .isInstanceOf(java.sql.SQLException.class).hasMessageContaining("ck_communications_status_timestamps");
+          try (var outbox = connection.createStatement().executeQuery("SELECT count(*) FROM outbox_messages")) {
+            assertThat(outbox.next()).isTrue();
+            assertThat(outbox.getLong(1)).isZero();
+          }
         }
       try (var runtime = DriverManager.getConnection(postgres.getJdbcUrl(), "communications_runtime", "runtime_password");
            var statement = runtime.createStatement()) {
@@ -107,8 +135,8 @@ class FlywayV10ToV12UpgradeIT {
     }
   }
 
-  private static void insertCommunication(java.sql.Statement statement, UUID communicationId, String sourceReference) throws Exception {
-    statement.execute("INSERT INTO communications (communication_id, recipient_account_id, system_code, communication_type, priority, source_service, source_reference_type, source_reference_id, status, created_at) VALUES ('" + communicationId + "', '" + UUID.randomUUID() + "', 'system', 'type', 'NORMAL', 'legacy', 'legacy', '" + sourceReference + "', 'PENDING', now())");
+  private static void insertCommunication(java.sql.Statement statement, UUID communicationId, String sourceReference, String status) throws Exception {
+    statement.execute("INSERT INTO communications (communication_id, recipient_account_id, system_code, communication_type, priority, source_service, source_reference_type, source_reference_id, status, created_at) VALUES ('" + communicationId + "', '" + UUID.randomUUID() + "', 'system', 'type', 'NORMAL', 'legacy', 'legacy', '" + sourceReference + "', '" + status + "', now())");
   }
 
   private static void insertDelivery(java.sql.Statement statement, UUID deliveryId, UUID communicationId, String status,
@@ -131,6 +159,19 @@ class FlywayV10ToV12UpgradeIT {
         assertThat(rows.getInt(1)).isEqualTo(attempts);
         assertThat(rows.getInt(2)).isEqualTo(retryCycle);
         assertThat(rows.getInt(3)).isEqualTo(cycleAttempts);
+      }
+    }
+  }
+
+  private static void assertCommunicationState(java.sql.Connection connection, UUID communicationId, String status,
+      boolean completed, boolean failed) throws Exception {
+    try (var query = connection.prepareStatement("SELECT status::text, completed_at, failed_at FROM communications WHERE communication_id = ?")) {
+      query.setObject(1, communicationId);
+      try (var rows = query.executeQuery()) {
+        assertThat(rows.next()).isTrue();
+        assertThat(rows.getString(1)).isEqualTo(status);
+        if (completed) assertThat(rows.getObject(2)).isNotNull(); else assertThat(rows.getObject(2)).isNull();
+        if (failed) assertThat(rows.getObject(3)).isNotNull(); else assertThat(rows.getObject(3)).isNull();
       }
     }
   }
