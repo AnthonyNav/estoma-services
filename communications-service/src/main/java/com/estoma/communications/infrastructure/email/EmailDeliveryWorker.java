@@ -78,21 +78,12 @@ public class EmailDeliveryWorker {
         boolean providerCallStarted = false;
         boolean recordingResult = false;
         try {
-          EmailProviderRouter.ProviderSelection selection = provider.select();
           EmailProviderPort.EmailSendRequest request = new EmailProviderPort.EmailSendRequest(
               claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
               claimed.contentMode(), claimed.subject(), claimed.textBody(), claimed.htmlBody(), claimed.templateCode(), claimed.templateData());
-          boolean finalContentPresent = claimed.subject() != null && claimed.textBody() != null;
-          EmailProviderPort.EmailSendRequest resolved;
-          if (claimed.contentMode() == com.estoma.communications.contracts.EmailContentMode.TEMPLATE && !finalContentPresent) {
-            resolved = templateResolver.resolve(request);
-            claimed = prepareService.prepare(claimed, resolved, selection.providerCode());
-          } else {
-            resolved = new EmailProviderPort.EmailSendRequest(claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(),
-                claimed.fromAddress(), claimed.replyToAddress(), EmailContentMode.GENERIC, claimed.subject(), claimed.textBody(),
-                claimed.htmlBody(), null, null);
-            claimed = prepareService.prepare(claimed, selection.providerCode());
-          }
+          EmailProviderPort.EmailSendRequest resolved = templateResolver.resolve(request);
+          EmailProviderRouter.ProviderSelection selection = provider.select();
+          claimed = prepareService.prepare(claimed, selection.providerCode());
           claimed = startService.start(claimed);
           providerCallStarted = true;
           // No transaction is open here: this is the only place the provider is called.

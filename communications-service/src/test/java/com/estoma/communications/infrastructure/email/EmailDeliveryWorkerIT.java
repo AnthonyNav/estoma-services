@@ -145,6 +145,50 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
   }
 
   @Test
+  void blankGenericContentFailsBeforeProviderAttempt() {
+    UUID communicationId = insertCommunication();
+    EmailDelivery delivery = EmailDelivery.generic(UUID.randomUUID(), communicationId, "alumno@estoma.edu", "Alumno",
+        "Estoma", "no-reply@estoma.edu", null, " ", "Contenido", null, Instant.now());
+    emailDeliveryRepository.insert(delivery);
+
+    worker.pollAndProcess();
+
+    EmailDelivery failed = emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow();
+    assertThat(failed.status()).isEqualTo(EmailDeliveryStatus.FAILED);
+    assertThat(failed.lastErrorCode()).isEqualTo("INVALID_FINAL_EMAIL_CONTENT");
+    assertThat(failed.attemptCount()).isZero();
+    assertThat(failed.cycleAttemptCount()).isZero();
+    assertThat(attemptCount(delivery.emailDeliveryId())).isZero();
+    assertThat(recordingProvider.calls.get()).isZero();
+    assertThat(recordingProvider.lastRequest.get()).isNull();
+    assertThat(communicationRepository.findById(communicationId).orElseThrow().status()).isEqualTo(CommunicationStatus.FAILED);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type IN ('EmailDeliveryFailed', 'CommunicationFailed')")
+        .query(Long.class).single()).isEqualTo(2);
+  }
+
+  @Test
+  void templateWithPersistedFinalContentReusesTheSnapshotAsGenericEmail() {
+    UUID communicationId = insertCommunication();
+    EmailDelivery delivery = EmailDelivery.template(UUID.randomUUID(), communicationId, "alumno@estoma.edu", "Alumno",
+        "Estoma", "no-reply@estoma.edu", null, "WELCOME", "{\"name\":\"Alumno\"}", Instant.now());
+    emailDeliveryRepository.insert(delivery);
+    jdbc.sql("UPDATE email_deliveries SET subject = 'Snapshot subject', text_body = 'Snapshot body', html_body = '<p>Snapshot</p>' WHERE email_delivery_id = :id")
+        .param("id", delivery.emailDeliveryId()).update();
+    recordingProvider.nextResult.set(new EmailProviderPort.EmailSendResult.Accepted("stub", "provider-msg-snapshot"));
+
+    worker.pollAndProcess();
+
+    EmailProviderPort.EmailSendRequest sent = recordingProvider.lastRequest.get();
+    assertThat(emailDeliveryRepository.findById(delivery.emailDeliveryId()).orElseThrow().status()).isEqualTo(EmailDeliveryStatus.ACCEPTED);
+    assertThat(sent.contentMode()).isEqualTo(com.estoma.communications.contracts.EmailContentMode.GENERIC);
+    assertThat(sent.subject()).isEqualTo("Snapshot subject");
+    assertThat(sent.textBody()).isEqualTo("Snapshot body");
+    assertThat(sent.htmlBody()).isEqualTo("<p>Snapshot</p>");
+    assertThat(sent.templateCode()).isNull();
+    assertThat(sent.templateData()).isNull();
+  }
+
+  @Test
   void retriesExactlySixPhysicalCallsUsingTheDocumentedBackoffThenFailsTerminally() {
     UUID communicationId = insertCommunication();
     EmailDelivery delivery = insertPendingDelivery(communicationId);

@@ -30,6 +30,7 @@ class EmailDeliveryWorkerResultFailureTest {
         "no-reply@example.test", null, "subject", "body", null, Instant.now()).claimed(UUID.randomUUID(), Instant.now(), Instant.now().plusSeconds(60), "test");
     EmailProviderPort.EmailSendResult accepted = new EmailProviderPort.EmailSendResult.Accepted("stub", "message-1");
     when(claim.claim(1)).thenReturn(List.of(delivery));
+    when(templates.resolve(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(router.select()).thenReturn(new EmailProviderRouter.ProviderSelection("stub", mock(EmailProviderPort.class)));
     when(prepare.prepare(any(EmailDelivery.class), any(String.class))).thenReturn(delivery);
     when(start.start(delivery)).thenReturn(delivery);
@@ -54,6 +55,7 @@ class EmailDeliveryWorkerResultFailureTest {
     ProviderNotStartedRecoveryTxService recovery = mock(ProviderNotStartedRecoveryTxService.class);
     EmailDelivery delivery = claimedDelivery();
     when(claim.claim(1)).thenReturn(List.of(delivery));
+    when(templates.resolve(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(router.select()).thenReturn(new EmailProviderRouter.ProviderSelection("stub", mock(EmailProviderPort.class)));
     doThrow(new IllegalStateException("database unavailable")).when(prepare).prepare(any(EmailDelivery.class), any(String.class));
     EmailDeliveryWorker worker = new EmailDeliveryWorker(router, claim, prepare, start, result, templates, preProvider, recovery, 1, false);
@@ -77,6 +79,7 @@ class EmailDeliveryWorkerResultFailureTest {
     ProviderNotStartedRecoveryTxService recovery = mock(ProviderNotStartedRecoveryTxService.class);
     EmailDelivery delivery = claimedDelivery();
     when(claim.claim(1)).thenReturn(List.of(delivery));
+    when(templates.resolve(any())).thenAnswer(invocation -> invocation.getArgument(0));
     when(router.select()).thenReturn(new EmailProviderRouter.ProviderSelection("stub", mock(EmailProviderPort.class)));
     when(prepare.prepare(any(EmailDelivery.class), any(String.class))).thenReturn(delivery);
     doThrow(new IllegalStateException("fencing lost")).when(start).start(delivery);
@@ -87,6 +90,32 @@ class EmailDeliveryWorkerResultFailureTest {
     verify(preProvider, never()).record(any(), any(), any());
     verify(result, never()).record(any(), any());
     verify(router, never()).send(any(), any());
+  }
+
+  @Test
+  void genericValidationFailureIsRecordedBeforePreparingAnAttempt() {
+    EmailProviderRouter router = mock(EmailProviderRouter.class);
+    ClaimEmailDeliveriesTxService claim = mock(ClaimEmailDeliveriesTxService.class);
+    PrepareEmailDeliveryTxService prepare = mock(PrepareEmailDeliveryTxService.class);
+    StartEmailDeliveryTxService start = mock(StartEmailDeliveryTxService.class);
+    EmailDeliveryResultTxService result = mock(EmailDeliveryResultTxService.class);
+    EmailTemplateResolver templates = mock(EmailTemplateResolver.class);
+    PreProviderFailureTxService preProvider = mock(PreProviderFailureTxService.class);
+    ProviderNotStartedRecoveryTxService recovery = mock(ProviderNotStartedRecoveryTxService.class);
+    EmailDelivery delivery = claimedDelivery();
+    when(claim.claim(1)).thenReturn(List.of(delivery));
+    doThrow(new PreProviderValidationException("INVALID_FINAL_EMAIL_CONTENT", "final email content is invalid"))
+        .when(templates).resolve(any());
+    EmailDeliveryWorker worker = new EmailDeliveryWorker(router, claim, prepare, start, result, templates, preProvider, recovery, 1, false);
+
+    worker.pollAndProcess();
+
+    verify(preProvider).record(delivery, "INVALID_FINAL_EMAIL_CONTENT", "final email content is invalid");
+    verify(prepare, never()).prepare(any(EmailDelivery.class), any(String.class));
+    verify(start, never()).start(any());
+    verify(router, never()).select();
+    verify(router, never()).send(any(), any());
+    verify(result, never()).record(any(), any());
   }
 
   private EmailDelivery claimedDelivery() {
