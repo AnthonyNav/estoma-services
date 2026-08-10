@@ -22,13 +22,16 @@ class CommunicationsContractTests {
     assertThat(EmailContentMode.values()).containsExactly(EmailContentMode.GENERIC, EmailContentMode.TEMPLATE);
     assertThat(EmailDeliveryStatus.values())
         .containsExactly(
-            EmailDeliveryStatus.PENDING,
+        EmailDeliveryStatus.WAITING_FOR_RECIPIENT,
+        EmailDeliveryStatus.PENDING,
             EmailDeliveryStatus.SENDING,
             EmailDeliveryStatus.ACCEPTED,
             EmailDeliveryStatus.DELIVERED,
-            EmailDeliveryStatus.RETRY_SCHEDULED,
-            EmailDeliveryStatus.FAILED);
-    assertThat(EmailAttemptStatus.values()).containsExactly(EmailAttemptStatus.ACCEPTED, EmailAttemptStatus.FAILED);
+        EmailDeliveryStatus.RETRY_SCHEDULED,
+        EmailDeliveryStatus.INDETERMINATE,
+        EmailDeliveryStatus.FAILED);
+    assertThat(EmailAttemptStatus.values()).containsExactly(EmailAttemptStatus.READY_TO_SEND, EmailAttemptStatus.CALL_STARTED,
+        EmailAttemptStatus.ACCEPTED, EmailAttemptStatus.INDETERMINATE, EmailAttemptStatus.FAILED);
     assertThat(ProjectedStatus.values()).containsExactly(ProjectedStatus.ACTIVE, ProjectedStatus.INACTIVE);
   }
 
@@ -37,6 +40,7 @@ class CommunicationsContractTests {
     assertThat(CommunicationsCommand.REQUEST_COMMUNICATION.wireName()).isEqualTo("RequestCommunication");
     assertThat(CommunicationsCommand.REGISTER_INBOX_VISIT.wireName()).isEqualTo("RegisterInboxVisit");
     assertThat(CommunicationsCommand.RETRY_EMAIL_DELIVERY.wireName()).isEqualTo("RetryEmailDelivery");
+    assertThat(CommunicationsCommand.RESOLVE_INDETERMINATE_EMAIL_DELIVERY.wireName()).isEqualTo("ResolveIndeterminateEmailDelivery");
     assertThat(CommunicationsCommand.EXPIRE_INBOX_MESSAGES.wireName()).isEqualTo("ExpireInboxMessages");
   }
 

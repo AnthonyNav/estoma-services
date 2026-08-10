@@ -4,7 +4,7 @@ Spring Boot service that delivers platform communications (internal inbox and em
 
 ## Current Scope
 
-All business logic is implemented and tested against a real database: the full schema, the domain aggregates, the four durable commands (`RequestCommunication`, `RegisterInboxVisit`, `RetryEmailDelivery`, `ExpireInboxMessages`), the `recipient_projection` consumers, the `AppointmentCancelled` adapter, and the email delivery worker. Everything runs by invoking the transactional dispatchers directly — there is no RabbitMQ consumer or publisher yet; that is Phase 3 (see `docs/execution_plan.md`).
+All business logic is implemented and tested against a real database: the full schema, the domain aggregates, the five durable commands (`RequestCommunication`, `RegisterInboxVisit`, `RetryEmailDelivery`, `ResolveIndeterminateEmailDelivery`, `ExpireInboxMessages`), the `recipient_projection` consumers, the `AppointmentCancelled` adapter, and the email delivery worker. `ResolveIndeterminateEmailDelivery` requires a real indeterminate attempt for acceptance and explicit duplicate-risk acknowledgement for resend. Everything runs by invoking the transactional dispatchers directly — there is no RabbitMQ consumer or publisher yet; that is Phase 3 (see `docs/execution_plan.md`).
 
 ## Service Docs
 

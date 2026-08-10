@@ -6,6 +6,8 @@ import com.estoma.communications.domain.communication.Communication;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.UUID;
+import java.util.Arrays;
+import java.util.List;
 import org.springframework.jdbc.core.RowMapper;
 
 /** Maps one row of {@code communications} back into a {@link Communication}. */
@@ -30,6 +32,10 @@ final class CommunicationRowMapper implements RowMapper<Communication> {
         CommunicationStatus.valueOf(rs.getString("status")),
         Timestamps.toInstant(rs, "created_at"),
         Timestamps.toInstant(rs, "completed_at"),
-        Timestamps.toInstant(rs, "failed_at"));
+        Timestamps.toInstant(rs, "failed_at"),
+        rs.getArray("requested_channels") == null ? List.of() : Arrays.asList((String[]) rs.getArray("requested_channels").getArray()),
+         rs.getObject("source_message_id", UUID.class), uuid(rs.getString("idempotency_key")),
+        rs.getString("request_fingerprint"), rs.getObject("correlation_id", UUID.class), rs.getObject("causation_id", UUID.class));
   }
+  private static UUID uuid(String value) { return value == null || value.isBlank() ? null : UUID.fromString(value); }
 }

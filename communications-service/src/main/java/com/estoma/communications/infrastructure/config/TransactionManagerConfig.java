@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 /**
  * Overrides Spring Boot's auto-configured {@code DataSourceTransactionManager}
@@ -32,5 +33,17 @@ class TransactionManagerConfig {
     DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(dataSource);
     transactionManager.setNestedTransactionAllowed(true);
     return transactionManager;
+  }
+
+  @Bean(name = "emailProviderExecutor")
+  ThreadPoolTaskExecutor emailProviderExecutor() {
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(4);
+    executor.setMaxPoolSize(4);
+    executor.setQueueCapacity(20);
+    executor.setThreadNamePrefix("communications-email-provider-");
+    executor.setWaitForTasksToCompleteOnShutdown(false);
+    executor.initialize();
+    return executor;
   }
 }

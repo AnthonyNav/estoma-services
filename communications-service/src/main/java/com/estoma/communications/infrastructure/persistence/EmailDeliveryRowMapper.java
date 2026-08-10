@@ -25,6 +25,7 @@ final class EmailDeliveryRowMapper implements RowMapper<EmailDelivery> {
         rs.getString("from_name"),
         rs.getString("from_address"),
         rs.getString("reply_to_address"),
+        rs.getString("sender_code"),
         EmailContentMode.valueOf(rs.getString("content_mode")),
         rs.getString("subject"),
         rs.getString("text_body"),
@@ -40,6 +41,8 @@ final class EmailDeliveryRowMapper implements RowMapper<EmailDelivery> {
         rs.getString("last_error_code"),
         rs.getString("last_error_message"),
         Timestamps.toInstant(rs, "created_at"),
-        Timestamps.toInstant(rs, "updated_at"));
+         Timestamps.toInstant(rs, "updated_at"), rs.getObject("claim_token", UUID.class),
+         Timestamps.toInstant(rs, "claimed_at"), Timestamps.toInstant(rs, "lease_until"), rs.getString("worker_id"),
+         rs.getInt("retry_cycle"), rs.getInt("cycle_attempt_count"));
   }
 }

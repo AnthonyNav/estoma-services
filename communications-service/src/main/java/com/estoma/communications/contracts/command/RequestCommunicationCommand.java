@@ -4,6 +4,7 @@ import com.estoma.communications.contracts.CommunicationPriority;
 import com.estoma.communications.contracts.EmailContentMode;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 /**
  * {@code RequestCommunication} (commands.md §3). At least one of {@code
@@ -23,7 +24,15 @@ public record RequestCommunicationCommand(
     String sourceReferenceId,
     UUID initiatedByAccountId,
     InboxContent inbox,
-    EmailContent email) {
+    EmailContent email,
+    List<String> requestedChannels) {
+
+  public RequestCommunicationCommand(UUID recipientAccountId, String systemCode, String communicationType,
+      CommunicationPriority priority, String sourceService, String sourceReferenceType, String sourceReferenceId,
+      UUID initiatedByAccountId, InboxContent inbox, EmailContent email) {
+    this(recipientAccountId, systemCode, communicationType, priority, sourceService, sourceReferenceType,
+        sourceReferenceId, initiatedByAccountId, inbox, email, null);
+  }
 
   public record InboxContent(String title, String body, Instant expiresAt) {}
 

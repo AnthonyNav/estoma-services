@@ -9,8 +9,8 @@ import com.estoma.communications.domain.CommunicationsRejectedException;
  * {@code RegisterInboxVisit} from the BFF; {@code RetryEmailDelivery} from
  * an authorized administrative operation; {@code ExpireInboxMessages} from
  * the service's own scheduler. The concrete allow-list of authorized
- * callers per command is not fixed by the platform docs yet (see {@link
- * AllowAllCommunicationsAuthorizationPolicy}).
+ * callers per command is configured by deployment (see {@link
+ * ConfiguredCommunicationsAuthorizationPolicy}).
  *
  * @throws CommunicationsRejectedException with {@code ACTOR_NOT_AUTHORIZED} if the actor may not
  *     perform {@code messageType}.

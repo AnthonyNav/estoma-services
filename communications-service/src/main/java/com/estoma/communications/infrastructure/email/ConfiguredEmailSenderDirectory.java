@@ -27,6 +27,9 @@ class ConfiguredEmailSenderDirectory implements EmailSenderDirectory {
 
   @Override
   public ResolvedSender resolve(String senderCode) {
+    if (senderCode != null && senderCode.isBlank()) {
+      throw new IllegalArgumentException("senderCode must not be blank");
+    }
     return new ResolvedSender(defaultFromName, defaultFromAddress);
   }
 }

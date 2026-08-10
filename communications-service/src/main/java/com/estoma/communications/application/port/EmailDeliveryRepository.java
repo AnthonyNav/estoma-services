@@ -8,10 +8,13 @@ import java.util.UUID;
 public interface EmailDeliveryRepository {
 
   Optional<EmailDelivery> findById(UUID emailDeliveryId);
+  default Optional<EmailDelivery> findByIdForUpdate(UUID emailDeliveryId) { return findById(emailDeliveryId); }
 
   void insert(EmailDelivery delivery);
 
   int update(EmailDelivery delivery);
+
+  int persistRenderedContent(EmailDelivery delivery, UUID claimToken);
 
   /**
    * Atomically claims up to {@code batchSize} due {@code PENDING}/{@code
@@ -21,4 +24,17 @@ public interface EmailDeliveryRepository {
    * Operational Policy").
    */
   List<EmailDelivery> claimDue(int batchSize);
+
+  int releaseExpiredLeases();
+
+  default List<EmailDelivery> claimDue(int batchSize, String workerId) { return claimDue(batchSize); }
+
+  int startSending(UUID deliveryId, UUID claimToken, java.time.Instant now);
+
+  int failPreProvider(UUID deliveryId, UUID claimToken, String code, String message, java.time.Instant now);
+
+  /** Releases a claim which never entered the provider executor. */
+  int requeueUnstarted(UUID deliveryId, UUID claimToken, java.time.Instant now);
+
+  default int updateClaimed(EmailDelivery delivery, UUID claimToken) { return update(delivery); }
 }

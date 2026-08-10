@@ -75,7 +75,10 @@ class AppointmentCancelledAdapter implements ProjectionHandler {
                 "Tu cita fue cancelada por una falla o reducción de capacidad de la clínica. Te contactaremos para reprogramarla.", null, null, null));
 
     try {
-      CommandHandlerResult result = service.create(command);
+      MessageEnvelope boundary = new MessageEnvelope(envelope.messageId(), envelope.messageType(), envelope.messageVersion(), envelope.messageKind(),
+          envelope.producer(), envelope.occurredAt(), envelope.correlationId() == null ? java.util.UUID.randomUUID() : envelope.correlationId(), envelope.messageId(), envelope.operationId(), payload.appointmentId(),
+          envelope.aggregateId(), envelope.aggregateVersion(), envelope.actor(), envelope.payload());
+      CommandHandlerResult result = service.create(command, boundary);
       return new ProjectionHandlerResult(result.events());
     } catch (CommunicationsRejectedException rejected) {
       if (rejected.code() == RejectionCode.COMMUNICATION_ALREADY_EXISTS) {

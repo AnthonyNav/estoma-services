@@ -5,12 +5,14 @@ import com.estoma.communications.contracts.EmailContentMode;
 import java.time.Instant;
 import java.util.UUID;
 
-/** One provider interaction for a given email delivery (data-model.md §6). */
+/** A durable provider interaction, including the pre-call lifecycle. */
 public final class EmailDeliveryAttempt {
-
-  private final UUID emailDeliveryAttemptId;
-  private final UUID emailDeliveryId;
+  private final UUID id;
+  private final UUID deliveryId;
   private final int attemptNumber;
+  private final int retryCycle;
+  private final int cycleAttemptNumber;
+  private final UUID claimToken;
   private final String provider;
   private final EmailContentMode deliveryMode;
   private final EmailAttemptStatus status;
@@ -18,100 +20,97 @@ public final class EmailDeliveryAttempt {
   private final String normalizedErrorCode;
   private final String errorMessage;
   private final Instant startedAt;
+  private final Instant callStartedAt;
   private final Instant completedAt;
 
-  private EmailDeliveryAttempt(
-      UUID emailDeliveryAttemptId,
-      UUID emailDeliveryId,
-      int attemptNumber,
-      String provider,
-      EmailContentMode deliveryMode,
-      EmailAttemptStatus status,
-      String providerMessageId,
-      String normalizedErrorCode,
-      String errorMessage,
-      Instant startedAt,
+  private EmailDeliveryAttempt(UUID id, UUID deliveryId, int attemptNumber, int retryCycle, int cycleAttemptNumber,
+      UUID claimToken, String provider, EmailContentMode mode, EmailAttemptStatus status, String providerMessageId,
+      String errorCode, String errorMessage, Instant startedAt, Instant callStartedAt, Instant completedAt) {
+    this.id = required(id, "emailDeliveryAttemptId");
+    this.deliveryId = required(deliveryId, "emailDeliveryId");
+    if (attemptNumber < 1 || retryCycle < 1 || cycleAttemptNumber < 1) throw new IllegalArgumentException("invalid attempt numbers");
+    this.attemptNumber = attemptNumber; this.retryCycle = retryCycle; this.cycleAttemptNumber = cycleAttemptNumber;
+    this.claimToken = claimToken; this.provider = required(provider, "provider"); this.deliveryMode = required(mode, "deliveryMode");
+    this.status = required(status, "status"); this.providerMessageId = providerMessageId; this.normalizedErrorCode = errorCode;
+    this.errorMessage = errorMessage; this.startedAt = required(startedAt, "startedAt"); this.callStartedAt = callStartedAt; this.completedAt = completedAt;
+  }
+
+  public static EmailDeliveryAttempt readyToSend(UUID id, UUID deliveryId, int attemptNumber, int retryCycle,
+      int cycleAttemptNumber, UUID claimToken, String provider, EmailContentMode mode, Instant createdAt) {
+    return new EmailDeliveryAttempt(id, deliveryId, attemptNumber, retryCycle, cycleAttemptNumber, claimToken, provider,
+        mode, EmailAttemptStatus.READY_TO_SEND, null, null, null, createdAt, null, null);
+  }
+  public static EmailDeliveryAttempt reconstitute(UUID id, UUID deliveryId, int attemptNumber, int retryCycle,
+      int cycleAttemptNumber, UUID claimToken, String provider, EmailContentMode mode, EmailAttemptStatus status,
+      String providerMessageId, String errorCode, String errorMessage, Instant startedAt, Instant callStartedAt,
       Instant completedAt) {
-    this.emailDeliveryAttemptId = requireNonNull(emailDeliveryAttemptId, "emailDeliveryAttemptId");
-    this.emailDeliveryId = requireNonNull(emailDeliveryId, "emailDeliveryId");
-    if (attemptNumber <= 0) {
-      throw new IllegalArgumentException("attemptNumber must be positive");
-    }
-    this.attemptNumber = attemptNumber;
-    this.provider = requireNonNull(provider, "provider");
-    this.deliveryMode = requireNonNull(deliveryMode, "deliveryMode");
-    this.status = requireNonNull(status, "status");
-    this.providerMessageId = providerMessageId;
-    this.normalizedErrorCode = normalizedErrorCode;
-    this.errorMessage = errorMessage;
-    this.startedAt = requireNonNull(startedAt, "startedAt");
-    this.completedAt = requireNonNull(completedAt, "completedAt");
+    return new EmailDeliveryAttempt(id, deliveryId, attemptNumber, retryCycle, cycleAttemptNumber, claimToken, provider,
+        mode, status, providerMessageId, errorCode, errorMessage, startedAt, callStartedAt, completedAt);
+  }
+  public EmailDeliveryAttempt callStarted(Instant now) {
+    return copy(EmailAttemptStatus.CALL_STARTED, null, null, null, now, null);
+  }
+  public EmailDeliveryAttempt accepted(String providerMessageId, Instant now) {
+    return terminal(EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, now);
+  }
+  public EmailDeliveryAttempt failed(String code, String message, Instant now) {
+    return terminal(EmailAttemptStatus.FAILED, null, code, message, now);
+  }
+  public EmailDeliveryAttempt indeterminate(String code, String message, Instant now) {
+    return terminal(EmailAttemptStatus.INDETERMINATE, null, code, message, now);
+  }
+  public EmailDeliveryAttempt reconciledAccepted(Instant now) {
+    if (status != EmailAttemptStatus.INDETERMINATE) throw new IllegalStateException("attempt is not indeterminate");
+    return terminal(EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, now);
+  }
+  public EmailDeliveryAttempt reconciledFailed(String code, String message, Instant now) {
+    if (status != EmailAttemptStatus.INDETERMINATE) throw new IllegalStateException("attempt is not indeterminate");
+    return terminal(EmailAttemptStatus.FAILED, providerMessageId, code, message, now);
+  }
+  private EmailDeliveryAttempt terminal(EmailAttemptStatus newStatus, String providerMessageId, String code, String message,
+      Instant completedAt) {
+    return new EmailDeliveryAttempt(id, deliveryId, attemptNumber, retryCycle, cycleAttemptNumber, null, provider,
+        deliveryMode, newStatus, providerMessageId, code, message, startedAt, callStartedAt, completedAt);
+  }
+  private EmailDeliveryAttempt copy(EmailAttemptStatus newStatus, String providerMessageId, String code, String message,
+      Instant newCallStartedAt, Instant completedAt) {
+    return new EmailDeliveryAttempt(id, deliveryId, attemptNumber, retryCycle, cycleAttemptNumber, claimToken, provider,
+        deliveryMode, newStatus, providerMessageId, code, message, startedAt, newCallStartedAt, completedAt);
   }
 
-  public static EmailDeliveryAttempt accepted(
-      UUID emailDeliveryAttemptId, UUID emailDeliveryId, int attemptNumber, String provider, EmailContentMode deliveryMode, String providerMessageId,
-      Instant startedAt, Instant completedAt) {
-    return new EmailDeliveryAttempt(
-        emailDeliveryAttemptId, emailDeliveryId, attemptNumber, provider, deliveryMode, EmailAttemptStatus.ACCEPTED, providerMessageId, null, null,
-        startedAt, completedAt);
+  public static EmailDeliveryAttempt accepted(UUID id, UUID deliveryId, int number, int retryCycle, int cycleNumber,
+      String provider, EmailContentMode mode, String providerMessageId, Instant startedAt, Instant completedAt) {
+    return new EmailDeliveryAttempt(id, deliveryId, number, retryCycle, cycleNumber, null, provider, mode,
+        EmailAttemptStatus.ACCEPTED, providerMessageId, null, null, startedAt, startedAt, completedAt);
   }
-
-  public static EmailDeliveryAttempt failed(
-      UUID emailDeliveryAttemptId, UUID emailDeliveryId, int attemptNumber, String provider, EmailContentMode deliveryMode, String normalizedErrorCode,
-      String errorMessage, Instant startedAt, Instant completedAt) {
-    return new EmailDeliveryAttempt(
-        emailDeliveryAttemptId, emailDeliveryId, attemptNumber, provider, deliveryMode, EmailAttemptStatus.FAILED, null, normalizedErrorCode, errorMessage,
-        startedAt, completedAt);
+  public static EmailDeliveryAttempt accepted(UUID id, UUID deliveryId, int number, String provider,
+      EmailContentMode mode, String providerMessageId, Instant startedAt, Instant completedAt) {
+    return accepted(id, deliveryId, number, 1, number, provider, mode, providerMessageId, startedAt, completedAt);
   }
-
-  public UUID emailDeliveryAttemptId() {
-    return emailDeliveryAttemptId;
+  public static EmailDeliveryAttempt failed(UUID id, UUID deliveryId, int number, String provider, EmailContentMode mode,
+      String code, String message, Instant startedAt, Instant completedAt) {
+    return new EmailDeliveryAttempt(id, deliveryId, number, 1, number, null, provider, mode,
+        EmailAttemptStatus.FAILED, null, code, message, startedAt, startedAt, completedAt);
   }
-
-  public UUID emailDeliveryId() {
-    return emailDeliveryId;
+  public static EmailDeliveryAttempt indeterminate(UUID id, UUID deliveryId, int number, int retryCycle, int cycleNumber,
+      String provider, EmailContentMode mode, String code, String message, Instant startedAt, Instant completedAt) {
+    return new EmailDeliveryAttempt(id, deliveryId, number, retryCycle, cycleNumber, null, provider, mode,
+        EmailAttemptStatus.INDETERMINATE, null, code, message, startedAt, startedAt, completedAt);
   }
-
-  public int attemptNumber() {
-    return attemptNumber;
-  }
-
-  public String provider() {
-    return provider;
-  }
-
-  public EmailContentMode deliveryMode() {
-    return deliveryMode;
-  }
-
-  public EmailAttemptStatus status() {
-    return status;
-  }
-
-  public String providerMessageId() {
-    return providerMessageId;
-  }
-
-  public String normalizedErrorCode() {
-    return normalizedErrorCode;
-  }
-
-  public String errorMessage() {
-    return errorMessage;
-  }
-
-  public Instant startedAt() {
-    return startedAt;
-  }
-
-  public Instant completedAt() {
-    return completedAt;
-  }
-
-  private static <T> T requireNonNull(T value, String fieldName) {
-    if (value == null) {
-      throw new IllegalArgumentException(fieldName + " must not be null");
-    }
-    return value;
-  }
+  public UUID emailDeliveryAttemptId() { return id; }
+  public UUID emailDeliveryId() { return deliveryId; }
+  public int attemptNumber() { return attemptNumber; }
+  public int retryCycle() { return retryCycle; }
+  public int cycleAttemptNumber() { return cycleAttemptNumber; }
+  public UUID claimToken() { return claimToken; }
+  public String provider() { return provider; }
+  public EmailContentMode deliveryMode() { return deliveryMode; }
+  public EmailAttemptStatus status() { return status; }
+  public String providerMessageId() { return providerMessageId; }
+  public String normalizedErrorCode() { return normalizedErrorCode; }
+  public String errorMessage() { return errorMessage; }
+  public Instant startedAt() { return startedAt; }
+  public Instant callStartedAt() { return callStartedAt; }
+  public Instant completedAt() { return completedAt; }
+  private static <T> T required(T value, String name) { if (value == null) throw new IllegalArgumentException(name + " must not be null"); return value; }
 }
