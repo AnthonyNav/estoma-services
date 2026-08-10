@@ -94,7 +94,7 @@ jobs:
           ESTOMA_INFRA_TOKEN: ${{ secrets.ESTOMA_INFRA_TOKEN }}
         run: |
           if [ -z "$ESTOMA_INFRA_TOKEN" ]; then
-            echo "::error::Missing repository secret ESTOMA_INFRA_TOKEN. It must allow contents:write on AnthonyNav/estoma-infra."
+            echo "::error::Missing repository secret ESTOMA_INFRA_TOKEN. It must allow contents:write and pull-requests:write on AnthonyNav/estoma-infra."
             exit 1
           fi
 
@@ -143,10 +143,11 @@ jobs:
           overlay_path.write_text("".join(lines))
           PY
 
-      - name: Commit and push estoma-infra update
+      - name: Create estoma-infra image update pull request
         env:
           SERVICE_NAME: ${{ inputs.service-name }}
           IMAGE_TAG: ${{ needs.build.outputs.tag }}
+          GH_TOKEN: ${{ secrets.ESTOMA_INFRA_TOKEN }}
         working-directory: estoma-infra
         run: |
           if git diff --quiet; then
@@ -154,8 +155,27 @@ jobs:
             exit 0
           fi
 
+          branch="chore/deploy-${SERVICE_NAME}-${IMAGE_TAG}"
+          existing_pr="$(gh pr list \
+            --repo AnthonyNav/estoma-infra \
+            --head "$branch" \
+            --state open \
+            --json number \
+            --jq 'length')"
+          if [ "$existing_pr" != "0" ]; then
+            echo "An image update pull request already exists."
+            exit 0
+          fi
+
           git config user.name "estoma-ci"
           git config user.email "estoma-ci@users.noreply.github.com"
+          git switch -c "$branch"
           git add "${{ inputs.infra-overlay-path }}"
           git commit -m "chore(deploy): update ${SERVICE_NAME} develop image to ${IMAGE_TAG}"
-          git push origin main
+          git push origin "$branch"
+          gh pr create \
+            --repo AnthonyNav/estoma-infra \
+            --base main \
+            --head "$branch" \
+            --title "chore(deploy): update ${SERVICE_NAME} develop image to ${IMAGE_TAG}" \
+            --body "Automated image tag update for ${SERVICE_NAME}."
