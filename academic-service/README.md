@@ -17,11 +17,9 @@ Spring Boot service that manages student academic information.
 - Account credentials.
 - Roles and permissions.
 
-## Initial Endpoints
+## Operational endpoints
 
-- `GET /health`
-- `GET /version`
-- `GET /actuator/health`
-- `GET /actuator/health/liveness`
-- `GET /actuator/health/readiness`
-- `GET /actuator/prometheus`
+- `GET /health`, `/health/liveness`, `/health/readiness`, `/health/startup`
+- `GET /metrics` and `GET /info`
+
+Business operations are durable RabbitMQ commands on `commands.academic`. The service owns a PostgreSQL/Flyway schema, Consumer Inbox, idempotency records, transactional Outbox, confirmed relay, external status/authorization projections, and the V1 `PRACTICAS_PROFESIONALES` eligibility result. Import-process commands and XLSX handling are deliberately outside this core implementation.
