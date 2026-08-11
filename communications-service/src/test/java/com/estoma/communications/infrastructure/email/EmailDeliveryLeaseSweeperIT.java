@@ -19,9 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.test.context.TestPropertySource;
 
-@TestPropertySource(properties = "estoma.communications.email.worker.enabled=true")
 class EmailDeliveryLeaseSweeperIT extends AbstractPostgresIT {
   @Autowired private EmailDeliveryLeaseSweeper sweeper;
   @Autowired private EmailDeliveryRepository deliveries;

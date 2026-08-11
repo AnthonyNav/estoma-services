@@ -22,8 +22,12 @@ class EmailDeliveryLeaseSweeper {
   }
   @Scheduled(fixedDelayString = "${estoma.communications.email.worker.sweeper-interval-ms:5000}")
   @Transactional
+  public void scheduledSweep() {
+    if (scheduledEnabled) sweep();
+  }
+
+  @Transactional
   public void sweep() {
-    if (!scheduledEnabled) return;
     int recovered = repository.releaseExpiredLeases();
     if (recovered > 0) metrics.counter("communications.email.lease_recovered.total").increment(recovered);
   }
