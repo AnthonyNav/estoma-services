@@ -30,7 +30,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
 /** Exercises real topology, technical retry routing and confirmed relay publication without timing assertions. */
-@SpringBootTest(properties = {"spring.task.scheduling.enabled=false"})
+@SpringBootTest(properties = {"spring.task.scheduling.enabled=false", "estoma.messaging.topology-declare=true"})
 @Testcontainers
 @Tag("integration")
 class AcademicMessagingIT {
@@ -84,7 +84,7 @@ class AcademicMessagingIT {
     UUID profile = UUID.randomUUID(), person = UUID.randomUUID(), account = UUID.randomUUID(), messageId = UUID.randomUUID();
     jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:admin,'SUPERADMIN','ACTIVE',1,now()),(:student,'ALUMNO','ACTIVE',1,now())").param("admin",administratorAccount).param("student",account).update();
     jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',1,now())").param("id",person).update();
-    jdbc.sql("INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at) VALUES (:id,:person,'INSTITUTIONAL','ACTIVE',1,now())").param("id",account).param("person",person).update();
+    jdbc.sql("INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at) VALUES (:id,:person,'MATRICULA','ACTIVE',1,now())").param("id",account).param("person",person).update();
     MessageEnvelope command = command(messageId, "CreateStudentAcademicProfile", mapper.createObjectNode().put("studentAcademicProfileId", profile.toString()).put("personId", person.toString()).put("accountId", account.toString()).put("studentNumber", "st-duplicate").put("currentSemester", 5).put("academicStatus", "ACTIVE"));
 
     rabbit.send(AcademicTopology.COMMANDS, "academic", new Message(codec.encode(command)));

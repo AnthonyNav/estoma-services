@@ -17,5 +17,5 @@ jobs:
     with:
       service-name: academic-service
       image-name: ghcr.io/anthonynav/academic-service
-      infra-overlay-path: apps/academic-service/overlays/develop/kustomization.yaml
+      infra-update-enabled: false
     secrets: inherit

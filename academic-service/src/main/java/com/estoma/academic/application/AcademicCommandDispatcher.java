@@ -1,7 +1,7 @@
 package com.estoma.academic.application;
 
 import com.estoma.academic.contract.MessageEnvelope;
-import com.estoma.academic.domain.AcademicEligibilityPolicyV1;
+import com.estoma.academic.domain.AcademicEligibilityPolicy;
 import com.estoma.academic.domain.StudentAcademicProfile;
 import com.estoma.academic.messaging.EnvelopeCodec;
 import com.estoma.academic.persistence.OutboxRepository;
@@ -36,7 +36,7 @@ public class AcademicCommandDispatcher {
     Instant now = Instant.now();
     if (jdbc.sql("""
         INSERT INTO processed_messages (consumer_name,message_id,correlation_id,message_type,message_kind,producer,aggregate_id,aggregate_version,envelope,processing_state,reconciliation_state,processed_at)
-        VALUES ('academic.commands',:id,:correlation,:type,:kind,:producer,:aggregate,:version,CAST(:envelope AS jsonb),'APPLIED','EVENT_PENDING',:now)
+        VALUES ('academic.commands',:id,:correlation,:type,:kind,:producer,:aggregate,:version,CAST(:envelope AS jsonb),'APPLIED',NULL,:now)
         ON CONFLICT DO NOTHING
         """).param("id", e.messageId()).param("correlation", e.correlationId()).param("type",e.messageType()).param("kind",e.messageKind()).param("producer",e.producer()).param("aggregate",e.aggregateId()).param("version",e.aggregateVersion()).param("envelope",codec.json(e)).param("now", java.sql.Timestamp.from(now)).update() == 0) return Outcome.duplicate();
     String fingerprint;
@@ -82,7 +82,9 @@ public class AcademicCommandDispatcher {
   private Change handle(MessageEnvelope e, Instant now) {
     return switch (e.messageType()) {
       case "CreateStudentAcademicProfile" -> createProfile(e, now);
-      case "UpdateStudentAcademicProfile" -> updateProfile(e, now);
+      // V1 has no Academic-owned general profile field. Do not turn this command
+      // into a version-only mutation or emit a misleading domain event.
+      case "UpdateStudentAcademicProfile" -> throw new AcademicRejectedException("INVALID_MESSAGE");
       case "CorrectStudentNumber" -> correctStudentNumber(e, now);
       case "ChangeStudentSemester" -> changeSemester(e, now);
       case "ActivateStudentAcademicProfile" -> changeProfileStatus(e, now, "ACTIVE");
@@ -105,21 +107,16 @@ public class AcademicCommandDispatcher {
     validateSemester(semester);
     if (!status.equals("ACTIVE") && !status.equals("INACTIVE")) throw new AcademicRejectedException("INVALID_ACADEMIC_STATUS");
     if (!projectionActive("person_status_projection", "person_id", person)) throw new AcademicRejectedException("PERSON_NOT_FOUND");
-    if (!projectionActive("account_status_projection", "account_id", account) || !isStudentAccount(account)) throw new AcademicRejectedException("ACCOUNT_NOT_ELIGIBLE_AS_STUDENT");
+    AccountProjection accountProjection = accountProjection(account);
+    if (accountProjection == null) throw new AcademicRejectedException("ACCOUNT_NOT_FOUND");
+    if (!"ACTIVE".equals(accountProjection.status()) || !isStudentAccount(account)) throw new AcademicRejectedException("ACCOUNT_NOT_ELIGIBLE_AS_STUDENT");
+    if (!person.equals(accountProjection.personId())) throw new AcademicRejectedException("ACCOUNT_CONFLICT");
+    if (!"MATRICULA".equals(accountProjection.loginType())) throw new AcademicRejectedException("ACCOUNT_NOT_ELIGIBLE_AS_STUDENT");
     jdbc.sql("INSERT INTO student_academic_profiles (student_academic_profile_id,person_id,account_id,student_number,student_number_normalized,current_semester,academic_status,version,student_number_version,created_at,updated_at) VALUES (:id,:person,:account,:number,:normalized,:semester,CAST(:status AS academic_profile_status),1,0,:now,:now)")
         .param("id", id).param("person", person).param("account", account).param("number", number.trim()).param("normalized", normalize(number)).param("semester", semester).param("status", status).param("now", java.sql.Timestamp.from(now)).update();
     var events = events(new Event("StudentAcademicProfileCreated", id, 1, map("studentAcademicProfileId", id, "personId", person, "accountId", account, "studentNumber", number, "currentSemester", semester, "academicStatus", status, "createdAt", now)));
     events.add(evaluateEligibility(id, account, semester, status, 1, e, now));
     return new Change(id, 1, events);
-  }
-
-  private Change updateProfile(MessageEnvelope e, Instant now) {
-    UUID id = uuid(e.payload(), "studentAcademicProfileId", null); Profile profile = profile(id);
-    expected(e.payload(), profile.version); int version = profile.version + 1;
-    expectedUpdate(jdbc.sql("UPDATE student_academic_profiles SET version=:version,updated_at=:now WHERE student_academic_profile_id=:id AND version=:expected").param("version", version).param("now", java.sql.Timestamp.from(now)).param("id", id).param("expected", profile.version).update());
-    var events = events(new Event("StudentAcademicProfileUpdated", id, version, map("studentAcademicProfileId", id, "personId", profile.personId, "accountId", profile.accountId, "updatedAt", now)));
-    Event eligibility = evaluateEligibility(id, profile.accountId, profile.semester, profile.status, version, e, now); if (eligibility != null) events.add(eligibility);
-    return new Change(id, version, events);
   }
 
   private Change correctStudentNumber(MessageEnvelope e, Instant now) {
@@ -172,16 +169,19 @@ public class AcademicCommandDispatcher {
     return new Change(id, 1, events(new Event("CourseSectionRegistered", id, 1, map("courseSectionId", id, "academicPeriodId", periodId, "nrc", nrc, "name", name, "status", "ACTIVE", "registeredAt", now))));
   }
 
-  private Change updateSection(MessageEnvelope e, Instant now) {
-    UUID id = uuid(e.payload(), "courseSectionId", null); Section section = section(id); readyPeriod(section.periodId); expected(e.payload(), section.version); int version = section.version + 1; String name = required(e.payload(), "name");
+   private Change updateSection(MessageEnvelope e, Instant now) {
+     requireActorField(e.payload(), "requestedByAccountId", e);
+     UUID id = uuid(e.payload(), "courseSectionId", null); Section section = section(id); readyPeriod(section.periodId); expected(e.payload(), section.version); int version = section.version + 1; String name = required(e.payload(), "name");
     expectedUpdate(jdbc.sql("UPDATE course_sections SET name=:name,version=:version,updated_at=:now WHERE course_section_id=:id AND version=:expected").param("name", name).param("version", version).param("now", java.sql.Timestamp.from(now)).param("id", id).param("expected", section.version).update());
     return new Change(id, version, events(new Event("CourseSectionUpdated", id, version, map("courseSectionId", id, "academicPeriodId", section.periodId, "nrc", section.nrc, "name", name, "updatedAt", now))));
   }
 
-  private Change changeSectionStatus(MessageEnvelope e, Instant now, String target) {
-    UUID id = uuid(e.payload(), "courseSectionId", null); Section section = section(id); readyPeriod(section.periodId); expected(e.payload(), section.version);
-    if (e.payload().hasNonNull("academicPeriodId") && !section.periodId.equals(uuid(e.payload(), "academicPeriodId", null))) throw new AcademicRejectedException("ACADEMIC_PERIOD_NOT_FOUND");
-    if (target.equals("ACTIVE") && e.payload().hasNonNull("name") && !section.name.equals(text(e.payload(), "name", null))) throw new AcademicRejectedException("COURSE_SECTION_NAME_CONFLICT");
+   private Change changeSectionStatus(MessageEnvelope e, Instant now, String target) {
+     requireActorField(e.payload(), "requestedByAccountId", e);
+     UUID id = uuid(e.payload(), "courseSectionId", null); Section section = section(id); readyPeriod(section.periodId); expected(e.payload(), section.version);
+     UUID periodId = uuid(e.payload(), "academicPeriodId", null);
+     if (periodId == null || !section.periodId.equals(periodId)) throw new AcademicRejectedException("ACADEMIC_PERIOD_NOT_FOUND");
+     if (target.equals("ACTIVE") && !section.name.equals(required(e.payload(), "name"))) throw new AcademicRejectedException("COURSE_SECTION_NAME_CONFLICT");
     if (section.status.equals(target)) throw new AcademicRejectedException(target.equals("ACTIVE") ? "COURSE_SECTION_ALREADY_ACTIVE" : "COURSE_SECTION_ALREADY_INACTIVE"); int version = section.version + 1;
     expectedUpdate(jdbc.sql("UPDATE course_sections SET status=CAST(:status AS course_section_status),version=:version,updated_at=:now WHERE course_section_id=:id AND version=:expected").param("status", target).param("version", version).param("now", java.sql.Timestamp.from(now)).param("id", id).param("expected", section.version).update());
     return new Change(id, version, events(new Event("CourseSectionStatusChanged", id, version, map("courseSectionId", id, "academicPeriodId", section.periodId, "nrc", section.nrc, "previousStatus", section.status, "currentStatus", target, "changedByAccountId", e.actor().accountId(), "reason", text(e.payload(), "reason", null), "changedAt", now))));
@@ -189,31 +189,37 @@ public class AcademicCommandDispatcher {
 
   private Change addEnrollment(MessageEnvelope e, Instant now) {
     UUID student = uuid(e.payload(), "studentAcademicProfileId", null), course = uuid(e.payload(), "courseSectionId", null); Profile profile = profile(student); if (!profile.status.equals("ACTIVE")) throw new AcademicRejectedException("STUDENT_PROFILE_INACTIVE"); Section section = section(course); readyPeriod(section.periodId); if (!section.status.equals("ACTIVE")) throw new AcademicRejectedException("COURSE_SECTION_INACTIVE");
-    jdbc.sql("INSERT INTO student_course_sections (student_academic_profile_id,course_section_id,status,enrolled_at,version,updated_at) VALUES (:student,:course,'ACTIVE',:now,1,:now)").param("student", student).param("course", course).param("now", java.sql.Timestamp.from(now)).update();
-    return new Change(student, 1, events(new Event("StudentEnrolledInCourseSection", student, 1, map("studentAcademicProfileId", student, "accountId", profile.accountId, "courseSectionId", course, "academicPeriodId", section.periodId, "nrc", section.nrc, "enrolledAt", now))));
+     UUID enrollmentId = UUID.randomUUID();
+     jdbc.sql("INSERT INTO student_course_sections (enrollment_id,student_academic_profile_id,course_section_id,status,enrolled_at,version,updated_at) VALUES (:enrollment,:student,:course,'ACTIVE',:now,1,:now)").param("enrollment", enrollmentId).param("student", student).param("course", course).param("now", java.sql.Timestamp.from(now)).update();
+     return new Change(enrollmentId, 1, events(new Event("StudentEnrolledInCourseSection", enrollmentId, 1, map("studentAcademicProfileId", student, "accountId", profile.accountId, "courseSectionId", course, "academicPeriodId", section.periodId, "nrc", section.nrc, "enrolledAt", now))));
   }
 
   private Change reactivateEnrollment(MessageEnvelope e, Instant now) { return changeEnrollment(e, now, "ACTIVE", "StudentEnrollmentReactivated"); }
   private Change removeEnrollment(MessageEnvelope e, Instant now) { return changeEnrollment(e, now, "REMOVED", "StudentRemovedFromCourseSection"); }
-  private Change changeEnrollment(MessageEnvelope e, Instant now, String target, String eventType) {
-    UUID student = uuid(e.payload(), "studentAcademicProfileId", null), course = uuid(e.payload(), "courseSectionId", null); Enrollment enrollment = enrollment(student, course); Profile profile = profile(student); Section section = section(course); readyPeriod(section.periodId);
-    if (enrollment.status.equals(target)) throw new AcademicRejectedException(target.equals("ACTIVE") ? "ENROLLMENT_ALREADY_EXISTS" : "ENROLLMENT_ALREADY_REMOVED"); expected(e.payload(), enrollment.version); int version = enrollment.version + 1;
+   private Change changeEnrollment(MessageEnvelope e, Instant now, String target, String eventType) {
+     UUID student = uuid(e.payload(), "studentAcademicProfileId", null), course = uuid(e.payload(), "courseSectionId", null); Enrollment enrollment = enrollment(student, course); Profile profile = profile(student); Section section = section(course); readyPeriod(section.periodId);
+     if (enrollment.status.equals(target)) throw new AcademicRejectedException(target.equals("ACTIVE") ? "ENROLLMENT_ALREADY_EXISTS" : "ENROLLMENT_ALREADY_REMOVED");
+     if ("StudentEnrollmentReactivated".equals(eventType)) {
+       requireActorField(e.payload(), "requestedByAccountId", e);
+       expected(e.payload(), enrollment.version);
+     }
+     int version = enrollment.version + 1;
     expectedUpdate(jdbc.sql("UPDATE student_course_sections SET status=CAST(:status AS enrollment_status),removed_at=:removed,version=:version,updated_at=:now WHERE student_academic_profile_id=:student AND course_section_id=:course AND version=:expected")
         .param("status", target).param("removed", target.equals("REMOVED") ? java.sql.Timestamp.from(now) : null).param("version", version).param("now", java.sql.Timestamp.from(now)).param("student", student).param("course", course).param("expected", enrollment.version).update());
     Map<String,Object> data = map("studentAcademicProfileId", student, "accountId", profile.accountId, "courseSectionId", course, "academicPeriodId", section.periodId, "nrc", section.nrc, target.equals("ACTIVE") ? "reactivatedAt" : "removedAt", now);
     if (target.equals("REMOVED") && e.payload().hasNonNull("reason")) data.put("reason", text(e.payload(), "reason", null));
-    return new Change(student, version, events(new Event(eventType, student, version, data)));
+     return new Change(enrollment.id, version, events(new Event(eventType, enrollment.id, version, data)));
   }
 
   private Event evaluateEligibility(UUID profileId, UUID accountId, int semester, String status, int profileVersion, MessageEnvelope cause, Instant now) {
-    AcademicEligibilityPolicyV1 policy = eligibilityPolicies.active();
+     AcademicEligibilityPolicy policy = eligibilityPolicies.active();
     boolean eligible = policy.isEligible(new StudentAcademicProfile(profileId, profileId, accountId, "evaluation", semester, StudentAcademicProfile.Status.valueOf(status), profileVersion));
-    Eligibility old = jdbc.sql("SELECT eligibility_id,eligible,policy_version,eligibility_version FROM student_academic_eligibilities WHERE student_academic_profile_id=:profile AND system_code=:system FOR UPDATE").param("profile", profileId).param("system", AcademicEligibilityPolicyV1.SYSTEM_CODE).query((rs,n)->new Eligibility(rs.getObject(1,UUID.class),rs.getBoolean(2),rs.getInt(3),rs.getInt(4))).optional().orElse(null);
+     Eligibility old = jdbc.sql("SELECT eligibility_id,eligible,policy_version,eligibility_version FROM student_academic_eligibilities WHERE student_academic_profile_id=:profile AND system_code=:system FOR UPDATE").param("profile", profileId).param("system", policy.systemCode()).query((rs,n)->new Eligibility(rs.getObject(1,UUID.class),rs.getBoolean(2),rs.getInt(3),rs.getInt(4))).optional().orElse(null);
     if (old != null && old.eligible == eligible && old.policyVersion == policy.version()) return null;
     UUID id = old == null ? UUID.randomUUID() : old.id; int version = old == null ? 1 : old.version + 1;
-    if (old == null) jdbc.sql("INSERT INTO student_academic_eligibilities (eligibility_id,student_academic_profile_id,system_code,eligible,policy_version,eligibility_version,academic_profile_version,evaluated_at,updated_at) VALUES (:id,:profile,:system,:eligible,:policy,1,:profileVersion,:now,:now)").param("id",id).param("profile",profileId).param("system",AcademicEligibilityPolicyV1.SYSTEM_CODE).param("eligible",eligible).param("policy",policy.version()).param("profileVersion",profileVersion).param("now",java.sql.Timestamp.from(now)).update();
+     if (old == null) jdbc.sql("INSERT INTO student_academic_eligibilities (eligibility_id,student_academic_profile_id,system_code,eligible,policy_version,eligibility_version,academic_profile_version,evaluated_at,updated_at) VALUES (:id,:profile,:system,:eligible,:policy,1,:profileVersion,:now,:now)").param("id",id).param("profile",profileId).param("system",policy.systemCode()).param("eligible",eligible).param("policy",policy.version()).param("profileVersion",profileVersion).param("now",java.sql.Timestamp.from(now)).update();
     else jdbc.sql("UPDATE student_academic_eligibilities SET eligible=:eligible,policy_version=:policy,eligibility_version=:version,academic_profile_version=:profileVersion,evaluated_at=:now,updated_at=:now WHERE eligibility_id=:id AND eligibility_version=:expected").param("eligible",eligible).param("policy",policy.version()).param("version",version).param("profileVersion",profileVersion).param("now",java.sql.Timestamp.from(now)).param("id",id).param("expected",old.version).update();
-    return new Event("StudentAcademicEligibilityChanged", id, version, map("eligibilityId", id, "studentAcademicProfileId", profileId, "accountId", accountId, "systemCode", AcademicEligibilityPolicyV1.SYSTEM_CODE, "eligible", eligible, "policyVersion", policy.version(), "eligibilityVersion", version, "academicProfileVersion", profileVersion, "evaluatedAt", now));
+     return new Event("StudentAcademicEligibilityChanged", id, version, map("eligibilityId", id, "studentAcademicProfileId", profileId, "accountId", accountId, "systemCode", policy.systemCode(), "eligible", eligible, "policyVersion", policy.version(), "eligibilityVersion", version, "academicProfileVersion", profileVersion, "evaluatedAt", now));
   }
 
   private void requireAdmin(MessageEnvelope e) {
@@ -230,6 +236,13 @@ public class AcademicCommandDispatcher {
   private boolean isStudentAccount(UUID account) {
     return jdbc.sql("SELECT EXISTS (SELECT 1 FROM authorization_context_projection WHERE account_id=:id AND role_code='ALUMNO' AND status='ACTIVE')").param("id", account).query(Boolean.class).single();
   }
+  private AccountProjection accountProjection(UUID id) {
+    if (id == null) return null;
+    return jdbc.sql("SELECT person_id,login_type,status FROM account_status_projection WHERE account_id=:id")
+        .param("id", id)
+        .query((rs, n) -> new AccountProjection(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)))
+        .optional().orElse(null);
+  }
   private Profile profile(UUID id) {
     if (id == null) throw new AcademicRejectedException("STUDENT_PROFILE_NOT_FOUND");
     return jdbc.sql("SELECT person_id,account_id,student_number,current_semester,academic_status::text,version,student_number_version FROM student_academic_profiles WHERE student_academic_profile_id=:id")
@@ -240,10 +253,10 @@ public class AcademicCommandDispatcher {
     return jdbc.sql("SELECT academic_period_id,nrc,name,status::text,version FROM course_sections WHERE course_section_id=:id").param("id", id)
         .query((rs,n)->new Section(id,rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4),rs.getInt(5))).optional().orElseThrow(()->new AcademicRejectedException("COURSE_SECTION_NOT_FOUND"));
   }
-  private Enrollment enrollment(UUID student, UUID course) {
-    return jdbc.sql("SELECT status::text,version FROM student_course_sections WHERE student_academic_profile_id=:student AND course_section_id=:course").param("student",student).param("course",course)
-        .query((rs,n)->new Enrollment(rs.getString(1),rs.getInt(2))).optional().orElseThrow(()->new AcademicRejectedException("ENROLLMENT_NOT_FOUND"));
-  }
+   private Enrollment enrollment(UUID student, UUID course) {
+      return jdbc.sql("SELECT enrollment_id,status::text,version FROM student_course_sections WHERE student_academic_profile_id=:student AND course_section_id=:course FOR UPDATE").param("student",student).param("course",course)
+          .query((rs,n)->new Enrollment(rs.getObject(1, UUID.class), rs.getString(2),rs.getInt(3))).optional().orElseThrow(()->new AcademicRejectedException("ENROLLMENT_NOT_FOUND"));
+   }
   private Period activePeriod(boolean required) {
     Period period = jdbc.sql("SELECT academic_period_id,code,status::text,academic_data_status::text,version FROM academic_periods WHERE status='ACTIVE'")
         .query((rs,n)->new Period(rs.getObject(1,UUID.class),rs.getString(2),rs.getString(3),rs.getString(4),rs.getInt(5))).optional().orElse(null);
@@ -299,6 +312,7 @@ public class AcademicCommandDispatcher {
   private record Profile(UUID id, UUID personId, UUID accountId, String number, int semester, String status, int version, int numberVersion) {}
   private record Period(UUID id, String code, String status, String dataStatus, int version) {}
   private record Section(UUID id, UUID periodId, String nrc, String name, String status, int version) {}
-  private record Enrollment(String status, int version) {}
+   private record Enrollment(UUID id, String status, int version) {}
+   private record AccountProjection(UUID personId, String loginType, String status) {}
   private record Eligibility(UUID id, boolean eligible, int policyVersion, int version) {}
 }

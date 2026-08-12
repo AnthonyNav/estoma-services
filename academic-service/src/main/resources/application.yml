@@ -29,9 +29,11 @@ estoma:
     listeners-enabled: ${ESTOMA_MESSAGING_LISTENERS_ENABLED:true}
   outbox:
     claim-batch-size: 20
-    lease: 2m
+    lease: 3m
     max-attempts: 10
     retry-delay: 5s
+    confirm-timeout: 5s
+    publish-backoff: 100ms
 server:
   port: 8080
 management:

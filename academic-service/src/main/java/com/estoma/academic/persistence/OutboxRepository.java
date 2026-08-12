@@ -38,5 +38,12 @@ public class OutboxRepository {
   public int failed(Row row, String code) { return jdbc.sql("UPDATE outbox_messages SET status='FAILED',claim_token=NULL,lease_until=NULL,last_error_code=:code,last_error_at=now() WHERE message_id=:id AND claim_token=:token AND status='PROCESSING'").param("id",row.id()).param("token",row.token()).param("code",code).update(); }
   public int recoverExpired(int maxAttempts) { return jdbc.sql("UPDATE outbox_messages SET status=CASE WHEN attempts >= :max THEN 'FAILED'::outbox_status ELSE 'PENDING'::outbox_status END,available_at=CASE WHEN attempts >= :max THEN available_at ELSE now() END,claim_token=NULL,lease_until=NULL,last_error_code='LEASE_EXPIRED',last_error_at=now() WHERE status='PROCESSING' AND lease_until < now()").param("max",maxAttempts).update(); }
   public long overdue() { return jdbc.sql("SELECT count(*) FROM outbox_messages WHERE status IN ('PENDING','PROCESSING') AND available_at < now()-interval '5 minutes'").query(Long.class).single(); }
+  public long pendingCount() { return jdbc.sql("SELECT count(*) FROM outbox_messages WHERE status='PENDING'").query(Long.class).single(); }
+  public long stuckProcessingCount() { return jdbc.sql("SELECT count(*) FROM outbox_messages WHERE status='PROCESSING' AND lease_until < now()").query(Long.class).single(); }
+  public Instant oldestPendingAvailableAt() {
+    return jdbc.sql("SELECT min(available_at) FROM outbox_messages WHERE status='PENDING'")
+        .query((rs, n) -> rs.getTimestamp(1) == null ? null : rs.getTimestamp(1).toInstant())
+        .optional().orElse(null);
+  }
   public record Row(UUID id, String type, String kind, UUID aggregateId, Integer aggregateVersion, UUID correlationId, UUID causationId, String payload, String metadata, UUID token, Instant occurredAt, int attempts) {}
 }
