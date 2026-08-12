@@ -1,18 +1,68 @@
 spring:
   application:
     name: academic-service
+  datasource:
+    url: ${ACADEMIC_DB_URL:jdbc:postgresql://localhost:5432/academic_db}
+    username: ${ACADEMIC_DB_RUNTIME_USER:academic_service}
+    password: ${ACADEMIC_DB_RUNTIME_PASSWORD:academic_service}
+  flyway:
+    url: ${ACADEMIC_DB_URL:jdbc:postgresql://localhost:5432/academic_db}
+    user: ${ACADEMIC_DB_MIGRATION_USER:academic_service}
+    password: ${ACADEMIC_DB_MIGRATION_PASSWORD:academic_service}
+    placeholders:
+      runtime_role: ${ACADEMIC_DB_RUNTIME_USER:academic_service}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: false
+estoma:
+  messaging:
+    topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
+    listeners-enabled: ${ESTOMA_MESSAGING_LISTENERS_ENABLED:true}
+  outbox:
+    claim-batch-size: 20
+    lease: 3m
+    max-attempts: 10
+    retry-delay: 5s
+    confirm-timeout: 5s
+    publish-backoff: 100ms
 server:
   port: 8080
 management:
+  endpoints:
+    access:
+      default: none
+    web:
+      base-path: /
+      exposure:
+        include: health,info,prometheus
+      path-mapping:
+        prometheus: metrics
   endpoint:
     health:
+      access: read-only
       probes:
         enabled: true
       show-details: never
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
+      group:
+        startup:
+          include: db, schemaVersion
+        readiness:
+          include: db, commandConsumer, eventProjectionConsumer, outboxRelay
+        liveness:
+          include: livenessState
+    info:
+      access: read-only
+    prometheus:
+      access: read-only
   info:
     env:
       enabled: true

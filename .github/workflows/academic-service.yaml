@@ -1,0 +1,21 @@
+name: academic-service
+
+on:
+  pull_request:
+    paths: ["academic-service/**", ".github/workflows/academic-service.yaml", ".github/workflows/service-ci.yaml"]
+  push:
+    branches: [develop, main]
+    paths: ["academic-service/**", ".github/workflows/academic-service.yaml", ".github/workflows/service-ci.yaml"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  service-ci:
+    uses: ./.github/workflows/service-ci.yaml
+    with:
+      service-name: academic-service
+      image-name: ghcr.io/anthonynav/academic-service
+      infra-update-enabled: false
+    secrets: inherit
