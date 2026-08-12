@@ -1,21 +1,70 @@
 spring:
   application:
     name: wash-administration-service
+
+  datasource:
+    url: ${WASH_ADMINISTRATION_DB_URL:jdbc:postgresql://localhost:5432/wash_administration_db}
+    username: ${WASH_ADMINISTRATION_DB_RUNTIME_USER:wash_administration_service}
+    password: ${WASH_ADMINISTRATION_DB_RUNTIME_PASSWORD:wash_administration_service}
+    hikari:
+      connection-timeout: 10000
+      validation-timeout: 5000
+      data-source-properties:
+        socketTimeout: 10
+        connectTimeout: 10
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+    baseline-on-migrate: false
+    url: ${WASH_ADMINISTRATION_DB_URL:jdbc:postgresql://localhost:5432/wash_administration_db}
+    user: ${WASH_ADMINISTRATION_DB_MIGRATION_USER:wash_administration_service}
+    password: ${WASH_ADMINISTRATION_DB_MIGRATION_PASSWORD:wash_administration_service}
+    placeholders:
+      runtime_role: ${WASH_ADMINISTRATION_DB_RUNTIME_USER:wash_administration_service}
+
 server:
   port: 8080
+
+logging:
+  structured:
+    format:
+      console: ecs
+
 management:
+  endpoints:
+    access:
+      default: none
+    web:
+      base-path: /
+      exposure:
+        include: health,info,prometheus
+      path-mapping:
+        prometheus: metrics
   endpoint:
     health:
+      access: read-only
       probes:
         enabled: true
       show-details: never
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
+      show-components: never
+      group:
+        startup:
+          include: db, schemaVersion
+        readiness:
+          include: db, schemaVersion
+        liveness:
+          include: livenessState
+    info:
+      access: read-only
+    prometheus:
+      access: read-only
   info:
     env:
       enabled: true
+
 info:
   app:
     name: wash-administration-service

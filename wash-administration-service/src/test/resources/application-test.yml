@@ -1,0 +1,10 @@
+spring:
+  task:
+    scheduling:
+      enabled: false
+
+management:
+  metrics:
+    export:
+      prometheus:
+        enabled: true
