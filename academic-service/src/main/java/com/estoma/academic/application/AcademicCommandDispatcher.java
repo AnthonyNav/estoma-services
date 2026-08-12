@@ -148,7 +148,9 @@ public class AcademicCommandDispatcher {
   }
 
   private void acquireIdempotencyLock(String producer, String idempotencyKey) {
-    String lockKey = producer + "\u0000" + idempotencyKey;
+    // producer is a canonical logicalComponentId (e.g. "bff"); ':' is not valid in that namespace,
+    // so this composition is unambiguous and remains valid PostgreSQL UTF-8 text.
+    String lockKey = producer + ":" + idempotencyKey;
     jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(:lockKey, 0))")
         .param("lockKey", lockKey)
         .query((rs, rowNum) -> 1)
