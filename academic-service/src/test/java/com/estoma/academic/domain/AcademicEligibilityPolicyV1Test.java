@@ -18,6 +18,13 @@ class AcademicEligibilityPolicyV1Test {
     assertThat(policy.isEligible(profile(10, StudentAcademicProfile.Status.INACTIVE))).isFalse();
   }
 
+  @Test void V1CannotBeRelabeledAsAnotherPolicyVersion() {
+    assertThatThrownBy(() -> new AcademicEligibilityPolicyV1(2))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThat(policy.version()).isEqualTo(1);
+    assertThat(policy.systemCode()).isEqualTo(AcademicEligibilityPolicyV1.SYSTEM_CODE);
+  }
+
   private static StudentAcademicProfile profile(int semester, StudentAcademicProfile.Status status) {
     return new StudentAcademicProfile(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "S-1", semester, status, 1);
   }

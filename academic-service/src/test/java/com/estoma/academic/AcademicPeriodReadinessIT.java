@@ -49,6 +49,28 @@ class AcademicPeriodReadinessIT {
     jdbc.sql("UPDATE academic_periods SET status='CLOSED' WHERE academic_period_id=:id").param("id",period).update();
     assertThat(dispatcher.dispatch(command("RegisterCourseSection", mapper.createObjectNode().put("academicPeriodId", period.toString()).put("nrc","NRC-1").put("name","Clinical"))).errorCode()).isEqualTo("ACADEMIC_PERIOD_CLOSED");
   }
+
+  @Test void enrollmentEventsUseDistinctStableStreamsForTwoCourseSections() {
+    jdbc.sql("UPDATE academic_periods SET academic_data_status='READY' WHERE academic_period_id=:id").param("id", period).update();
+    UUID profile = UUID.randomUUID();
+    jdbc.sql("INSERT INTO student_academic_profiles (student_academic_profile_id,person_id,account_id,student_number,student_number_normalized,current_semester,academic_status,version,student_number_version,created_at,updated_at) VALUES (:id,:person,:account,'ST-ENROLL','ST-ENROLL',5,'ACTIVE',1,0,now(),now())")
+        .param("id", profile).param("person", UUID.randomUUID()).param("account", UUID.randomUUID()).update();
+    UUID firstSection = UUID.randomUUID();
+    UUID secondSection = UUID.randomUUID();
+    jdbc.sql("INSERT INTO course_sections (course_section_id,academic_period_id,nrc,name,status,version,created_at,updated_at) VALUES (:id,:period,:nrc,:name,'ACTIVE',1,now(),now()),(:id2,:period,:nrc2,:name2,'ACTIVE',1,now(),now())")
+        .param("id", firstSection).param("period", period).param("nrc", "NRC-1").param("name", "Clinical 1")
+        .param("id2", secondSection).param("nrc2", "NRC-2").param("name2", "Clinical 2").update();
+    assertThat(dispatcher.dispatch(command("AddStudentEnrollment", mapper.createObjectNode()
+        .put("studentAcademicProfileId", profile.toString()).put("courseSectionId", firstSection.toString()))).status()).isEqualTo("SUCCEEDED");
+    assertThat(dispatcher.dispatch(command("AddStudentEnrollment", mapper.createObjectNode()
+        .put("studentAcademicProfileId", profile.toString()).put("courseSectionId", secondSection.toString()))).status()).isEqualTo("SUCCEEDED");
+    var streams = jdbc.sql("SELECT aggregate_id,aggregate_version FROM outbox_messages WHERE message_type='StudentEnrolledInCourseSection' ORDER BY occurred_at")
+        .query((rs, n) -> new Object[] {rs.getObject(1, UUID.class), rs.getInt(2)}).list();
+    assertThat(streams).hasSize(2);
+    assertThat(streams.get(0)[0]).isNotEqualTo(streams.get(1)[0]);
+    assertThat(streams.get(0)[1]).isEqualTo(1);
+    assertThat(streams.get(1)[1]).isEqualTo(1);
+  }
   private MessageEnvelope command(String type, tools.jackson.databind.JsonNode payload) {
     return new MessageEnvelope(UUID.randomUUID(), type, 1, "COMMAND", "bff", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(), UUID.randomUUID().toString(), null, null, new Actor("ACCOUNT",admin,null), payload);
   }

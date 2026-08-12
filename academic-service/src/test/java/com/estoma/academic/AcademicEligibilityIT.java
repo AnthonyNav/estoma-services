@@ -41,7 +41,7 @@ class AcademicEligibilityIT {
     jdbc.sql("TRUNCATE TABLE outbox_messages,processed_messages,idempotency_records,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
     jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:id,'SUPERADMIN','ACTIVE',1,now()),(:student,'ALUMNO','ACTIVE',1,now())").param("id",admin).param("student",account).update();
     jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',1,now())").param("id",person).update();
-    jdbc.sql("INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at) VALUES (:id,:person,'INSTITUTIONAL','ACTIVE',1,now())").param("id",account).param("person",person).update();
+    jdbc.sql("INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at) VALUES (:id,:person,'MATRICULA','ACTIVE',1,now())").param("id",account).param("person",person).update();
     policies.activateForEvaluation(1);
   }
 
@@ -65,19 +65,52 @@ class AcademicEligibilityIT {
 
   @Test void policyActivationReevaluatesOnlyTheNextCommandEvenWhenResultIsUnchanged() {
     create(6);
-    policies.activateForEvaluation(2);
+    policies.activateForEvaluation(new com.estoma.academic.domain.AcademicEligibilityPolicy() {
+      public String systemCode() { return com.estoma.academic.domain.AcademicEligibilityPolicyV1.SYSTEM_CODE; }
+      public int version() { return 2; }
+      public boolean isEligible(com.estoma.academic.domain.StudentAcademicProfile profile) {
+        return profile.status() == com.estoma.academic.domain.StudentAcademicProfile.Status.ACTIVE
+            && profile.currentSemester() >= 6;
+      }
+    });
     assertThat(profileVersion()).isEqualTo(1); // Changing policy configuration does not mutate the profile.
-    assertThat(dispatcher.dispatch(command("UpdateStudentAcademicProfile", mapper.createObjectNode().put("studentAcademicProfileId", profile.toString()).put("expectedVersion", 1))).status()).isEqualTo("SUCCEEDED");
+    assertThat(dispatcher.dispatch(command("ChangeStudentSemester", mapper.createObjectNode()
+        .put("studentAcademicProfileId", profile.toString()).put("currentSemester", 7).put("expectedVersion", 1))).status()).isEqualTo("SUCCEEDED");
     assertThat(eligible()).isTrue(); assertThat(eligibilityVersion()).isEqualTo(2);
     assertThat(profileVersion()).isEqualTo(2);
     assertThat(jdbc.sql("SELECT policy_version FROM student_academic_eligibilities WHERE student_academic_profile_id=:id").param("id",profile).query(Integer.class).single()).isEqualTo(2);
+  }
+
+  @Test void profileCreationRejectsAnAccountBoundToAnotherPerson() {
+    UUID otherPerson = UUID.randomUUID();
+    jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',1,now())")
+        .param("id", otherPerson).update();
+    UUID otherAccount = UUID.randomUUID();
+    jdbc.sql("INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at) VALUES (:id,:person,'MATRICULA','ACTIVE',1,now())")
+        .param("id", otherAccount).param("person", otherPerson).update();
+    jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:id,'ALUMNO','ACTIVE',1,now())")
+        .param("id", otherAccount).update();
+    assertThat(dispatcher.dispatch(command("CreateStudentAcademicProfile", mapper.createObjectNode()
+        .put("studentAcademicProfileId", UUID.randomUUID().toString()).put("personId", person.toString())
+        .put("accountId", otherAccount.toString()).put("studentNumber", "ST-CONFLICT")
+        .put("currentSemester", 5).put("academicStatus", "ACTIVE"))).errorCode()).isEqualTo("ACCOUNT_CONFLICT");
+  }
+
+  @Test void updateStudentAcademicProfileDoesNotPerformANoOpMutation() {
+    create(5);
+    long outboxBefore = jdbc.sql("SELECT count(*) FROM outbox_messages").query(Long.class).single();
+    assertThat(dispatcher.dispatch(command("UpdateStudentAcademicProfile", mapper.createObjectNode()
+        .put("studentAcademicProfileId", profile.toString()).put("expectedVersion", 1))).errorCode())
+        .isEqualTo("INVALID_MESSAGE");
+    assertThat(profileVersion()).isEqualTo(1);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages").query(Long.class).single()).isEqualTo(outboxBefore + 1);
   }
 
   @Test void normalizedStudentNumberConstraintViolationLeavesNoBusinessStateAndCommitsOnlyRejectedResult() {
     create(5);
     UUID secondProfile = UUID.randomUUID(), secondPerson = UUID.randomUUID(), secondAccount = UUID.randomUUID();
     jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',1,now())").param("id",secondPerson).update();
-    jdbc.sql("INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at) VALUES (:id,:person,'INSTITUTIONAL','ACTIVE',1,now())").param("id",secondAccount).param("person",secondPerson).update();
+    jdbc.sql("INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at) VALUES (:id,:person,'MATRICULA','ACTIVE',1,now())").param("id",secondAccount).param("person",secondPerson).update();
     jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:id,'ALUMNO','ACTIVE',1,now())").param("id",secondAccount).update();
     MessageEnvelope duplicate = command("CreateStudentAcademicProfile", mapper.createObjectNode().put("studentAcademicProfileId", secondProfile.toString()).put("personId", secondPerson.toString()).put("accountId", secondAccount.toString()).put("studentNumber", "ST-01").put("currentSemester", 5).put("academicStatus", "ACTIVE"));
 
