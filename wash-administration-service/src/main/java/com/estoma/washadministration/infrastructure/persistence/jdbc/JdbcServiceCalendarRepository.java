@@ -83,12 +83,13 @@ class JdbcServiceCalendarRepository implements ServiceCalendarRepository {
 
   @Override
   public int update(ServiceCalendar calendar, int expectedVersion) {
+    OptimisticVersionGuard.requireNext(expectedVersion, calendar.version());
     return jdbc.sql(
             """
             UPDATE service_calendars SET
               name = :name, timezone = :timezone, effective_from = :effectiveFrom,
               effective_until = :effectiveUntil, status = CAST(:status AS service_calendar_status),
-              version = :newVersion, updated_by_account_id = :updatedBy, updated_at = :updatedAt
+              version = version + 1, updated_by_account_id = :updatedBy, updated_at = :updatedAt
              WHERE service_calendar_id = :id AND version = :expectedVersion
             """)
         .param("id", calendar.id())
@@ -97,7 +98,6 @@ class JdbcServiceCalendarRepository implements ServiceCalendarRepository {
         .param("effectiveFrom", calendar.effectivePeriod().from())
         .param("effectiveUntil", calendar.effectivePeriod().until())
         .param("status", calendar.status().name())
-        .param("newVersion", calendar.version())
         .param("updatedBy", calendar.updatedByAccountId())
         .param("updatedAt", Timestamps.toTimestamp(calendar.updatedAt()))
         .param("expectedVersion", expectedVersion)

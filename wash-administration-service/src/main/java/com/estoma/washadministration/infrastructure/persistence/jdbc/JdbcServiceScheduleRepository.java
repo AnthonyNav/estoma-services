@@ -98,12 +98,13 @@ class JdbcServiceScheduleRepository implements ServiceScheduleRepository {
 
   @Override
   public int update(ServiceSchedule schedule, int expectedVersion) {
+    OptimisticVersionGuard.requireNext(expectedVersion, schedule.version());
     return jdbc.sql(
             """
             UPDATE service_schedules SET
               day_of_week = :dayOfWeek, opening_time = :openingTime, closing_time = :closingTime,
               slot_duration_minutes = :slotDuration, status = CAST(:status AS service_schedule_status),
-              version = :newVersion, updated_by_account_id = :updatedBy, updated_at = :updatedAt
+              version = version + 1, updated_by_account_id = :updatedBy, updated_at = :updatedAt
              WHERE service_schedule_id = :id AND version = :expectedVersion
             """)
         .param("id", schedule.id())
@@ -112,7 +113,6 @@ class JdbcServiceScheduleRepository implements ServiceScheduleRepository {
         .param("closingTime", schedule.timeWindow().closing())
         .param("slotDuration", schedule.timeWindow().slotDurationMinutes())
         .param("status", schedule.status().name())
-        .param("newVersion", schedule.version())
         .param("updatedBy", schedule.updatedByAccountId())
         .param("updatedAt", Timestamps.toTimestamp(schedule.updatedAt()))
         .param("expectedVersion", expectedVersion)

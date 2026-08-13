@@ -2,10 +2,13 @@ package com.estoma.washadministration.infrastructure.persistence.jdbc;
 
 import com.estoma.washadministration.application.port.TankRepository;
 import com.estoma.washadministration.domain.resource.Tank;
+import com.estoma.washadministration.domain.shared.DomainErrorCode;
+import com.estoma.washadministration.domain.shared.DomainRuleViolationException;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 class JdbcTankRepository implements TankRepository {
@@ -53,7 +56,19 @@ class JdbcTankRepository implements TankRepository {
   }
 
   @Override
+  @Transactional
   public void insert(Tank tank) {
+    Optional<String> parentStatus =
+        jdbc.sql("SELECT status::text FROM cabins WHERE cabin_id = :cabinId FOR UPDATE")
+            .param("cabinId", tank.cabinId())
+            .query(String.class)
+            .optional();
+
+    if (parentStatus.isPresent() && "RETIRED".equals(parentStatus.get())) {
+      throw new DomainRuleViolationException(
+          DomainErrorCode.CABIN_RETIRED, "cannot register a tank under a retired cabin");
+    }
+
     jdbc.sql(
             """
             INSERT INTO tanks (
@@ -80,18 +95,18 @@ class JdbcTankRepository implements TankRepository {
 
   @Override
   public int update(Tank tank, int expectedVersion) {
+    OptimisticVersionGuard.requireNext(expectedVersion, tank.version());
     return jdbc.sql(
             """
             UPDATE tanks SET
               name = :name, configured_capacity = :capacity, status = CAST(:status AS resource_status),
-              version = :newVersion, updated_by_account_id = :updatedBy, updated_at = :updatedAt
+              version = version + 1, updated_by_account_id = :updatedBy, updated_at = :updatedAt
              WHERE tank_id = :id AND version = :expectedVersion
             """)
         .param("id", tank.id())
         .param("name", tank.name().value())
         .param("capacity", tank.configuredCapacity().value())
         .param("status", tank.status().name())
-        .param("newVersion", tank.version())
         .param("updatedBy", tank.updatedByAccountId())
         .param("updatedAt", Timestamps.toTimestamp(tank.updatedAt()))
         .param("expectedVersion", expectedVersion)

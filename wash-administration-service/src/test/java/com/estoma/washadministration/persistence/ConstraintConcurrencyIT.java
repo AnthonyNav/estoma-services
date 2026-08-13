@@ -2,10 +2,22 @@ package com.estoma.washadministration.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.estoma.washadministration.application.port.CabinRepository;
+import com.estoma.washadministration.application.port.TankRepository;
+import com.estoma.washadministration.domain.resource.Cabin;
+import com.estoma.washadministration.domain.resource.CabinType;
+import com.estoma.washadministration.domain.resource.ResourceStatus;
+import com.estoma.washadministration.domain.resource.Tank;
+import com.estoma.washadministration.domain.shared.DisplayName;
+import com.estoma.washadministration.domain.shared.DomainErrorCode;
+import com.estoma.washadministration.domain.shared.DomainRuleViolationException;
+import com.estoma.washadministration.domain.shared.PositiveCapacity;
+import com.estoma.washadministration.domain.shared.ResourceCode;
 import com.estoma.washadministration.testsupport.AbstractPostgresIT;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -23,8 +35,13 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 class ConstraintConcurrencyIT extends AbstractPostgresIT {
 
+  private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
+  private static final UUID ACCOUNT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
   @Autowired private DataSource dataSource;
   @Autowired private JdbcClient jdbc;
+  @Autowired private CabinRepository cabins;
+  @Autowired private TankRepository tanks;
 
   @Test
   void activeCalendarOverlapIsRaceSafe() throws Exception {
@@ -97,6 +114,80 @@ class ConstraintConcurrencyIT extends AbstractPostgresIT {
       executor.shutdownNow();
     }
     assertThat(count("cabins")).isEqualTo(1);
+  }
+
+  @Test
+  void cabinRetirementAndTankRegistrationSerializeOnTheParentCabin() throws Exception {
+    Cabin cabin =
+        Cabin.createNew(
+            UUID.randomUUID(),
+            new ResourceCode("RACE-PARENT"),
+            new DisplayName("Race Parent"),
+            CabinType.NORMAL,
+            ACCOUNT_ID,
+            NOW);
+    cabins.insert(cabin);
+
+    Cabin retiredCandidate = cabin.retire(ACCOUNT_ID, true, NOW.plusSeconds(1));
+    Tank tank =
+        Tank.createNew(
+            UUID.randomUUID(),
+            cabin.id(),
+            new ResourceCode("RACE-TANK"),
+            new DisplayName("Race Tank"),
+            new PositiveCapacity(1),
+            ACCOUNT_ID,
+            NOW.plusSeconds(1));
+
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch go = new CountDownLatch(1);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<Boolean> retireResult =
+          executor.submit(
+              () -> {
+                ready.countDown();
+                await(go);
+                try {
+                  return cabins.update(retiredCandidate, cabin.version()) == 1;
+                } catch (DomainRuleViolationException exception) {
+                  assertThat(exception.code()).isEqualTo(DomainErrorCode.CABIN_HAS_NON_RETIRED_TANKS);
+                  return false;
+                }
+              });
+
+      Future<Boolean> registerResult =
+          executor.submit(
+              () -> {
+                ready.countDown();
+                await(go);
+                try {
+                  tanks.insert(tank);
+                  return true;
+                } catch (DomainRuleViolationException exception) {
+                  assertThat(exception.code()).isEqualTo(DomainErrorCode.CABIN_RETIRED);
+                  return false;
+                }
+              });
+
+      ready.await();
+      go.countDown();
+
+      boolean retired = retireResult.get();
+      boolean registered = registerResult.get();
+      assertThat(retired).isNotEqualTo(registered);
+    } finally {
+      executor.shutdownNow();
+    }
+
+    Cabin stored = cabins.findById(cabin.id()).orElseThrow();
+    long nonRetiredTanks = tanks.countNonRetiredByCabinId(cabin.id());
+    assertThat(stored.status() == ResourceStatus.RETIRED && nonRetiredTanks > 0).isFalse();
+    if (stored.status() == ResourceStatus.RETIRED) {
+      assertThat(nonRetiredTanks).isZero();
+    } else {
+      assertThat(nonRetiredTanks).isEqualTo(1);
+    }
   }
 
   private boolean insertOverlappingCalendar(UUID id, CountDownLatch ready, CountDownLatch go) {

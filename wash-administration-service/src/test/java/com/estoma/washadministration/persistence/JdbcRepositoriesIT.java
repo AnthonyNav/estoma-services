@@ -1,6 +1,7 @@
 package com.estoma.washadministration.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.washadministration.application.port.AdministrativeClosureRepository;
 import com.estoma.washadministration.application.port.AuthorizationAccessProjectionRepository;
@@ -22,7 +23,6 @@ import com.estoma.washadministration.domain.priority.ResourcePriority;
 import com.estoma.washadministration.domain.priority.UsageMode;
 import com.estoma.washadministration.domain.resource.Cabin;
 import com.estoma.washadministration.domain.resource.CabinType;
-import com.estoma.washadministration.domain.resource.ResourceStatus;
 import com.estoma.washadministration.domain.resource.Tank;
 import com.estoma.washadministration.domain.schedule.ServiceSchedule;
 import com.estoma.washadministration.domain.shared.ClosureReason;
@@ -83,6 +83,24 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
             NOW.plusSeconds(1));
     assertThat(calendars.update(updated, calendar.version())).isEqualTo(1);
     assertThat(calendars.update(updated, calendar.version())).isZero();
+    assertThat(calendars.findById(calendar.id())).map(ServiceCalendar::version).contains(2);
+
+    ServiceCalendar illegalJump =
+        ServiceCalendar.reconstitute(
+            updated.id(),
+            updated.code(),
+            updated.name(),
+            updated.timezone(),
+            updated.effectivePeriod(),
+            updated.status(),
+            27,
+            updated.createdByAccountId(),
+            updated.updatedByAccountId(),
+            updated.createdAt(),
+            updated.updatedAt().plusSeconds(1));
+    assertThatThrownBy(() -> calendars.update(illegalJump, 2))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("expectedVersion + 1");
     assertThat(calendars.findById(calendar.id())).map(ServiceCalendar::version).contains(2);
   }
 
@@ -151,7 +169,10 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
         });
     assertThat(tanks.countByCabinId(cabin.id())).isEqualTo(1);
     assertThat(tanks.countNonRetiredByCabinId(cabin.id())).isEqualTo(1);
-    assertThat(tanks.findById(tank.id())).map(Tank::configuredCapacity).map(PositiveCapacity::value).contains(3);
+    assertThat(tanks.findById(tank.id()))
+        .map(Tank::configuredCapacity)
+        .map(PositiveCapacity::value)
+        .contains(3);
   }
 
   @Test
@@ -217,15 +238,40 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
         .contains("ACTIVE");
 
     UUID messageId = UUID.randomUUID();
-    assertThat(processedMessages.registerIfAbsent("authorization-events", messageId, UUID.randomUUID(), NOW)).isTrue();
-    assertThat(processedMessages.registerIfAbsent("authorization-events", messageId, UUID.randomUUID(), NOW)).isFalse();
+    assertThat(processedMessages.registerIfAbsent("authorization-events", messageId, UUID.randomUUID(), NOW))
+        .isTrue();
+    assertThat(processedMessages.registerIfAbsent("authorization-events", messageId, UUID.randomUUID(), NOW))
+        .isFalse();
 
-    assertThat(idempotency.insertIfAbsent("bff", "CreateServiceCalendar", "key-1", "a".repeat(64), NOW)).isTrue();
-    assertThat(idempotency.insertIfAbsent("bff", "CreateServiceCalendar", "key-1", "b".repeat(64), NOW)).isFalse();
+    assertThat(idempotency.insertIfAbsent("bff", "CreateServiceCalendar", "key-1", "a".repeat(64), NOW))
+        .isTrue();
+    assertThat(idempotency.insertIfAbsent("bff", "CreateServiceCalendar", "key-1", "b".repeat(64), NOW))
+        .isFalse();
     assertThat(
             idempotency.markSucceeded(
-                "bff", "CreateServiceCalendar", "key-1", priority.id(), 1, "SUCCEEDED", "{}", NOW.plusSeconds(1)))
+                "bff",
+                "CreateServiceCalendar",
+                "key-1",
+                priority.id(),
+                1,
+                "SUCCEEDED",
+                "{}",
+                NOW.plusSeconds(1)))
         .isEqualTo(1);
+    assertThat(idempotency.find("bff", "CreateServiceCalendar", "key-1"))
+        .map(CommandIdempotencyRepository.IdempotencyRecord::status)
+        .contains("SUCCEEDED");
+
+    assertThat(
+            idempotency.markFailed(
+                "bff",
+                "CreateServiceCalendar",
+                "key-1",
+                "LATE_FAILURE",
+                "FAILED",
+                "{}",
+                NOW.plusSeconds(2)))
+        .isZero();
     assertThat(idempotency.find("bff", "CreateServiceCalendar", "key-1"))
         .map(CommandIdempotencyRepository.IdempotencyRecord::status)
         .contains("SUCCEEDED");
@@ -278,7 +324,7 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
             1,
             correlationId,
             null,
-             "{\"type\":\"SYSTEM\",\"service\":\"wash-administration\"}",
+            "{\"type\":\"SYSTEM\",\"service\":\"wash-administration\"}",
             "{}",
             null));
     assertThat(

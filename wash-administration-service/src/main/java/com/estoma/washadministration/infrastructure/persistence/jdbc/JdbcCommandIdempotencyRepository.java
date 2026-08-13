@@ -70,6 +70,7 @@ class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepository {
               status = 'SUCCEEDED', aggregate_id = :aggregateId, aggregate_version = :aggregateVersion,
               result_status = :resultStatus, result_data = CAST(:resultData AS jsonb), completed_at = :completedAt
              WHERE producer = :producer AND operation_type = :operationType AND idempotency_key = :idempotencyKey
+               AND status = 'IN_PROGRESS'
             """)
         .param("producer", producer)
         .param("operationType", operationType)
@@ -97,6 +98,7 @@ class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepository {
               status = 'REJECTED', error_code = :errorCode, result_status = :resultStatus,
               result_data = CAST(:resultData AS jsonb), completed_at = :completedAt
              WHERE producer = :producer AND operation_type = :operationType AND idempotency_key = :idempotencyKey
+               AND status = 'IN_PROGRESS'
             """)
         .param("producer", producer)
         .param("operationType", operationType)
@@ -163,6 +165,7 @@ class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepository {
               status = CAST(:status AS idempotency_status), error_code = :errorCode,
               result_status = :resultStatus, result_data = CAST(:resultData AS jsonb), completed_at = :completedAt
              WHERE producer = :producer AND operation_type = :operationType AND idempotency_key = :idempotencyKey
+               AND status = 'IN_PROGRESS'
             """)
         .param("producer", producer)
         .param("operationType", operationType)

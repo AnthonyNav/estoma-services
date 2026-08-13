@@ -8,6 +8,12 @@ public interface CabinRepository {
 
   Optional<Cabin> findById(UUID id);
 
+  /**
+   * Loads and locks the parent cabin for cross-aggregate operations that must serialize with tank
+   * registration and cabin retirement.
+   */
+  Optional<Cabin> findByIdForUpdate(UUID id);
+
   Optional<Cabin> findByCode(String code);
 
   void insert(Cabin cabin);

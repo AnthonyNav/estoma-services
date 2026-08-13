@@ -4,9 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.washadministration.testsupport.AbstractPostgresIT;
-import java.time.OffsetDateTime;
 import java.time.LocalDate;
-import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
@@ -24,8 +23,11 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   void allMigrationsApplyAndSecondMigrateIsANoOp() {
     MigrationInfo[] applied = flyway.info().applied();
 
-    assertThat(applied).hasSize(2);
-    assertThat(applied).extracting(MigrationInfo::getVersion).extracting(Object::toString).containsExactly("1", "2");
+    assertThat(applied).hasSize(3);
+    assertThat(applied)
+        .extracting(MigrationInfo::getVersion)
+        .extracting(Object::toString)
+        .containsExactly("1", "2", "3");
     assertThat(applied).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
     assertThat(flyway.migrate().migrationsExecuted).isZero();
   }
@@ -36,7 +38,8 @@ class FlywayMigrationIT extends AbstractPostgresIT {
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' "
                 + "AND table_name IN ('service_calendars', 'service_schedules', 'administrative_closures', "
                 + "'cabins', 'tanks', 'resource_priorities', 'authorization_role_projection', "
-                + "'authorization_access_projection', 'processed_messages', 'command_idempotency_records', 'outbox_messages')")
+                + "'authorization_access_projection', 'processed_messages', 'command_idempotency_records', "
+                + "'outbox_messages', 'projection_recovery_jobs')")
         .query(String.class)
         .list())
         .containsExactlyInAnyOrder(
@@ -50,7 +53,8 @@ class FlywayMigrationIT extends AbstractPostgresIT {
             "authorization_access_projection",
             "processed_messages",
             "command_idempotency_records",
-            "outbox_messages");
+            "outbox_messages",
+            "projection_recovery_jobs");
   }
 
   @Test
@@ -158,6 +162,64 @@ class FlywayMigrationIT extends AbstractPostgresIT {
                 .query(String.class)
                 .list())
         .containsExactly("IN_PROGRESS", "SUCCEEDED", "REJECTED", "FAILED", "EXPIRED");
+  }
+
+  @Test
+  void recoveryJobSchemaEnforcesDurableMachineShape() {
+    UUID activeFull = UUID.randomUUID();
+    jdbc.sql(
+            """
+            INSERT INTO projection_recovery_jobs (
+              recovery_job_id, projection_type, scope, status, query_attempt, attempts, created_at, updated_at
+            ) VALUES (?, 'AUTHORIZATION', 'FULL', 'PENDING', 0, 0, ?, ?)
+            """)
+        .params(activeFull, OffsetDateTime.now(), OffsetDateTime.now())
+        .update();
+
+    assertThatThrownBy(
+            () ->
+                jdbc.sql(
+                        """
+                        INSERT INTO projection_recovery_jobs (
+                          recovery_job_id, projection_type, scope, status, query_attempt, attempts, created_at, updated_at
+                        ) VALUES (?, 'AUTHORIZATION', 'FULL', 'PENDING', 0, 0, ?, ?)
+                        """)
+                    .params(UUID.randomUUID(), OffsetDateTime.now(), OffsetDateTime.now())
+                    .update())
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ux_projection_recovery_full_active");
+
+    assertThatThrownBy(
+            () ->
+                jdbc.sql(
+                        """
+                        INSERT INTO projection_recovery_jobs (
+                          recovery_job_id, projection_type, scope, entity_key, status,
+                          query_attempt, attempts, created_at, updated_at
+                        ) VALUES (?, 'AUTHORIZATION', 'FULL', 'account:bad', 'PENDING', 0, 0, ?, ?)
+                        """)
+                    .params(UUID.randomUUID(), OffsetDateTime.now(), OffsetDateTime.now())
+                    .update())
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_projection_recovery_entity_key");
+
+    jdbc.sql("DELETE FROM projection_recovery_jobs WHERE recovery_job_id = :id")
+        .param("id", activeFull)
+        .update();
+
+    assertThatThrownBy(
+            () ->
+                jdbc.sql(
+                        """
+                        INSERT INTO projection_recovery_jobs (
+                          recovery_job_id, projection_type, scope, status,
+                          query_attempt, attempts, created_at, updated_at
+                        ) VALUES (?, 'AUTHORIZATION', 'FULL', 'WAITING_RESULT', 1, 1, ?, ?)
+                        """)
+                    .params(UUID.randomUUID(), OffsetDateTime.now(), OffsetDateTime.now())
+                    .update())
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_projection_recovery_state_shape");
   }
 
   private void insertCabin(UUID id, String code) {

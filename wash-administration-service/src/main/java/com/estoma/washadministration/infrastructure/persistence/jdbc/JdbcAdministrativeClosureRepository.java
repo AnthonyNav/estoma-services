@@ -63,17 +63,17 @@ class JdbcAdministrativeClosureRepository implements AdministrativeClosureReposi
 
   @Override
   public int update(AdministrativeClosure closure, int expectedVersion) {
+    OptimisticVersionGuard.requireNext(expectedVersion, closure.version());
     return jdbc.sql(
             """
             UPDATE administrative_closures SET
-              status = CAST(:status AS administrative_closure_status), version = :newVersion,
+              status = CAST(:status AS administrative_closure_status), version = version + 1,
               cancelled_by_account_id = :cancelledBy, cancellation_reason = :cancellationReason,
               cancelled_at = :cancelledAt, updated_at = :updatedAt
              WHERE administrative_closure_id = :id AND version = :expectedVersion
             """)
         .param("id", closure.id())
         .param("status", closure.status().name())
-        .param("newVersion", closure.version())
         .param("cancelledBy", closure.cancelledByAccountId())
         .param("cancellationReason", closure.cancellationReason() == null ? null : closure.cancellationReason().value())
         .param("cancelledAt", Timestamps.toTimestamp(closure.cancelledAt()))
