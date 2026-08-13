@@ -28,7 +28,7 @@ public class AcademicCommandDispatcher {
       "ActivateStudentAcademicProfile", "DeactivateStudentAcademicProfile",
       "CreateAndActivateAcademicPeriod", "RegisterCourseSection", "UpdateCourseSection",
       "ActivateCourseSection", "DeactivateCourseSection", "AddStudentEnrollment",
-      "ReactivateStudentEnrollment", "RemoveStudentEnrollment");
+      "ReactivateStudentEnrollment", "RemoveStudentEnrollment", "StartStudentImport");
 
   private final JdbcClient jdbc;
   private final OutboxRepository outbox;
@@ -173,6 +173,7 @@ public class AcademicCommandDispatcher {
       case "AddStudentEnrollment" -> addEnrollment(e, now);
       case "ReactivateStudentEnrollment" -> changeEnrollment(e, now, "ACTIVE", "StudentEnrollmentReactivated");
       case "RemoveStudentEnrollment" -> changeEnrollment(e, now, "REMOVED", "StudentRemovedFromCourseSection");
+      case "StartStudentImport" -> startStudentImport(e, now);
       default -> throw new AcademicRejectedException("INVALID_MESSAGE");
     };
   }
@@ -300,6 +301,7 @@ public class AcademicCommandDispatcher {
     LocalDate start = LocalDate.parse(required(p, "startDate"));
     LocalDate end = LocalDate.parse(required(p, "endDate"));
     if (end.isBefore(start)) throw new AcademicRejectedException("INVALID_PERIOD_DATES");
+    if (hasActiveImport()) throw new AcademicRejectedException("ACADEMIC_PERIOD_CHANGE_BLOCKED_BY_IMPORT");
     UUID id = uuid(p, "academicPeriodId", UUID.randomUUID());
     Period old = activePeriod(false);
     var events = events();
@@ -329,6 +331,54 @@ public class AcademicCommandDispatcher {
         map("academicPeriodId", id, "previousAcademicDataStatus", null,
             "academicDataStatus", "PENDING_IMPORT", "reason", "PERIOD_ACTIVATED", "changedAt", now)));
     return new Change(id, 1, events);
+  }
+
+  private Change startStudentImport(MessageEnvelope e, Instant now) {
+    JsonNode p = e.payload();
+    requireActorField(p, "requestedByAccountId", e);
+    UUID importId = uuid(p, "importId", null);
+    if (importId == null) throw new AcademicRejectedException("INVALID_MESSAGE");
+    String fileReference = required(p, "fileReference");
+    String fileChecksum = required(p, "fileChecksum");
+    ImportProcess existing = importProcess(importId);
+    if (existing != null) {
+      if (!existing.fileReference.equals(fileReference) || !existing.fileChecksum.equals(fileChecksum)) {
+        throw new AcademicRejectedException("IMPORT_ALREADY_EXISTS");
+      }
+      return new Change(importId, existing.version, events());
+    }
+    Period period = activePeriod(true);
+    if (hasActiveImport()) throw new AcademicRejectedException("IMPORT_ALREADY_RUNNING");
+    if ("READY".equals(period.dataStatus) && !p.path("confirmationAcknowledged").asBoolean(false)) {
+      throw new AcademicRejectedException("WARNING_NOT_ACKNOWLEDGED");
+    }
+    String previousDataStatus = period.dataStatus;
+    if ("IMPORT_FAILED".equals(previousDataStatus)) {
+      expectedUpdate(jdbc.sql("""
+          UPDATE academic_periods SET academic_data_status='PENDING_IMPORT',version=version+1,updated_at=:now
+          WHERE academic_period_id=:id AND version=:expected
+          """)
+          .param("id", period.id).param("expected", period.version).param("now", java.sql.Timestamp.from(now)).update());
+    }
+    jdbc.sql("""
+        INSERT INTO student_import_processes (
+          import_id,academic_period_id,academic_period_code,academic_period_version,import_mode,file_reference,
+          file_checksum,status,started_by_account_id,authorized_by_account_id,process_version,execution_generation,
+          started_at,created_at,updated_at)
+        VALUES (:id,:period,:code,:periodVersion,'FULL',:reference,:checksum,'VALIDATING',:actor,:actor,1,0,:now,:now,:now)
+        """)
+        .param("id", importId).param("period", period.id).param("code", period.code).param("periodVersion", period.version)
+        .param("reference", fileReference).param("checksum", fileChecksum).param("actor", e.actor().accountId())
+        .param("now", java.sql.Timestamp.from(now)).update();
+    var events = events(new Event("StudentImportStarted", importId, 1,
+        map("importId", importId, "academicPeriodId", period.id, "importMode", "FULL",
+            "startedByAccountId", e.actor().accountId(), "authorizedByAccountId", e.actor().accountId(), "startedAt", now)));
+    if ("IMPORT_FAILED".equals(previousDataStatus)) {
+      events.add(new Event("AcademicPeriodDataStatusChanged", period.id, period.version + 1,
+          map("academicPeriodId", period.id, "previousAcademicDataStatus", previousDataStatus,
+              "academicDataStatus", "PENDING_IMPORT", "reason", "IMPORT_RETRY_ACCEPTED", "changedAt", now)));
+    }
+    return new Change(importId, 1, events);
   }
 
   private Change registerSection(MessageEnvelope e, Instant now) {
@@ -569,6 +619,22 @@ public class AcademicCommandDispatcher {
     return period;
   }
 
+  private boolean hasActiveImport() {
+    return jdbc.sql("""
+        SELECT EXISTS (SELECT 1 FROM student_import_processes
+          WHERE status IN ('VALIDATING','VALIDATED','APPLYING','APPLICATION_FAILED'))
+        """).query(Boolean.class).single();
+  }
+
+  private ImportProcess importProcess(UUID importId) {
+    return jdbc.sql("""
+        SELECT file_reference,file_checksum,status::text,process_version
+        FROM student_import_processes WHERE import_id=:id
+        """).param("id", importId)
+        .query((rs, n) -> new ImportProcess(rs.getString(1), rs.getString(2), rs.getString(3), rs.getInt(4)))
+        .optional().orElse(null);
+  }
+
   private void readyPeriod(UUID id) {
     if (id == null) throw new AcademicRejectedException("ACADEMIC_PERIOD_NOT_FOUND");
     Period period = jdbc.sql("SELECT academic_period_id,code,status::text,academic_data_status::text,version FROM academic_periods WHERE academic_period_id=:id")
@@ -649,6 +715,7 @@ public class AcademicCommandDispatcher {
       case "CreateStudentAcademicProfile" -> "STUDENT_PROFILE_ALREADY_EXISTS";
       case "CorrectStudentNumber" -> "STUDENT_NUMBER_ALREADY_EXISTS";
       case "CreateAndActivateAcademicPeriod" -> "ACADEMIC_PERIOD_ALREADY_EXISTS";
+      case "StartStudentImport" -> "IMPORT_ALREADY_RUNNING";
       case "RegisterCourseSection" -> "COURSE_SECTION_ALREADY_EXISTS";
       case "AddStudentEnrollment" -> "ENROLLMENT_ALREADY_EXISTS";
       default -> "VERSION_CONFLICT";
@@ -721,4 +788,5 @@ public class AcademicCommandDispatcher {
   private record Enrollment(UUID id, String status, int version) {}
   private record AccountProjection(UUID personId, String loginType, String status) {}
   private record Eligibility(UUID id, boolean eligible, int policyVersion, int version) {}
+  private record ImportProcess(String fileReference, String fileChecksum, String status, int version) {}
 }
