@@ -64,6 +64,29 @@ class ExternalProjectionListenerIT {
   }
 
   @Test
+  void accountDeactivationReasonIsRetainedAndClearedAfterReactivation() {
+    listener.apply(event("AccountCreated", "authentication", 1,
+        mapper.createObjectNode().put("accountId", account.toString()).put("personId", person.toString())
+            .put("loginType", "MATRICULA").put("status", "INACTIVE")));
+    listener.apply(event("AccountActivated", "authentication", 2,
+        mapper.createObjectNode().put("accountId", account.toString()).put("personId", person.toString())
+            .put("status", "ACTIVE")));
+    listener.apply(event("AccountDeactivated", "authentication", 3,
+        mapper.createObjectNode().put("accountId", account.toString()).put("personId", person.toString())
+            .put("status", "INACTIVE").put("reasonCode", "ACADEMIC_ABSENCE")));
+
+    assertThat(jdbc.sql("SELECT last_deactivation_reason_code FROM account_status_projection WHERE account_id=:id")
+        .param("id", account).query(String.class).single()).isEqualTo("ACADEMIC_ABSENCE");
+
+    listener.apply(event("AccountActivated", "authentication", 4,
+        mapper.createObjectNode().put("accountId", account.toString()).put("personId", person.toString())
+            .put("status", "ACTIVE")));
+
+    assertThat(jdbc.sql("SELECT last_deactivation_reason_code FROM account_status_projection WHERE account_id=:id")
+        .param("id", account).query(String.class).optional()).isEmpty();
+  }
+
+  @Test
   void roleChangeDeactivatesPreviousRoleAndActivatesNewRole() {
     listener.apply(event("AccountRoleAssigned", "authorization", 1,
         mapper.createObjectNode().put("accountId", account.toString()).put("roleCode", "ALUMNO")));
