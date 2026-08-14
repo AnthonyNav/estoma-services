@@ -23,11 +23,11 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   void allMigrationsApplyAndSecondMigrateIsANoOp() {
     MigrationInfo[] applied = flyway.info().applied();
 
-    assertThat(applied).hasSize(3);
+    assertThat(applied).hasSize(4);
     assertThat(applied)
         .extracting(MigrationInfo::getVersion)
         .extracting(Object::toString)
-        .containsExactly("1", "2", "3");
+        .containsExactly("1", "2", "3", "4");
     assertThat(applied).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
     assertThat(flyway.migrate().migrationsExecuted).isZero();
   }
@@ -39,7 +39,7 @@ class FlywayMigrationIT extends AbstractPostgresIT {
                 + "AND table_name IN ('service_calendars', 'service_schedules', 'administrative_closures', "
                 + "'cabins', 'tanks', 'resource_priorities', 'authorization_role_projection', "
                 + "'authorization_access_projection', 'processed_messages', 'command_idempotency_records', "
-                + "'outbox_messages', 'projection_recovery_jobs')")
+                + "'outbox_messages', 'projection_recovery_jobs', 'administrative_audit_records')")
         .query(String.class)
         .list())
         .containsExactlyInAnyOrder(
@@ -54,7 +54,8 @@ class FlywayMigrationIT extends AbstractPostgresIT {
             "processed_messages",
             "command_idempotency_records",
             "outbox_messages",
-            "projection_recovery_jobs");
+            "projection_recovery_jobs",
+            "administrative_audit_records");
   }
 
   @Test

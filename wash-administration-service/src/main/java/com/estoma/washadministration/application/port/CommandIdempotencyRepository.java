@@ -29,6 +29,8 @@ public interface CommandIdempotencyRepository {
       String producer,
       String operationType,
       String idempotencyKey,
+      UUID aggregateId,
+      Integer aggregateVersion,
       String errorCode,
       String resultStatus,
       String resultDataJson,

@@ -13,4 +13,6 @@ public interface ResourcePriorityRepository {
   List<ResourcePriority> findAll();
 
   void insert(ResourcePriority priority);
+
+  boolean insertIfAbsent(ResourcePriority priority);
 }

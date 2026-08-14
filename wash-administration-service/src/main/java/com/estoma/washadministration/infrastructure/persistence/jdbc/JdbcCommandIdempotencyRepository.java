@@ -88,6 +88,8 @@ class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepository {
       String producer,
       String operationType,
       String idempotencyKey,
+      UUID aggregateId,
+      Integer aggregateVersion,
       String errorCode,
       String resultStatus,
       String resultDataJson,
@@ -95,7 +97,8 @@ class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepository {
     return jdbc.sql(
             """
             UPDATE command_idempotency_records SET
-              status = 'REJECTED', error_code = :errorCode, result_status = :resultStatus,
+              status = 'REJECTED', aggregate_id = :aggregateId, aggregate_version = :aggregateVersion,
+              error_code = :errorCode, result_status = :resultStatus,
               result_data = CAST(:resultData AS jsonb), completed_at = :completedAt
              WHERE producer = :producer AND operation_type = :operationType AND idempotency_key = :idempotencyKey
                AND status = 'IN_PROGRESS'
@@ -103,6 +106,8 @@ class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepository {
         .param("producer", producer)
         .param("operationType", operationType)
         .param("idempotencyKey", idempotencyKey)
+        .param("aggregateId", aggregateId)
+        .param("aggregateVersion", aggregateVersion)
         .param("errorCode", errorCode)
         .param("resultStatus", resultStatus)
         .param("resultData", resultDataJson)

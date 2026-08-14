@@ -8,13 +8,19 @@ public interface OutboxRepository {
 
   void append(OutboxMessage message);
 
+  /**
+   * Durable, transport-neutral message intent.
+   *
+   * <p>{@code logicalDestination} is not a RabbitMQ routing key. PR3 maps message kind, type and
+   * logical destination to the canonical exchange/routing contract.
+   */
   record OutboxMessage(
       UUID messageId,
       String messageType,
       int messageVersion,
       String messageKind,
       String producer,
-      String routingKey,
+      String logicalDestination,
       Instant occurredAt,
       UUID operationId,
       String idempotencyKey,
@@ -31,7 +37,10 @@ public interface OutboxRepository {
       if (actorJson.isBlank()) {
         throw new IllegalArgumentException("actorJson must not be blank");
       }
-      Objects.requireNonNull(routingKey, "routingKey");
+      Objects.requireNonNull(logicalDestination, "logicalDestination");
+      if (logicalDestination.isBlank()) {
+        throw new IllegalArgumentException("logicalDestination must not be blank");
+      }
     }
   }
 }

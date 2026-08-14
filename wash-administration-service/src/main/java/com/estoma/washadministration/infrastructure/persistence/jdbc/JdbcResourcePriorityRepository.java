@@ -62,4 +62,29 @@ class JdbcResourcePriorityRepository implements ResourcePriorityRepository {
         .param("updatedAt", Timestamps.toTimestamp(priority.updatedAt()))
         .update();
   }
+
+  @Override
+  public boolean insertIfAbsent(ResourcePriority priority) {
+    return jdbc.sql(
+            """
+            INSERT INTO resource_priorities (
+              resource_priority_id, appointment_type, cabin_type, usage_mode, priority_order,
+              status, version, created_at, updated_at
+            ) VALUES (
+              :id, CAST(:appointmentType AS appointment_type), CAST(:cabinType AS cabin_type),
+              CAST(:usageMode AS usage_mode), :priorityOrder, CAST(:status AS resource_status),
+              :version, :createdAt, :updatedAt
+            ) ON CONFLICT (appointment_type, cabin_type) DO NOTHING
+            """)
+        .param("id", priority.id())
+        .param("appointmentType", priority.appointmentType().name())
+        .param("cabinType", priority.cabinType().name())
+        .param("usageMode", priority.usageMode().name())
+        .param("priorityOrder", priority.priorityOrder())
+        .param("status", priority.status().name())
+        .param("version", priority.version())
+        .param("createdAt", Timestamps.toTimestamp(priority.createdAt()))
+        .param("updatedAt", Timestamps.toTimestamp(priority.updatedAt()))
+        .update() == 1;
+  }
 }

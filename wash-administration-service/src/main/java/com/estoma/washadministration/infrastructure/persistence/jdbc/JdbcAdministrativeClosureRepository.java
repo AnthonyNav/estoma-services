@@ -2,7 +2,10 @@ package com.estoma.washadministration.infrastructure.persistence.jdbc;
 
 import com.estoma.washadministration.application.port.AdministrativeClosureRepository;
 import com.estoma.washadministration.domain.closure.AdministrativeClosure;
+import com.estoma.washadministration.domain.closure.AdministrativeClosureScope;
+import java.time.Instant;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -24,6 +27,47 @@ class JdbcAdministrativeClosureRepository implements AdministrativeClosureReposi
   public Optional<AdministrativeClosure> findById(UUID id) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM administrative_closures WHERE administrative_closure_id = :id")
         .param("id", id)
+        .query(ClosureRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
+  public Optional<AdministrativeClosure> findByIdForUpdate(UUID id) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM administrative_closures WHERE administrative_closure_id = :id FOR UPDATE")
+        .param("id", id)
+        .query(ClosureRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
+  public List<AdministrativeClosure> findAll() {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM administrative_closures ORDER BY starts_at, administrative_closure_id")
+        .query(ClosureRowMapper.INSTANCE)
+        .list();
+  }
+
+  @Override
+  public Optional<AdministrativeClosure> findExact(
+      UUID serviceCalendarId,
+      AdministrativeClosureScope scope,
+      UUID cabinId,
+      UUID tankId,
+      Instant startsAt,
+      Instant endsAt,
+      String reason) {
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM administrative_closures "
+                + "WHERE service_calendar_id = :calendarId AND scope = CAST(:scope AS administrative_closure_scope) "
+                + "AND cabin_id IS NOT DISTINCT FROM CAST(:cabinId AS uuid) "
+                + "AND tank_id IS NOT DISTINCT FROM CAST(:tankId AS uuid) "
+                + "AND starts_at = :startsAt AND ends_at = :endsAt AND reason = :reason")
+        .param("calendarId", serviceCalendarId)
+        .param("scope", scope.name())
+        .param("cabinId", cabinId)
+        .param("tankId", tankId)
+        .param("startsAt", Timestamps.toTimestamp(startsAt))
+        .param("endsAt", Timestamps.toTimestamp(endsAt))
+        .param("reason", reason)
         .query(ClosureRowMapper.INSTANCE)
         .optional();
   }

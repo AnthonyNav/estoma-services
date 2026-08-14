@@ -1,7 +1,6 @@
 package com.estoma.washadministration.infrastructure.persistence.jdbc;
 
 import com.estoma.washadministration.application.port.OutboxRepository;
-import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -25,7 +24,7 @@ class JdbcOutboxRepository implements OutboxRepository {
               causation_id, actor, payload, metadata, status, attempts, available_at
             ) VALUES (
               :messageId, :messageType, :messageVersion, :messageKind, :producer, :occurredAt,
-              :routingKey,
+              :logicalDestination,
               :operationId, :idempotencyKey, :aggregateId, :aggregateVersion, :correlationId,
               :causationId, CAST(:actor AS jsonb), CAST(:payload AS jsonb), CAST(:metadata AS jsonb),
               'PENDING', 0, :availableAt
@@ -36,7 +35,9 @@ class JdbcOutboxRepository implements OutboxRepository {
         .param("messageVersion", message.messageVersion())
         .param("messageKind", message.messageKind())
         .param("producer", message.producer())
-        .param("routingKey", message.routingKey())
+        // PR1 created the physical column as routing_key. Until PR3 owns transport mapping,
+        // it stores only the transport-neutral logical destination token from Application.
+        .param("logicalDestination", message.logicalDestination())
         .param("occurredAt", Timestamps.toTimestamp(message.occurredAt()))
         .param("operationId", message.operationId())
         .param("idempotencyKey", message.idempotencyKey())
