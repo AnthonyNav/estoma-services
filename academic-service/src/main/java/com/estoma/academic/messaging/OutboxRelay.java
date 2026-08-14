@@ -107,7 +107,7 @@ public class OutboxRelay {
     String key = switch (row.kind()) {
       case "EVENT" -> AcademicEventRoutingKeyResolver.resolve(row.type());
       case "RESULT" -> meta.path("destination").asString();
-      case "QUERY" -> "users-service";
+      case "QUERY" -> "users";
       default -> throw new IllegalStateException("unsupported outbox message kind " + row.kind());
     };
 
