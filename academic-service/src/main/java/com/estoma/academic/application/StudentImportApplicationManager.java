@@ -8,7 +8,6 @@ import com.estoma.academic.messaging.EnvelopeCodec;
 import com.estoma.academic.persistence.OutboxRepository;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -267,14 +266,15 @@ public class StudentImportApplicationManager {
           WHEN item_type IN ('CREATE_PERSON','UPDATE_PERSON') THEN 2
           WHEN item_type IN ('CREATE_ACCOUNT','ACTIVATE_ACCOUNT') THEN 3
           WHEN item_type='ASSIGN_STUDENT_ROLE' THEN 4
-          WHEN item_type IN ('CREATE_STUDENT_PROFILE','ACTIVATE_STUDENT_PROFILE','CHANGE_STUDENT_SEMESTER') THEN 5
-          WHEN item_type='GRANT_STUDENT_SYSTEM_ACCESS' THEN 6
-          WHEN item_type IN ('ADD_STUDENT_ENROLLMENT','REACTIVATE_STUDENT_ENROLLMENT') THEN 7
-          WHEN item_type='REMOVE_STUDENT_ENROLLMENT' THEN 8
-          WHEN item_type='DEACTIVATE_COURSE_SECTION' THEN 9
-          WHEN item_type='DEACTIVATE_STUDENT_PROFILE' THEN 10
-          WHEN item_type='DEACTIVATE_ACCOUNT' THEN 11
-          WHEN item_type='FINALIZE_STUDENT_IMPORT' THEN 12
+          WHEN item_type IN ('CREATE_STUDENT_PROFILE','ACTIVATE_STUDENT_PROFILE') THEN 5
+          WHEN item_type='CHANGE_STUDENT_SEMESTER' THEN 6
+          WHEN item_type='GRANT_STUDENT_SYSTEM_ACCESS' THEN 7
+          WHEN item_type IN ('ADD_STUDENT_ENROLLMENT','REACTIVATE_STUDENT_ENROLLMENT') THEN 8
+          WHEN item_type='REMOVE_STUDENT_ENROLLMENT' THEN 9
+          WHEN item_type='DEACTIVATE_COURSE_SECTION' THEN 10
+          WHEN item_type='DEACTIVATE_STUDENT_PROFILE' THEN 11
+          WHEN item_type='DEACTIVATE_ACCOUNT' THEN 12
+          WHEN item_type='FINALIZE_STUDENT_IMPORT' THEN 13
           ELSE 50 END,
           i.created_at,i.plan_item_id
         LIMIT 1
@@ -718,10 +718,10 @@ public class StudentImportApplicationManager {
     if ("FINALIZE_STUDENT_IMPORT".equals(item.type)) finalizeImport(importId, item, now);
     requireChanged(jdbc.sql("""
         UPDATE student_import_plan_items
-        SET status='COMPLETED',received_result=CASE WHEN :result IS NULL THEN received_result ELSE CAST(:result AS jsonb) END,
+        SET status='COMPLETED',received_result=COALESCE(CAST(:result AS jsonb),received_result),
             last_result_message_id=COALESCE(:resultMessage,last_result_message_id),
             last_result_status=COALESCE(:resultStatus,last_result_status),
-            applied_aggregate_version=COALESCE(applied_aggregate_version,:aggregateVersion),updated_at=:now
+            applied_aggregate_version=COALESCE(applied_aggregate_version,CAST(:aggregateVersion AS integer)),updated_at=:now
         WHERE import_id=:import AND plan_item_id=:item AND status IN ('PENDING','PROCESSING')
         """).param("result", result).param("resultMessage", resultMessageId).param("resultStatus", resultStatus)
         .param("aggregateVersion", null).param("now", timestamp(now)).param("import", importId).param("item", item.id).update());
@@ -767,7 +767,7 @@ public class StudentImportApplicationManager {
     String resultStatus = result == null ? null : codec.node(result).path("status").asString(null);
     jdbc.sql("""
         UPDATE student_import_plan_items
-        SET status='FAILED',received_result=CASE WHEN :result IS NULL THEN received_result ELSE CAST(:result AS jsonb) END,
+        SET status='FAILED',received_result=COALESCE(CAST(:result AS jsonb),received_result),
             last_result_message_id=COALESCE(:resultMessage,last_result_message_id),
             last_result_status=COALESCE(:resultStatus,last_result_status),
             last_error_code=:code,last_error_at=:now,updated_at=:now
