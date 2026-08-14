@@ -1,0 +1,38 @@
+name: authorization-service
+
+on:
+  pull_request:
+    paths:
+      - "authorization-service/**"
+      - ".github/workflows/authorization-service.yaml"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "authorization-service/**"
+      - ".github/workflows/authorization-service.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: authorization-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          cache-dependency-path: authorization-service/pom.xml
+
+      - name: Run tests
+        run: ./mvnw -B clean verify
