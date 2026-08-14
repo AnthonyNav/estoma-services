@@ -28,8 +28,8 @@ public class AcademicCommandDispatcher {
       "ActivateStudentAcademicProfile", "DeactivateStudentAcademicProfile",
       "CreateAndActivateAcademicPeriod", "RegisterCourseSection", "UpdateCourseSection",
       "ActivateCourseSection", "DeactivateCourseSection", "AddStudentEnrollment",
-       "ReactivateStudentEnrollment", "RemoveStudentEnrollment", "StartStudentImport",
-       "ApplyStudentImport", "ResumeStudentImport");
+      "ReactivateStudentEnrollment", "RemoveStudentEnrollment", "StartStudentImport",
+      "ResumeStudentImport");
 
   private final JdbcClient jdbc;
   private final OutboxRepository outbox;
@@ -174,9 +174,8 @@ public class AcademicCommandDispatcher {
       case "AddStudentEnrollment" -> addEnrollment(e, now);
       case "ReactivateStudentEnrollment" -> changeEnrollment(e, now, "ACTIVE", "StudentEnrollmentReactivated");
       case "RemoveStudentEnrollment" -> changeEnrollment(e, now, "REMOVED", "StudentRemovedFromCourseSection");
-       case "StartStudentImport" -> startStudentImport(e, now);
-       case "ApplyStudentImport" -> applyStudentImport(e, now);
-       case "ResumeStudentImport" -> resumeStudentImport(e, now);
+      case "StartStudentImport" -> startStudentImport(e, now);
+      case "ResumeStudentImport" -> resumeStudentImport(e, now);
       default -> throw new AcademicRejectedException("INVALID_MESSAGE");
     };
   }
@@ -390,96 +389,100 @@ public class AcademicCommandDispatcher {
     return new Change(importId, 1, events);
   }
 
-  private Change applyStudentImport(MessageEnvelope e, Instant now) {
-    requireActorField(e.payload(), "requestedByAccountId", e);
-    UUID importId = uuid(e.payload(), "importId", null);
-    ApplicationProcess process = applicationProcess(importId);
-    if (process == null || !"VALIDATED".equals(process.status)) {
-      throw new AcademicRejectedException("IMPORT_NOT_READY_FOR_APPLICATION");
-    }
-    int changed = jdbc.sql("""
-        UPDATE student_import_processes
-        SET status='APPLYING', process_version=process_version+1,
-            execution_generation=execution_generation+1, application_started_at=:now, updated_at=:now
-        WHERE import_id=:id AND status='VALIDATED' AND process_version=:expected
-        """).param("id", importId).param("expected", process.version)
-        .param("now", java.sql.Timestamp.from(now)).update();
-    if (changed != 1) throw new AcademicRejectedException("IMPORT_NOT_READY_FOR_APPLICATION");
-
-    int periodChanged = jdbc.sql("""
-        UPDATE academic_periods SET academic_data_status='IMPORTING',version=version+1,updated_at=:now
-        WHERE academic_period_id=:id AND version=:expected
-        """).param("id", process.periodId).param("expected", process.periodVersion)
-        .param("now", java.sql.Timestamp.from(now)).update();
-    if (periodChanged != 1) throw new AcademicRejectedException("VERSION_CONFLICT");
-
-    jdbc.sql("""
-        UPDATE student_import_plan_items
-        SET execution_generation=(SELECT execution_generation FROM student_import_processes WHERE import_id=:id),
-            expected_versions=CASE WHEN item_type='FINALIZE_STUDENT_IMPORT'
-              THEN jsonb_set(expected_versions,'{academicPeriodVersion}',to_jsonb(:periodVersion + 1))
-              ELSE expected_versions END,
-            updated_at=:now
-        WHERE import_id=:id
-        """).param("id", importId).param("periodVersion", process.periodVersion)
-        .param("now", java.sql.Timestamp.from(now)).update();
-    return new Change(importId, processVersion(importId), events(new Event("StudentImportApplicationStarted", importId, processVersion(importId),
-        map("importId", importId, "startedByAccountId", e.actor().accountId(), "startedAt", now))));
-  }
-
   private Change resumeStudentImport(MessageEnvelope e, Instant now) {
     requireActorField(e.payload(), "requestedByAccountId", e);
     UUID importId = uuid(e.payload(), "importId", null);
-    boolean timeout = jdbc.sql("SELECT EXISTS (SELECT 1 FROM student_import_processes WHERE import_id=:id AND failure_code='RESULT_TIMEOUT')")
-        .param("id", importId).query(Boolean.class).single();
-    if (timeout) throw new AcademicRejectedException("RECONCILIATION_REQUIRED");
-    boolean ambiguousRemoteFailure = jdbc.sql("""
+    if (importId == null) throw new AcademicRejectedException("INVALID_MESSAGE");
+
+    ResumeProcess process = jdbc.sql("""
+        SELECT academic_period_id,process_version,execution_generation,status::text
+        FROM student_import_processes WHERE import_id=:id FOR UPDATE
+        """).param("id", importId)
+        .query((rs, n) -> new ResumeProcess(
+            rs.getObject(1, UUID.class), rs.getInt(2), rs.getInt(3), rs.getString(4)))
+        .optional().orElse(null);
+    if (process == null) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
+    if ("COMPLETED".equals(process.status)) throw new AcademicRejectedException("IMPORT_ALREADY_COMPLETED");
+    if (!"APPLICATION_FAILED".equals(process.status)) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
+
+    boolean ambiguous = jdbc.sql("""
         SELECT EXISTS (
           SELECT 1 FROM student_import_plan_items
           WHERE import_id=:id AND status='FAILED'
-            AND received_result IS NOT NULL
-            AND received_result->>'status' <> 'REJECTED'
+            AND (last_error_code='RESULT_TIMEOUT' OR last_result_status IN ('FAILED','EXPIRED'))
         )
         """).param("id", importId).query(Boolean.class).single();
-    if (ambiguousRemoteFailure) throw new AcademicRejectedException("RECONCILIATION_REQUIRED");
-    int changed = jdbc.sql("""
-        UPDATE student_import_processes SET status='APPLYING',process_version=process_version+1,
-          last_resumed_by_account_id=:actor,last_resumed_at=:now,
-          failure_code=NULL,failure_reason=NULL,failed_step=NULL,recoverable=NULL,updated_at=:now
-        WHERE import_id=:id AND status='APPLICATION_FAILED'
-        """).param("id", importId).param("actor", e.actor().accountId()).param("now", java.sql.Timestamp.from(now)).update();
-    if (changed != 1) throw new AcademicRejectedException("IMPORT_NOT_RESUMABLE");
-    // A terminal rejection confirms the prior intent was not applied, so it gets a
-    // fresh generation. Local failures retain their generation; ambiguous Results are blocked above.
+    if (ambiguous) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
+
+    int failedItems = jdbc.sql("""
+        SELECT count(*) FROM student_import_plan_items WHERE import_id=:id AND status='FAILED'
+        """).param("id", importId).query(Integer.class).single();
+    if (failedItems == 0) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
+
+    int generation = process.executionGeneration + 1;
+    int resumedVersion = process.processVersion + 1;
+    int progressVersion = process.processVersion + 2;
+    expectedUpdate(jdbc.sql("""
+        UPDATE student_import_processes
+        SET status='APPLYING',process_version=:version,execution_generation=:generation,
+            last_resumed_by_account_id=:actor,last_resumed_at=:now,
+            failure_code=NULL,failure_reason=NULL,failed_step=NULL,recoverable=NULL,
+            last_progress_at=:now,updated_at=:now
+        WHERE import_id=:id AND status='APPLICATION_FAILED' AND process_version=:expected
+        """).param("version", progressVersion).param("generation", generation)
+        .param("actor", e.actor().accountId()).param("now", java.sql.Timestamp.from(now))
+        .param("id", importId).param("expected", process.processVersion).update());
+
     jdbc.sql("""
         UPDATE student_import_plan_items
-        SET status='PENDING',
-            execution_generation=CASE WHEN received_result->>'status'='REJECTED'
-              THEN execution_generation+1 ELSE execution_generation END,
-            current_command_message_id=CASE WHEN received_result->>'status'='REJECTED'
-              THEN NULL ELSE current_command_message_id END,
-            current_idempotency_key=CASE WHEN received_result->>'status'='REJECTED'
-              THEN NULL ELSE current_idempotency_key END,
-            next_attempt_at=:now,updated_at=:now
+        SET status='PENDING',execution_generation=:generation,
+            current_command_message_id=NULL,current_operation_id=NULL,current_idempotency_key=NULL,
+            last_result_message_id=NULL,last_result_status=NULL,received_result=NULL,
+            attempts=0,first_published_at=NULL,next_attempt_at=:now,
+            last_error_code=NULL,last_error_at=NULL,updated_at=:now
         WHERE import_id=:id AND status='FAILED'
-          AND (received_result IS NULL OR received_result->>'status'='REJECTED')
-        """)
-        .param("id", importId).param("now", java.sql.Timestamp.from(now)).update();
-    return new Change(importId, processVersion(importId), events(new Event("StudentImportResumed", importId, processVersion(importId),
-        map("importId", importId, "resumedByAccountId", e.actor().accountId(), "resumedAt", now))));
-  }
+          AND (last_result_status IS NULL OR last_result_status='REJECTED')
+        """).param("generation", generation).param("now", java.sql.Timestamp.from(now))
+        .param("id", importId).update();
 
-  private int processVersion(UUID importId) {
-    return jdbc.sql("SELECT process_version FROM student_import_processes WHERE import_id=:id").param("id", importId).query(Integer.class).single();
-  }
+    jdbc.sql("""
+        INSERT INTO student_import_resume_audit (
+          audit_id,import_id,operation_id,correlation_id,requested_by_account_id,
+          previous_status,execution_generation,result,resumed_at)
+        VALUES (:audit,:import,:operation,:correlation,:actor,
+          'APPLICATION_FAILED',:generation,'ACCEPTED',:now)
+        """).param("audit", UUID.randomUUID()).param("import", importId)
+        .param("operation", e.operationId()).param("correlation", e.correlationId())
+        .param("actor", e.actor().accountId()).param("generation", generation)
+        .param("now", java.sql.Timestamp.from(now)).update();
 
-  private ApplicationProcess applicationProcess(UUID importId) {
-    return jdbc.sql("""
-        SELECT academic_period_id,academic_period_version,status::text,process_version
-        FROM student_import_processes WHERE import_id=:id
-        """).param("id", importId)
-        .query((rs, n) -> new ApplicationProcess(rs.getObject(1, UUID.class), rs.getInt(2), rs.getString(3), rs.getInt(4)))
-        .optional().orElse(null);
+    int total = jdbc.sql("""
+        SELECT count(*) FROM student_import_plan_items
+        WHERE import_id=:id AND item_type<>'FINALIZE_STUDENT_IMPORT'
+        """).param("id", importId).query(Integer.class).single();
+    int completed = jdbc.sql("""
+        SELECT count(*) FROM student_import_plan_items
+        WHERE import_id=:id AND item_type<>'FINALIZE_STUDENT_IMPORT' AND status='COMPLETED'
+        """).param("id", importId).query(Integer.class).single();
+    int stillFailed = jdbc.sql("""
+        SELECT count(*) FROM student_import_plan_items
+        WHERE import_id=:id AND item_type<>'FINALIZE_STUDENT_IMPORT' AND status='FAILED'
+        """).param("id", importId).query(Integer.class).single();
+
+    Map<String, Object> systemActor = map("type", "SYSTEM", "service", "academic");
+    outbox.append(UUID.randomUUID(), "StudentImportApplicationResumed", "EVENT", importId, resumedVersion,
+        importId, e.messageId(), codec.json(map(
+            "importId", importId, "academicPeriodId", process.periodId,
+            "resumedByAccountId", e.actor().accountId(), "previousStatus", "APPLICATION_FAILED",
+            "status", "APPLYING", "executionGeneration", generation, "resumedAt", now)),
+        codec.json(map("actor", systemActor)), now);
+    outbox.append(UUID.randomUUID(), "StudentImportProgressUpdated", "EVENT", importId, progressVersion,
+        importId, e.messageId(), codec.json(map(
+            "importId", importId, "academicPeriodId", process.periodId, "phase", "APPLYING",
+            "completedItems", completed, "totalItems", total, "failedItems", stillFailed, "updatedAt", now)),
+        codec.json(map("actor", systemActor)), now);
+
+    return new Change(importId, progressVersion, events());
   }
 
   private Change registerSection(MessageEnvelope e, Instant now) {
@@ -687,8 +690,7 @@ public class AcademicCommandDispatcher {
     return jdbc.sql("""
         SELECT person_id,account_id,student_number,current_semester,academic_status::text,version,student_number_version
         FROM student_academic_profiles WHERE student_academic_profile_id=:id
-        """)
-        .param("id", id)
+        """).param("id", id)
         .query((rs, n) -> new Profile(id, rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
             rs.getString(3), rs.getInt(4), rs.getString(5), rs.getInt(6), rs.getInt(7)))
         .optional().orElseThrow(() -> new AcademicRejectedException("STUDENT_PROFILE_NOT_FOUND"));
@@ -706,8 +708,7 @@ public class AcademicCommandDispatcher {
     return jdbc.sql("""
         SELECT enrollment_id,status::text,version FROM student_course_sections
         WHERE student_academic_profile_id=:student AND course_section_id=:course FOR UPDATE
-        """)
-        .param("student", student).param("course", course)
+        """).param("student", student).param("course", course)
         .query((rs, n) -> new Enrollment(rs.getObject(1, UUID.class), rs.getString(2), rs.getInt(3)))
         .optional().orElseThrow(() -> new AcademicRejectedException("ENROLLMENT_NOT_FOUND"));
   }
@@ -781,7 +782,8 @@ public class AcademicCommandDispatcher {
   private void validateEnvelope(MessageEnvelope e) {
     if (e == null || e.messageId() == null || e.messageType() == null
         || !SUPPORTED_BFF_COMMANDS.contains(e.messageType()) || e.occurredAt() == null
-        || e.correlationId() == null || e.idempotencyKey() == null || e.idempotencyKey().isBlank()
+        || e.correlationId() == null || e.operationId() == null
+        || e.idempotencyKey() == null || e.idempotencyKey().isBlank()
         || e.payload() == null || !e.payload().isObject() || !"COMMAND".equals(e.messageKind())
         || e.messageVersion() != 1 || !"bff".equals(e.producer()) || e.actor() == null
         || !"ACCOUNT".equals(e.actor().type()) || e.actor().accountId() == null || e.actor().service() != null) {
@@ -890,5 +892,5 @@ public class AcademicCommandDispatcher {
   private record AccountProjection(UUID personId, String loginType, String status) {}
   private record Eligibility(UUID id, boolean eligible, int policyVersion, int version) {}
   private record ImportProcess(String fileReference, String fileChecksum, String status, int version) {}
-  private record ApplicationProcess(UUID periodId, int periodVersion, String status, int version) {}
+  private record ResumeProcess(UUID periodId, int processVersion, int executionGeneration, String status) {}
 }
