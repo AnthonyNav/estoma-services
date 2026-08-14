@@ -151,6 +151,26 @@ class AcademicPeriodReadinessIT {
   }
 
   @Test
+  void retryAfterImportFailedFreezesTheRecoveredPeriodVersion() {
+    jdbc.sql("UPDATE academic_periods SET academic_data_status='IMPORT_FAILED',version=4 WHERE academic_period_id=:id")
+        .param("id", period).update();
+    UUID importId = UUID.randomUUID();
+
+    assertThat(dispatcher.dispatch(command("StartStudentImport", mapper.createObjectNode()
+        .put("importId", importId.toString())
+        .put("fileReference", importId.toString())
+        .put("fileChecksum", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        .put("requestedByAccountId", admin.toString()))).status()).isEqualTo("SUCCEEDED");
+
+    assertThat(jdbc.sql("SELECT version FROM academic_periods WHERE academic_period_id=:id")
+        .param("id", period).query(Integer.class).single()).isEqualTo(5);
+    assertThat(jdbc.sql("SELECT academic_period_version FROM student_import_processes WHERE import_id=:id")
+        .param("id", importId).query(Integer.class).single()).isEqualTo(5);
+    assertThat(jdbc.sql("SELECT academic_data_status::text FROM academic_periods WHERE academic_period_id=:id")
+        .param("id", period).query(String.class).single()).isEqualTo("PENDING_IMPORT");
+  }
+
+  @Test
   void startImportIsIdempotentOnlyForTheSameFrozenFile() {
     UUID importId = UUID.randomUUID();
     var payload = mapper.createObjectNode()
