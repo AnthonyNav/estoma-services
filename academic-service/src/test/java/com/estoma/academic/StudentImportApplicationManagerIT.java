@@ -166,6 +166,44 @@ class StudentImportApplicationManagerIT {
   }
 
   @Test
+  void inactiveProfileActivatesBeforeItsSemesterChange() {
+    UUID importId = process("APPLYING", 1, 1);
+    UUID profileId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO student_academic_profiles (
+          student_academic_profile_id,person_id,account_id,student_number,student_number_normalized,
+          current_semester,academic_status,version,student_number_version,created_at,updated_at)
+        VALUES (:id,:person,:account,'ST-INACTIVE','ST-INACTIVE',5,'INACTIVE',4,0,now(),now())
+        """).param("id", profileId).param("person", UUID.randomUUID()).param("account", accountId).update();
+
+    UUID activate = item(importId, "ACTIVATE_STUDENT_PROFILE",
+        Map.of("studentAcademicProfileId", profileId),
+        Map.of("studentAcademicProfileVersion", 4));
+    UUID semester = item(importId, "CHANGE_STUDENT_SEMESTER",
+        Map.of("studentAcademicProfileId", profileId, "currentSemester", 6),
+        Map.of("studentAcademicProfileVersion", 5));
+
+    manager.schedule();
+    assertThat(value("SELECT academic_status::text FROM student_academic_profiles WHERE student_academic_profile_id=:id", profileId))
+        .isEqualTo("ACTIVE");
+    assertThat(integer("SELECT current_semester FROM student_academic_profiles WHERE student_academic_profile_id=:id", profileId))
+        .isEqualTo(5);
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE plan_item_id='" + activate + "' AND import_id=:id", importId))
+        .isEqualTo("COMPLETED");
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE plan_item_id='" + semester + "' AND import_id=:id", importId))
+        .isEqualTo("PENDING");
+
+    manager.schedule();
+    assertThat(integer("SELECT current_semester FROM student_academic_profiles WHERE student_academic_profile_id=:id", profileId))
+        .isEqualTo(6);
+    assertThat(integer("SELECT version FROM student_academic_profiles WHERE student_academic_profile_id=:id", profileId))
+        .isEqualTo(6);
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE plan_item_id='" + semester + "' AND import_id=:id", importId))
+        .isEqualTo("COMPLETED");
+  }
+
+  @Test
   void remoteChainCarriesCausalityAndRetriesTheSameOperationAndIdempotencyKey() {
     UUID importId = process("APPLYING", 1, 1);
     UUID personId = UUID.randomUUID();
@@ -208,6 +246,13 @@ class StudentImportApplicationManagerIT {
     assertThat(accountKey2).isEqualTo(accountKey1);
     assertThat(integer("SELECT execution_generation FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + accountItem + "'", importId))
         .isEqualTo(1);
+
+    MessageEnvelope lateFirstRetryResult = result(
+        "CreateAccountResult", "authentication", importId, accountItem,
+        accountMessage1, accountOperation1, 1, "SUCCEEDED", null);
+    assertThat(manager.applyResult(lateFirstRetryResult)).isTrue();
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + accountItem + "'", importId))
+        .isEqualTo("COMPLETED");
   }
 
   @Test
