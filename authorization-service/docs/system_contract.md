@@ -4,13 +4,15 @@
 
 Contrato de implementación para `authorization-service`.
 
-Este documento prepara la implementación futura del servicio, pero **este PR no implementa comportamiento de negocio**. Los cambios de código deberán realizarse después, siguiendo `execution_plan.md` y respetando la división de tres PRs allí definida.
+PR1 materializa la foundation de dominio, persistencia y operación descrita en
+este documento. El comportamiento completo de Application se implementará en
+PR2 y los adapters/contratos wire en PR3, siguiendo `execution_plan.md`.
 
 Si este archivo entra en conflicto con la documentación canónica de plataforma, la documentación de plataforma prevalece y el conflicto debe resolverse antes de implementar el comportamiento afectado.
 
 ## Fuente De Verdad
 
-Fuente canónica: `AnthonyNav/estomatologia-platform-docs`, `main` observado en `29b5c85d18d726844312d1a8893f851b97b80b88`.
+Fuente canónica: `AnthonyNav/estomatologia-platform-docs`, `main` observado en `ba9c03e2d7bccfc48211bdc4279f3c23bd03f6db`.
 
 Documentos principales:
 
@@ -38,30 +40,21 @@ Para Events/Queries consumidos y coordinación académica también deben respeta
 
 Antes de iniciar cada PR de implementación, el agente debe comprobar si estos contratos cambiaron. No debe implementar reglas basándose únicamente en este archivo si la fuente canónica ya evolucionó.
 
-## Estado Actual Del Scaffold
+## Estado De La Implementación PR1
 
-Estado observado en `estoma-services/develop` en `ccc63e144acf8f8b59e79b19bbac9bd4979e48e2`:
+Estado observado en `estoma-services` en la rama PR1:
 
-- Spring Boot `4.1.0`;
-- Java `25`;
-- Maven Wrapper;
-- Actuator, WebMVC y Prometheus;
-- `SystemController` temporal con `/health` y `/version`;
-- `application.yml` con probes Actuator básicos;
-- sin PostgreSQL;
-- sin Flyway;
-- sin Spring JDBC;
-- sin RabbitMQ;
-- sin dominio implementado;
-- sin persistencia funcional;
-- sin Consumer Inbox;
-- sin idempotencia funcional;
-- sin Transactional Outbox;
-- sin proyecciones externas;
-- sin recovery de proyecciones;
-- sin contratos wire ejecutables.
+- Spring Boot `4.1.0` y Java `25`;
+- Actuator, WebMVC, Prometheus, Spring JDBC, Flyway, PostgreSQL y Security;
+- `SystemController` temporal eliminado;
+- `/actuator/health`, liveness, readiness y Prometheus como única superficie HTTP operativa;
+- dominio puro con modelos de rol y `SystemAccess`;
+- PostgreSQL V1 con catálogos, seed determinista, asignaciones, proyecciones y tablas técnicas;
+- adapters `JdbcClient`, locking optimista y `TransactionRunner` broker-agnostic;
+- ArchUnit y Testcontainers PostgreSQL como gates;
+- sin RabbitMQ, handlers completos, recovery orchestration ni contratos wire ejecutables: quedan para PR2/PR3.
 
-La implementación futura puede eliminar `SystemController` y sus tests cuando Actuator cubra esa responsabilidad. No debe conservarse un controller HTTP de negocio por compatibilidad con el scaffold.
+No debe conservarse un controller HTTP de negocio ni el `SystemController` temporal.
 
 ## Baseline Tecnológica
 

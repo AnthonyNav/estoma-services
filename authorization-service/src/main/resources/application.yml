@@ -1,21 +1,66 @@
 spring:
   application:
     name: authorization-service
+
+  datasource:
+    url: ${AUTHORIZATION_DB_URL:jdbc:postgresql://localhost:5432/authorization_db}
+    username: ${AUTHORIZATION_DB_RUNTIME_USER:authorization_service}
+    password: ${AUTHORIZATION_DB_RUNTIME_PASSWORD:authorization_service}
+    hikari:
+      connection-timeout: 10000
+      validation-timeout: 5000
+      data-source-properties:
+        socketTimeout: 10
+        connectTimeout: 10
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+    baseline-on-migrate: false
+    url: ${AUTHORIZATION_DB_URL:jdbc:postgresql://localhost:5432/authorization_db}
+    user: ${AUTHORIZATION_DB_MIGRATION_USER:authorization_service}
+    password: ${AUTHORIZATION_DB_MIGRATION_PASSWORD:authorization_service}
+    placeholders:
+      runtime_role: ${AUTHORIZATION_DB_RUNTIME_USER:authorization_service}
+
 server:
   port: 8080
+
+logging:
+  structured:
+    format:
+      console: ecs
+
 management:
+  endpoints:
+    access:
+      default: none
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,prometheus
   endpoint:
     health:
+      access: read-only
       probes:
         enabled: true
       show-details: never
-  endpoints:
-    web:
-      exposure:
-        include: health,info,prometheus
+      show-components: never
+      group:
+        readiness:
+          include: db,schemaVersion
+        liveness:
+          include: livenessState
+    prometheus:
+      access: read-only
   info:
     env:
       enabled: true
+  health:
+    db:
+      query: SELECT 1 FROM systems LIMIT 1
 info:
   app:
     name: authorization-service
