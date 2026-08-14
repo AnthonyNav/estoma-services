@@ -12,4 +12,6 @@ public interface RoleCatalogRepository {
   Optional<RoleCatalog> findByCode(String code);
 
   List<RoleCatalog> findAll();
+
+  boolean isAllowedInSystem(UUID roleId, UUID systemId);
 }
