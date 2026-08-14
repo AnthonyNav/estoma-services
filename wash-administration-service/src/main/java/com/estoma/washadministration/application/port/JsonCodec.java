@@ -1,16 +1,16 @@
 package com.estoma.washadministration.application.port;
 
-import tools.jackson.databind.JsonNode;
-
-/** JSON operations needed by application services without coupling them to Jackson. */
+/**
+ * Structured-data serialization needed by durable persistence.
+ *
+ * <p>The Application contract is framework-neutral; Jackson types never cross this port.
+ */
 public interface JsonCodec {
-
-  JsonNode tree(Object value);
 
   String write(Object value);
 
-  JsonNode parse(String value);
+  Object parse(String value);
 
   /** Returns a stable representation suitable for a functional request fingerprint. */
-  String canonical(JsonNode value);
+  String canonical(Object value);
 }

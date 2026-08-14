@@ -1,10 +1,13 @@
 package com.estoma.washadministration.application.command;
 
 import java.util.Objects;
-import tools.jackson.databind.JsonNode;
 
-/** Internal command request. Concrete payloads remain application models, not wire DTOs. */
-public record CommandRequest(CommandMetadata metadata, JsonNode payload) {
+/**
+ * Internal command request.
+ *
+ * <p>The payload is a typed Application model. JSON/AMQP DTO mapping belongs to PR3.
+ */
+public record CommandRequest(CommandMetadata metadata, AdministrativeCommand payload) {
 
   public CommandRequest {
     Objects.requireNonNull(metadata, "metadata");

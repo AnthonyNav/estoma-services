@@ -34,11 +34,23 @@ class ArchitectureTest {
           .resideInAnyPackage("com.estoma.washadministration.infrastructure..");
 
   @ArchTest
+  static final ArchRule application_does_not_depend_on_json_framework_types =
+      noClasses()
+          .that()
+          .resideInAnyPackage("com.estoma.washadministration.application..")
+          .should()
+          .dependOnClassesThat()
+          .resideInAnyPackage("tools.jackson..", "com.fasterxml.jackson..")
+          .because("wire/JSON mapping belongs to infrastructure/contracts in PR3");
+
+  @ArchTest
   static final ArchRule contracts_do_not_depend_on_business_implementation =
       noClasses()
           .that()
           .resideInAnyPackage("com.estoma.washadministration.contracts..")
           .should()
           .dependOnClassesThat()
-          .resideInAnyPackage("com.estoma.washadministration.domain..", "com.estoma.washadministration.application..");
+          .resideInAnyPackage(
+              "com.estoma.washadministration.domain..",
+              "com.estoma.washadministration.application..");
 }

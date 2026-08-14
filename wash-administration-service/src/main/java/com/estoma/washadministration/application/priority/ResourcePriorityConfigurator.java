@@ -1,5 +1,6 @@
 package com.estoma.washadministration.application.priority;
 
+import com.estoma.washadministration.application.command.ActorContext;
 import com.estoma.washadministration.application.port.JsonCodec;
 import com.estoma.washadministration.application.port.OutboxRepository;
 import com.estoma.washadministration.application.port.OutboxRepository.OutboxMessage;
@@ -20,6 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class ResourcePriorityConfigurator {
 
+  private static final String PRODUCER = "wash-administration";
+
   private final ResourcePriorityRepository priorities;
   private final OutboxRepository outbox;
   private final JsonCodec json;
@@ -37,27 +40,36 @@ public class ResourcePriorityConfigurator {
   public int configureAll(Instant now) {
     int created = 0;
     for (MatrixRow row : MatrixRow.values()) {
-      ResourcePriority priority = ResourcePriority.createNew(
-          UUID.randomUUID(), row.appointmentType, row.cabinType, row.usageMode, row.order, now);
-      if (!priorities.insertIfAbsent(priority)) continue;
+      ResourcePriority priority =
+          ResourcePriority.createNew(
+              UUID.randomUUID(),
+              row.appointmentType,
+              row.cabinType,
+              row.usageMode,
+              row.order,
+              now);
+      if (!priorities.insertIfAbsent(priority)) {
+        continue;
+      }
       created++;
-      outbox.append(new OutboxMessage(
-          UUID.randomUUID(),
-          "ResourcePriorityConfigured",
-          1,
-          "EVENT",
-          "wash-administration",
-          "wash-administration.resource-priority.configured",
-          now,
-          null,
-          null,
-          priority.id(),
-          priority.version(),
-          UUID.randomUUID(),
-          null,
-          "{\"type\":\"SYSTEM\",\"service\":\"wash-administration\"}",
-          json.write(payload(priority, now)),
-          null));
+      outbox.append(
+          new OutboxMessage(
+              UUID.randomUUID(),
+              "ResourcePriorityConfigured",
+              1,
+              "EVENT",
+              PRODUCER,
+              "ResourcePriorityConfigured",
+              now,
+              null,
+              null,
+              priority.id(),
+              priority.version(),
+              UUID.randomUUID(),
+              null,
+              json.write(ActorContext.system(PRODUCER)),
+              json.write(payload(priority, now)),
+              null));
     }
     return created;
   }
@@ -84,14 +96,22 @@ public class ResourcePriorityConfigurator {
     NORMAL_JOURNEY(AppointmentType.NORMAL, CabinType.JOURNEY, UsageMode.ALTERNATIVE, 2),
     JOURNEY_JOURNEY(AppointmentType.JOURNEY, CabinType.JOURNEY, UsageMode.PREFERRED, 1),
     JOURNEY_NORMAL(AppointmentType.JOURNEY, CabinType.NORMAL, UsageMode.ALTERNATIVE, 2),
-    IMMUNOCOMPROMISED(AppointmentType.IMMUNOCOMPROMISED, CabinType.IMMUNOCOMPROMISED, UsageMode.EXCLUSIVE, 1);
+    IMMUNOCOMPROMISED(
+        AppointmentType.IMMUNOCOMPROMISED,
+        CabinType.IMMUNOCOMPROMISED,
+        UsageMode.EXCLUSIVE,
+        1);
 
     private final AppointmentType appointmentType;
     private final CabinType cabinType;
     private final UsageMode usageMode;
     private final int order;
 
-    MatrixRow(AppointmentType appointmentType, CabinType cabinType, UsageMode usageMode, int order) {
+    MatrixRow(
+        AppointmentType appointmentType,
+        CabinType cabinType,
+        UsageMode usageMode,
+        int order) {
       this.appointmentType = appointmentType;
       this.cabinType = cabinType;
       this.usageMode = usageMode;
