@@ -124,12 +124,12 @@ class AcademicMessagingIT {
   }
 
   @Test
-  void relayPublishesPersonResolutionQueriesToUsersService() {
-    Queue queue = new Queue("queries.users-service.messaging-it", false, true, true);
+  void relayPublishesPersonResolutionQueriesToUsers() {
+    Queue queue = new Queue("queries.users.messaging-it", false, true, true);
     admin.declareQueue(queue);
     admin.declareBinding(BindingBuilder.bind(queue)
         .to(new DirectExchange(AcademicTopology.QUERIES))
-        .with("users-service"));
+        .with("users"));
     UUID messageId = UUID.randomUUID();
     UUID operationId = UUID.randomUUID();
     UUID importId = UUID.randomUUID();
@@ -140,7 +140,9 @@ class AcademicMessagingIT {
 
     relay.relay();
 
-    MessageEnvelope query = codec.decode(rabbit.receive(queue.getName(), 5_000).getBody());
+    Message queryMessage = rabbit.receive(queue.getName(), 5_000);
+    assertThat(queryMessage).isNotNull();
+    MessageEnvelope query = codec.decode(queryMessage.getBody());
     assertThat(query.messageKind()).isEqualTo("QUERY");
     assertThat(query.messageType()).isEqualTo("ResolvePersonByInstitutionalEmail");
     assertThat(query.operationId()).isEqualTo(operationId);
@@ -156,7 +158,7 @@ class AcademicMessagingIT {
     var resultData = mapper.createObjectNode().put("outcome", "NOT_FOUND");
     var resultPayload = mapper.createObjectNode().put("status", "SUCCEEDED");
     resultPayload.set("data", resultData);
-    MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users-service",
+    MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users",
         Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null, new Actor("SYSTEM", null, "academic"),
         resultPayload);
     Message message = new Message(codec.encode(result));
@@ -177,13 +179,15 @@ class AcademicMessagingIT {
     var data = mapper.createObjectNode().put("outcome", "INACTIVE_MATCH").put("personId", UUID.randomUUID().toString()).put("status", "INACTIVE");
     var payload = mapper.createObjectNode().put("status", "SUCCEEDED");
     payload.set("data", data);
-    MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users-service",
+    MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users",
         Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null, new Actor("SYSTEM", null, "academic"), payload);
     rabbit.send(AcademicTopology.RESULTS, "academic", new Message(codec.encode(result)));
 
     await().atMost(Duration.ofSeconds(10)).until(() -> "REJECTED".equals(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id")
         .param("id", pending.importId).query(String.class).single()));
     assertThat(value("SELECT failure_code FROM student_import_processes WHERE import_id=:id", pending.importId)).isEqualTo("IDENTITY_CONFLICT");
+    assertThat(jdbc.sql("SELECT academic_data_status::text FROM academic_periods WHERE academic_period_id=(SELECT academic_period_id FROM student_import_processes WHERE import_id=:id)")
+        .param("id", pending.importId).query(String.class).single()).isEqualTo("IMPORT_FAILED");
   }
 
   @Test
