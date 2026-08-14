@@ -1149,7 +1149,9 @@ La implementación no debe:
 
 ## Gate De Contratos Para PR3
 
-Existe actualmente una inconsistencia documental que **no debe resolverse dentro del código**:
+PR3 está bloqueado por las decisiones de contrato registradas en `docs/pr3_contract_decisions.md`. Deben resolverse en `estomatologia-platform-docs`; este repositorio no debe inventar reglas wire ni topologías de compatibilidad.
+
+Existe además una inconsistencia documental de naming que **no debe resolverse dentro del código**:
 
 El contrato específico del servicio documenta:
 
@@ -1173,7 +1175,7 @@ commands.wash-administration
 queries.wash-administration
 ```
 
-Antes de PR3 debe corregirse la fuente canónica para que exista una sola convención. PR3 no puede introducir aliases permanentes ni cablear ambos nombres para ocultar la contradicción.
+Antes de PR3 debe corregirse la fuente canónica y completarse la checklist de decisiones para que exista una sola convención. PR3 no puede introducir aliases permanentes ni cablear ambos nombres para ocultar la contradicción.
 
 Hasta ese gate, PR1 y PR2 permanecen broker-agnostic y no dependen del nombre físico de cola.
 

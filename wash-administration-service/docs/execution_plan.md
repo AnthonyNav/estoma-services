@@ -23,6 +23,7 @@ Este PR que agrega `docs/system_contract.md` y `docs/execution_plan.md` es prepa
 - No mezclar cambios funcionales de Appointments o Wash Execution.
 - No modificar reglas canónicas de negocio desde el repositorio de implementación.
 - Si el código descubre una contradicción contractual, corregir primero `estomatologia-platform-docs` y reanudar después el comportamiento afectado.
+- PR3 está bloqueado hasta resolver las decisiones de contrato registradas en `docs/pr3_contract_decisions.md`.
 
 Nombres sugeridos:
 
@@ -548,7 +549,7 @@ No debe reescribir reglas de dominio.
 
 ## Gate Obligatorio Antes De Empezar
 
-Resolver en `estomatologia-platform-docs` la contradicción actual entre:
+Resolver en `estomatologia-platform-docs` las decisiones pendientes en `docs/pr3_contract_decisions.md`, incluida la contradicción actual entre:
 
 ```text
 commands.wash-administration-service
@@ -565,7 +566,7 @@ queries.wash-administration
 
 No implementar aliases permanentes ni ambas topologías.
 
-Una vez corregida la fuente canónica, PR3 usa exclusivamente el nombre aprobado.
+Una vez corregida la fuente canónica y actualizada la checklist, PR3 usa exclusivamente los contratos aprobados.
 
 ## Scope
 
@@ -838,7 +839,7 @@ Si se requiere un cambio mínimo en un módulo compartido de contratos para comp
 
 ## Acceptance Criteria PR3
 
-- gate de naming resuelto en docs canónicas;
+- decisiones de `docs/pr3_contract_decisions.md` resueltas en docs canónicas;
 - `./mvnw clean verify` pasa;
 - RabbitMQ Testcontainers cubre Commands, Queries, Results y Events;
 - listener no contiene lógica de dominio;
