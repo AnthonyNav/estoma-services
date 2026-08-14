@@ -361,12 +361,14 @@ public class AcademicCommandDispatcher {
       throw new AcademicRejectedException("WARNING_NOT_ACKNOWLEDGED");
     }
     String previousDataStatus = period.dataStatus;
+    int frozenPeriodVersion = period.version;
     if ("IMPORT_FAILED".equals(previousDataStatus)) {
       expectedUpdate(jdbc.sql("""
           UPDATE academic_periods SET academic_data_status='PENDING_IMPORT',version=version+1,updated_at=:now
           WHERE academic_period_id=:id AND version=:expected
           """)
           .param("id", period.id).param("expected", period.version).param("now", java.sql.Timestamp.from(now)).update());
+      frozenPeriodVersion = period.version + 1;
     }
     jdbc.sql("""
         INSERT INTO student_import_processes (
@@ -375,14 +377,14 @@ public class AcademicCommandDispatcher {
           started_at,created_at,updated_at)
         VALUES (:id,:period,:code,:periodVersion,'FULL',:reference,:checksum,'VALIDATING',:actor,:actor,1,0,:now,:now,:now)
         """)
-        .param("id", importId).param("period", period.id).param("code", period.code).param("periodVersion", period.version)
+        .param("id", importId).param("period", period.id).param("code", period.code).param("periodVersion", frozenPeriodVersion)
         .param("reference", fileReference).param("checksum", fileChecksum).param("actor", e.actor().accountId())
         .param("now", java.sql.Timestamp.from(now)).update();
     var events = events(new Event("StudentImportStarted", importId, 1,
         map("importId", importId, "academicPeriodId", period.id, "importMode", "FULL",
             "startedByAccountId", e.actor().accountId(), "authorizedByAccountId", e.actor().accountId(), "startedAt", now)));
     if ("IMPORT_FAILED".equals(previousDataStatus)) {
-      events.add(new Event("AcademicPeriodDataStatusChanged", period.id, period.version + 1,
+      events.add(new Event("AcademicPeriodDataStatusChanged", period.id, frozenPeriodVersion,
           map("academicPeriodId", period.id, "previousAcademicDataStatus", previousDataStatus,
               "academicDataStatus", "PENDING_IMPORT", "reason", "IMPORT_RETRY_ACCEPTED", "changedAt", now)));
     }
