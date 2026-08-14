@@ -59,12 +59,13 @@ public class StudentImportPersonResolutionResults {
         .query((rs, n) -> new Work(rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, UUID.class), rs.getString(4)))
         .optional().orElse(null);
     if (work == null || !work.importId.equals(envelope.correlationId()) || !work.operationId.equals(envelope.operationId())) {
-      return true; // A late result is durably observed but cannot alter another import's work.
+      return true;
     }
     PersonResolution resolution = resolution(work.email, envelope.payload().path("data"));
     if (!"WAITING_RESULT".equals(work.status)) return true;
     Map<String, Object> result = new java.util.LinkedHashMap<>();
     result.put("outcome", resolution.outcome().name());
+    result.put("sourceResultMessageId", envelope.messageId());
     if (resolution.personId() != null) result.put("personId", resolution.personId());
     if (resolution.status() != null) result.put("status", resolution.status());
     int changed = jdbc.sql("""
@@ -135,8 +136,6 @@ public class StudentImportPersonResolutionResults {
   }
 
   private enum Outcome { FOUND, NOT_FOUND, INACTIVE_MATCH }
-
   private record PersonResolution(String institutionalEmail, Outcome outcome, UUID personId, String status) {}
-
   private record Work(UUID importId, String email, UUID operationId, String status) {}
 }
