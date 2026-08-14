@@ -22,4 +22,6 @@ Spring Boot service that manages student academic information.
 - `GET /health`, `/health/liveness`, `/health/readiness`, `/health/startup`
 - `GET /metrics` and `GET /info`
 
-Business operations are durable RabbitMQ commands on `commands.academic`. The service owns a PostgreSQL/Flyway schema, Consumer Inbox, idempotency records, transactional Outbox, confirmed relay, external status/authorization projections, and the V1 `PRACTICAS_PROFESIONALES` eligibility result. It also persists the `student-import-process` acceptance state and frozen file reference for `StartStudentImport`; XLSX validation and distributed plan application are not implemented yet.
+Business operations are durable RabbitMQ commands on `commands.academic`. The service owns a PostgreSQL/Flyway schema, Consumer Inbox, idempotency records, transactional Outbox, confirmed relay, external status/authorization projections, and the V1 `PRACTICAS_PROFESIONALES` eligibility result. It also persists the `student-import-process` acceptance state and frozen file reference for `StartStudentImport`; XLSX validation and distributed plan application are the active PR2 implementation work.
+
+The physical/operational decisions that previously blocked PR2 are closed in [`docs/student-import-pr2-open-questions.md`](docs/student-import-pr2-open-questions.md). Despite the historical filename, that file is now the approved implementation-decision record. The agent should proceed without reopening those decisions unless a new contradiction with the shared business contracts is discovered.
