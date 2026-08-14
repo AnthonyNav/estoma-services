@@ -1,9 +1,7 @@
 package com.estoma.academic.application;
 
-import com.estoma.academic.messaging.EnvelopeCodec;
-import com.estoma.academic.persistence.OutboxRepository;
-import com.estoma.academic.contract.Actor;
 import com.estoma.academic.contract.MessageEnvelope;
+import com.estoma.academic.messaging.EnvelopeCodec;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -20,14 +18,17 @@ public class StudentImportPersonResolutionResults {
   private final JdbcClient jdbc;
   private final EnvelopeCodec codec;
   private final StudentImportPlanBuilder planBuilder;
-  private final OutboxRepository outbox;
+  private final StudentImportValidationRejectionService rejectionService;
 
   public StudentImportPersonResolutionResults(
-      JdbcClient jdbc, EnvelopeCodec codec, StudentImportPlanBuilder planBuilder, OutboxRepository outbox) {
+      JdbcClient jdbc,
+      EnvelopeCodec codec,
+      StudentImportPlanBuilder planBuilder,
+      StudentImportValidationRejectionService rejectionService) {
     this.jdbc = jdbc;
     this.codec = codec;
     this.planBuilder = planBuilder;
-    this.outbox = outbox;
+    this.rejectionService = rejectionService;
   }
 
   /** Applies one Users result to the exact query work identified by its causation id. */
@@ -77,34 +78,13 @@ public class StudentImportPersonResolutionResults {
         .param("email", work.email).param("causation", envelope.causationId()).update();
     if (changed != 1) return true;
     if (resolution.outcome() == Outcome.INACTIVE_MATCH) {
-      rejectIdentityConflict(work.importId);
+      rejectionService.rejectIdentityConflict(
+          work.importId,
+          "An imported institutional email resolves to an inactive Person");
       return true;
     }
     planBuilder.buildIfReady(work.importId);
     return true;
-  }
-
-  private void rejectIdentityConflict(UUID importId) {
-    Instant now = Instant.now();
-    Process process = jdbc.sql("""
-        SELECT academic_period_id,process_version FROM student_import_processes
-        WHERE import_id=:id AND status='VALIDATING' FOR UPDATE
-        """).param("id", importId).query((rs, n) -> new Process(rs.getObject(1, UUID.class), rs.getInt(2))).optional()
-        .orElseThrow(() -> new IllegalStateException("student import is not validating"));
-    int version = process.version + 1;
-    jdbc.sql("""
-        INSERT INTO student_import_validation_errors (import_id,sequence,error_code,message,created_at)
-        VALUES (:id,1,'IDENTITY_CONFLICT','An imported institutional email resolves to an inactive Person',:now)
-        ON CONFLICT (import_id,sequence) DO NOTHING
-        """).param("id", importId).param("now", java.sql.Timestamp.from(now)).update();
-    jdbc.sql("""
-        UPDATE student_import_processes SET status='REJECTED',process_version=:version,failed_step='VALIDATION',
-          failure_code='IDENTITY_CONFLICT',failure_reason='Institutional email identity conflict',recoverable=false,
-          failed_at=:now,updated_at=:now WHERE import_id=:id AND status='VALIDATING' AND process_version=:expected
-        """).param("id", importId).param("version", version).param("expected", process.version).param("now", java.sql.Timestamp.from(now)).update();
-    outbox.append(UUID.randomUUID(), "StudentImportRejected", "EVENT", importId, version, importId, null,
-        codec.json(Map.of("importId", importId, "academicPeriodId", process.periodId, "errorCount", 1, "rejectedAt", now)),
-        codec.json(Map.of("actor", new Actor("SYSTEM", null, "academic"))), now);
   }
 
   private static void validate(PersonResolution resolution, String email) {
@@ -127,7 +107,7 @@ public class StudentImportPersonResolutionResults {
     if (envelope == null || envelope.messageId() == null || envelope.correlationId() == null
         || envelope.causationId() == null || envelope.operationId() == null
         || !"ResolvePersonByInstitutionalEmailResult".equals(envelope.messageType())
-        || !"RESULT".equals(envelope.messageKind()) || !"users-service".equals(envelope.producer())
+        || !"RESULT".equals(envelope.messageKind()) || !"users".equals(envelope.producer())
         || envelope.payload() == null || !envelope.payload().isObject()
         || !"SUCCEEDED".equals(envelope.payload().path("status").asString())
         || !envelope.payload().path("data").isObject()) {
@@ -159,5 +139,4 @@ public class StudentImportPersonResolutionResults {
   private record PersonResolution(String institutionalEmail, Outcome outcome, UUID personId, String status) {}
 
   private record Work(UUID importId, String email, UUID operationId, String status) {}
-  private record Process(UUID periodId, int version) {}
 }
