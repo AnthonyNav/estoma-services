@@ -20,10 +20,13 @@ class ArchitectureTest {
               "org.springframework..",
               "org.postgresql..",
               "java.sql..",
+              "com.fasterxml.jackson..",
+              "tools.jackson..",
+              "com.rabbitmq..",
               "com.estoma.authorization.application..",
               "com.estoma.authorization.infrastructure..",
               "com.estoma.authorization.contracts..")
-          .because("the domain must remain independent of adapters and wire contracts");
+          .because("the domain must remain independent of frameworks, adapters and wire contracts");
 
   @ArchTest
   static final ArchRule application_does_not_depend_on_infrastructure =
@@ -33,6 +36,17 @@ class ArchitectureTest {
           .should()
           .dependOnClassesThat()
           .resideInAnyPackage("com.estoma.authorization.infrastructure..");
+
+  @ArchTest
+  static final ArchRule application_is_messaging_framework_free =
+      noClasses()
+          .that()
+          .resideInAnyPackage("com.estoma.authorization.application..")
+          .should()
+          .dependOnClassesThat()
+          .resideInAnyPackage(
+              "org.springframework.amqp..", "org.springframework.rabbit..", "com.rabbitmq..")
+          .because("RabbitMQ belongs to infrastructure adapters, never Application");
 
   @ArchTest
   static final ArchRule contracts_do_not_depend_on_business_code =
