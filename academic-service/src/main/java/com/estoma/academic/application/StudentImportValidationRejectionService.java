@@ -34,17 +34,18 @@ public class StudentImportValidationRejectionService {
   @Transactional
   public boolean reject(UUID importId, String errorCode, String message, Instant now) {
     Process process = jdbc.sql("""
-        SELECT p.academic_period_id,p.process_version,period.academic_data_status::text,period.version
+        SELECT p.academic_period_id,p.process_version,p.status::text,
+               ap.academic_data_status::text,ap.version
         FROM student_import_processes p
-        JOIN academic_periods period ON period.academic_period_id=p.academic_period_id
+        JOIN academic_periods ap ON ap.academic_period_id=p.academic_period_id
         WHERE p.import_id=:id
-        FOR UPDATE OF p,period
+        FOR UPDATE OF p,ap
         """)
         .param("id", importId)
         .query((rs, n) -> new Process(
-            rs.getObject(1, UUID.class), rs.getInt(2), rs.getString(3), rs.getInt(4)))
+            rs.getObject(1, UUID.class), rs.getInt(2), rs.getString(3), rs.getString(4), rs.getInt(5)))
         .optional().orElse(null);
-    if (process == null || !isValidating(importId)) return false;
+    if (process == null || !"VALIDATING".equals(process.status)) return false;
 
     int sequence = jdbc.sql("SELECT COALESCE(max(sequence),0)+1 FROM student_import_validation_errors WHERE import_id=:id")
         .param("id", importId).query(Integer.class).single();
@@ -68,8 +69,8 @@ public class StudentImportValidationRejectionService {
         .param("expected", process.processVersion).update();
     if (changed != 1) throw new IllegalStateException("student import changed while rejecting validation");
 
-    int errorCount = jdbc.sql("SELECT count(*) FROM student_import_validation_errors WHERE import_id=:id")
-        .param("id", importId).query(Integer.class).single();
+    long errorCount = jdbc.sql("SELECT count(*) FROM student_import_validation_errors WHERE import_id=:id")
+        .param("id", importId).query(Long.class).single();
     append("StudentImportRejected", importId, version, Map.of(
         "importId", importId,
         "academicPeriodId", process.periodId,
@@ -106,15 +107,15 @@ public class StudentImportValidationRejectionService {
     return true;
   }
 
-  private boolean isValidating(UUID importId) {
-    return jdbc.sql("SELECT status::text='VALIDATING' FROM student_import_processes WHERE import_id=:id")
-        .param("id", importId).query(Boolean.class).single();
-  }
-
   private void append(String type, UUID aggregateId, int version, Map<String, Object> payload, Instant now) {
     outbox.append(UUID.randomUUID(), type, "EVENT", aggregateId, version, aggregateId, null,
         codec.json(payload), codec.json(Map.of("actor", SYSTEM_ACTOR)), now);
   }
 
-  private record Process(UUID periodId, int processVersion, String periodDataStatus, int periodVersion) {}
+  private record Process(
+      UUID periodId,
+      int processVersion,
+      String status,
+      String periodDataStatus,
+      int periodVersion) {}
 }
