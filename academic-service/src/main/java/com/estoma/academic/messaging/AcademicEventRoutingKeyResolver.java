@@ -6,7 +6,6 @@ import java.util.Map;
 public final class AcademicEventRoutingKeyResolver {
   private static final Map<String, String> ROUTING_KEYS = Map.ofEntries(
       Map.entry("StudentAcademicProfileCreated", "academic.student.profile-created"),
-      Map.entry("StudentAcademicProfileUpdated", "academic.student.profile-updated"),
       Map.entry("StudentAcademicProfileActivated", "academic.student.profile-activated"),
       Map.entry("StudentAcademicProfileDeactivated", "academic.student.profile-deactivated"),
       Map.entry("StudentAcademicEligibilityChanged", "academic.student-eligibility.changed"),
@@ -26,7 +25,7 @@ public final class AcademicEventRoutingKeyResolver {
       Map.entry("StudentImportRejected", "academic.student-import.rejected"),
       Map.entry("StudentImportValidationErrorsAvailable", "academic.student-import.validation-errors-available"),
       Map.entry("StudentImportApplicationStarted", "academic.student-import.application-started"),
-      Map.entry("StudentImportResumed", "academic.student-import.resumed"),
+      Map.entry("StudentImportApplicationResumed", "academic.student-import.application-resumed"),
       Map.entry("StudentImportApplicationFailed", "academic.student-import.application-failed"),
       Map.entry("StudentImportProgressUpdated", "academic.student-import.progress-updated"),
       Map.entry("StudentImportCompleted", "academic.student-import.completed"));
