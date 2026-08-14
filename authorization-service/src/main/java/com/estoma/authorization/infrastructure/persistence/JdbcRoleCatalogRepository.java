@@ -40,4 +40,14 @@ class JdbcRoleCatalogRepository implements RoleCatalogRepository {
         .query(RoleCatalogRowMapper.INSTANCE)
         .list();
   }
+
+  @Override
+  public boolean isAllowedInSystem(UUID roleId, UUID systemId) {
+    return jdbc.sql(
+            "SELECT EXISTS (SELECT 1 FROM role_systems WHERE role_id = :roleId AND system_id = :systemId)")
+        .param("roleId", roleId)
+        .param("systemId", systemId)
+        .query(Boolean.class)
+        .single();
+  }
 }
