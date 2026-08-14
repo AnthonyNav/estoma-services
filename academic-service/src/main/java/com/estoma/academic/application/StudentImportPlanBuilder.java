@@ -70,6 +70,7 @@ public class StudentImportPlanBuilder {
       int changed = jdbc.sql("""
           UPDATE student_import_processes
           SET status='VALIDATED',process_version=:version,validated_at=:now,
+              failure_code=NULL,failure_reason=NULL,failed_step=NULL,recoverable=NULL,
               students_created=:studentsCreated,students_updated=:studentsUpdated,
               students_reactivated=:studentsReactivated,students_deactivated=:studentsDeactivated,
               course_sections_created=:courseSectionsCreated,course_sections_activated=:courseSectionsActivated,
@@ -211,9 +212,13 @@ public class StudentImportPlanBuilder {
       }
       if (account == null) {
         UUID accountId = ids.id("account", student.email);
-        account = new Account(accountId, "MATRICULA", "INACTIVE", 0);
+        account = new Account(accountId, "MATRICULA", "INACTIVE", 0, null);
         plans.add(plan(process.importId, "CREATE_ACCOUNT", key("personId", personId),
             key("accountId", accountId, "personId", personId, "loginType", "MATRICULA", "loginIdentifier", student.number, "status", "INACTIVE"), Map.of(), accountId));
+      } else if ("INACTIVE".equals(account.status) && "ACADEMIC_ABSENCE".equals(account.deactivationReasonCode)) {
+        plans.add(plan(process.importId, "ACTIVATE_ACCOUNT", key("accountId", account.id),
+            key("accountId", account.id), versions("accountVersion", account.version), null));
+        account = new Account(account.id, account.loginType, "ACTIVE", account.version + 1, null);
       }
       Role role = role(account.id);
       if (role == null || !"ACTIVE".equals(role.status)) plans.add(plan(process.importId, "ASSIGN_STUDENT_ROLE", key("accountId", account.id),
@@ -247,8 +252,11 @@ public class StudentImportPlanBuilder {
         plans.add(plan(process.importId, "DEACTIVATE_STUDENT_PROFILE", key("studentAcademicProfileId", profile.id),
             key("studentAcademicProfileId", profile.id), versions("studentAcademicProfileVersion", profile.version), null));
         Account account = account(profile.accountId);
-        if (account != null && "MATRICULA".equals(account.loginType) && "ACTIVE".equals(account.status)) plans.add(plan(process.importId, "DEACTIVATE_ACCOUNT", key("accountId", account.id),
-            key("accountId", account.id, "personId", profile.personId), versions("accountVersion", account.version), null));
+        if (account != null && "MATRICULA".equals(account.loginType) && "ACTIVE".equals(account.status)) {
+          plans.add(plan(process.importId, "DEACTIVATE_ACCOUNT", key("accountId", account.id),
+              key("accountId", account.id, "personId", profile.personId, "reasonCode", "ACADEMIC_ABSENCE"),
+              versions("accountVersion", account.version), null));
+        }
       }
     }
     Map<String, UUID> sectionIds = sectionIds(process.importId, desiredSections, ids);
@@ -291,8 +299,8 @@ public class StudentImportPlanBuilder {
   private Map<String, Profile> profiles() { return jdbc.sql("SELECT student_academic_profile_id,person_id,account_id,student_number_normalized,current_semester,academic_status::text,version FROM student_academic_profiles ORDER BY student_number_normalized")
       .query((rs, n) -> new Profile(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getString(4), rs.getInt(5), rs.getString(6), rs.getInt(7))).list().stream().collect(java.util.stream.Collectors.toMap(Profile::number, value -> value, (a, b) -> a, TreeMap::new)); }
   private Person person(UUID id) { return jdbc.sql("SELECT source_version FROM person_status_projection WHERE person_id=:id").param("id", id).query((rs, n) -> new Person(rs.getInt(1))).optional().orElse(null); }
-  private Account accountFor(UUID personId) { List<Account> accounts = jdbc.sql("SELECT account_id,login_type,status,source_version FROM account_status_projection WHERE person_id=:person AND login_type='MATRICULA' ORDER BY account_id").param("person", personId).query((rs, n) -> new Account(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4))).list(); if (accounts.size() > 1) throw new IdentityConflict("Resolved Person has more than one student Account"); return accounts.isEmpty() ? null : accounts.getFirst(); }
-  private Account account(UUID id) { return jdbc.sql("SELECT account_id,login_type,status,source_version FROM account_status_projection WHERE account_id=:id").param("id", id).query((rs, n) -> new Account(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4))).optional().orElse(null); }
+  private Account accountFor(UUID personId) { List<Account> accounts = jdbc.sql("SELECT account_id,login_type,status,source_version,last_deactivation_reason_code FROM account_status_projection WHERE person_id=:person AND login_type='MATRICULA' ORDER BY account_id").param("person", personId).query((rs, n) -> new Account(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4), rs.getString(5))).list(); if (accounts.size() > 1) throw new IdentityConflict("Resolved Person has more than one student Account"); return accounts.isEmpty() ? null : accounts.getFirst(); }
+  private Account account(UUID id) { return jdbc.sql("SELECT account_id,login_type,status,source_version,last_deactivation_reason_code FROM account_status_projection WHERE account_id=:id").param("id", id).query((rs, n) -> new Account(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4), rs.getString(5))).optional().orElse(null); }
   private Role role(UUID accountId) { return jdbc.sql("SELECT status,source_version FROM authorization_context_projection WHERE account_id=:id AND role_code='ALUMNO'").param("id", accountId).query((rs, n) -> new Role(rs.getString(1), rs.getInt(2))).optional().orElse(null); }
   private Access access(UUID accountId) { return jdbc.sql("SELECT status,source_version FROM system_access_context_projection WHERE account_id=:id AND system_code='LAVADO_ULTRASONICO'").param("id", accountId).query((rs, n) -> new Access(rs.getString(1), rs.getInt(2))).optional().orElse(null); }
   private Map<String, UUID> sectionIds(UUID importId, Map<String, Nrc> desired, Ids generatedIds) { Map<String, UUID> ids = new HashMap<>(); for (String nrc : desired.keySet()) { Section section = sectionsForImport(importId, nrc); ids.put(nrc, section == null ? generatedIds.id("course-section", nrc) : section.id); } return ids; }
@@ -344,7 +352,7 @@ public class StudentImportPlanBuilder {
   private record Section(UUID id, String nrc, String name, String status, int version) {}
   private record Profile(UUID id, UUID personId, UUID accountId, String number, int semester, String status, int version) {}
   private record Person(int version) {}
-  private record Account(UUID id, String loginType, String status, int version) {}
+  private record Account(UUID id, String loginType, String status, int version, String deactivationReasonCode) {}
   private record Role(String status, int version) {}
   private record Access(String status, int version) {}
   private record Enrollment(UUID id, UUID profileId, UUID sectionId, String studentNumber, String nrc, String status, int version) {}
