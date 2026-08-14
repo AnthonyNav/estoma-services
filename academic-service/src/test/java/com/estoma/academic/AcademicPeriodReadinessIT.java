@@ -129,8 +129,8 @@ class AcademicPeriodReadinessIT {
     UUID importId = UUID.randomUUID();
     assertThat(dispatcher.dispatch(command("StartStudentImport", mapper.createObjectNode()
         .put("importId", importId.toString())
-        .put("fileReference", "upload://student-imports/" + importId)
-        .put("fileChecksum", "sha256:abc")
+        .put("fileReference", importId.toString())
+        .put("fileChecksum", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
         .put("requestedByAccountId", admin.toString()))).status()).isEqualTo("SUCCEEDED");
 
     assertThat(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id")
@@ -155,8 +155,8 @@ class AcademicPeriodReadinessIT {
     UUID importId = UUID.randomUUID();
     var payload = mapper.createObjectNode()
         .put("importId", importId.toString())
-        .put("fileReference", "upload://student-imports/" + importId)
-        .put("fileChecksum", "sha256:abc")
+        .put("fileReference", importId.toString())
+        .put("fileChecksum", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
         .put("requestedByAccountId", admin.toString());
     assertThat(dispatcher.dispatch(command("StartStudentImport", payload.deepCopy())).status()).isEqualTo("SUCCEEDED");
     assertThat(dispatcher.dispatch(command("StartStudentImport", payload.deepCopy())).status()).isEqualTo("SUCCEEDED");
@@ -165,7 +165,7 @@ class AcademicPeriodReadinessIT {
         .query(Long.class)
         .single()).isEqualTo(1);
 
-    payload.put("fileChecksum", "sha256:def");
+    payload.put("fileChecksum", "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210");
     assertThat(dispatcher.dispatch(command("StartStudentImport", payload)).errorCode()).isEqualTo("IMPORT_ALREADY_EXISTS");
   }
 

@@ -21,7 +21,10 @@ public final class AcademicEventRoutingKeyResolver {
       Map.entry("StudentEnrolledInCourseSection", "academic.enrollment.registered"),
       Map.entry("StudentEnrollmentReactivated", "academic.enrollment.reactivated"),
       Map.entry("StudentRemovedFromCourseSection", "academic.enrollment.removed"),
-      Map.entry("StudentImportStarted", "academic.student-import.started"));
+      Map.entry("StudentImportStarted", "academic.student-import.started"),
+      Map.entry("StudentImportValidated", "academic.student-import.validated"),
+      Map.entry("StudentImportRejected", "academic.student-import.rejected"),
+      Map.entry("StudentImportValidationErrorsAvailable", "academic.student-import.validation-errors-available"));
 
   private AcademicEventRoutingKeyResolver() {}
 

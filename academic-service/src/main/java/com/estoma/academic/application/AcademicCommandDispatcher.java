@@ -340,6 +340,12 @@ public class AcademicCommandDispatcher {
     if (importId == null) throw new AcademicRejectedException("INVALID_MESSAGE");
     String fileReference = required(p, "fileReference");
     String fileChecksum = required(p, "fileChecksum");
+    try {
+      UUID.fromString(fileReference);
+    } catch (IllegalArgumentException ex) {
+      throw new AcademicRejectedException("INVALID_MESSAGE");
+    }
+    if (!fileChecksum.matches("[0-9a-f]{64}")) throw new AcademicRejectedException("INVALID_MESSAGE");
     ImportProcess existing = importProcess(importId);
     if (existing != null) {
       if (!existing.fileReference.equals(fileReference) || !existing.fileChecksum.equals(fileChecksum)) {

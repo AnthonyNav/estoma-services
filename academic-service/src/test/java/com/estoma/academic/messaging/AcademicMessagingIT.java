@@ -72,7 +72,7 @@ class AcademicMessagingIT {
 
   @BeforeEach
   void reset() {
-    jdbc.sql("TRUNCATE TABLE outbox_messages,processed_messages,idempotency_records,student_import_validation_errors,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
+    jdbc.sql("TRUNCATE TABLE outbox_messages,processed_messages,idempotency_records,student_import_validation_work,student_import_validation_rows,student_import_validation_errors,student_import_plan_item_rebases,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
     jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',1,now())")
         .param("id", administratorPerson)
         .update();
@@ -82,6 +82,7 @@ class AcademicMessagingIT {
         .update();
     admin.purgeQueue(AcademicTopology.COMMAND_QUEUE);
     admin.purgeQueue(AcademicTopology.EVENT_QUEUE);
+    admin.purgeQueue(AcademicTopology.RESULT_QUEUE);
     admin.purgeQueue("commands.academic.retry.5s");
     admin.purgeQueue("commands.academic.dlq");
   }
@@ -120,6 +121,69 @@ class AcademicMessagingIT {
         .query(String.class)
         .single()).isEqualTo("PUBLISHED");
     assertThat(rabbit.receive(queue.getName(), 5_000)).isNotNull();
+  }
+
+  @Test
+  void relayPublishesPersonResolutionQueriesToUsersService() {
+    Queue queue = new Queue("queries.users-service.messaging-it", false, true, true);
+    admin.declareQueue(queue);
+    admin.declareBinding(BindingBuilder.bind(queue)
+        .to(new DirectExchange(AcademicTopology.QUERIES))
+        .with("users-service"));
+    UUID messageId = UUID.randomUUID();
+    UUID operationId = UUID.randomUUID();
+    UUID importId = UUID.randomUUID();
+    outbox.append(messageId, "ResolvePersonByInstitutionalEmail", "QUERY", importId, 1, importId, null,
+        "{\"institutionalEmail\":\"ada@estoma.mx\"}",
+        "{\"operationId\":\"" + operationId + "\",\"actor\":{\"type\":\"SYSTEM\",\"service\":\"academic\"}}",
+        Instant.now());
+
+    relay.relay();
+
+    MessageEnvelope query = codec.decode(rabbit.receive(queue.getName(), 5_000).getBody());
+    assertThat(query.messageKind()).isEqualTo("QUERY");
+    assertThat(query.messageType()).isEqualTo("ResolvePersonByInstitutionalEmail");
+    assertThat(query.operationId()).isEqualTo(operationId);
+    assertThat(query.actor()).isEqualTo(new Actor("SYSTEM", null, "academic"));
+    assertThat(query.payload().path("institutionalEmail").asString()).isEqualTo("ada@estoma.mx");
+    admin.deleteQueue(queue.getName());
+  }
+
+  @Test
+  void resultListenerUsesInboxThenCompletesTheCorrelatedValidationWork() {
+    PendingResolution pending = pendingResolution("ada@estoma.mx");
+    UUID resultId = UUID.randomUUID();
+    var resultData = mapper.createObjectNode().put("outcome", "NOT_FOUND");
+    var resultPayload = mapper.createObjectNode().put("status", "SUCCEEDED");
+    resultPayload.set("data", resultData);
+    MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users-service",
+        Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null, new Actor("SYSTEM", null, "academic"),
+        resultPayload);
+    Message message = new Message(codec.encode(result));
+    rabbit.send(AcademicTopology.RESULTS, "academic", message);
+    rabbit.send(AcademicTopology.RESULTS, "academic", message);
+
+    await().atMost(Duration.ofSeconds(10)).until(() ->
+        count("SELECT count(*) FROM processed_messages WHERE consumer_name='academic.results' AND message_id=:id", resultId) == 1
+            && "VALIDATED".equals(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id").param("id", pending.importId).query(String.class).single()));
+    assertThat(jdbc.sql("SELECT result->>'outcome' FROM student_import_validation_work WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'")
+        .param("id", pending.importId).query(String.class).single()).isEqualTo("NOT_FOUND");
+  }
+
+  @Test
+  void inactivePersonResolutionResultRejectsTheImport() {
+    PendingResolution pending = pendingResolution("inactive@estoma.mx");
+    UUID resultId = UUID.randomUUID();
+    var data = mapper.createObjectNode().put("outcome", "INACTIVE_MATCH").put("personId", UUID.randomUUID().toString()).put("status", "INACTIVE");
+    var payload = mapper.createObjectNode().put("status", "SUCCEEDED");
+    payload.set("data", data);
+    MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users-service",
+        Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null, new Actor("SYSTEM", null, "academic"), payload);
+    rabbit.send(AcademicTopology.RESULTS, "academic", new Message(codec.encode(result)));
+
+    await().atMost(Duration.ofSeconds(10)).until(() -> "REJECTED".equals(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id")
+        .param("id", pending.importId).query(String.class).single()));
+    assertThat(value("SELECT failure_code FROM student_import_processes WHERE import_id=:id", pending.importId)).isEqualTo("IDENTITY_CONFLICT");
   }
 
   @Test
@@ -241,6 +305,22 @@ class AcademicMessagingIT {
         payload);
   }
 
+  private PendingResolution pendingResolution(String email) {
+    UUID importId = UUID.randomUUID();
+    UUID period = UUID.randomUUID();
+    UUID queryId = UUID.randomUUID();
+    UUID operationId = UUID.randomUUID();
+    jdbc.sql("INSERT INTO academic_periods (academic_period_id,code,name,start_date,end_date,status,academic_data_status,version,created_at,updated_at) VALUES (:id,:code,'Spring',current_date,current_date,'ACTIVE','PENDING_IMPORT',1,now(),now())")
+        .param("id", period).param("code", "2026-result-" + importId).update();
+    jdbc.sql("INSERT INTO student_import_processes (import_id,academic_period_id,academic_period_code,academic_period_version,import_mode,file_reference,file_checksum,status,started_by_account_id,authorized_by_account_id,process_version,execution_generation,started_at,created_at,updated_at) VALUES (:id,:period,:code,1,'FULL',:reference,'0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef','VALIDATING',:actor,:actor,1,0,now(),now(),now())")
+        .param("id", importId).param("period", period).param("code", "2026-result-" + importId).param("reference", UUID.randomUUID().toString()).param("actor", administratorAccount).update();
+    jdbc.sql("INSERT INTO student_import_validation_rows (import_id,row_type,sequence,sheet_name,row_number,row_data,created_at) VALUES (:id,'STUDENT',1,'ALUMNOS',2,CAST(:row AS jsonb),now())")
+        .param("id", importId).param("row", "{\"studentNumber\":\"ST-1\",\"firstName\":\"Ada\",\"paternalSurname\":\"Lovelace\",\"maternalSurname\":\"\",\"institutionalEmail\":\"" + email + "\",\"semester\":1}").update();
+    jdbc.sql("INSERT INTO student_import_validation_work (import_id,work_id,work_type,work_key,status,current_message_id,current_operation_id,created_at,updated_at) VALUES (:id,:work,'LOCAL_FILE_ACCESS','file','SUCCEEDED',NULL,NULL,now(),now()),(:id,:resolution,'AUTHORITATIVE_PERSON_RESOLUTION',:email,'WAITING_RESULT',:message,:operation,now(),now())")
+        .param("id", importId).param("work", UUID.randomUUID()).param("resolution", UUID.randomUUID()).param("email", email).param("message", queryId).param("operation", operationId).update();
+    return new PendingResolution(importId, queryId, operationId);
+  }
+
   private MessageEnvelope event(UUID messageId, String type, UUID person, String status, int version) {
     return new MessageEnvelope(
         messageId,
@@ -270,4 +350,10 @@ class AcademicMessagingIT {
   private long count(String sql) {
     return count(sql, null);
   }
+
+  private String value(String sql, UUID id) {
+    return jdbc.sql(sql).param("id", id).query(String.class).single();
+  }
+
+  private record PendingResolution(UUID importId, UUID queryId, UUID operationId) {}
 }
