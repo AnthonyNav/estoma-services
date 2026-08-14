@@ -1,17 +1,15 @@
 package com.estoma.academic.application;
 
-import com.estoma.academic.messaging.EnvelopeCodec;
 import com.estoma.academic.contract.Actor;
 import com.estoma.academic.domain.StudentAcademicProfile;
+import com.estoma.academic.messaging.EnvelopeCodec;
 import com.estoma.academic.persistence.OutboxRepository;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -31,11 +29,17 @@ public class StudentImportPlanBuilder {
   private final JdbcClient jdbc;
   private final EnvelopeCodec codec;
   private final OutboxRepository outbox;
+  private final StudentImportValidationRejectionService rejectionService;
 
-  public StudentImportPlanBuilder(JdbcClient jdbc, EnvelopeCodec codec, OutboxRepository outbox) {
+  public StudentImportPlanBuilder(
+      JdbcClient jdbc,
+      EnvelopeCodec codec,
+      OutboxRepository outbox,
+      StudentImportValidationRejectionService rejectionService) {
     this.jdbc = jdbc;
     this.codec = codec;
     this.outbox = outbox;
+    this.rejectionService = rejectionService;
   }
 
   @Transactional
@@ -52,43 +56,47 @@ public class StudentImportPlanBuilder {
     Map<String, Resolution> resolutions = resolutions(importId);
     if (resolutions == null) return false;
 
-    List<Student> students = students(importId);
-    if (!supportedAndComplete(students, resolutions)) return false;
-    List<Plan> plans = plans(process, students, resolutions);
-    if (plans == null) return false;
-    if (jdbc.sql("SELECT count(*) FROM student_import_plan_items WHERE import_id=:importId")
-        .param("importId", importId).query(Long.class).single() != 0) {
+    try {
+      List<Student> students = students(importId);
+      if (!supportedAndComplete(students, resolutions)) return false;
+      List<Plan> plans = plans(process, students, resolutions);
+      if (jdbc.sql("SELECT count(*) FROM student_import_plan_items WHERE import_id=:importId")
+          .param("importId", importId).query(Long.class).single() != 0) {
+        return false;
+      }
+      Instant now = Instant.now();
+      for (Plan plan : plans) insert(importId, plan, now);
+      Summary summary = summary(plans);
+      int changed = jdbc.sql("""
+          UPDATE student_import_processes
+          SET status='VALIDATED',process_version=:version,validated_at=:now,
+              students_created=:studentsCreated,students_updated=:studentsUpdated,
+              students_reactivated=:studentsReactivated,students_deactivated=:studentsDeactivated,
+              course_sections_created=:courseSectionsCreated,course_sections_activated=:courseSectionsActivated,
+              course_sections_deactivated=:courseSectionsDeactivated,enrollments_registered=:enrollmentsRegistered,
+              enrollments_reactivated=:enrollmentsReactivated,enrollments_removed=:enrollmentsRemoved,updated_at=:now
+          WHERE import_id=:importId AND status='VALIDATING' AND process_version=:expected
+          """).param("version", process.version + 1).param("expected", process.version)
+          .param("studentsCreated", summary.studentsCreated).param("studentsUpdated", summary.studentsUpdated)
+          .param("studentsReactivated", summary.studentsReactivated).param("studentsDeactivated", summary.studentsDeactivated)
+          .param("courseSectionsCreated", summary.courseSectionsCreated).param("courseSectionsActivated", summary.courseSectionsActivated)
+          .param("courseSectionsDeactivated", summary.courseSectionsDeactivated).param("enrollmentsRegistered", summary.enrollmentsRegistered)
+          .param("enrollmentsReactivated", summary.enrollmentsReactivated).param("enrollmentsRemoved", summary.enrollmentsRemoved)
+          .param("importId", importId).param("now", java.sql.Timestamp.from(now)).update();
+      if (changed != 1) throw new IllegalStateException("student import changed while its plan was being built");
+      outbox.append(UUID.randomUUID(), "StudentImportValidated", "EVENT", importId, process.version + 1, importId, null,
+          codec.json(key("importId", importId, "academicPeriodId", process.periodId,
+              "studentsCreated", summary.studentsCreated, "studentsUpdated", summary.studentsUpdated,
+              "studentsReactivated", summary.studentsReactivated, "studentsDeactivated", summary.studentsDeactivated,
+              "courseSectionsCreated", summary.courseSectionsCreated, "courseSectionsActivated", summary.courseSectionsActivated,
+              "courseSectionsDeactivated", summary.courseSectionsDeactivated, "enrollmentsRegistered", summary.enrollmentsRegistered,
+              "enrollmentsReactivated", summary.enrollmentsReactivated, "enrollmentsRemoved", summary.enrollmentsRemoved,
+              "validatedAt", now)), codec.json(Map.of("actor", SYSTEM_ACTOR)), now);
+      return true;
+    } catch (IdentityConflict ex) {
+      rejectionService.rejectIdentityConflict(importId, ex.getMessage());
       return false;
     }
-    Instant now = Instant.now();
-    for (Plan plan : plans) insert(importId, plan, now);
-    Summary summary = summary(plans);
-    int changed = jdbc.sql("""
-        UPDATE student_import_processes
-        SET status='VALIDATED',process_version=:version,validated_at=:now,
-            students_created=:studentsCreated,students_updated=:studentsUpdated,
-            students_reactivated=:studentsReactivated,students_deactivated=:studentsDeactivated,
-            course_sections_created=:courseSectionsCreated,course_sections_activated=:courseSectionsActivated,
-            course_sections_deactivated=:courseSectionsDeactivated,enrollments_registered=:enrollmentsRegistered,
-            enrollments_reactivated=:enrollmentsReactivated,enrollments_removed=:enrollmentsRemoved,updated_at=:now
-        WHERE import_id=:importId AND status='VALIDATING' AND process_version=:expected
-        """).param("version", process.version + 1).param("expected", process.version)
-        .param("studentsCreated", summary.studentsCreated).param("studentsUpdated", summary.studentsUpdated)
-        .param("studentsReactivated", summary.studentsReactivated).param("studentsDeactivated", summary.studentsDeactivated)
-        .param("courseSectionsCreated", summary.courseSectionsCreated).param("courseSectionsActivated", summary.courseSectionsActivated)
-        .param("courseSectionsDeactivated", summary.courseSectionsDeactivated).param("enrollmentsRegistered", summary.enrollmentsRegistered)
-        .param("enrollmentsReactivated", summary.enrollmentsReactivated).param("enrollmentsRemoved", summary.enrollmentsRemoved)
-        .param("importId", importId).param("now", java.sql.Timestamp.from(now)).update();
-    if (changed != 1) throw new IllegalStateException("student import changed while its plan was being built");
-    outbox.append(UUID.randomUUID(), "StudentImportValidated", "EVENT", importId, process.version + 1, importId, null,
-        codec.json(key("importId", importId, "academicPeriodId", process.periodId,
-            "studentsCreated", summary.studentsCreated, "studentsUpdated", summary.studentsUpdated,
-            "studentsReactivated", summary.studentsReactivated, "studentsDeactivated", summary.studentsDeactivated,
-            "courseSectionsCreated", summary.courseSectionsCreated, "courseSectionsActivated", summary.courseSectionsActivated,
-            "courseSectionsDeactivated", summary.courseSectionsDeactivated, "enrollmentsRegistered", summary.enrollmentsRegistered,
-            "enrollmentsReactivated", summary.enrollmentsReactivated, "enrollmentsRemoved", summary.enrollmentsRemoved,
-            "validatedAt", now)), codec.json(Map.of("actor", SYSTEM_ACTOR)), now);
-    return true;
   }
 
   private boolean workSucceeded(UUID importId, String type) {
@@ -109,7 +117,10 @@ public class StudentImportPlanBuilder {
     for (ResolutionWork value : work) {
       JsonNode result = codec.node(value.result);
       String outcome = text(result, "outcome");
-      if (value.email == null || outcome == null || resolutions.put(value.email, new Resolution(outcome, uuid(result, "personId"), text(result, "status"))) != null) return null;
+      if (value.email == null || outcome == null
+          || resolutions.put(value.email, new Resolution(outcome, uuid(result, "personId"), text(result, "status"))) != null) {
+        return null;
+      }
     }
     return resolutions;
   }
@@ -128,11 +139,19 @@ public class StudentImportPlanBuilder {
   private boolean supportedAndComplete(List<Student> students, Map<String, Resolution> resolutions) {
     Set<String> emails = new HashSet<>();
     for (Student student : students) {
-      if (student.email == null || !emails.add(student.email) && students.stream().filter(other -> other.email.equals(student.email)).count() > 1) return false;
+      if (student.email == null) throw new IdentityConflict("Imported student is missing an institutional email");
+      if (!emails.add(student.email)) throw new IdentityConflict("Two imported students use the same institutional email");
       Resolution resolution = resolutions.get(student.email);
-      if (resolution == null || !("FOUND".equals(resolution.outcome) || "NOT_FOUND".equals(resolution.outcome))) return false;
-      if ("FOUND".equals(resolution.outcome) && (resolution.personId == null || !"ACTIVE".equals(resolution.status))) return false;
-      if ("NOT_FOUND".equals(resolution.outcome) && (resolution.personId != null || resolution.status != null)) return false;
+      if (resolution == null) return false;
+      if (!("FOUND".equals(resolution.outcome) || "NOT_FOUND".equals(resolution.outcome))) {
+        throw new IllegalStateException("unsupported person-resolution outcome " + resolution.outcome);
+      }
+      if ("FOUND".equals(resolution.outcome) && (resolution.personId == null || !"ACTIVE".equals(resolution.status))) {
+        throw new IllegalStateException("FOUND person-resolution result is inconsistent");
+      }
+      if ("NOT_FOUND".equals(resolution.outcome) && (resolution.personId != null || resolution.status != null)) {
+        throw new IllegalStateException("NOT_FOUND person-resolution result is inconsistent");
+      }
     }
     return emails.size() == resolutions.size();
   }
@@ -164,17 +183,21 @@ public class StudentImportPlanBuilder {
     Map<String, UUID> studentProfileIds = new HashMap<>();
     Set<String> desiredNumbers = new HashSet<>();
     for (Student student : students) {
-      if (!desiredNumbers.add(student.number)) return null;
+      if (!desiredNumbers.add(student.number)) throw new IllegalStateException("validated plan contains duplicate student number");
       Resolution resolution = resolutions.get(student.email);
       UUID personId = "FOUND".equals(resolution.outcome) ? resolution.personId : ids.id("person", student.email);
       Profile profile = profiles.get(student.number);
-      if (profile != null && !profile.personId.equals(personId)) return null;
+      if (profile != null && !profile.personId.equals(personId)) {
+        throw new IdentityConflict("Student number and institutional email resolve to different Persons");
+      }
       Profile otherProfile = profilesByPerson.get(personId);
-      if (otherProfile != null && !otherProfile.number.equals(student.number)) return null;
+      if (otherProfile != null && !otherProfile.number.equals(student.number)) {
+        throw new IdentityConflict("Resolved Person is already linked to a different student number");
+      }
       Account account = accountFor(personId);
-      boolean existingAccount = account != null;
-      if (profile != null && (account == null || !profile.accountId.equals(account.id))) return null;
-      if (account != null && !"MATRICULA".equals(account.loginType)) return null;
+      if (profile != null && (account == null || !profile.accountId.equals(account.id))) {
+        throw new IdentityConflict("Existing academic profile points to an incompatible student Account");
+      }
       if ("FOUND".equals(resolution.outcome)) {
         Person person = person(personId);
         plans.add(plan(process.importId, "UPDATE_PERSON", key("personId", personId),
@@ -234,7 +257,9 @@ public class StudentImportPlanBuilder {
     for (EnrollmentRow enrollment : enrollmentRows(process.importId)) {
       UUID profileId = studentProfileIds.get(enrollment.studentNumber);
       UUID sectionId = sectionIds.get(enrollment.nrc);
-      if (profileId == null || sectionId == null || !desiredEnrollments.add(enrollment.studentNumber + "\u0000" + enrollment.nrc)) return null;
+      if (profileId == null || sectionId == null || !desiredEnrollments.add(enrollment.studentNumber + "\u0000" + enrollment.nrc)) {
+        throw new IllegalStateException("validated enrollment cannot be mapped into the import plan");
+      }
       Enrollment current = enrollments.remove(enrollment.studentNumber + "\u0000" + enrollment.nrc);
       if (current == null) {
         UUID id = ids.id("enrollment", enrollment.studentNumber + "\u0000" + enrollment.nrc);
@@ -266,7 +291,7 @@ public class StudentImportPlanBuilder {
   private Map<String, Profile> profiles() { return jdbc.sql("SELECT student_academic_profile_id,person_id,account_id,student_number_normalized,current_semester,academic_status::text,version FROM student_academic_profiles ORDER BY student_number_normalized")
       .query((rs, n) -> new Profile(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getString(4), rs.getInt(5), rs.getString(6), rs.getInt(7))).list().stream().collect(java.util.stream.Collectors.toMap(Profile::number, value -> value, (a, b) -> a, TreeMap::new)); }
   private Person person(UUID id) { return jdbc.sql("SELECT source_version FROM person_status_projection WHERE person_id=:id").param("id", id).query((rs, n) -> new Person(rs.getInt(1))).optional().orElse(null); }
-  private Account accountFor(UUID personId) { List<Account> accounts = jdbc.sql("SELECT account_id,login_type,status,source_version FROM account_status_projection WHERE person_id=:person ORDER BY account_id").param("person", personId).query((rs, n) -> new Account(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4))).list(); return accounts.size() == 1 ? accounts.getFirst() : null; }
+  private Account accountFor(UUID personId) { List<Account> accounts = jdbc.sql("SELECT account_id,login_type,status,source_version FROM account_status_projection WHERE person_id=:person AND login_type='MATRICULA' ORDER BY account_id").param("person", personId).query((rs, n) -> new Account(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4))).list(); if (accounts.size() > 1) throw new IdentityConflict("Resolved Person has more than one student Account"); return accounts.isEmpty() ? null : accounts.getFirst(); }
   private Account account(UUID id) { return jdbc.sql("SELECT account_id,login_type,status,source_version FROM account_status_projection WHERE account_id=:id").param("id", id).query((rs, n) -> new Account(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getInt(4))).optional().orElse(null); }
   private Role role(UUID accountId) { return jdbc.sql("SELECT status,source_version FROM authorization_context_projection WHERE account_id=:id AND role_code='ALUMNO'").param("id", accountId).query((rs, n) -> new Role(rs.getString(1), rs.getInt(2))).optional().orElse(null); }
   private Access access(UUID accountId) { return jdbc.sql("SELECT status,source_version FROM system_access_context_projection WHERE account_id=:id AND system_code='LAVADO_ULTRASONICO'").param("id", accountId).query((rs, n) -> new Access(rs.getString(1), rs.getInt(2))).optional().orElse(null); }
@@ -328,6 +353,11 @@ public class StudentImportPlanBuilder {
   private record Summary(int studentsCreated, int studentsUpdated, int studentsReactivated, int studentsDeactivated,
                          int courseSectionsCreated, int courseSectionsActivated, int courseSectionsDeactivated,
                          int enrollmentsRegistered, int enrollmentsReactivated, int enrollmentsRemoved) {}
+
+  private static final class IdentityConflict extends RuntimeException {
+    IdentityConflict(String message) { super(message); }
+  }
+
   private static final class Ids {
     private final Map<String, UUID> values = new HashMap<>();
     UUID id(String type, String key) { return values.computeIfAbsent(type + "\u0000" + key, ignored -> UUID.randomUUID()); }
