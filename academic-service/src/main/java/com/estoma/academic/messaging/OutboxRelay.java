@@ -102,12 +102,14 @@ public class OutboxRelay {
       case "EVENT" -> AcademicTopology.EVENTS;
       case "RESULT" -> AcademicTopology.RESULTS;
       case "QUERY" -> AcademicTopology.QUERIES;
+      case "COMMAND" -> AcademicTopology.COMMANDS;
       default -> throw new IllegalStateException("unsupported outbox message kind " + row.kind());
     };
     String key = switch (row.kind()) {
       case "EVENT" -> AcademicEventRoutingKeyResolver.resolve(row.type());
       case "RESULT" -> meta.path("destination").asString();
       case "QUERY" -> "users";
+      case "COMMAND" -> meta.path("destination").asString();
       default -> throw new IllegalStateException("unsupported outbox message kind " + row.kind());
     };
 
@@ -120,10 +122,10 @@ public class OutboxRelay {
         row.occurredAt(),
         row.correlationId(),
         row.causationId(),
-        ("RESULT".equals(row.kind()) || "QUERY".equals(row.kind())) && meta.hasNonNull("operationId")
+        ("RESULT".equals(row.kind()) || "QUERY".equals(row.kind()) || "COMMAND".equals(row.kind())) && meta.hasNonNull("operationId")
             ? java.util.UUID.fromString(meta.path("operationId").asString())
             : null,
-        null,
+        meta.hasNonNull("idempotencyKey") ? meta.path("idempotencyKey").asString() : null,
         row.aggregateId(),
         row.aggregateVersion(),
         actor,
