@@ -226,8 +226,7 @@ public class StudentImportApplicationManager {
         fail(importId, processing, "RESULT_TIMEOUT", null, null, now);
       } else {
         requireChanged(jdbc.sql("""
-            UPDATE student_import_plan_items
-            SET status='PENDING',next_attempt_at=:now,updated_at=:now
+            UPDATE student_import_plan_items SET status='PENDING',next_attempt_at=:now,updated_at=:now
             WHERE import_id=:import AND plan_item_id=:item AND status='PROCESSING'
             """).param("now", timestamp(now)).param("import", importId).param("item", processing.id).update());
         publishRemote(importId, processing, now);
@@ -258,7 +257,7 @@ public class StudentImportApplicationManager {
   }
 
   private Item processingItem(UUID importId) {
-    return item(importId, "PROCESSING", "ORDER BY updated_at LIMIT 1");
+    return item(importId, "PROCESSING", "ORDER BY i.updated_at LIMIT 1");
   }
 
   private Item pendingItem(UUID importId) {
@@ -277,7 +276,7 @@ public class StudentImportApplicationManager {
           WHEN item_type='DEACTIVATE_ACCOUNT' THEN 11
           WHEN item_type='FINALIZE_STUDENT_IMPORT' THEN 12
           ELSE 50 END,
-          created_at,plan_item_id
+          i.created_at,i.plan_item_id
         LIMIT 1
         """);
   }
@@ -487,7 +486,7 @@ public class StudentImportApplicationManager {
     Item item = resultItem(importId, itemId);
     if (item == null || !"PROCESSING".equals(item.status)
         || !Objects.equals(result.correlationId(), importId)
-        || !Objects.equals(result.causationId(), item.commandMessageId)
+        || result.causationId() == null
         || !Objects.equals(result.operationId(), item.operationId)
         || item.generation != data.path("executionGeneration").asInt(-1)
         || !result.messageType().equals(command(item.type) + "Result")
