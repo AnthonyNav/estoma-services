@@ -6,6 +6,7 @@ import com.estoma.washadministration.domain.resource.ResourceStatus;
 import com.estoma.washadministration.domain.shared.DomainErrorCode;
 import com.estoma.washadministration.domain.shared.DomainRuleViolationException;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -29,6 +30,13 @@ class JdbcCabinRepository implements CabinRepository {
         .param("id", id)
         .query(CabinRowMapper.INSTANCE)
         .optional();
+  }
+
+  @Override
+  public List<Cabin> findAll() {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM cabins ORDER BY code")
+        .query(CabinRowMapper.INSTANCE)
+        .list();
   }
 
   @Override

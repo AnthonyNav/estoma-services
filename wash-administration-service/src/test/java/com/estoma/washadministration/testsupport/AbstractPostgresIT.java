@@ -45,7 +45,7 @@ public abstract class AbstractPostgresIT {
   @BeforeEach
   void clearDatabase() {
     jdbc.sql(
-            "TRUNCATE TABLE projection_recovery_jobs, outbox_messages, command_idempotency_records, processed_messages, "
+            "TRUNCATE TABLE projection_recovery_jobs, administrative_audit_records, outbox_messages, command_idempotency_records, processed_messages, "
                 + "authorization_access_projection, authorization_role_projection, administrative_closures, "
                 + "tanks, cabins, service_schedules, resource_priorities, service_calendars RESTART IDENTITY CASCADE")
         .update();

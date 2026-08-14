@@ -10,6 +10,10 @@ public interface ServiceScheduleRepository {
 
   Optional<ServiceSchedule> findById(UUID id);
 
+  Optional<ServiceSchedule> findByIdForUpdate(UUID id);
+
+  List<ServiceSchedule> findAll();
+
   List<ServiceSchedule> findActiveOverlapping(
       UUID calendarId, int dayOfWeek, LocalTime openingTime, LocalTime closingTime, UUID excludedId);
 

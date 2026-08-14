@@ -10,7 +10,11 @@ public interface ServiceCalendarRepository {
 
   Optional<ServiceCalendar> findById(UUID id);
 
+  Optional<ServiceCalendar> findByIdForUpdate(UUID id);
+
   Optional<ServiceCalendar> findByCode(String code);
+
+  List<ServiceCalendar> findAll();
 
   List<ServiceCalendar> findActiveOverlapping(EffectivePeriod period, UUID excludedId);
 

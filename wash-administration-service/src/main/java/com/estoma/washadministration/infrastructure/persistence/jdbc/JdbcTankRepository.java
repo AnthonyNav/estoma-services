@@ -5,6 +5,7 @@ import com.estoma.washadministration.domain.resource.Tank;
 import com.estoma.washadministration.domain.shared.DomainErrorCode;
 import com.estoma.washadministration.domain.shared.DomainRuleViolationException;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -28,6 +29,21 @@ class JdbcTankRepository implements TankRepository {
         .param("id", id)
         .query(TankRowMapper.INSTANCE)
         .optional();
+  }
+
+  @Override
+  public Optional<Tank> findByIdForUpdate(UUID id) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM tanks WHERE tank_id = :id FOR UPDATE")
+        .param("id", id)
+        .query(TankRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
+  public List<Tank> findAll() {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM tanks ORDER BY cabin_id, code")
+        .query(TankRowMapper.INSTANCE)
+        .list();
   }
 
   @Override

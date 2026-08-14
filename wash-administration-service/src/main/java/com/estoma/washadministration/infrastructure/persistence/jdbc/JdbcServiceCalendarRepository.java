@@ -30,11 +30,26 @@ class JdbcServiceCalendarRepository implements ServiceCalendarRepository {
   }
 
   @Override
+  public Optional<ServiceCalendar> findByIdForUpdate(UUID id) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM service_calendars WHERE service_calendar_id = :id FOR UPDATE")
+        .param("id", id)
+        .query(CalendarRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
   public Optional<ServiceCalendar> findByCode(String code) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM service_calendars WHERE code = :code")
         .param("code", code)
         .query(CalendarRowMapper.INSTANCE)
         .optional();
+  }
+
+  @Override
+  public List<ServiceCalendar> findAll() {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM service_calendars ORDER BY code")
+        .query(CalendarRowMapper.INSTANCE)
+        .list();
   }
 
   @Override
@@ -45,7 +60,7 @@ class JdbcServiceCalendarRepository implements ServiceCalendarRepository {
              WHERE status = 'ACTIVE'
                AND service_calendar_id <> COALESCE(:excludedId, '00000000-0000-0000-0000-000000000000'::uuid)
                AND daterange(effective_from, effective_until, '[]')
-                   && daterange(CAST(:effectiveFrom AS date), CAST(:effectiveUntil AS date), '[]')
+                   && daterange(CAST(:effectiveFrom AS date), COALESCE(CAST(:effectiveUntil AS date), 'infinity'::date), '[]')
             """.formatted(COLUMNS))
         .param("excludedId", excludedId == null ? UUID.randomUUID() : excludedId)
         .param("effectiveFrom", period.from())

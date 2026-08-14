@@ -31,6 +31,21 @@ class JdbcServiceScheduleRepository implements ServiceScheduleRepository {
   }
 
   @Override
+  public Optional<ServiceSchedule> findByIdForUpdate(UUID id) {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM service_schedules WHERE service_schedule_id = :id FOR UPDATE")
+        .param("id", id)
+        .query(ScheduleRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
+  public List<ServiceSchedule> findAll() {
+    return jdbc.sql("SELECT " + COLUMNS + " FROM service_schedules ORDER BY service_calendar_id, day_of_week, opening_time")
+        .query(ScheduleRowMapper.INSTANCE)
+        .list();
+  }
+
+  @Override
   public List<ServiceSchedule> findActiveOverlapping(
       UUID calendarId, int dayOfWeek, LocalTime openingTime, LocalTime closingTime, UUID excludedId) {
     return jdbc.sql(
