@@ -13,8 +13,6 @@ public interface ProcessedMessageRepository {
 
   int markApplied(String consumerName, UUID messageId, Instant appliedAt, Instant updatedAt);
 
-  int markDeferred(String consumerName, UUID messageId, String deferredReason, Instant updatedAt);
-
   record ProcessedMessage(
       String consumerName,
       UUID messageId,
