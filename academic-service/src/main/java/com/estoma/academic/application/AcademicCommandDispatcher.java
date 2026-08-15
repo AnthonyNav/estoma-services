@@ -423,6 +423,8 @@ public class AcademicCommandDispatcher {
     if (remainingItems == 0) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
 
     int generation = process.executionGeneration + 1;
+    StudentImportResumeGuardRebaser.reconcile(
+        jdbc, codec, importId, generation, e.actor().accountId(), now);
     int resumedVersion = process.processVersion + 1;
     int progressVersion = process.processVersion + 2;
     expectedUpdate(jdbc.sql("""
