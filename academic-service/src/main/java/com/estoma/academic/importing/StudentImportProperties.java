@@ -14,12 +14,14 @@ public record StudentImportProperties(
     @DefaultValue("25000") int maxStudentRows,
     @DefaultValue("200000") int maxEnrollmentRows,
     @DefaultValue("4096") int maxCellCharacters,
+    @DefaultValue("100") int validationErrorBatchSize,
     @DefaultValue("60s") Duration parseTimeout) {
   public StudentImportProperties {
     storage = storage == null ? new Storage(false, null, null, null, null) : storage;
     if (maxObjectBytes < 1 || maxExpandedZipBytes < 1 || maxNrcRows < 1 || maxStudentRows < 1
-        || maxEnrollmentRows < 1 || maxCellCharacters < 1 || parseTimeout == null
-        || parseTimeout.isZero() || parseTimeout.isNegative()) {
+        || maxEnrollmentRows < 1 || maxCellCharacters < 1
+        || validationErrorBatchSize < 1 || validationErrorBatchSize > 200
+        || parseTimeout == null || parseTimeout.isZero() || parseTimeout.isNegative()) {
       throw new IllegalArgumentException("invalid estoma.student-import configuration");
     }
   }
