@@ -5,8 +5,9 @@
 Contrato de implementación para `authorization-service`.
 
 PR1 materializa la foundation de dominio, persistencia y operación descrita en
-este documento. El comportamiento completo de Application se implementará en
-PR2 y los adapters/contratos wire en PR3, siguiendo `execution_plan.md`.
+este documento. El comportamiento funcional local de Application se implementa
+en PR2; recovery/snapshots y los adapters/contratos wire se implementan en PR3,
+siguiendo `execution_plan.md`.
 
 Si este archivo entra en conflicto con la documentación canónica de plataforma, la documentación de plataforma prevalece y el conflicto debe resolverse antes de implementar el comportamiento afectado.
 
@@ -184,7 +185,8 @@ com.estoma.authorization
     └── query
 ```
 
-`infrastructure.messaging` y `contracts` se materializan en PR3. PR1 y PR2 deben permanecer broker-agnostic.
+`infrastructure.messaging`, `contracts` y la orquestación de recovery remoto se
+materializan en PR3. PR1 y PR2 deben permanecer broker-agnostic.
 
 ## Reglas De Dependencia
 
@@ -247,8 +249,11 @@ Application orquesta:
 - auditoría;
 - aprovisionamiento derivado de Prácticas;
 - proyección de Events externos;
-- Queries de snapshot;
-- recovery y reaplicación de `DEFERRED`.
+- persistencia de Commands `DEFERRED` sin Result terminal.
+
+PR3 agrega la orquestación de recovery, la reaplicación de `DEFERRED` y las
+Queries de snapshot sobre estos ports, sin cambiar las reglas funcionales de
+PR2.
 
 Application opera con modelos internos. Un listener RabbitMQ no puede ser el use case.
 
@@ -581,6 +586,22 @@ roleCode
 importExecution?  // sólo Academic
 ```
 
+`importExecution` académico contiene:
+
+```text
+importId
+planItemId
+executionGeneration
+authorizedByAccountId
+scope = ASSIGN_STUDENT_ROLE
+causalDependency? / causalDependencies[]?
+authoritativeEvidence[]?
+```
+
+Cada dependencia puede incluir `priorCommandType`, `priorResultMessageId`,
+`priorResultStatus=SUCCEEDED`, `expectedEventType`, `expectedAggregateId` y
+`minimumSourceVersion?`. La evidencia debe proceder del owner autoritativo.
+
 Reglas principales:
 
 - Cuenta proyectada existente/confiable cuando sea necesaria;
@@ -606,6 +627,12 @@ changed = false
 sin Event funcional nuevo
 ```
 
+Si la Cuenta no es visible, Academic puede quedar `DEFERRED` con
+`EVENT_PENDING` cuando exista un Event futuro garantizado por causalidad, o
+con `PROJECTION_RECONCILIATION` cuando exista evidencia autoritativa sin Event
+futuro. Sin evidencia suficiente el resultado es `REJECTED/ACCOUNT_NOT_FOUND`.
+`DEFERRED` no emite Result terminal ni crea un nuevo Command.
+
 ## `ChangeAccountRole`
 
 Input:
@@ -630,6 +657,10 @@ cambiar account_roles
 
 Cada acceso suspendido incrementa su propia versión.
 
+El cambio no concede accesos nuevos directamente ni restaura accesos
+`SUSPENDED`/`REVOKED`, pero puede disparar una reevaluación derivada de
+elegibilidad de Prácticas fuera del efecto directo del Command.
+
 ## `GrantSystemAccess`
 
 Input:
@@ -640,6 +671,10 @@ accountId
 systemCode
 importExecution?  // sólo Academic
 ```
+
+Para Academic, `importExecution.scope = GRANT_STUDENT_SYSTEM_ACCESS` y se
+conservan los mismos campos completos de atribución, causalidad y evidencia
+definidos para `AssignAccountRole`.
 
 BFF normal:
 
@@ -666,6 +701,9 @@ relación ya existe ACTIVE/SUSPENDED/REVOKED
 → no restaurar restricción
 ```
 
+La ausencia de Cuenta académica sólo puede quedar `DEFERRED` con causalidad o
+evidencia válida; sin ella se rechaza.
+
 ## `SuspendSystemAccess`
 
 Input:
@@ -681,7 +719,9 @@ Sólo desde `ACTIVE`.
 
 ## `RevokeSystemAccess`
 
-Input equivalente con `expectedVersion` y motivo válido. Puede revocar desde estado permitido por el contrato; el resultado final es `REVOKED`.
+Input equivalente con `expectedVersion` y motivo válido. Puede revocar un acceso
+existente desde `ACTIVE` o `SUSPENDED`; `REVOKED` se rechaza con
+`SYSTEM_ACCESS_ALREADY_REVOKED`. El resultado exitoso final es `REVOKED`.
 
 ## `RestoreSystemAccess`
 
@@ -743,6 +783,7 @@ StudentAcademicEligibilityChanged
 AccountCreated / projection disponible
 AccountRoleAssigned
 AccountRoleChanged
+System ACTIVE
 snapshot/recovery aplicado
 reconciliación operativa
 ```
@@ -797,7 +838,10 @@ Payload común:
 ```text
 status = SUCCEEDED | REJECTED | FAILED | EXPIRED
 data?
-error?
+error? {
+  code
+  details?
+}
 ```
 
 Authorization V1 no produce `EXPIRED` para los seis Commands actuales.
@@ -807,6 +851,9 @@ Authorization V1 no produce `EXPIRED` para los seis Commands actuales.
 `FAILED` es fallo técnico terminal persistible.
 
 Un Command `DEFERRED` no tiene Result terminal hasta resolverse.
+
+Para Commands de Academic, el `data` de un Result terminal conserva
+`importId`, `planItemId` y `executionGeneration`.
 
 Success data mínimo:
 
@@ -860,6 +907,33 @@ authorization.system-access.restored
 ```
 
 Cada Event usa `aggregateId` y `aggregateVersion` del agregado que realmente cambió.
+
+Payloads mínimos V1:
+
+```text
+AccountRoleAssigned
+→ accountId, roleId, roleCode, assignedAt
+
+AccountRoleChanged
+→ accountId, previousRoleId, previousRoleCode, newRoleId, newRoleCode, changedAt
+
+SystemAccessGranted
+→ systemAccessId, accountId, systemId, systemCode, roleId, roleCode, status=ACTIVE, grantedAt
+
+SystemAccessSuspended
+→ systemAccessId, accountId, systemId, systemCode, previousStatus, status=SUSPENDED,
+  reasonCode, reasonDetail?, suspendedAt
+
+SystemAccessRevoked
+→ systemAccessId, accountId, systemId, systemCode, previousStatus, status=REVOKED,
+  reasonCode, reasonDetail?, revokedAt
+
+SystemAccessRestored
+→ systemAccessId, accountId, systemId, systemCode, previousStatus, status=ACTIVE, restoredAt
+```
+
+El actor vive en el envelope y no se duplica como `*ByAccountId` dentro del
+payload. Cada suspensión derivada conserva su propio agregado y versión.
 
 `SystemAccessGranted` puede originarse por:
 
@@ -916,6 +990,24 @@ academic.student-eligibility.changed
 
 `aggregateVersion` protege monotonía, no contigüidad.
 
+Payloads de proyecciones:
+
+```text
+PersonCreated/Activated/Deactivated
+→ personId, status
+
+AccountCreated/Activated/Deactivated
+→ accountId, personId, loginType, status
+
+StudentAcademicEligibilityChanged
+→ eligibilityId, studentAcademicProfileId, accountId, systemCode, eligible,
+  policyVersion, eligibilityVersion, academicProfileVersion, evaluatedAt
+```
+
+`AccountCreated` inicia como `INACTIVE`. El Event de elegibilidad se aplica
+como snapshot autónomo con `aggregateVersion=eligibilityVersion`; la falta de
+Cuenta, rol o sistema para aprovisionar no lo convierte en Inbox `DEFERRED`.
+
 ```text
 incoming <= local
 → stale/duplicate
@@ -935,6 +1027,10 @@ La falta de prerrequisitos de aprovisionamiento no convierte `StudentAcademicEli
 
 # Queries Y Recovery
 
+Estas capacidades se implementan en PR3. PR2 sólo deja los ports y la
+persistencia neutral necesarios; no usa una Query de snapshot para convertir un
+fallo cerrado en autorización.
+
 ## Queries Que Authorization Expone
 
 ```text
@@ -951,6 +1047,20 @@ wash-administration
 wash-execution
 academic
 ```
+
+`GetAccountAuthorizationSnapshot` devuelve `FOUND` con `accountId`, `role?`
+(`roleCode`, `roleVersion`), `systemAccesses[]` (`systemAccessId`, `systemId`,
+`systemCode`, `status`, `accessVersion`) y `snapshotGeneratedAt`. Devuelve
+`NOT_FOUND` sólo si no existe estado de Authorization dentro del scope; un rol
+conocido sin acceso al sistema filtrado es `FOUND` con lista vacía.
+
+`ListAccountAuthorizationSnapshotsPage` usa `cursor?`, `limit` y
+`systemCode?`, y devuelve `items[]`, `nextCursor?`, `hasMore` y
+`snapshotGeneratedAt`. La paginación es keyset estable; `roleVersion` y cada
+`accessVersion` se comparan independientemente.
+
+`appointments`, `wash-administration` y `wash-execution` sólo pueden consultar
+`LAVADO_ULTRASONICO`; ningún requester amplía scope enviando otro valor.
 
 Requesters limitados a Lavado usan `systemCode = LAVADO_ULTRASONICO` y no reciben accesos de Prácticas.
 
@@ -1039,7 +1149,20 @@ updatedAt
 completedAt?
 ```
 
+`entityKey` es determinista y no contiene PII libre:
+
+```text
+person:<uuid>
+account:<uuid>
+eligibility:<studentAcademicProfileId>:<systemCode>
+```
+
 No mantener claim ni transacción abiertos durante `WAITING_RESULT`.
+
+Un Result `FAILED` no autoriza a asumir estado: el job permanece reintentable o
+termina `FAILED` según la política técnica, sin mutar la proyección y
+manteniendo fail-closed. El handler reclama/bloquea el job antes de validar y
+aplicar el Result; un Result no reclamado o con `causationId` viejo es stale.
 
 Result tardío:
 
@@ -1086,6 +1209,10 @@ NOT_FOUND + projection ya existe
 → marcar discrepancia/no confiable
 → re-query controlada o FULL rebuild
 ```
+
+Al resolverse una evaluación, `pendingReason` vuelve a `NULL`. Un
+`NOT_FOUND` contradictorio conserva fail-closed y no limpia la espera como si
+la discrepancia estuviera resuelta.
 
 ---
 
@@ -1233,7 +1360,9 @@ COMPLETED
 FAILED
 ```
 
-Fingerprint no incluye metadata de transporte como `messageId` o timestamps.
+Fingerprint incluye actor, target, campos funcionales, `expectedVersion` e
+`importExecution` completo cuando aplique; no incluye metadata de transporte
+como `messageId`, `correlationId`, `causationId`, `operationId` o timestamps.
 
 ```text
 misma key + mismo fingerprint

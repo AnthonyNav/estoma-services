@@ -97,6 +97,53 @@ class JdbcSystemAccessRepository implements SystemAccessRepository {
   }
 
   @Override
+  public boolean insertIfAbsent(SystemAccess access) {
+    return jdbc.sql(
+            """
+            INSERT INTO system_accesses (
+              system_access_id, account_id, system_id, status, reason_code, reason_detail, version,
+              granted_by_account_id, granted_by_actor_type, granted_by_actor_service,
+              suspended_by_account_id, suspended_by_actor_type, suspended_by_actor_service,
+              revoked_by_account_id, revoked_by_actor_type, revoked_by_actor_service,
+              restored_by_account_id, restored_by_actor_type, restored_by_actor_service,
+              granted_at, suspended_at, revoked_at, updated_at
+            ) VALUES (
+              :systemAccessId, :accountId, :systemId, CAST(:status AS system_access_status), :reasonCode, :reasonDetail, :version,
+              :grantedByAccountId, CAST(:grantedByActorType AS actor_type), :grantedByActorService,
+              :suspendedByAccountId, CAST(:suspendedByActorType AS actor_type), :suspendedByActorService,
+              :revokedByAccountId, CAST(:revokedByActorType AS actor_type), :revokedByActorService,
+              :restoredByAccountId, CAST(:restoredByActorType AS actor_type), :restoredByActorService,
+              :grantedAt, :suspendedAt, :revokedAt, :updatedAt
+            ) ON CONFLICT (account_id, system_id) DO NOTHING
+            """)
+        .param("systemAccessId", access.systemAccessId())
+        .param("accountId", access.accountId())
+        .param("systemId", access.systemId())
+        .param("status", access.status().name())
+        .param("reasonCode", access.reasonCode() == null ? null : access.reasonCode().name())
+        .param("reasonDetail", access.reasonDetail())
+        .param("version", access.version())
+        .param("grantedByAccountId", access.grantedBy().accountId())
+        .param("grantedByActorType", access.grantedBy().type().name())
+        .param("grantedByActorService", access.grantedBy().service())
+        .param("suspendedByAccountId", access.suspendedBy() == null ? null : access.suspendedBy().accountId())
+        .param("suspendedByActorType", access.suspendedBy() == null ? null : access.suspendedBy().type().name())
+        .param("suspendedByActorService", access.suspendedBy() == null ? null : access.suspendedBy().service())
+        .param("revokedByAccountId", access.revokedBy() == null ? null : access.revokedBy().accountId())
+        .param("revokedByActorType", access.revokedBy() == null ? null : access.revokedBy().type().name())
+        .param("revokedByActorService", access.revokedBy() == null ? null : access.revokedBy().service())
+        .param("restoredByAccountId", access.restoredBy() == null ? null : access.restoredBy().accountId())
+        .param("restoredByActorType", access.restoredBy() == null ? null : access.restoredBy().type().name())
+        .param("restoredByActorService", access.restoredBy() == null ? null : access.restoredBy().service())
+        .param("grantedAt", Timestamps.toTimestamp(access.grantedAt()))
+        .param("suspendedAt", Timestamps.toTimestamp(access.suspendedAt()))
+        .param("revokedAt", Timestamps.toTimestamp(access.revokedAt()))
+        .param("updatedAt", Timestamps.toTimestamp(access.updatedAt()))
+        .update()
+        == 1;
+  }
+
+  @Override
   public int update(SystemAccess access, int expectedVersion) {
     OptimisticVersionGuard.requireNext(expectedVersion, access.version());
     return jdbc.sql(

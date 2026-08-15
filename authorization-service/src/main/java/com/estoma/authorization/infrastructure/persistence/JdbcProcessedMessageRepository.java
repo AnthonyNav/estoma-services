@@ -81,4 +81,30 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
         .param("updatedAt", Timestamps.toTimestamp(updatedAt))
         .update();
   }
+
+  @Override
+  public int markDeferred(String consumerName, UUID messageId, String deferredReason, Instant updatedAt) {
+    return jdbc.sql(
+            "UPDATE processed_messages SET status = 'DEFERRED', applied_at = NULL, "
+                + "deferred_reason = :deferredReason, updated_at = :updatedAt "
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId")
+        .param("consumerName", consumerName)
+        .param("messageId", messageId)
+        .param("deferredReason", deferredReason)
+        .param("updatedAt", Timestamps.toTimestamp(updatedAt))
+        .update();
+  }
+
+  @Override
+  public boolean hasDeferredNewerThan(String consumerName, UUID aggregateId, int aggregateVersion) {
+    return jdbc.sql(
+            "SELECT EXISTS (SELECT 1 FROM processed_messages "
+                + "WHERE consumer_name = :consumerName AND status = 'DEFERRED' "
+                + "AND aggregate_id = :aggregateId AND aggregate_version > :aggregateVersion)")
+        .param("consumerName", consumerName)
+        .param("aggregateId", aggregateId)
+        .param("aggregateVersion", aggregateVersion)
+        .query(Boolean.class)
+        .single();
+  }
 }

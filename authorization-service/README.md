@@ -12,7 +12,15 @@ sessions or expose a business HTTP API.
 - V1 catalogs and role/system/permission seed are deterministic.
 - Account roles, system accesses, external projections and technical Inbox,
   idempotency, Outbox, audit and recovery tables are present.
-- RabbitMQ, wire DTOs and business handlers are intentionally deferred.
+- RabbitMQ, wire DTOs, recovery orchestration and snapshot Queries remain PR3.
+
+## PR2 Application Behavior
+
+- Six durable Commands are dispatched directly through Application without a broker.
+- BFF/Academic authority, optimistic locking, terminal Results and Event intents are persisted atomically.
+- Projection Events are monotonic and support Inbox `APPLIED`/`DEFERRED`.
+- Academic `importExecution` is retained in deferred command payloads.
+- Convergent `PRACTICAS_PROFESIONALES` provisioning is idempotent and race-safe.
 
 ## Operational Endpoints
 

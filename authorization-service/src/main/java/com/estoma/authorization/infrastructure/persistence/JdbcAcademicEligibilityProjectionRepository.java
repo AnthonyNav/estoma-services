@@ -30,6 +30,21 @@ class JdbcAcademicEligibilityProjectionRepository implements AcademicEligibility
   }
 
   @Override
+  public Optional<AcademicEligibilityProjection> findByAccountIdAndSystemCode(
+      UUID accountId, String systemCode) {
+    return jdbc.sql(
+            "SELECT eligibility_id, student_academic_profile_id, system_code, account_id, eligible, "
+                + "policy_version, eligibility_version, academic_profile_version, pending_reason, evaluated_at, updated_at "
+                + "FROM academic_eligibility_projection "
+                + "WHERE account_id = :accountId AND system_code = :systemCode "
+                + "ORDER BY eligibility_version DESC LIMIT 1")
+        .param("accountId", accountId)
+        .param("systemCode", systemCode)
+        .query(AcademicEligibilityRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
   public int upsertIfNewer(AcademicEligibilityProjection projection) {
     return jdbc.sql(
             """
@@ -65,6 +80,17 @@ class JdbcAcademicEligibilityProjectionRepository implements AcademicEligibility
         .param("pendingReason", projection.pendingReason())
         .param("evaluatedAt", Timestamps.toTimestamp(projection.evaluatedAt()))
         .param("updatedAt", Timestamps.toTimestamp(projection.updatedAt()))
+        .update();
+  }
+
+  @Override
+  public int updatePendingReason(UUID studentAcademicProfileId, String systemCode, String pendingReason) {
+    return jdbc.sql(
+            "UPDATE academic_eligibility_projection SET pending_reason = :pendingReason, updated_at = now() "
+                + "WHERE student_academic_profile_id = :studentAcademicProfileId AND system_code = :systemCode")
+        .param("studentAcademicProfileId", studentAcademicProfileId)
+        .param("systemCode", systemCode)
+        .param("pendingReason", pendingReason)
         .update();
   }
 }

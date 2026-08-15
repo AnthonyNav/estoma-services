@@ -13,6 +13,14 @@ public interface ProcessedMessageRepository {
 
   int markApplied(String consumerName, UUID messageId, Instant appliedAt, Instant updatedAt);
 
+  default int markDeferred(String consumerName, UUID messageId, String deferredReason, Instant updatedAt) {
+    return 0;
+  }
+
+  default boolean hasDeferredNewerThan(String consumerName, UUID aggregateId, int aggregateVersion) {
+    return false;
+  }
+
   record ProcessedMessage(
       String consumerName,
       UUID messageId,

@@ -9,7 +9,14 @@ public interface AcademicEligibilityProjectionRepository {
   Optional<AcademicEligibilityProjection> findByStudentProfileAndSystem(
       UUID studentAcademicProfileId, String systemCode);
 
+  Optional<AcademicEligibilityProjection> findByAccountIdAndSystemCode(
+      UUID accountId, String systemCode);
+
   int upsertIfNewer(AcademicEligibilityProjection projection);
+
+  default int updatePendingReason(UUID studentAcademicProfileId, String systemCode, String pendingReason) {
+    return 0;
+  }
 
   record AcademicEligibilityProjection(
       UUID eligibilityId,

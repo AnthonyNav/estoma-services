@@ -15,5 +15,10 @@ public interface SystemAccessRepository {
 
   void insert(SystemAccess access);
 
+  default boolean insertIfAbsent(SystemAccess access) {
+    insert(access);
+    return true;
+  }
+
   int update(SystemAccess access, int expectedVersion);
 }

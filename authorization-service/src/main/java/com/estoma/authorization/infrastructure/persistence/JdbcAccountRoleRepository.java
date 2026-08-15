@@ -55,6 +55,30 @@ class JdbcAccountRoleRepository implements AccountRoleRepository {
   }
 
   @Override
+  public boolean insertIfAbsent(AccountRoleAssignment assignment) {
+    return jdbc.sql(
+            """
+            INSERT INTO account_roles (
+              account_id, role_id, version, assigned_by_account_id, assigned_by_actor_type,
+              assigned_by_actor_service, assigned_at, updated_at
+            ) VALUES (
+              :accountId, :roleId, :version, :assignedByAccountId, CAST(:assignedByActorType AS actor_type),
+              :assignedByActorService, :assignedAt, :updatedAt
+            ) ON CONFLICT (account_id) DO NOTHING
+            """)
+        .param("accountId", assignment.accountId())
+        .param("roleId", assignment.roleId())
+        .param("version", assignment.version())
+        .param("assignedByAccountId", assignment.assignedBy().accountId())
+        .param("assignedByActorType", assignment.assignedBy().type().name())
+        .param("assignedByActorService", assignment.assignedBy().service())
+        .param("assignedAt", Timestamps.toTimestamp(assignment.assignedAt()))
+        .param("updatedAt", Timestamps.toTimestamp(assignment.updatedAt()))
+        .update()
+        == 1;
+  }
+
+  @Override
   public int update(AccountRoleAssignment assignment, int expectedVersion) {
     OptimisticVersionGuard.requireNext(expectedVersion, assignment.version());
     return jdbc.sql(
