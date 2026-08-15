@@ -8,13 +8,13 @@ import com.estoma.academic.messaging.EnvelopeCodec;
 import com.estoma.academic.persistence.OutboxRepository;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -165,12 +165,16 @@ public class StudentImportApplicationManager {
         FROM student_import_plan_items WHERE import_id=:id ORDER BY created_at,plan_item_id
         """).param("id", importId)
         .query((rs, n) -> new VersionCheck(rs.getString(1), rs.getString(2), rs.getString(3))).list();
-    Set<String> checkedTargets = new HashSet<>();
+    Map<String, TargetVersion> initialTargets = new LinkedHashMap<>();
     for (VersionCheck check : checks) {
       JsonNode effect = codec.node(check.effect);
       JsonNode versions = codec.node(check.versions);
       TargetVersion target = targetVersion(check.type, effect, versions);
-      if (target == null || !checkedTargets.add(target.targetKey)) continue;
+      if (target == null) continue;
+      initialTargets.merge(target.targetKey, target,
+          (current, candidate) -> current.expectedVersion <= candidate.expectedVersion ? current : candidate);
+    }
+    for (TargetVersion target : initialTargets.values()) {
       Integer actual = currentVersion(target);
       if (actual == null || actual != target.expectedVersion) return true;
     }
@@ -239,6 +243,8 @@ public class StudentImportApplicationManager {
       try {
         executeLocal(importId, next, now);
         complete(importId, next, null, null, null, now);
+      } catch (DataAccessException ex) {
+        throw ex;
       } catch (RuntimeException ex) {
         fail(importId, next, "LOCAL_APPLICATION_FAILED", null, null, now);
       }
@@ -253,6 +259,14 @@ public class StudentImportApplicationManager {
           SELECT 1 FROM student_import_processes
           WHERE import_id=:id AND status='APPLYING' FOR UPDATE)
         """).param("id", importId).query(Boolean.class).single();
+  }
+
+  private String lockResultProcess(UUID importId) {
+    return jdbc.sql("""
+        SELECT status::text FROM student_import_processes
+        WHERE import_id=:id AND status IN ('APPLYING','APPLICATION_FAILED')
+        FOR UPDATE
+        """).param("id", importId).query(String.class).optional().orElse(null);
   }
 
   private Item processingItem(UUID importId) {
@@ -464,7 +478,8 @@ public class StudentImportApplicationManager {
   @Transactional
   public boolean applyResult(MessageEnvelope result) {
     if (result == null || !"RESULT".equals(result.messageKind()) || result.messageId() == null
-        || result.operationId() == null || result.correlationId() == null || result.payload() == null) {
+        || result.operationId() == null || result.idempotencyKey() == null
+        || result.correlationId() == null || result.payload() == null || !result.payload().isObject()) {
       throw new IllegalArgumentException("invalid result");
     }
     if (jdbc.sql("""
@@ -480,20 +495,33 @@ public class StudentImportApplicationManager {
         .param("envelope", codec.json(result)).update() == 0) return false;
 
     JsonNode data = result.payload().path("data");
+    if (!data.isObject()) return false;
     UUID importId = uuid(data, "importId");
     UUID itemId = uuid(data, "planItemId");
-    if (importId == null || itemId == null || !lockApplyingProcess(importId)) return false;
+    if (importId == null || itemId == null) return false;
+    String processStatus = lockResultProcess(importId);
+    if (processStatus == null) return false;
     Item item = resultItem(importId, itemId);
-    if (item == null || !"PROCESSING".equals(item.status)
-        || !Objects.equals(result.correlationId(), importId)
+    if (item == null) return false;
+    boolean applying = "APPLYING".equals(processStatus) && "PROCESSING".equals(item.status);
+    boolean lateTimeout = "APPLICATION_FAILED".equals(processStatus)
+        && "FAILED".equals(item.status) && timeoutFailure(importId, item.id);
+    if (!applying && !lateTimeout) return false;
+    if (!Objects.equals(result.correlationId(), importId)
         || result.causationId() == null
         || !Objects.equals(result.operationId(), item.operationId)
+        || !Objects.equals(result.idempotencyKey(), item.idempotencyKey)
         || item.generation != data.path("executionGeneration").asInt(-1)
         || !result.messageType().equals(command(item.type) + "Result")
-        || !destination(item.type).equals(result.producer())) return false;
+        || !destination(item.type).equals(result.producer())
+        || !knownCommandAttempt(result, importId, item)) return false;
 
     Instant now = Instant.now();
     String outcome = result.payload().path("status").asString();
+    if (lateTimeout) {
+      reconcileLateTimeout(importId, item, result, outcome, now);
+      return true;
+    }
     switch (outcome) {
       case "SUCCEEDED" -> complete(importId, item, codec.json(result.payload()), result.messageId(), outcome, now);
       case "REJECTED" -> fail(importId, item,
@@ -505,6 +533,62 @@ public class StudentImportApplicationManager {
       default -> throw new IllegalArgumentException("invalid terminal result status");
     }
     return true;
+  }
+
+  private boolean timeoutFailure(UUID importId, UUID itemId) {
+    return jdbc.sql("""
+        SELECT last_error_code='RESULT_TIMEOUT' FROM student_import_plan_items
+        WHERE import_id=:import AND plan_item_id=:item
+        """).param("import", importId).param("item", itemId).query(Boolean.class).single();
+  }
+
+  private boolean knownCommandAttempt(MessageEnvelope result, UUID importId, Item item) {
+    return jdbc.sql("""
+        SELECT EXISTS (
+          SELECT 1 FROM outbox_messages
+          WHERE message_id=:causation AND message_kind='COMMAND' AND message_type=:type
+            AND correlation_id=:import
+            AND payload->'importExecution'->>'planItemId'=:item
+            AND payload->'importExecution'->>'executionGeneration'=:generation
+            AND metadata->>'operationId'=:operation
+            AND metadata->>'idempotencyKey'=:key)
+        """).param("causation", result.causationId()).param("type", command(item.type))
+        .param("import", importId).param("item", item.id.toString())
+        .param("generation", Integer.toString(item.generation))
+        .param("operation", result.operationId().toString()).param("key", result.idempotencyKey())
+        .query(Boolean.class).single();
+  }
+
+  private void reconcileLateTimeout(
+      UUID importId, Item item, MessageEnvelope result, String outcome, Instant now) {
+    String payload = codec.json(result.payload());
+    switch (outcome) {
+      case "SUCCEEDED" -> requireChanged(jdbc.sql("""
+          UPDATE student_import_plan_items
+          SET status='COMPLETED',received_result=CAST(:result AS jsonb),
+              last_result_message_id=:message,last_result_status='SUCCEEDED',
+              applied_aggregate_version=COALESCE(CAST(:aggregateVersion AS integer),applied_aggregate_version),
+              last_error_code=NULL,last_error_at=NULL,updated_at=:now
+          WHERE import_id=:import AND plan_item_id=:item AND status='FAILED'
+            AND last_error_code='RESULT_TIMEOUT' AND execution_generation=:generation
+          """).param("result", payload).param("message", result.messageId())
+          .param("aggregateVersion", result.aggregateVersion()).param("now", timestamp(now))
+          .param("import", importId).param("item", item.id).param("generation", item.generation).update());
+      case "REJECTED", "FAILED", "EXPIRED" -> {
+        String error = result.payload().path("error").path("code")
+            .asString("REJECTED".equals(outcome) ? "REMOTE_REJECTED" : "REMOTE_" + outcome);
+        requireChanged(jdbc.sql("""
+            UPDATE student_import_plan_items
+            SET received_result=CAST(:result AS jsonb),last_result_message_id=:message,
+                last_result_status=:status,last_error_code=:error,last_error_at=:now,updated_at=:now
+            WHERE import_id=:import AND plan_item_id=:item AND status='FAILED'
+              AND last_error_code='RESULT_TIMEOUT' AND execution_generation=:generation
+            """).param("result", payload).param("message", result.messageId()).param("status", outcome)
+            .param("error", error).param("now", timestamp(now)).param("import", importId)
+            .param("item", item.id).param("generation", item.generation).update());
+      }
+      default -> throw new IllegalArgumentException("invalid terminal result status");
+    }
   }
 
   private Item resultItem(UUID importId, UUID itemId) {
