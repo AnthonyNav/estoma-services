@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
@@ -19,8 +20,13 @@ final class S3StudentImportFileStore implements StudentImportFileStore, AutoClos
 
   S3StudentImportFileStore(StudentImportProperties properties) {
     storage = properties.storage();
-    var builder = S3Client.builder().region(Region.of(storage.region())).credentialsProvider(DefaultCredentialsProvider.create());
-    if (storage.endpoint() != null) builder.endpointOverride(storage.endpoint());
+    var builder = S3Client.builder()
+        .region(Region.of(storage.region()))
+        .credentialsProvider(DefaultCredentialsProvider.create());
+    if (storage.endpoint() != null) {
+      builder.endpointOverride(storage.endpoint())
+          .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build());
+    }
     client = builder.build();
   }
 
