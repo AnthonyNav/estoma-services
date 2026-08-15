@@ -112,6 +112,7 @@ class StudentImportIdentityContractIT {
     UUID operationId = UUID.randomUUID();
     jdbc.sql("INSERT INTO student_import_validation_work (import_id,work_id,work_type,work_key,status,current_message_id,current_operation_id,attempts,created_at,updated_at) VALUES (:id,:work,'AUTHORITATIVE_PERSON_RESOLUTION','student@estoma.mx','WAITING_RESULT',:message,:operation,1,now(),now())")
         .param("id", importId).param("work", UUID.randomUUID()).param("message", queryMessageId).param("operation", operationId).update();
+    publishedResolutionQuery(importId, queryMessageId, operationId, "student@estoma.mx");
     UUID inactivePerson = UUID.randomUUID();
 
     assertThat(personResults.apply(result(importId, queryMessageId, operationId, "users", "INACTIVE_MATCH", inactivePerson, "INACTIVE"))).isTrue();
@@ -164,6 +165,19 @@ class StudentImportIdentityContractIT {
   private void resolution(UUID importId, String email, String result) {
     jdbc.sql("INSERT INTO student_import_validation_work (import_id,work_id,work_type,work_key,status,result,created_at,updated_at) VALUES (:id,:work,'AUTHORITATIVE_PERSON_RESOLUTION',:email,'SUCCEEDED',CAST(:result AS jsonb),now(),now())")
         .param("id", importId).param("work", UUID.randomUUID()).param("email", email).param("result", result).update();
+  }
+
+  private void publishedResolutionQuery(UUID importId, UUID messageId, UUID operationId, String email) {
+    jdbc.sql("""
+        INSERT INTO outbox_messages (
+          message_id,message_type,message_version,message_kind,aggregate_id,aggregate_version,
+          correlation_id,payload,metadata,status,attempts,occurred_at,available_at)
+        VALUES (:message,'ResolvePersonByInstitutionalEmail',1,'QUERY',:import,1,
+          :import,CAST(:payload AS jsonb),CAST(:metadata AS jsonb),'PENDING',0,now(),now())
+        """).param("message", messageId).param("import", importId)
+        .param("payload", mapper.writeValueAsString(Map.of("institutionalEmail", email)))
+        .param("metadata", mapper.writeValueAsString(Map.of("operationId", operationId.toString())))
+        .update();
   }
 
   private MessageEnvelope result(
