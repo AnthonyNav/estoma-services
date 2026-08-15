@@ -31,7 +31,7 @@ public class StudentImportPersonResolutionResults {
     this.rejectionService = rejectionService;
   }
 
-  /** Applies one Users result to the exact query work identified by its causation id. */
+  /** Applies one Users result to the logical query work identified by correlation and operation id. */
   @Transactional
   public boolean apply(MessageEnvelope envelope) {
     validateResultEnvelope(envelope);
@@ -53,14 +53,14 @@ public class StudentImportPersonResolutionResults {
     Work work = jdbc.sql("""
         SELECT import_id,work_key,current_operation_id,status::text
         FROM student_import_validation_work
-        WHERE work_type=:type AND current_message_id=:causation
+        WHERE work_type=:type AND import_id=:import AND current_operation_id=:operation
         FOR UPDATE
-        """).param("type", WORK_TYPE).param("causation", envelope.causationId())
+        """).param("type", WORK_TYPE).param("import", envelope.correlationId())
+        .param("operation", envelope.operationId())
         .query((rs, n) -> new Work(rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, UUID.class), rs.getString(4)))
         .optional().orElse(null);
-    if (work == null || !work.importId.equals(envelope.correlationId()) || !work.operationId.equals(envelope.operationId())) {
-      return true;
-    }
+    if (work == null || !knownQueryAttempt(envelope, work)) return true;
+
     PersonResolution resolution = resolution(work.email, envelope.payload().path("data"));
     if (!"WAITING_RESULT".equals(work.status)) return true;
     Map<String, Object> result = new java.util.LinkedHashMap<>();
@@ -73,10 +73,10 @@ public class StudentImportPersonResolutionResults {
         SET status='SUCCEEDED',result=CAST(:result AS jsonb),next_attempt_at=NULL,
             last_error_code=NULL,last_error_at=NULL,updated_at=:now
         WHERE import_id=:importId AND work_type=:type AND work_key=:email
-          AND current_message_id=:causation AND status='WAITING_RESULT'
+          AND current_operation_id=:operation AND status='WAITING_RESULT'
         """).param("result", codec.json(result))
         .param("now", java.sql.Timestamp.from(now)).param("importId", work.importId).param("type", WORK_TYPE)
-        .param("email", work.email).param("causation", envelope.causationId()).update();
+        .param("email", work.email).param("operation", work.operationId).update();
     if (changed != 1) return true;
     if (resolution.outcome() == Outcome.INACTIVE_MATCH) {
       rejectionService.rejectIdentityConflict(
@@ -86,6 +86,20 @@ public class StudentImportPersonResolutionResults {
     }
     planBuilder.buildIfReady(work.importId);
     return true;
+  }
+
+  private boolean knownQueryAttempt(MessageEnvelope envelope, Work work) {
+    return jdbc.sql("""
+        SELECT EXISTS (
+          SELECT 1 FROM outbox_messages
+          WHERE message_id=:causation AND message_kind='QUERY'
+            AND message_type='ResolvePersonByInstitutionalEmail'
+            AND correlation_id=:import
+            AND payload->>'institutionalEmail'=:email
+            AND metadata->>'operationId'=:operation)
+        """).param("causation", envelope.causationId()).param("import", work.importId)
+        .param("email", work.email).param("operation", work.operationId.toString())
+        .query(Boolean.class).single();
   }
 
   private static void validate(PersonResolution resolution, String email) {
