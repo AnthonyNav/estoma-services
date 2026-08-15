@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record StudentImportProperties(
     @DefaultValue Storage storage,
     @DefaultValue("20971520") int maxObjectBytes,
+    @DefaultValue("209715200") long maxExpandedZipBytes,
     @DefaultValue("10000") int maxNrcRows,
     @DefaultValue("25000") int maxStudentRows,
     @DefaultValue("200000") int maxEnrollmentRows,
@@ -16,8 +17,9 @@ public record StudentImportProperties(
     @DefaultValue("60s") Duration parseTimeout) {
   public StudentImportProperties {
     storage = storage == null ? new Storage(false, null, null, null, null) : storage;
-    if (maxObjectBytes < 1 || maxNrcRows < 1 || maxStudentRows < 1 || maxEnrollmentRows < 1
-        || maxCellCharacters < 1 || parseTimeout == null || parseTimeout.isZero() || parseTimeout.isNegative()) {
+    if (maxObjectBytes < 1 || maxExpandedZipBytes < 1 || maxNrcRows < 1 || maxStudentRows < 1
+        || maxEnrollmentRows < 1 || maxCellCharacters < 1 || parseTimeout == null
+        || parseTimeout.isZero() || parseTimeout.isNegative()) {
       throw new IllegalArgumentException("invalid estoma.student-import configuration");
     }
   }
