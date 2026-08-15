@@ -14,11 +14,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
@@ -73,7 +73,7 @@ public class StudentImportApplicationManager {
         WHERE status='APPLYING' ORDER BY application_started_at NULLS LAST
         """).query(UUID.class).list();
     for (UUID importId : applying) {
-      transactions.executeWithoutResult(status -> runOne(importId));
+      transactions.executeWithoutResult(status -> runOne(importId, status));
     }
   }
 
@@ -219,7 +219,7 @@ public class StudentImportApplicationManager {
         .param("id", target.id).query(Integer.class).optional().orElse(null);
   }
 
-  private void runOne(UUID importId) {
+  private void runOne(UUID importId, TransactionStatus transactionStatus) {
     if (!lockApplyingProcess(importId)) return;
     Instant now = Instant.now();
     Item processing = processingItem(importId);
@@ -240,12 +240,13 @@ public class StudentImportApplicationManager {
     Item next = pendingItem(importId);
     if (next == null || ("FINALIZE_STUDENT_IMPORT".equals(next.type) && outstanding(importId))) return;
     if (LOCAL.contains(next.type)) {
+      Object savepoint = transactionStatus.createSavepoint();
       try {
         executeLocal(importId, next, now);
         complete(importId, next, null, null, null, now);
-      } catch (DataAccessException ex) {
-        throw ex;
+        transactionStatus.releaseSavepoint(savepoint);
       } catch (RuntimeException ex) {
+        transactionStatus.rollbackToSavepoint(savepoint);
         fail(importId, next, "LOCAL_APPLICATION_FAILED", null, null, now);
       }
     } else {
