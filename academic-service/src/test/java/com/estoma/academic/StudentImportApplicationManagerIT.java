@@ -204,6 +204,37 @@ class StudentImportApplicationManagerIT {
   }
 
   @Test
+  void chainedExpectedVersionsDoNotMakeAValidatedPlanStale() {
+    UUID importId = process("VALIDATED", 0, 2);
+    jdbc.sql("UPDATE academic_periods SET academic_data_status='PENDING_IMPORT' WHERE academic_period_id=:id")
+        .param("id", period).update();
+    UUID profileId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO student_academic_profiles (
+          student_academic_profile_id,person_id,account_id,student_number,student_number_normalized,
+          current_semester,academic_status,version,student_number_version,created_at,updated_at)
+        VALUES (:id,:person,:account,'ST-CHAIN','ST-CHAIN',5,'INACTIVE',4,0,now(),now())
+        """).param("id", profileId).param("person", UUID.randomUUID()).param("account", accountId).update();
+    UUID activate = item(importId, "ACTIVATE_STUDENT_PROFILE",
+        Map.of("studentAcademicProfileId", profileId), Map.of("studentAcademicProfileVersion", 4));
+    UUID semester = item(importId, "CHANGE_STUDENT_SEMESTER",
+        Map.of("studentAcademicProfileId", profileId, "currentSemester", 6),
+        Map.of("studentAcademicProfileVersion", 5));
+
+    manager.schedule();
+
+    assertThat(value("SELECT status::text FROM student_import_processes WHERE import_id=:id", importId))
+        .isEqualTo("APPLYING");
+    assertThat(value("SELECT academic_status::text FROM student_academic_profiles WHERE student_academic_profile_id=:id", profileId))
+        .isEqualTo("ACTIVE");
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + activate + "'", importId))
+        .isEqualTo("COMPLETED");
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + semester + "'", importId))
+        .isEqualTo("PENDING");
+  }
+
+  @Test
   void remoteChainCarriesCausalityAndRetriesTheSameOperationAndIdempotencyKey() {
     UUID importId = process("APPLYING", 1, 1);
     UUID personId = UUID.randomUUID();
@@ -256,6 +287,32 @@ class StudentImportApplicationManagerIT {
   }
 
   @Test
+  void resultMustMatchAPublishedAttemptAndItsFunctionalIntention() {
+    UUID importId = process("APPLYING", 1, 1);
+    UUID itemId = item(importId, "CREATE_PERSON", Map.of(
+        "personId", UUID.randomUUID(), "institutionalEmail", "student@estoma.mx",
+        "firstName", "Student", "paternalSurname", "One"));
+    manager.schedule();
+    UUID operation = uuidValue("SELECT current_operation_id FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + itemId + "'", importId);
+    String key = value("SELECT current_idempotency_key FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + itemId + "'", importId);
+
+    MessageEnvelope wrongCausation = resultWithKey(
+        "CreatePersonResult", "users", importId, itemId, UUID.randomUUID(), operation, key,
+        1, "SUCCEEDED", null);
+    assertThat(manager.applyResult(wrongCausation)).isFalse();
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + itemId + "'", importId))
+        .isEqualTo("PROCESSING");
+
+    UUID commandMessage = uuidValue("SELECT current_command_message_id FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + itemId + "'", importId);
+    MessageEnvelope wrongKey = resultWithKey(
+        "CreatePersonResult", "users", importId, itemId, commandMessage, operation, key + ":other",
+        1, "SUCCEEDED", null);
+    assertThat(manager.applyResult(wrongKey)).isFalse();
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + itemId + "'", importId))
+        .isEqualTo("PROCESSING");
+  }
+
+  @Test
   void authorizationCommandsUseCanonicalNamesAndRoleResultCausesGrant() {
     UUID importId = process("APPLYING", 1, 1);
     UUID accountId = UUID.randomUUID();
@@ -292,6 +349,8 @@ class StudentImportApplicationManagerIT {
     UUID importId = process("APPLICATION_FAILED", 1, 5);
     UUID failed = item(importId, "CREATE_PERSON", Map.of(
         "personId", UUID.randomUUID(), "institutionalEmail", "student@estoma.mx"));
+    UUID untouchedPending = item(importId, "CREATE_ACCOUNT", Map.of(
+        "accountId", UUID.randomUUID(), "personId", UUID.randomUUID(), "loginType", "MATRICULA"));
     jdbc.sql("""
         UPDATE student_import_plan_items
         SET status='FAILED',execution_generation=1,last_result_status='REJECTED',
@@ -307,6 +366,8 @@ class StudentImportApplicationManagerIT {
     assertThat(integer("SELECT execution_generation FROM student_import_processes WHERE import_id=:id", importId))
         .isEqualTo(2);
     assertThat(integer("SELECT execution_generation FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + failed + "'", importId))
+        .isEqualTo(2);
+    assertThat(integer("SELECT execution_generation FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + untouchedPending + "'", importId))
         .isEqualTo(2);
     assertThat(value("SELECT status::text FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + failed + "'", importId))
         .isEqualTo("PENDING");
@@ -344,6 +405,45 @@ class StudentImportApplicationManagerIT {
     assertThat(outcome.errorCode()).isEqualTo("IMPORT_RESUME_NOT_ALLOWED");
     assertThat(integer("SELECT execution_generation FROM student_import_processes WHERE import_id=:id", importId))
         .isEqualTo(3);
+  }
+
+  @Test
+  void lateSuccessAfterResultTimeoutReconcilesBeforeAdministrativeResume() {
+    UUID importId = process("APPLYING", 1, 1);
+    UUID timedOut = item(importId, "CREATE_PERSON", Map.of(
+        "personId", UUID.randomUUID(), "institutionalEmail", "student@estoma.mx",
+        "firstName", "Student", "paternalSurname", "One"));
+    UUID laterPending = item(importId, "CREATE_ACCOUNT", Map.of(
+        "accountId", UUID.randomUUID(), "personId", UUID.randomUUID(), "loginType", "MATRICULA"));
+
+    manager.schedule();
+    UUID commandMessage = uuidValue("SELECT current_command_message_id FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + timedOut + "'", importId);
+    UUID operation = uuidValue("SELECT current_operation_id FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + timedOut + "'", importId);
+    jdbc.sql("""
+        UPDATE student_import_plan_items
+        SET status='FAILED',last_error_code='RESULT_TIMEOUT',last_error_at=now()
+        WHERE import_id=:id AND plan_item_id=:item
+        """).param("id", importId).param("item", timedOut).update();
+    jdbc.sql("UPDATE student_import_processes SET status='APPLICATION_FAILED' WHERE import_id=:id")
+        .param("id", importId).update();
+
+    MessageEnvelope late = result(
+        "CreatePersonResult", "users", importId, timedOut,
+        commandMessage, operation, 1, "SUCCEEDED", null);
+    assertThat(manager.applyResult(late)).isTrue();
+    assertThat(value("SELECT status::text FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + timedOut + "'", importId))
+        .isEqualTo("COMPLETED");
+    assertThat(value("SELECT status::text FROM student_import_processes WHERE import_id=:id", importId))
+        .isEqualTo("APPLICATION_FAILED");
+
+    UUID admin = admin();
+    AcademicCommandDispatcher.Outcome resume = commands.dispatch(
+        command("ResumeStudentImport", importId, admin, UUID.randomUUID(), "resume-late:" + importId));
+    assertThat(resume.status()).isEqualTo("SUCCEEDED");
+    assertThat(value("SELECT status::text FROM student_import_processes WHERE import_id=:id", importId))
+        .isEqualTo("APPLYING");
+    assertThat(integer("SELECT execution_generation FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + laterPending + "'", importId))
+        .isEqualTo(2);
   }
 
   @Test
@@ -449,6 +549,13 @@ class StudentImportApplicationManagerIT {
   private MessageEnvelope result(
       String type, String producer, UUID importId, UUID itemId, UUID causationId,
       UUID operationId, int generation, String status, String errorCode) {
+    String key = value("SELECT current_idempotency_key FROM student_import_plan_items WHERE import_id=:id AND plan_item_id='" + itemId + "'", importId);
+    return resultWithKey(type, producer, importId, itemId, causationId, operationId, key, generation, status, errorCode);
+  }
+
+  private MessageEnvelope resultWithKey(
+      String type, String producer, UUID importId, UUID itemId, UUID causationId,
+      UUID operationId, String key, int generation, String status, String errorCode) {
     var data = mapper.createObjectNode()
         .put("importId", importId.toString())
         .put("planItemId", itemId.toString())
@@ -458,7 +565,7 @@ class StudentImportApplicationManagerIT {
     if (errorCode != null) payload.set("error", mapper.createObjectNode().put("code", errorCode));
     return new MessageEnvelope(
         UUID.randomUUID(), type, 1, "RESULT", producer, Instant.now(), importId, causationId,
-        operationId, null, null, 1, null, payload);
+        operationId, key, null, 1, null, payload);
   }
 
   private List<String> types(UUID importId) {
