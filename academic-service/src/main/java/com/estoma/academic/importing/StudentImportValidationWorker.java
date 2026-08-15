@@ -266,7 +266,7 @@ public class StudentImportValidationWorker {
   }
 
   private void appendErrorBatches(UUID importId, int version, List<ValidationError> errors, Instant now) {
-    int batchSize = 100;
+    int batchSize = properties.validationErrorBatchSize();
     int batchCount = (errors.size() + batchSize - 1) / batchSize;
     for (int batch = 0; batch < batchCount; batch++) {
       List<Map<String, Object>> details = new ArrayList<>();
