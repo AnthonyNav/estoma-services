@@ -144,7 +144,7 @@ class StudentImportValidationWorkerIT {
     payload.set("data", data);
     MessageEnvelope late = new MessageEnvelope(
         UUID.randomUUID(), "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users", Instant.now(),
-        importId, firstMessage, operation, null, null, null, null, null, payload);
+        importId, firstMessage, operation, null, null, null, null, payload);
 
     assertThat(personResults.apply(late)).isTrue();
     assertThat(value("""
