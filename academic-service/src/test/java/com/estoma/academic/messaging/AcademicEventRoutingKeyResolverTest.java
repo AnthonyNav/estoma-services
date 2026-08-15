@@ -16,6 +16,13 @@ class AcademicEventRoutingKeyResolverTest {
         "AcademicPeriodActivated", "academic.period.activated");
     assertThat(AcademicEventRoutingKeyResolver.routingKeys()).containsEntry(
         "StudentEnrollmentReactivated", "academic.enrollment.reactivated");
+    assertThat(AcademicEventRoutingKeyResolver.routingKeys()).containsEntry(
+        "StudentImportValidated", "academic.student-import.validated");
+    assertThat(AcademicEventRoutingKeyResolver.routingKeys()).containsEntry(
+        "StudentImportApplicationResumed", "academic.student-import.application-resumed");
+    assertThat(AcademicEventRoutingKeyResolver.routingKeys())
+        .doesNotContainKey("StudentAcademicProfileUpdated")
+        .doesNotContainKey("StudentImportResumed");
     assertThat(AcademicEventRoutingKeyResolver.routingKeys().values())
         .allMatch(key -> key.matches("academic\\.[a-z0-9-]+\\.[a-z0-9-]+"));
   }

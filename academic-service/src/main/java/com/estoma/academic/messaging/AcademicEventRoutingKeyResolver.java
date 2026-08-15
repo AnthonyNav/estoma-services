@@ -6,7 +6,6 @@ import java.util.Map;
 public final class AcademicEventRoutingKeyResolver {
   private static final Map<String, String> ROUTING_KEYS = Map.ofEntries(
       Map.entry("StudentAcademicProfileCreated", "academic.student.profile-created"),
-      Map.entry("StudentAcademicProfileUpdated", "academic.student.profile-updated"),
       Map.entry("StudentAcademicProfileActivated", "academic.student.profile-activated"),
       Map.entry("StudentAcademicProfileDeactivated", "academic.student.profile-deactivated"),
       Map.entry("StudentAcademicEligibilityChanged", "academic.student-eligibility.changed"),
@@ -20,7 +19,16 @@ public final class AcademicEventRoutingKeyResolver {
       Map.entry("CourseSectionStatusChanged", "academic.course-section.status-changed"),
       Map.entry("StudentEnrolledInCourseSection", "academic.enrollment.registered"),
       Map.entry("StudentEnrollmentReactivated", "academic.enrollment.reactivated"),
-      Map.entry("StudentRemovedFromCourseSection", "academic.enrollment.removed"));
+      Map.entry("StudentRemovedFromCourseSection", "academic.enrollment.removed"),
+      Map.entry("StudentImportStarted", "academic.student-import.started"),
+      Map.entry("StudentImportValidated", "academic.student-import.validated"),
+      Map.entry("StudentImportRejected", "academic.student-import.rejected"),
+      Map.entry("StudentImportValidationErrorsAvailable", "academic.student-import.validation-errors-available"),
+      Map.entry("StudentImportApplicationStarted", "academic.student-import.application-started"),
+      Map.entry("StudentImportApplicationResumed", "academic.student-import.application-resumed"),
+      Map.entry("StudentImportApplicationFailed", "academic.student-import.application-failed"),
+      Map.entry("StudentImportProgressUpdated", "academic.student-import.progress-updated"),
+      Map.entry("StudentImportCompleted", "academic.student-import.completed"));
 
   private AcademicEventRoutingKeyResolver() {}
 

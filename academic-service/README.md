@@ -22,4 +22,10 @@ Spring Boot service that manages student academic information.
 - `GET /health`, `/health/liveness`, `/health/readiness`, `/health/startup`
 - `GET /metrics` and `GET /info`
 
-Business operations are durable RabbitMQ commands on `commands.academic`. The service owns a PostgreSQL/Flyway schema, Consumer Inbox, idempotency records, transactional Outbox, confirmed relay, external status/authorization projections, and the V1 `PRACTICAS_PROFESIONALES` eligibility result. Import-process commands and XLSX handling are deliberately outside this core implementation.
+Business operations are durable RabbitMQ commands on `commands.academic`. The service owns a PostgreSQL/Flyway schema, Consumer Inbox, idempotency records, transactional Outbox, confirmed relay, external status/authorization projections, and the V1 `PRACTICAS_PROFESIONALES` eligibility result.
+
+The service also owns the durable `student-import-process` module for `FULL` academic imports: frozen object references and SHA-256 integrity checks, bounded streaming XLSX validation, authoritative Person resolution, deterministic Plan Items, coordinated `SYSTEM/academic` Commands, Result correlation and retry fencing, controlled `ResumeStudentImport` recovery, audited expected-version rebases, local Academic effects/eligibility, and atomic `COMPLETED + READY` finalization.
+
+Cross-service receiver adaptations in Authentication/Authorization/BFF and full platform E2E validation remain integration work outside this Academic PR2 boundary. Academic emits the canonical contracts documented by `estomatologia-platform-docs/main` rather than preserving legacy receiver identities.
+
+The physical/operational decisions that previously blocked PR2 are closed in [`docs/student-import-pr2-open-questions.md`](docs/student-import-pr2-open-questions.md). Despite the historical filename, that file is now the approved implementation-decision record and remains subordinate to the shared platform contracts.
