@@ -8,6 +8,7 @@ import com.estoma.academic.contract.MessageEnvelope;
 import com.estoma.academic.persistence.OutboxRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
@@ -322,6 +323,16 @@ class AcademicMessagingIT {
         .param("id", importId).param("row", "{\"studentNumber\":\"ST-1\",\"firstName\":\"Ada\",\"paternalSurname\":\"Lovelace\",\"maternalSurname\":\"\",\"institutionalEmail\":\"" + email + "\",\"semester\":1}").update();
     jdbc.sql("INSERT INTO student_import_validation_work (import_id,work_id,work_type,work_key,status,current_message_id,current_operation_id,created_at,updated_at) VALUES (:id,:work,'LOCAL_FILE_ACCESS','file','SUCCEEDED',NULL,NULL,now(),now()),(:id,:resolution,'AUTHORITATIVE_PERSON_RESOLUTION',:email,'WAITING_RESULT',:message,:operation,now(),now())")
         .param("id", importId).param("work", UUID.randomUUID()).param("resolution", UUID.randomUUID()).param("email", email).param("message", queryId).param("operation", operationId).update();
+    jdbc.sql("""
+        INSERT INTO outbox_messages (
+          message_id,message_type,message_version,message_kind,aggregate_id,aggregate_version,
+          correlation_id,payload,metadata,status,attempts,occurred_at,available_at)
+        VALUES (:message,'ResolvePersonByInstitutionalEmail',1,'QUERY',:import,1,
+          :import,CAST(:payload AS jsonb),CAST(:metadata AS jsonb),'PENDING',0,now(),now())
+        """).param("message", queryId).param("import", importId)
+        .param("payload", mapper.writeValueAsString(Map.of("institutionalEmail", email)))
+        .param("metadata", mapper.writeValueAsString(Map.of("operationId", operationId.toString())))
+        .update();
     return new PendingResolution(importId, queryId, operationId);
   }
 
