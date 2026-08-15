@@ -3,6 +3,7 @@ package com.estoma.academic;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.estoma.academic.application.AcademicCommandDispatcher;
+import com.estoma.academic.application.StudentImportPersonResolutionResults;
 import com.estoma.academic.contract.Actor;
 import com.estoma.academic.contract.MessageEnvelope;
 import com.estoma.academic.importing.StudentImportFileStore;
@@ -61,6 +62,7 @@ class StudentImportValidationWorkerIT {
   @Autowired JdbcClient jdbc;
   @Autowired AcademicCommandDispatcher dispatcher;
   @Autowired StudentImportValidationWorker worker;
+  @Autowired StudentImportPersonResolutionResults personResults;
   @Autowired ObjectMapper mapper;
 
   static final TestFileStore FILES = new TestFileStore();
@@ -99,6 +101,88 @@ class StudentImportValidationWorkerIT {
     assertThat(jdbc.sql("SELECT message_kind FROM outbox_messages WHERE message_type='ResolvePersonByInstitutionalEmail'")
         .query(String.class).single()).isEqualTo("QUERY");
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type='StudentImportRejected'").query(Long.class).single()).isZero();
+  }
+
+  @Test
+  void personResolutionRetryKeepsOperationAndAcceptsLatePriorAttempt() throws Exception {
+    UUID importId = start(workbook("Clinical"), false).importId();
+    worker.validatePendingImports();
+
+    UUID firstMessage = uuidValue("""
+        SELECT current_message_id FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'
+        """, importId);
+    UUID operation = uuidValue("""
+        SELECT current_operation_id FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'
+        """, importId);
+    jdbc.sql("""
+        UPDATE student_import_validation_work SET next_attempt_at=now()-interval '1 second'
+        WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'
+        """).param("id", importId).update();
+
+    worker.validatePendingImports();
+
+    UUID secondMessage = uuidValue("""
+        SELECT current_message_id FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'
+        """, importId);
+    assertThat(secondMessage).isNotEqualTo(firstMessage);
+    assertThat(uuidValue("""
+        SELECT current_operation_id FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'
+        """, importId)).isEqualTo(operation);
+    assertThat(integer("""
+        SELECT attempts FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'
+        """, importId)).isEqualTo(2);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type='ResolvePersonByInstitutionalEmail' AND correlation_id=:id")
+        .param("id", importId).query(Long.class).single()).isEqualTo(2);
+
+    var data = mapper.createObjectNode().put("outcome", "NOT_FOUND");
+    var payload = mapper.createObjectNode().put("status", "SUCCEEDED");
+    payload.set("data", data);
+    MessageEnvelope late = new MessageEnvelope(
+        UUID.randomUUID(), "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users", Instant.now(),
+        importId, firstMessage, operation, null, null, null, null, null, payload);
+
+    assertThat(personResults.apply(late)).isTrue();
+    assertThat(value("""
+        SELECT status::text FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'
+        """, importId)).isEqualTo("SUCCEEDED");
+    assertThat(value("SELECT status::text FROM student_import_processes WHERE import_id=:id", importId))
+        .isEqualTo("VALIDATED");
+  }
+
+  @Test
+  void fileAccessRetryUsesDurableBackoffState() throws Exception {
+    StartedImport started = start(workbook("Clinical"), false);
+    FILES.files.remove(started.reference());
+
+    worker.validatePendingImports();
+    assertThat(value("""
+        SELECT status::text FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='LOCAL_FILE_ACCESS'
+        """, started.importId())).isEqualTo("PENDING");
+    assertThat(integer("""
+        SELECT attempts FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='LOCAL_FILE_ACCESS'
+        """, started.importId())).isEqualTo(1);
+
+    jdbc.sql("""
+        UPDATE student_import_validation_work SET next_attempt_at=now()-interval '1 second'
+        WHERE import_id=:id AND work_type='LOCAL_FILE_ACCESS'
+        """).param("id", started.importId()).update();
+    worker.validatePendingImports();
+    assertThat(integer("""
+        SELECT attempts FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='LOCAL_FILE_ACCESS'
+        """, started.importId())).isEqualTo(2);
+    assertThat(jdbc.sql("""
+        SELECT next_attempt_at > now() FROM student_import_validation_work
+        WHERE import_id=:id AND work_type='LOCAL_FILE_ACCESS'
+        """).param("id", started.importId()).query(Boolean.class).single()).isTrue();
   }
 
   @Test
@@ -202,6 +286,14 @@ class StudentImportValidationWorkerIT {
 
   private String value(String sql, UUID id) {
     return jdbc.sql(sql).param("id", id).query(String.class).single();
+  }
+
+  private int integer(String sql, UUID id) {
+    return jdbc.sql(sql).param("id", id).query(Integer.class).single();
+  }
+
+  private UUID uuidValue(String sql, UUID id) {
+    return jdbc.sql(sql).param("id", id).query(UUID.class).single();
   }
 
   private long count(String table, UUID importId) {
