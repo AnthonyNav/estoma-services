@@ -416,10 +416,11 @@ public class AcademicCommandDispatcher {
         """).param("id", importId).query(Boolean.class).single();
     if (ambiguous) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
 
-    int failedItems = jdbc.sql("""
-        SELECT count(*) FROM student_import_plan_items WHERE import_id=:id AND status='FAILED'
+    int remainingItems = jdbc.sql("""
+        SELECT count(*) FROM student_import_plan_items
+        WHERE import_id=:id AND status<>'COMPLETED'
         """).param("id", importId).query(Integer.class).single();
-    if (failedItems == 0) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
+    if (remainingItems == 0) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
 
     int generation = process.executionGeneration + 1;
     int resumedVersion = process.processVersion + 1;
@@ -435,17 +436,19 @@ public class AcademicCommandDispatcher {
         .param("actor", e.actor().accountId()).param("now", java.sql.Timestamp.from(now))
         .param("id", importId).param("expected", process.processVersion).update());
 
-    jdbc.sql("""
+    int reset = jdbc.sql("""
         UPDATE student_import_plan_items
         SET status='PENDING',execution_generation=:generation,
             current_command_message_id=NULL,current_operation_id=NULL,current_idempotency_key=NULL,
             last_result_message_id=NULL,last_result_status=NULL,received_result=NULL,
             attempts=0,first_published_at=NULL,next_attempt_at=:now,
             last_error_code=NULL,last_error_at=NULL,updated_at=:now
-        WHERE import_id=:id AND status='FAILED'
-          AND (last_result_status IS NULL OR last_result_status='REJECTED')
+        WHERE import_id=:id
+          AND (status='PENDING'
+            OR (status='FAILED' AND (last_result_status IS NULL OR last_result_status='REJECTED')))
         """).param("generation", generation).param("now", java.sql.Timestamp.from(now))
         .param("id", importId).update();
+    if (reset == 0) throw new AcademicRejectedException("IMPORT_RESUME_NOT_ALLOWED");
 
     jdbc.sql("""
         INSERT INTO student_import_resume_audit (
@@ -799,7 +802,8 @@ public class AcademicCommandDispatcher {
     else payload.put("error", map("code", code));
     outbox.append(UUID.randomUUID(), e.messageType() + "Result", "RESULT", id, version,
         e.correlationId(), e.messageId(), codec.json(payload),
-        codec.json(map("destination", e.producer(), "operationId", e.operationId(), "actor", e.actor())), now);
+        codec.json(map("destination", e.producer(), "operationId", e.operationId(),
+            "idempotencyKey", e.idempotencyKey(), "actor", e.actor())), now);
   }
 
   private void appendEvent(MessageEnvelope e, Event event, Instant now) {
