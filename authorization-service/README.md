@@ -18,11 +18,17 @@ sessions or expose a business HTTP API.
 - Six durable Commands are implemented through broker-agnostic Application use cases.
 - BFF/Academic authority, optimistic locking, terminal Results and Event intents are persisted atomically.
 - Exact delivery dedupe (`messageId`) is separate from functional idempotency (`idempotencyKey`).
+- Academic Results preserve import-plan correlation and canonical aggregate metadata.
 - Projection Events are monotonic and support durable Inbox `APPLIED`/`DEFERRED` semantics.
 - Academic `importExecution` is retained in deferred Commands and stale generations cannot mutate state.
-- Convergent `PRACTICAS_PROFESIONALES` provisioning is idempotent, race-safe and fail-closed on untrusted projections.
+- Deferred Event replay uses lease/fencing; deferred Command wake-up is transactionally serialized.
+- Convergent `PRACTICAS_PROFESIONALES` provisioning is idempotent, eligibility-aware, race-safe and fail-closed on untrusted projections.
 - ENTITY/FULL projection recovery, authoritative snapshots, race-safe `NOT_FOUND`, pagination and wake-up of deferred work are implemented without a broker.
+- Terminal technical failures can produce durable `FAILED`; retryable Spring/JDBC failures remain visible to the PR3 transport retry policy through a hexagonal classifier port.
 - Authorization exposes broker-agnostic `GetAccountAuthorizationSnapshot` and paginated snapshot Query use cases.
+
+The PR2 audit register is in [`docs/implementation_gaps.md`](docs/implementation_gaps.md).
+All recorded `BLOCKER` and `HIGH` findings are resolved and covered by regression tests.
 
 ## Deferred To PR3
 
@@ -30,10 +36,6 @@ sessions or expose a business HTTP API.
 - Executable wire DTOs, AsyncAPI and JSON Schemas.
 - Outbox Relay publisher confirms, consumer retry/DLQ and broker integration tests.
 - Mapping the already implemented Application Commands/Events/Queries/Results to the platform messaging contracts.
-
-Known implementation gaps are tracked in
-[`docs/implementation_gaps.md`](docs/implementation_gaps.md). PR2 remains open
-until the `BLOCKER` and `HIGH` items are corrected and revalidated.
 
 ## Operational Endpoints
 
