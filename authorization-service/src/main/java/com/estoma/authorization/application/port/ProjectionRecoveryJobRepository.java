@@ -8,7 +8,21 @@ public interface ProjectionRecoveryJobRepository {
 
   Optional<RecoveryJob> findById(UUID recoveryJobId);
 
+  Optional<RecoveryJob> findActive(String projectionType, String scope, String entityKey);
+
+  Optional<RecoveryJob> findWaitingByQueryMessageId(UUID queryMessageId);
+
+  boolean hasActiveFull(String projectionType);
+
   void insert(RecoveryJob job);
+
+  boolean insertIfAbsent(RecoveryJob job);
+
+  /**
+   * Compare-and-set update for the durable state machine. For WAITING_RESULT callers should pass the
+   * expected current query message id; for other states it may be null.
+   */
+  int update(RecoveryJob job, String expectedStatus, UUID expectedCurrentQueryMessageId);
 
   record RecoveryJob(
       UUID recoveryJobId,
