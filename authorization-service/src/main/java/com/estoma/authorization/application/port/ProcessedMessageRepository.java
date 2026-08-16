@@ -2,6 +2,7 @@ package com.estoma.authorization.application.port;
 
 import com.estoma.authorization.domain.model.ActorRef;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -13,13 +14,14 @@ public interface ProcessedMessageRepository {
 
   int markApplied(String consumerName, UUID messageId, Instant appliedAt, Instant updatedAt);
 
-  default int markDeferred(String consumerName, UUID messageId, String deferredReason, Instant updatedAt) {
-    return 0;
-  }
+  /** Updates metadata of an already deferred entry; it must never reopen APPLIED messages. */
+  int updateDeferredReason(
+      String consumerName, UUID messageId, String deferredReason, Instant updatedAt);
 
-  default boolean hasDeferredNewerThan(String consumerName, UUID aggregateId, int aggregateVersion) {
-    return false;
-  }
+  boolean hasDeferredNewerThan(String consumerName, UUID aggregateId, int aggregateVersion);
+
+  List<ProcessedMessage> findDeferredByAggregate(
+      String consumerName, UUID aggregateId, int limit);
 
   record ProcessedMessage(
       String consumerName,
