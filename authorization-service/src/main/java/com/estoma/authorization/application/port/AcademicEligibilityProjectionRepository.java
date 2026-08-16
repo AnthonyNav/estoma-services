@@ -1,6 +1,7 @@
 package com.estoma.authorization.application.port;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -11,6 +12,8 @@ public interface AcademicEligibilityProjectionRepository {
 
   Optional<AcademicEligibilityProjection> findByAccountIdAndSystemCode(
       UUID accountId, String systemCode);
+
+  List<UUID> findEligibleAccountIds(String systemCode);
 
   int upsertIfNewer(AcademicEligibilityProjection projection);
 
