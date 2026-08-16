@@ -11,6 +11,7 @@ import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository
 import com.estoma.authorization.application.port.RoleCatalogRepository;
 import com.estoma.authorization.application.port.SystemAccessRepository;
 import com.estoma.authorization.application.port.SystemCatalogRepository;
+import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.support.CanonicalJson;
 import com.estoma.authorization.application.support.OutboxIntentWriter;
 import com.estoma.authorization.domain.model.AccountRoleAssignment;
@@ -37,6 +38,7 @@ public final class PracticesProvisioningService {
   private final SystemAccessRepository accesses;
   private final ProcessedMessageRepository inbox;
   private final ProjectionRecoveryJobRepository recoveryJobs;
+  private final ProjectionRecoveryCoordinator recovery;
   private final OutboxRepository outbox;
   private final AuthorizationAuditRepository audit;
 
@@ -49,6 +51,7 @@ public final class PracticesProvisioningService {
       SystemAccessRepository accesses,
       ProcessedMessageRepository inbox,
       ProjectionRecoveryJobRepository recoveryJobs,
+      ProjectionRecoveryCoordinator recovery,
       OutboxRepository outbox,
       AuthorizationAuditRepository audit) {
     this.eligibility = eligibility;
@@ -59,6 +62,7 @@ public final class PracticesProvisioningService {
     this.accesses = accesses;
     this.inbox = inbox;
     this.recoveryJobs = recoveryJobs;
+    this.recovery = recovery;
     this.outbox = outbox;
     this.audit = audit;
   }
@@ -71,25 +75,52 @@ public final class PracticesProvisioningService {
     }
     var eligibilityState = currentEligibility.get();
     if (!eligibilityState.eligible() || eligibilityState.policyVersion() != 1) {
+      clearPendingReason(eligibilityState);
+      return;
+    }
+
+    String accountKey = "account:" + accountId;
+    String eligibilityKey =
+        "eligibility:" + eligibilityState.studentAcademicProfileId() + ":" + eligibilityState.systemCode();
+
+    if (!recoveryJobs.isProjectionTrusted("ACADEMIC_ELIGIBILITY")
+        || !recoveryJobs.isEntityTrusted("ACADEMIC_ELIGIBILITY", eligibilityKey)) {
+      setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION");
       return;
     }
 
     var account = accounts.findByAccountId(accountId);
-    String accountKey = "account:" + accountId;
-    String eligibilityKey =
-        "eligibility:" + eligibilityState.studentAcademicProfileId() + ":" + eligibilityState.systemCode();
-    if (account.isEmpty()
-        || !recoveryJobs.isProjectionTrusted("ACCOUNT_STATUS")
-        || !recoveryJobs.isProjectionTrusted("ACADEMIC_ELIGIBILITY")
-        || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", accountKey)
-        || !recoveryJobs.isEntityTrusted("ACADEMIC_ELIGIBILITY", eligibilityKey)
-        || inbox.hasDeferredNewerThan(
-            EVENT_CONSUMER, accountId, account.get().sourceVersion())) {
+    if (account.isEmpty()) {
+      boolean accountEventPending = inbox.findDeferredByAggregate(EVENT_CONSUMER, accountId, 20).stream()
+          .anyMatch(message -> "authentication".equals(message.producer())
+              && "AccountCreated".equals(message.messageType()));
+      if (accountEventPending) {
+        setPendingReason(eligibilityState, "EVENT_PENDING");
+        return;
+      }
+      if (accountRoles.findByAccountId(accountId).isPresent()
+          || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", accountKey)) {
+        setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION");
+        recovery.requestAccount(accountId);
+      }
+      return;
+    }
+
+    if (!recoveryJobs.isProjectionTrusted("ACCOUNT_STATUS")
+        || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", accountKey)) {
+      setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION");
+      recovery.requestAccount(accountId);
+      return;
+    }
+    if (inbox.hasDeferredNewerThan(
+        EVENT_CONSUMER, accountId, account.get().sourceVersion())) {
+      setPendingReason(eligibilityState, "EVENT_PENDING");
       return;
     }
 
     Optional<AccountRoleAssignment> roleAssignment = accountRoles.findByAccountId(accountId);
     if (roleAssignment.isEmpty() || roleAssignment.get().roleCode() != RoleCode.ALUMNO) {
+      clearPendingReason(eligibilityState);
       return;
     }
     var role = roles.findById(roleAssignment.get().roleId());
@@ -99,6 +130,7 @@ public final class PracticesProvisioningService {
         || system.isEmpty()
         || system.get().status() != CatalogStatus.ACTIVE
         || !roles.isAllowedInSystem(roleAssignment.get().roleId(), system.get().id())) {
+      clearPendingReason(eligibilityState);
       return;
     }
     Optional<SystemAccess> existing = accesses.findByAccountIdAndSystemId(accountId, system.get().id());
@@ -164,6 +196,15 @@ public final class PracticesProvisioningService {
         null,
         trigger.occurredAt()));
     clearPendingReason(eligibilityState);
+  }
+
+  private void setPendingReason(
+      AcademicEligibilityProjectionRepository.AcademicEligibilityProjection eligibilityState,
+      String pendingReason) {
+    if (!pendingReason.equals(eligibilityState.pendingReason())) {
+      eligibility.updatePendingReason(
+          eligibilityState.studentAcademicProfileId(), eligibilityState.systemCode(), pendingReason);
+    }
   }
 
   private void clearPendingReason(
