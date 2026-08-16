@@ -27,6 +27,7 @@ estoma:
   messaging:
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     listeners-enabled: ${ESTOMA_MESSAGING_LISTENERS_ENABLED:true}
+    retry-max-attempts: ${ESTOMA_MESSAGING_RETRY_MAX_ATTEMPTS:3}
   outbox:
     claim-batch-size: 20
     lease: 3m
@@ -34,6 +35,9 @@ estoma:
     retry-delay: 5s
     confirm-timeout: 5s
     publish-backoff: 100ms
+  authorization-recovery:
+    result-timeout: ${ESTOMA_AUTHORIZATION_RECOVERY_RESULT_TIMEOUT:30m}
+    failed-retry-delay: ${ESTOMA_AUTHORIZATION_RECOVERY_FAILED_RETRY_DELAY:15m}
 server:
   port: 8080
 management:
@@ -56,7 +60,7 @@ management:
         startup:
           include: db, schemaVersion
         readiness:
-          include: db, commandConsumer, eventProjectionConsumer, outboxRelay
+          include: db, commandConsumer, queryConsumer, resultConsumer, eventProjectionConsumer, outboxRelay, authorizationProjectionRecovery
         liveness:
           include: livenessState
     info:

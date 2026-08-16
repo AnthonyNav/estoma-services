@@ -30,8 +30,14 @@ public class CommandListener {
        channel.basicAck(tag, false);
      } catch (RuntimeException ex) {
        log.warn("academic command consumption failed messageId={} error={}", message.getMessageProperties().getMessageId(), ex.toString());
-       if (retryPublisher.retry(message, "academic.commands.retry")) { metrics.retry(); channel.basicAck(tag, false); }
-       else { metrics.dlq(); channel.basicNack(tag, false, false); }
+       RetryPublisher.RetryOutcome outcome = retryPublisher.retry(message, "academic.commands.retry");
+       if (outcome == RetryPublisher.RetryOutcome.PUBLISHED) {
+         metrics.retry(); channel.basicAck(tag, false);
+       } else if (outcome == RetryPublisher.RetryOutcome.EXHAUSTED) {
+         metrics.dlq(); channel.basicNack(tag, false, false);
+       } else {
+         channel.basicNack(tag, false, true);
+       }
     }
   }
 }

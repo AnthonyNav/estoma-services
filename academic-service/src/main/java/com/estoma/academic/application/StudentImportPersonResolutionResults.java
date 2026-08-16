@@ -119,7 +119,7 @@ public class StudentImportPersonResolutionResults {
   }
 
   private static void validateResultEnvelope(MessageEnvelope envelope) {
-    if (envelope == null || envelope.messageId() == null || envelope.correlationId() == null
+     if (envelope == null || envelope.messageVersion() != 1 || envelope.messageId() == null || envelope.correlationId() == null
         || envelope.causationId() == null || envelope.operationId() == null
         || !"ResolvePersonByInstitutionalEmailResult".equals(envelope.messageType())
         || !"RESULT".equals(envelope.messageKind()) || !"users".equals(envelope.producer())

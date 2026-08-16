@@ -1,10 +1,13 @@
 # PR3 Contract Inconsistencies
 
-Status: BLOCKED
-Date: 2026-08-14
+Status: RESOLVED
+Date: 2026-08-15
 Scope: academic-service student-import PR3
 
-No implementation changes were made after these inconsistencies were found.
+The normative decisions are resolved by
+`estomatologia-platform-docs/03-services/shared/academic-service/pr3-contract-resolution.md`,
+merged through documentation PR #26. This file remains as the audit trail for
+the original gate.
 
 ## 1. Obsolete Plan Item Type
 
@@ -17,9 +20,8 @@ semester operation, and the approved PR2 implementation uses
 `CHANGE_STUDENT_SEMESTER`. There is no generic `UpdateStudentAcademicProfile`
 operation in V1.
 
-Required decision: remove `UPDATE_STUDENT_PROFILE` from the canonical data
-model and replace it with `CHANGE_STUDENT_SEMESTER`, or explicitly reopen the
-V1 command model before continuing PR3.
+Resolution: `UPDATE_STUDENT_PROFILE` is obsolete. PR3 uses
+`CHANGE_STUDENT_SEMESTER`.
 
 References:
 
@@ -39,9 +41,9 @@ approved PR2 decisions explicitly say that `payload.data` should add only
 `importId`, `planItemId` and `executionGeneration`; `operationId` and
 `idempotencyKey` must not be duplicated there.
 
-Required decision: confirm that `operationId` and `idempotencyKey` remain only
-in the envelope, with import correlation fields in `payload.data`, or define a
-new canonical payload shape before PR3 contract schemas are created.
+Resolution: `operationId` and `idempotencyKey` remain only in the envelope;
+`payload.data` contains `importId`, `planItemId` and
+`executionGeneration` when import correlation applies.
 
 References:
 
@@ -62,10 +64,9 @@ durable scheduled `StudentImportValidationWorker` and
 `StudentImportApplicationManager`; the dispatcher currently accepts only the
 BFF commands, including `StartStudentImport` and `ResumeStudentImport`.
 
-Required decision: confirm that validation and application are internal
-durable process-manager operations with no RabbitMQ Command/Result surface, or
-require their explicit wire contracts, dispatcher handlers, idempotency rules,
-and topology before PR3.
+Resolution: validation and application are internal durable Process Manager
+phases. The only external workflow Commands are `StartStudentImport` and
+`ResumeStudentImport`; no wire contracts are created for the two phases.
 
 References:
 
@@ -74,9 +75,19 @@ References:
 - PR2 branch `AcademicCommandDispatcher` allow-list and scheduled worker/
   manager implementation
 
-## Resume Gate
+## Historical Cleanup
 
-PR3 implementation must remain paused until the canonical documentation is
-resolved and the decision is reflected in the implementation branch. After
-resolution, re-check the academic command, data-model, event, query and
-messaging contracts before creating JSON Schemas or changing RabbitMQ wiring.
+The canonical repository still retains historical references in
+`data-model.md` and `commands.md`. The resolution document explicitly gives
+precedence to the decisions above and records cleanup as non-blocking. PR3
+must not reintroduce the obsolete enum or wire Commands.
+
+## External Integration Gate
+
+`academic-service` now publishes the Authorization recovery Queries and
+consumes their Results, but the current `authorization-service` `develop`
+implementation does not yet declare `queries.authorization`, its Query
+listener, or the corresponding durable Results. Full platform E2E recovery
+therefore remains blocked until the compatible Authorization implementation is
+merged in its own change set. This PR does not access `authorization-db` or
+modify that service.

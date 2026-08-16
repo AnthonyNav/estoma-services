@@ -478,7 +478,7 @@ public class StudentImportApplicationManager {
 
   @Transactional
   public boolean applyResult(MessageEnvelope result) {
-    if (result == null || !"RESULT".equals(result.messageKind()) || result.messageId() == null
+     if (result == null || result.messageVersion() != 1 || !"RESULT".equals(result.messageKind()) || result.messageId() == null
         || result.operationId() == null || result.idempotencyKey() == null
         || result.correlationId() == null || result.payload() == null || !result.payload().isObject()) {
       throw new IllegalArgumentException("invalid result");

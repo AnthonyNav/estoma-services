@@ -1,0 +1,365 @@
+asyncapi: 3.0.0
+
+info:
+  title: academic-service PR3 messaging contract
+  version: 1.0.0
+  description: >
+    Machine-readable contract for Academic eligibility recovery Queries,
+    coordinated import Results and Authorization projection recovery. The
+    normative prose source is estomatologia-platform-docs,
+    03-services/shared/academic-service.
+
+defaultContentType: application/json
+
+channels:
+  queries.academic:
+    address: queries.academic
+    description: >
+      Durable recovery Query queue bound to platform.queries with routing key
+      academic. Only authorization may publish the two eligibility Queries.
+    messages:
+      getEligibility:
+        $ref: '#/components/messages/GetStudentAcademicEligibilitySnapshot'
+      listEligibility:
+        $ref: '#/components/messages/ListStudentAcademicEligibilitySnapshotsPage'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: queries.academic
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: academic.queries
+
+  platform.queries:
+    address: platform.queries
+    description: >
+      Direct exchange used by Academic when it requests Authorization
+      projection snapshots. The destination is queries.authorization.
+    messages:
+      getAuthorization:
+        $ref: '#/components/messages/GetAccountAuthorizationSnapshot'
+      listAuthorization:
+        $ref: '#/components/messages/ListAccountAuthorizationSnapshotsPage'
+
+  platform.results:
+    address: platform.results
+    description: >
+      Direct exchange. Results are routed with the requester logical id. The
+      Academic requester consumes results.academic.
+    messages:
+      eligibilityFound:
+        $ref: '#/components/messages/GetStudentAcademicEligibilitySnapshotResult'
+      eligibilityPage:
+        $ref: '#/components/messages/ListStudentAcademicEligibilitySnapshotsPageResult'
+      authorizationSnapshot:
+        $ref: '#/components/messages/GetAccountAuthorizationSnapshotResult'
+      authorizationPage:
+        $ref: '#/components/messages/ListAccountAuthorizationSnapshotsPageResult'
+
+operations:
+  receiveEligibilityQueries:
+    action: receive
+    channel:
+      $ref: '#/channels/queries.academic'
+  sendEligibilityResults:
+    action: send
+    channel:
+      $ref: '#/channels/platform.results'
+  sendAuthorizationRecoveryQueries:
+    action: send
+    channel:
+      $ref: '#/channels/platform.queries'
+
+components:
+  messages:
+    GetStudentAcademicEligibilitySnapshot:
+      name: GetStudentAcademicEligibilitySnapshot
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/AuthorizationQueryEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/GetEligibilityPayload'
+
+    ListStudentAcademicEligibilitySnapshotsPage:
+      name: ListStudentAcademicEligibilitySnapshotsPage
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/AuthorizationQueryEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/ListEligibilityPayload'
+
+    GetAccountAuthorizationSnapshot:
+      name: GetAccountAuthorizationSnapshot
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/RecoveryQueryEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/GetAuthorizationPayload'
+
+    ListAccountAuthorizationSnapshotsPage:
+      name: ListAccountAuthorizationSnapshotsPage
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/RecoveryQueryEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/ListAuthorizationPayload'
+
+    GetStudentAcademicEligibilitySnapshotResult:
+      name: GetStudentAcademicEligibilitySnapshotResult
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/GetEligibilityResultPayload'
+
+    ListStudentAcademicEligibilitySnapshotsPageResult:
+      name: ListStudentAcademicEligibilitySnapshotsPageResult
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/ListEligibilityResultPayload'
+
+    GetAccountAuthorizationSnapshotResult:
+      name: GetAccountAuthorizationSnapshotResult
+      description: >
+        Consumed from results.academic only when Academic is the requester of
+        an Authorization recovery Query. It never completes a student import
+        Plan Item.
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/GetAuthorizationResultPayload'
+
+    ListAccountAuthorizationSnapshotsPageResult:
+      name: ListAccountAuthorizationSnapshotsPageResult
+      description: >
+        Consumed from results.academic only by the durable Authorization
+        projection recovery job.
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/ListAuthorizationResultPayload'
+
+  schemas:
+    AcademicSystemActor:
+      type: object
+      required: [type, service]
+      properties:
+        type:
+          const: SYSTEM
+        service:
+          const: academic
+
+    AuthorizationSystemActor:
+      type: object
+      required: [type, service]
+      properties:
+        type:
+          const: SYSTEM
+        service:
+          const: authorization
+
+    ResultActor:
+      oneOf:
+        - $ref: '#/components/schemas/AcademicSystemActor'
+        - $ref: '#/components/schemas/AuthorizationSystemActor'
+
+    QueryEnvelope:
+      type: object
+      required: [messageId, messageType, messageVersion, messageKind, producer,
+        occurredAt, correlationId, operationId, actor, payload]
+      properties:
+        messageId: {type: string, format: uuid}
+        messageType: {type: string}
+        messageVersion: {type: integer, const: 1}
+        messageKind: {type: string, const: QUERY}
+        producer: {type: string}
+        occurredAt: {type: string, format: date-time}
+        correlationId: {type: string, format: uuid}
+        causationId: {type: string, format: uuid}
+        operationId: {type: string, format: uuid}
+        actor: {$ref: '#/components/schemas/ResultActor'}
+        payload: {type: object}
+
+    AuthorizationQueryEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/QueryEnvelope'
+        - type: object
+          properties:
+            producer: {type: string, const: authorization}
+            actor: {$ref: '#/components/schemas/AuthorizationSystemActor'}
+
+    RecoveryQueryEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/QueryEnvelope'
+        - type: object
+          properties:
+            producer: {type: string, const: academic}
+            actor: {$ref: '#/components/schemas/AcademicSystemActor'}
+
+    ResultEnvelope:
+      type: object
+      required: [messageId, messageType, messageVersion, messageKind, producer,
+        occurredAt, correlationId, causationId, operationId, payload]
+      properties:
+        messageId: {type: string, format: uuid}
+        messageType: {type: string}
+        messageVersion: {type: integer, const: 1}
+        messageKind: {type: string, const: RESULT}
+        producer: {type: string}
+        occurredAt: {type: string, format: date-time}
+        correlationId: {type: string, format: uuid}
+        causationId: {type: string, format: uuid}
+        operationId: {type: string, format: uuid}
+        actor: {$ref: '#/components/schemas/ResultActor'}
+        payload: {type: object}
+
+    GetEligibilityPayload:
+      type: object
+      required: [systemCode]
+      oneOf:
+        - required: [studentAcademicProfileId]
+        - required: [accountId]
+      properties:
+        studentAcademicProfileId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        systemCode: {type: string, const: PRACTICAS_PROFESIONALES}
+
+    ListEligibilityPayload:
+      type: object
+      required: [limit]
+      properties:
+        cursor: {type: string, format: uuid}
+        limit: {type: integer, minimum: 1, maximum: 500}
+        systemCode: {type: string, const: PRACTICAS_PROFESIONALES}
+
+    GetEligibilityResultPayload:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [FOUND, NOT_FOUND]}
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/EligibilitySnapshot'
+            - type: 'null'
+
+    ListEligibilityResultPayload:
+      type: object
+      required: [status, data]
+      properties:
+        status: {type: string, const: SUCCEEDED}
+        data:
+          type: object
+          required: [items, hasMore]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/EligibilitySnapshot'}
+            nextCursor: {type: [string, 'null'], format: uuid}
+            hasMore: {type: boolean}
+
+    GetAuthorizationPayload:
+      type: object
+      required: [accountId]
+      properties:
+        accountId: {type: string, format: uuid}
+        systemCode: {type: string}
+
+    ListAuthorizationPayload:
+      type: object
+      required: [limit]
+      properties:
+        cursor: {type: string}
+        limit: {type: integer, minimum: 1, maximum: 500}
+        systemCode: {type: string}
+
+    AuthorizationSnapshot:
+      type: object
+      required: [accountId, systemAccesses]
+      properties:
+        accountId: {type: string, format: uuid}
+        role:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [roleCode, roleVersion]
+              properties:
+                roleCode: {type: string}
+                roleVersion: {type: integer, minimum: 0}
+        systemAccesses:
+          type: array
+          items:
+            type: object
+            required: [systemAccessId, systemId, systemCode, status, accessVersion]
+            properties:
+              systemAccessId: {type: string, format: uuid}
+              systemId: {type: string, format: uuid}
+              systemCode: {type: string}
+              status: {type: string, enum: [ACTIVE, SUSPENDED, REVOKED]}
+              accessVersion: {type: integer, minimum: 0}
+
+    GetAuthorizationResultPayload:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [FOUND, NOT_FOUND]}
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/AuthorizationSnapshot'
+            - type: 'null'
+
+    ListAuthorizationResultPayload:
+      type: object
+      required: [status, data]
+      properties:
+        status: {type: string, const: SUCCEEDED}
+        data:
+          type: object
+          required: [items, hasMore, snapshotGeneratedAt]
+          properties:
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/AuthorizationSnapshot'}
+            nextCursor: {type: [string, 'null']}
+            hasMore: {type: boolean}
+            snapshotGeneratedAt: {type: string, format: date-time}
+
+    EligibilitySnapshot:
+      type: object
+      required: [eligibilityId, studentAcademicProfileId, accountId, systemCode,
+        eligible, policyVersion, eligibilityVersion, academicProfileVersion,
+        evaluatedAt, updatedAt]
+      properties:
+        eligibilityId: {type: string, format: uuid}
+        studentAcademicProfileId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        systemCode: {type: string, const: PRACTICAS_PROFESIONALES}
+        eligible: {type: boolean}
+        policyVersion: {type: integer}
+        eligibilityVersion: {type: integer}
+        academicProfileVersion: {type: integer}
+        evaluatedAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}

@@ -35,16 +35,19 @@ public class AcademicCommandDispatcher {
   private final OutboxRepository outbox;
   private final EnvelopeCodec codec;
   private final AcademicEligibilityPolicyRegistry eligibilityPolicies;
+  private final AuthorizationProjectionRecoveryService authorizationRecovery;
 
   public AcademicCommandDispatcher(
       JdbcClient jdbc,
       OutboxRepository outbox,
       EnvelopeCodec codec,
-      AcademicEligibilityPolicyRegistry eligibilityPolicies) {
+      AcademicEligibilityPolicyRegistry eligibilityPolicies,
+      AuthorizationProjectionRecoveryService authorizationRecovery) {
     this.jdbc = jdbc;
     this.outbox = outbox;
     this.codec = codec;
     this.eligibilityPolicies = eligibilityPolicies;
+    this.authorizationRecovery = authorizationRecovery;
   }
 
   @Transactional
@@ -652,6 +655,12 @@ public class AcademicCommandDispatcher {
     if (e.actor() == null || !"ACCOUNT".equals(e.actor().type()) || e.actor().accountId() == null) {
       throw new AcademicRejectedException("ACTOR_NOT_AUTHORIZED");
     }
+    if (!authorizationRecovery.authorizationProjectionReady()) {
+      throw new AcademicRejectedException("ACTOR_NOT_AUTHORIZED");
+    }
+    if (!authorizationRecovery.accountTrustworthy(e.actor().accountId())) {
+      throw new AcademicRejectedException("ACTOR_NOT_AUTHORIZED");
+    }
     boolean allowed = jdbc.sql("""
         SELECT EXISTS (
           SELECT 1
@@ -670,7 +679,17 @@ public class AcademicCommandDispatcher {
         .param("id", e.actor().accountId())
         .query(Boolean.class)
         .single();
-    if (!allowed) throw new AcademicRejectedException("ACTOR_NOT_AUTHORIZED");
+    if (!allowed) {
+       if (!authorizationRoleExists(e.actor().accountId())) {
+         authorizationRecovery.requestEntity(e.actor().accountId());
+       }
+      throw new AcademicRejectedException("ACTOR_NOT_AUTHORIZED");
+    }
+  }
+
+   private boolean authorizationRoleExists(UUID accountId) {
+     return jdbc.sql("SELECT EXISTS (SELECT 1 FROM authorization_context_projection WHERE account_id=:id)")
+         .param("id", accountId).query(Boolean.class).single();
   }
 
   private boolean projectionActive(String table, String column, UUID id) {

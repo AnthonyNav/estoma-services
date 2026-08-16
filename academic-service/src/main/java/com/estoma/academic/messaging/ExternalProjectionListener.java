@@ -36,8 +36,14 @@ public class ExternalProjectionListener {
        channel.basicAck(tag, false);
      } catch (RuntimeException ex) {
        log.warn("academic external event consumption failed messageId={} error={}", message.getMessageProperties().getMessageId(), ex.toString());
-       if (retryPublisher.retry(message, "academic.events.retry")) { metrics.retry(); channel.basicAck(tag, false); }
-       else { metrics.dlq(); channel.basicNack(tag, false, false); }
+       RetryPublisher.RetryOutcome outcome = retryPublisher.retry(message, "academic.events.retry");
+       if (outcome == RetryPublisher.RetryOutcome.PUBLISHED) {
+         metrics.retry(); channel.basicAck(tag, false);
+       } else if (outcome == RetryPublisher.RetryOutcome.EXHAUSTED) {
+         metrics.dlq(); channel.basicNack(tag, false, false);
+       } else {
+         channel.basicNack(tag, false, true);
+       }
      }
   }
 
@@ -47,21 +53,27 @@ public class ExternalProjectionListener {
     Instant now = Instant.now();
     if (jdbc.sql("""
         INSERT INTO processed_messages (consumer_name,message_id,correlation_id,message_type,message_kind,producer,aggregate_id,aggregate_version,envelope,processing_state,reconciliation_state,processed_at)
-        VALUES ('academic.events',:id,:correlation,:type,:kind,:producer,:aggregate,:version,CAST(:envelope AS jsonb),'APPLIED',NULL,:now)
-        ON CONFLICT DO NOTHING
-        """).param("id",e.messageId()).param("correlation",e.correlationId()).param("type",e.messageType()).param("kind",e.messageKind()).param("producer",e.producer()).param("aggregate",e.aggregateId()).param("version",e.aggregateVersion()).param("envelope",codec.json(e)).param("now",java.sql.Timestamp.from(now)).update() == 0) return false;
-    JsonNode p = e.payload(); int version = e.aggregateVersion() == null ? 0 : e.aggregateVersion();
+         VALUES ('academic.events',:id,:correlation,:type,:kind,:producer,:aggregate,:version,CAST(:envelope AS jsonb),'APPLIED',NULL,:now)
+         ON CONFLICT DO NOTHING
+         """).param("id",e.messageId()).param("correlation",e.correlationId()).param("type",e.messageType()).param("kind",e.messageKind()).param("producer",e.producer()).param("aggregate",e.aggregateId()).param("version",e.aggregateVersion()).param("envelope",codec.json(e)).param("now",java.sql.Timestamp.from(now)).update() == 0) return false;
+     if (staleAuthorizationEvent(e)) return true;
+     JsonNode p = e.payload(); int version = e.aggregateVersion() == null ? 0 : e.aggregateVersion();
     switch (e.messageType()) {
       case "PersonCreated", "PersonActivated", "PersonDeactivated" -> upsertPerson(uuid(p,"personId", e.aggregateId()), status(p), version);
       case "PersonUpdated" -> updatePerson(uuid(p,"personId", e.aggregateId()), status(p), version);
       case "AccountCreated" -> upsertAccount(uuid(p,"accountId",e.aggregateId()), uuid(p,"personId",null), text(p,"loginType"), status(p), null, version);
       case "AccountActivated" -> upsertAccount(uuid(p,"accountId",e.aggregateId()), uuid(p,"personId",null), text(p,"loginType"), status(p), null, version);
       case "AccountDeactivated" -> upsertAccount(uuid(p,"accountId",e.aggregateId()), uuid(p,"personId",null), text(p,"loginType"), status(p), requiredText(p,"reasonCode"), version);
-      case "AccountRoleAssigned" -> upsertAuthorization(uuid(p,"accountId",e.aggregateId()), requiredText(p,"roleCode"), "ACTIVE", version);
+      case "AccountRoleAssigned" -> {
+        UUID accountId = uuid(p,"accountId",e.aggregateId());
+        if (upsertAuthorization(accountId, requiredText(p,"roleCode"), "ACTIVE", version) > 0) {
+          clearDegradedAccount(accountId);
+        }
+      }
       case "AccountRoleChanged" -> changeAuthorization(uuid(p,"accountId",e.aggregateId()), requiredText(p,"previousRoleCode"), requiredText(p,"newRoleCode"), version);
-      case "SystemAccessGranted", "SystemAccessRestored" -> upsertSystemAccess(uuid(p,"accountId",e.aggregateId()), requiredText(p,"systemCode"), "ACTIVE", version);
-      case "SystemAccessSuspended" -> upsertSystemAccess(uuid(p,"accountId",e.aggregateId()), requiredText(p,"systemCode"), "SUSPENDED", version);
-      case "SystemAccessRevoked" -> upsertSystemAccess(uuid(p,"accountId",e.aggregateId()), requiredText(p,"systemCode"), "REVOKED", version);
+       case "SystemAccessGranted", "SystemAccessRestored" -> upsertSystemAccess(uuid(p,"accountId",e.aggregateId()), uuid(p,"systemAccessId",null), uuid(p,"systemId",null), requiredText(p,"systemCode"), "ACTIVE", version);
+       case "SystemAccessSuspended" -> upsertSystemAccess(uuid(p,"accountId",e.aggregateId()), uuid(p,"systemAccessId",null), uuid(p,"systemId",null), requiredText(p,"systemCode"), "SUSPENDED", version);
+       case "SystemAccessRevoked" -> upsertSystemAccess(uuid(p,"accountId",e.aggregateId()), uuid(p,"systemAccessId",null), uuid(p,"systemId",null), requiredText(p,"systemCode"), "REVOKED", version);
        default -> { }
      }
       return true;
@@ -91,9 +103,24 @@ public class ExternalProjectionListener {
         .param("id",id).param("person",person).param("login",login).param("status",status)
         .param("reason",deactivationReasonCode).param("version",version).update();
   }
-  private void upsertAuthorization(UUID id, String role, String status, int version) { if (id != null && role != null) jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:id,:role,:status,:version,now()) ON CONFLICT (account_id,role_code) DO UPDATE SET status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at WHERE authorization_context_projection.source_version < excluded.source_version").param("id",id).param("role",role).param("status",status).param("version",version).update(); }
-  private void changeAuthorization(UUID id, String oldRole, String newRole, int version) { if (oldRole != null && !oldRole.equals(newRole)) upsertAuthorization(id,oldRole,"INACTIVE",version); upsertAuthorization(id,newRole,"ACTIVE",version); }
-  private void upsertSystemAccess(UUID id, String system, String status, int version) { if (id != null && system != null) jdbc.sql("INSERT INTO system_access_context_projection (account_id,system_code,status,source_version,updated_at) VALUES (:id,:system,:status,:version,now()) ON CONFLICT (account_id,system_code) DO UPDATE SET status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at WHERE system_access_context_projection.source_version < excluded.source_version").param("id",id).param("system",system).param("status",status).param("version",version).update(); }
+   private int upsertAuthorization(UUID id, String role, String status, int version) { return id != null && role != null ? jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:id,:role,:status,:version,now()) ON CONFLICT (account_id,role_code) DO UPDATE SET status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at WHERE authorization_context_projection.source_version < excluded.source_version").param("id",id).param("role",role).param("status",status).param("version",version).update() : 0; }
+   private void changeAuthorization(UUID id, String oldRole, String newRole, int version) { int changed = 0; if (oldRole != null && !oldRole.equals(newRole)) changed += upsertAuthorization(id,oldRole,"INACTIVE",version); changed += upsertAuthorization(id,newRole,"ACTIVE",version); if (changed > 0 && id != null) clearDegradedAccount(id); }
+     private void upsertSystemAccess(UUID id, UUID systemAccessId, UUID systemId, String system, String status, int version) { if (id != null && system != null) jdbc.sql("INSERT INTO system_access_context_projection (account_id,system_access_id,system_id,system_code,status,source_version,updated_at) VALUES (:id,:systemAccessId,:systemId,:system,:status,:version,now()) ON CONFLICT (account_id,system_code) DO UPDATE SET system_access_id=COALESCE(excluded.system_access_id,system_access_context_projection.system_access_id),system_id=COALESCE(excluded.system_id,system_access_context_projection.system_id),status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at WHERE system_access_context_projection.source_version < excluded.source_version").param("id",id).param("systemAccessId",systemAccessId).param("systemId",systemId).param("system",system).param("status",status).param("version",version).update(); }
+
+   private boolean staleAuthorizationEvent(MessageEnvelope event) {
+     if (!"authorization".equals(event.producer()) || event.occurredAt() == null) return false;
+     return jdbc.sql("""
+         SELECT COALESCE(:occurred <= COALESCE(snapshot_generated_at,recovery_started_at), false)
+         FROM academic_projection_recovery_state
+         WHERE projection_type='AUTHORIZATION'
+         """).param("occurred", java.sql.Timestamp.from(event.occurredAt()))
+         .query(Boolean.class).optional().orElse(false);
+   }
+
+   private void clearDegradedAccount(UUID accountId) {
+     jdbc.sql("DELETE FROM authorization_projection_degraded_accounts WHERE account_id=:id")
+         .param("id", accountId).update();
+   }
   private static void validatePayload(MessageEnvelope e) {
     JsonNode p = e.payload();
     if (p == null || p.isNull() || !p.isObject()) throw new IllegalArgumentException("external event payload must be an object");

@@ -24,7 +24,7 @@ public final class ExternalEventContract {
   private ExternalEventContract() {}
 
   public static void validate(MessageEnvelope envelope) {
-    if (envelope == null || envelope.messageId() == null || envelope.messageVersion() != 1
+     if (envelope == null || envelope.messageId() == null || envelope.occurredAt() == null || envelope.messageVersion() != 1
         || !"EVENT".equals(envelope.messageKind()) || envelope.messageType() == null) {
       throw new IllegalArgumentException("invalid external event envelope");
     }

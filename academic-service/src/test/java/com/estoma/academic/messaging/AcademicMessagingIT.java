@@ -5,7 +5,9 @@ import static org.awaitility.Awaitility.await;
 
 import com.estoma.academic.contract.Actor;
 import com.estoma.academic.contract.MessageEnvelope;
+import com.estoma.academic.application.AuthorizationProjectionRecoveryService;
 import com.estoma.academic.persistence.OutboxRepository;
+import com.estoma.academic.persistence.ProjectionRecoveryJobRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -65,6 +67,9 @@ class AcademicMessagingIT {
   @Autowired EnvelopeCodec codec;
   @Autowired OutboxRepository outbox;
   @Autowired OutboxRelay relay;
+  @Autowired AuthorizationProjectionRecoveryService recovery;
+  @Autowired ProjectionRecoveryJobRepository recoveryJobs;
+  @Autowired ExternalProjectionListener externalEvents;
   @Autowired JdbcClient jdbc;
   @Autowired ObjectMapper mapper;
 
@@ -73,7 +78,13 @@ class AcademicMessagingIT {
 
   @BeforeEach
   void reset() {
-    jdbc.sql("TRUNCATE TABLE outbox_messages,processed_messages,idempotency_records,student_import_validation_work,student_import_validation_rows,student_import_validation_errors,student_import_plan_item_rebases,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
+    jdbc.sql("TRUNCATE TABLE authorization_projection_degraded_accounts,projection_recovery_not_found_conflicts,projection_recovery_jobs,outbox_messages,processed_messages,idempotency_records,student_import_validation_work,student_import_validation_rows,student_import_validation_errors,student_import_plan_item_rebases,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
+    jdbc.sql("""
+        INSERT INTO academic_projection_recovery_state (projection_type,status,active_job_id,updated_at)
+        VALUES ('AUTHORIZATION','READY',NULL,now())
+        ON CONFLICT (projection_type) DO UPDATE
+        SET status='READY',active_job_id=NULL,updated_at=now(),recovery_started_at=NULL,snapshot_generated_at=NULL
+        """).update();
     jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',1,now())")
         .param("id", administratorPerson)
         .update();
@@ -82,10 +93,14 @@ class AcademicMessagingIT {
         .param("person", administratorPerson)
         .update();
     admin.purgeQueue(AcademicTopology.COMMAND_QUEUE);
+    admin.purgeQueue(AcademicTopology.QUERY_QUEUE);
     admin.purgeQueue(AcademicTopology.EVENT_QUEUE);
     admin.purgeQueue(AcademicTopology.RESULT_QUEUE);
     admin.purgeQueue("commands.academic.retry.5s");
+    admin.purgeQueue("queries.academic.retry.5s");
     admin.purgeQueue("commands.academic.dlq");
+    admin.purgeQueue("queries.academic.dlq");
+    admin.purgeQueue("results.academic.dlq");
   }
 
   @Test
@@ -150,6 +165,150 @@ class AcademicMessagingIT {
     assertThat(query.actor()).isEqualTo(new Actor("SYSTEM", null, "academic"));
     assertThat(query.payload().path("institutionalEmail").asString()).isEqualTo("ada@estoma.mx");
     admin.deleteQueue(queue.getName());
+  }
+
+  @Test
+  void declaresAcademicQueryTopologyAndRoutesRecoveryQueriesByDestination() {
+    assertThat(admin.getQueueProperties(AcademicTopology.QUERY_QUEUE)).isNotNull();
+    assertThat(admin.getQueueProperties("queries.academic.retry.5s")).isNotNull();
+    Queue queue = new Queue("queries.authorization.messaging-it", false, true, true);
+    admin.declareQueue(queue);
+    admin.declareBinding(BindingBuilder.bind(queue)
+        .to(new DirectExchange(AcademicTopology.QUERIES)).with("authorization"));
+    UUID messageId = UUID.randomUUID();
+    UUID operationId = UUID.randomUUID();
+    outbox.append(messageId, "GetAccountAuthorizationSnapshot", "QUERY", UUID.randomUUID(), null,
+        UUID.randomUUID(), null, "{\"accountId\":\"" + UUID.randomUUID() + "\"}",
+        "{\"destination\":\"authorization\",\"operationId\":\"" + operationId
+            + "\",\"actor\":{\"type\":\"SYSTEM\",\"service\":\"academic\"}}",
+        Instant.now());
+    relay.relay();
+    Message query = rabbit.receive(queue.getName(), 5_000);
+    assertThat(query).isNotNull();
+    assertThat(codec.decode(query.getBody()).messageType()).isEqualTo("GetAccountAuthorizationSnapshot");
+    admin.deleteQueue(queue.getName());
+  }
+
+  @Test
+  void academicQueryListenerPersistsEligibilityResultBeforeTheQueryIsAcknowledged() {
+    UUID profile = UUID.randomUUID();
+    UUID account = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO student_academic_profiles
+          (student_academic_profile_id,person_id,account_id,student_number,student_number_normalized,
+           current_semester,academic_status,version,student_number_version,created_at,updated_at)
+        VALUES (:profile,:person,:account,'Q-1','q-1',6,'ACTIVE',1,0,now(),now())
+        """).param("profile", profile).param("person", UUID.randomUUID()).param("account", account).update();
+    jdbc.sql("""
+        INSERT INTO student_academic_eligibilities
+          (eligibility_id,student_academic_profile_id,system_code,eligible,policy_version,
+           eligibility_version,academic_profile_version,evaluated_at,updated_at)
+        VALUES (:eligibility,:profile,'PRACTICAS_PROFESIONALES',true,1,3,1,now(),now())
+        """).param("eligibility", UUID.randomUUID()).param("profile", profile).update();
+    UUID queryId = UUID.randomUUID();
+    UUID operationId = UUID.randomUUID();
+    MessageEnvelope query = new MessageEnvelope(queryId, "GetStudentAcademicEligibilitySnapshot", 1, "QUERY",
+        "authorization", Instant.now(), UUID.randomUUID(), null, operationId, null, null, null,
+        new Actor("SYSTEM", null, "authorization"), mapper.createObjectNode()
+            .put("studentAcademicProfileId", profile.toString()).put("systemCode", "PRACTICAS_PROFESIONALES"));
+    rabbit.send(AcademicTopology.QUERIES, "academic", new Message(codec.encode(query)));
+    await().atMost(Duration.ofSeconds(10)).until(() -> count(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='GetStudentAcademicEligibilitySnapshotResult'"
+            + " AND causation_id=:id", queryId) == 1);
+    assertThat(jdbc.sql("SELECT payload->>'status' FROM outbox_messages WHERE causation_id=:id")
+        .param("id", queryId).query(String.class).single()).isEqualTo("FOUND");
+    assertThat(jdbc.sql("SELECT metadata->>'destination' FROM outbox_messages WHERE causation_id=:id")
+        .param("id", queryId).query(String.class).single()).isEqualTo("authorization");
+  }
+
+  @Test
+  void authorizationEntityRecoveryIgnoresAStaleResultAndAppliesTheCurrentSnapshot() {
+    UUID account = UUID.randomUUID();
+    UUID jobId = recovery.requestEntity(account);
+    ProjectionRecoveryJobRepository.Job claimed = recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst();
+    recovery.publishNext(claimed);
+    ProjectionRecoveryJobRepository.Job waiting = recoveryJobs.find(jobId).orElseThrow();
+    var data = mapper.createObjectNode().put("accountId", account.toString())
+        .put("snapshotGeneratedAt", Instant.now().toString());
+    data.set("role", mapper.createObjectNode().put("roleCode", "ALUMNO").put("roleVersion", 4));
+    data.set("systemAccesses", mapper.createArrayNode().add(mapper.createObjectNode()
+        .put("systemAccessId", UUID.randomUUID().toString()).put("systemId", UUID.randomUUID().toString())
+        .put("systemCode", "LAVADO_ULTRASONICO")
+        .put("status", "ACTIVE").put("accessVersion", 2)));
+    var payload = mapper.createObjectNode().put("status", "FOUND").set("data", data);
+    MessageEnvelope stale = new MessageEnvelope(UUID.randomUUID(), "GetAccountAuthorizationSnapshotResult", 1,
+        "RESULT", "authorization", Instant.now(), jobId, UUID.randomUUID(), waiting.currentOperationId(), null,
+        null, null, new Actor("SYSTEM", null, "academic"), payload);
+    assertThat(recovery.applyResult(stale)).isEqualTo(AuthorizationProjectionRecoveryService.ResultOutcome.STALE);
+    assertThat(jdbc.sql("SELECT count(*) FROM authorization_context_projection WHERE account_id=:id")
+        .param("id", account).query(Long.class).single()).isZero();
+
+    MessageEnvelope current = new MessageEnvelope(UUID.randomUUID(), "GetAccountAuthorizationSnapshotResult", 1,
+        "RESULT", "authorization", Instant.now(), jobId, waiting.currentQueryMessageId(), waiting.currentOperationId(), null,
+        null, null, new Actor("SYSTEM", null, "academic"), payload);
+    assertThat(recovery.applyResult(current)).isEqualTo(AuthorizationProjectionRecoveryService.ResultOutcome.APPLIED);
+    assertThat(jdbc.sql("SELECT status FROM authorization_context_projection WHERE account_id=:id AND role_code='ALUMNO'")
+        .param("id", account).query(String.class).single()).isEqualTo("ACTIVE");
+    assertThat(jdbc.sql("SELECT status::text FROM projection_recovery_jobs WHERE recovery_job_id=:id")
+        .param("id", jobId).query(String.class).single()).isEqualTo("COMPLETED");
+  }
+
+  @Test
+  void failedFullRecoveryCanBeRestartedAfterItsRetryDelay() {
+    UUID failedJob = recovery.requestFull();
+    ProjectionRecoveryJobRepository.Job claimed = recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst();
+    recoveryJobs.fail(claimed, "RECOVERY_QUERY_PUBLISH_FAILED", Instant.now().minusSeconds(1));
+    recoveryJobs.markFailed(failedJob, Instant.now().minusSeconds(1));
+
+    assertThat(recoveryJobs.fullRecoveryRetryDue(Duration.ZERO)).isTrue();
+    UUID retryJob = recovery.requestFull();
+
+    assertThat(retryJob).isNotEqualTo(failedJob);
+    assertThat(jdbc.sql("SELECT status::text FROM academic_projection_recovery_state WHERE projection_type='AUTHORIZATION'")
+        .query(String.class).single()).isEqualTo("REBUILDING");
+  }
+
+  @Test
+  void fullAuthorizationRecoveryAdvancesItsCursorOnlyAfterApplyingTheCurrentPage() {
+    UUID jobId = recovery.requestFull();
+    recovery.publishNext(recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst());
+    ProjectionRecoveryJobRepository.Job first = recoveryJobs.find(jobId).orElseThrow();
+    var firstData = mapper.createObjectNode();
+    UUID firstAccount = UUID.randomUUID();
+    Instant snapshotGeneratedAt = Instant.now();
+    var firstItem = mapper.createObjectNode().put("accountId", firstAccount.toString());
+    firstItem.putArray("systemAccesses");
+    firstData.putArray("items").add(firstItem);
+    firstData.put("nextCursor", UUID.randomUUID().toString()).put("hasMore", true)
+        .put("snapshotGeneratedAt", snapshotGeneratedAt.toString());
+    MessageEnvelope firstPage = new MessageEnvelope(UUID.randomUUID(), "ListAccountAuthorizationSnapshotsPageResult", 1,
+        "RESULT", "authorization", Instant.now(), jobId, first.currentQueryMessageId(), first.currentOperationId(), null,
+        null, null, new Actor("SYSTEM", null, "academic"), mapper.createObjectNode()
+            .put("status", "SUCCEEDED").set("data", firstData));
+    assertThat(recovery.applyResult(firstPage)).isEqualTo(AuthorizationProjectionRecoveryService.ResultOutcome.APPLIED);
+    MessageEnvelope staleEvent = new MessageEnvelope(UUID.randomUUID(), "AccountRoleAssigned", 1, "EVENT",
+        "authorization", snapshotGeneratedAt.minusSeconds(1), UUID.randomUUID(), null, null, null,
+        firstAccount, 3, null, mapper.createObjectNode().put("accountId", firstAccount.toString())
+            .put("roleCode", "SUPERADMIN"));
+    assertThat(externalEvents.apply(staleEvent)).isTrue();
+    assertThat(jdbc.sql("SELECT count(*) FROM authorization_context_projection WHERE account_id=:id")
+        .param("id", firstAccount).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT status::text FROM projection_recovery_jobs WHERE recovery_job_id=:id")
+        .param("id", jobId).query(String.class).single()).isEqualTo("PENDING");
+    recovery.publishNext(recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst());
+    ProjectionRecoveryJobRepository.Job second = recoveryJobs.find(jobId).orElseThrow();
+    var lastData = mapper.createObjectNode();
+    lastData.putArray("items");
+    lastData.put("hasMore", false).put("snapshotGeneratedAt", snapshotGeneratedAt.toString());
+    MessageEnvelope lastPage = new MessageEnvelope(UUID.randomUUID(), "ListAccountAuthorizationSnapshotsPageResult", 1,
+        "RESULT", "authorization", Instant.now(), jobId, second.currentQueryMessageId(), second.currentOperationId(), null,
+        null, null, new Actor("SYSTEM", null, "academic"), mapper.createObjectNode()
+            .put("status", "SUCCEEDED").set("data", lastData));
+    assertThat(recovery.applyResult(lastPage)).isEqualTo(AuthorizationProjectionRecoveryService.ResultOutcome.APPLIED);
+    assertThat(jdbc.sql("SELECT status::text FROM projection_recovery_jobs WHERE recovery_job_id=:id")
+        .param("id", jobId).query(String.class).single()).isEqualTo("COMPLETED");
+    assertThat(jdbc.sql("SELECT status::text FROM academic_projection_recovery_state WHERE projection_type='AUTHORIZATION'")
+        .query(String.class).single()).isEqualTo("READY");
   }
 
   @Test
