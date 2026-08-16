@@ -3,18 +3,21 @@ package com.estoma.authorization.application.recovery;
 import com.estoma.authorization.application.command.ApplicationResult;
 import com.estoma.authorization.application.command.AuthorizationCommandDispatcher;
 import com.estoma.authorization.application.command.CommandOutcome;
+import com.estoma.authorization.application.command.CommandResultSupport;
 import com.estoma.authorization.application.command.ImportExecution;
 import com.estoma.authorization.application.port.AuthorizationAuditRepository;
 import com.estoma.authorization.application.port.CommandIdempotencyRepository;
 import com.estoma.authorization.application.port.DeferredCommandDecoder;
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
+import com.estoma.authorization.application.support.CanonicalJson;
 import com.estoma.authorization.application.support.OutboxIntentWriter;
 import com.estoma.authorization.application.support.ResultIntentFactory;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -102,7 +105,8 @@ public final class DeferredCommandRecoveryService {
         details = "deferred execution generation is older than the latest observed generation";
       }
     }
-    ApplicationResult result = ApplicationResult.rejected(errorCode, details);
+    ApplicationResult result = CommandResultSupport.ensureImportExecutionData(
+        command, ApplicationResult.rejected(errorCode, details));
     var resultIntent = ResultIntentFactory.create(
         metadata, command, result, null, null, now);
     OutboxIntentWriter.append(outbox, resultIntent);
@@ -115,9 +119,9 @@ public final class DeferredCommandRecoveryService {
             record.requestFingerprint(),
             "COMPLETED",
             "REJECTED",
-            null,
+            result.dataJson(),
             errorCode,
-            "{\"details\":" + quote(details) + "}",
+            CanonicalJson.write(Map.of("details", details)),
             null,
             null,
             record.importId(),
@@ -151,9 +155,5 @@ public final class DeferredCommandRecoveryService {
         details,
         now));
     return CommandOutcome.terminal(result, List.of(), List.of(resultIntent));
-  }
-
-  private static String quote(String value) {
-    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
   }
 }
