@@ -12,15 +12,24 @@ sessions or expose a business HTTP API.
 - V1 catalogs and role/system/permission seed are deterministic.
 - Account roles, system accesses, external projections and technical Inbox,
   idempotency, Outbox, audit and recovery tables are present.
-- RabbitMQ, wire DTOs, recovery orchestration and snapshot Queries remain PR3.
 
-## PR2 Application Behavior
+## PR2 Application Behavior And Recovery
 
-- Six durable Commands are dispatched directly through Application without a broker.
+- Six durable Commands are implemented through broker-agnostic Application use cases.
 - BFF/Academic authority, optimistic locking, terminal Results and Event intents are persisted atomically.
-- Projection Events are monotonic and support Inbox `APPLIED`/`DEFERRED`.
-- Academic `importExecution` is retained in deferred command payloads.
-- Convergent `PRACTICAS_PROFESIONALES` provisioning is idempotent and race-safe.
+- Exact delivery dedupe (`messageId`) is separate from functional idempotency (`idempotencyKey`).
+- Projection Events are monotonic and support durable Inbox `APPLIED`/`DEFERRED` semantics.
+- Academic `importExecution` is retained in deferred Commands and stale generations cannot mutate state.
+- Convergent `PRACTICAS_PROFESIONALES` provisioning is idempotent, race-safe and fail-closed on untrusted projections.
+- ENTITY/FULL projection recovery, authoritative snapshots, race-safe `NOT_FOUND`, pagination and wake-up of deferred work are implemented without a broker.
+- Authorization exposes broker-agnostic `GetAccountAuthorizationSnapshot` and paginated snapshot Query use cases.
+
+## Deferred To PR3
+
+- RabbitMQ topology/listeners/publishers.
+- Executable wire DTOs, AsyncAPI and JSON Schemas.
+- Outbox Relay publisher confirms, consumer retry/DLQ and broker integration tests.
+- Mapping the already implemented Application Commands/Events/Queries/Results to the platform messaging contracts.
 
 ## Operational Endpoints
 
