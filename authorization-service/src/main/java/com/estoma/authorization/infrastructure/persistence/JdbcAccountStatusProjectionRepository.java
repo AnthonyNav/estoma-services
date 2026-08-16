@@ -51,4 +51,9 @@ class JdbcAccountStatusProjectionRepository implements AccountStatusProjectionRe
         .param("updatedAt", Timestamps.toTimestamp(projection.updatedAt()))
         .update();
   }
+
+  @Override
+  public int clearAll() {
+    return jdbc.sql("DELETE FROM account_status_projection").update();
+  }
 }

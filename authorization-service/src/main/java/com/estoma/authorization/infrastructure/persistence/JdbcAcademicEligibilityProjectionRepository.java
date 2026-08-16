@@ -1,6 +1,7 @@
 package com.estoma.authorization.infrastructure.persistence;
 
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -27,6 +28,31 @@ class JdbcAcademicEligibilityProjectionRepository implements AcademicEligibility
         .param("systemCode", systemCode)
         .query(AcademicEligibilityRowMapper.INSTANCE)
         .optional();
+  }
+
+  @Override
+  public Optional<AcademicEligibilityProjection> findByAccountIdAndSystemCode(
+      UUID accountId, String systemCode) {
+    return jdbc.sql(
+            "SELECT eligibility_id, student_academic_profile_id, system_code, account_id, eligible, "
+                + "policy_version, eligibility_version, academic_profile_version, pending_reason, evaluated_at, updated_at "
+                + "FROM academic_eligibility_projection "
+                + "WHERE account_id = :accountId AND system_code = :systemCode "
+                + "ORDER BY eligibility_version DESC LIMIT 1")
+        .param("accountId", accountId)
+        .param("systemCode", systemCode)
+        .query(AcademicEligibilityRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
+  public List<UUID> findEligibleAccountIds(String systemCode) {
+    return jdbc.sql(
+            "SELECT DISTINCT account_id FROM academic_eligibility_projection "
+                + "WHERE system_code = :systemCode AND eligible = true ORDER BY account_id")
+        .param("systemCode", systemCode)
+        .query(UUID.class)
+        .list();
   }
 
   @Override
@@ -66,5 +92,21 @@ class JdbcAcademicEligibilityProjectionRepository implements AcademicEligibility
         .param("evaluatedAt", Timestamps.toTimestamp(projection.evaluatedAt()))
         .param("updatedAt", Timestamps.toTimestamp(projection.updatedAt()))
         .update();
+  }
+
+  @Override
+  public int updatePendingReason(UUID studentAcademicProfileId, String systemCode, String pendingReason) {
+    return jdbc.sql(
+            "UPDATE academic_eligibility_projection SET pending_reason = :pendingReason, updated_at = now() "
+                + "WHERE student_academic_profile_id = :studentAcademicProfileId AND system_code = :systemCode")
+        .param("studentAcademicProfileId", studentAcademicProfileId)
+        .param("systemCode", systemCode)
+        .param("pendingReason", pendingReason)
+        .update();
+  }
+
+  @Override
+  public int clearAll() {
+    return jdbc.sql("DELETE FROM academic_eligibility_projection").update();
   }
 }

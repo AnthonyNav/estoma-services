@@ -12,6 +12,8 @@ public interface AccountStatusProjectionRepository {
 
   int upsertIfNewer(AccountStatusProjection projection);
 
+  int clearAll();
+
   record AccountStatusProjection(
       UUID accountId,
       UUID personId,

@@ -10,5 +10,10 @@ public interface AccountRoleRepository {
 
   void insert(AccountRoleAssignment assignment);
 
+  default boolean insertIfAbsent(AccountRoleAssignment assignment) {
+    insert(assignment);
+    return true;
+  }
+
   int update(AccountRoleAssignment assignment, int expectedVersion);
 }
