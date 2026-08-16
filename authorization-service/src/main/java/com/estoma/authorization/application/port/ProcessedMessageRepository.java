@@ -32,6 +32,8 @@ public interface ProcessedMessageRepository {
   List<ProcessedMessage> findDeferredCommandsByAccountId(
       String consumerName, UUID accountId, int limit);
 
+  List<ProcessedMessage> findDeferred(String consumerName, String messageKind, int limit);
+
   record ProcessedMessage(
       String consumerName,
       UUID messageId,
