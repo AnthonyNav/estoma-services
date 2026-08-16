@@ -7,14 +7,13 @@ import com.estoma.authorization.application.command.CommandMetadata;
 import com.estoma.authorization.application.command.GrantSystemAccessCommand;
 import com.estoma.authorization.application.command.ImportExecution;
 import com.estoma.authorization.application.command.RestoreSystemAccessCommand;
-import com.estoma.authorization.application.command.RevokeSystemAccessCommand;
-import com.estoma.authorization.application.command.SuspendSystemAccessCommand;
 import com.estoma.authorization.application.exception.AuthorizationErrorCode;
 import com.estoma.authorization.application.exception.AuthorizationRuleViolationException;
 import com.estoma.authorization.application.port.AccountRoleRepository;
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
+import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.port.RoleCatalogRepository;
 import com.estoma.authorization.application.port.SystemCatalogRepository;
 import com.estoma.authorization.domain.model.AccountRoleAssignment;
@@ -39,6 +38,7 @@ public final class AuthorityEvaluator {
   private final RoleCatalogRepository roles;
   private final SystemCatalogRepository systems;
   private final ProcessedMessageRepository inbox;
+  private final ProjectionRecoveryJobRepository recoveryJobs;
 
   public AuthorityEvaluator(
       AccountStatusProjectionRepository accounts,
@@ -46,13 +46,15 @@ public final class AuthorityEvaluator {
       AccountRoleRepository accountRoles,
       RoleCatalogRepository roles,
       SystemCatalogRepository systems,
-      ProcessedMessageRepository inbox) {
+      ProcessedMessageRepository inbox,
+      ProjectionRecoveryJobRepository recoveryJobs) {
     this.accounts = accounts;
     this.persons = persons;
     this.accountRoles = accountRoles;
     this.roles = roles;
     this.systems = systems;
     this.inbox = inbox;
+    this.recoveryJobs = recoveryJobs;
   }
 
   public void authorize(
@@ -80,6 +82,9 @@ public final class AuthorityEvaluator {
     if (actor.type() != ActorType.ACCOUNT || actor.accountId() == null) {
       throw reject(AuthorizationErrorCode.ACTOR_CONTEXT_INVALID, "BFF commands require an ACCOUNT actor");
     }
+    if (recoveryJobs.hasActiveFull("ACCOUNT_STATUS") || recoveryJobs.hasActiveFull("PERSON_STATUS")) {
+      throw reject(AuthorizationErrorCode.ACTOR_NOT_AUTHORIZED, "critical actor projection rebuild is active");
+    }
     var actorAccount = accounts.findByAccountId(actor.accountId());
     var actorPerson = actorAccount.flatMap(account -> persons.findByPersonId(account.personId()));
     if (actorAccount.isEmpty()
@@ -87,8 +92,11 @@ public final class AuthorityEvaluator {
         || actorAccount.get().status() != ProjectedStatus.ACTIVE
         || actorPerson.get().status() != ProjectedStatus.ACTIVE
         || inbox.hasDeferredNewerThan(EVENT_CONSUMER, actor.accountId(), actorAccount.get().sourceVersion())
-        || inbox.hasDeferredNewerThan(EVENT_CONSUMER, actorAccount.get().personId(), actorPerson.get().sourceVersion())) {
-      throw reject(AuthorizationErrorCode.ACTOR_NOT_AUTHORIZED, "actor projections are not active and trustworthy");
+        || inbox.hasDeferredNewerThan(
+            EVENT_CONSUMER, actorAccount.get().personId(), actorPerson.get().sourceVersion())) {
+      throw reject(
+          AuthorizationErrorCode.ACTOR_NOT_AUTHORIZED,
+          "actor projections are not active and trustworthy");
     }
     AccountRoleAssignment actorRole = accountRoles.findByAccountId(actor.accountId())
         .orElseThrow(() -> reject(AuthorizationErrorCode.ACTOR_NOT_AUTHORIZED, "actor has no role"));
@@ -115,10 +123,14 @@ public final class AuthorityEvaluator {
       return;
     }
     if (actorRoleCode != RoleCode.ADMINISTRADOR_LAVADO) {
-      throw reject(AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED, "actor role has no V1 administration scope");
+      throw reject(
+          AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+          "actor role has no V1 administration scope");
     }
     if (command instanceof ChangeAccountRoleCommand) {
-      throw reject(AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED, "ADMINISTRADOR_LAVADO cannot change roles");
+      throw reject(
+          AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+          "ADMINISTRADOR_LAVADO cannot change roles");
     }
     if (command instanceof AssignAccountRoleCommand assign
         && assign.roleCode() != RoleCode.SUPERVISOR_LAVADO) {
@@ -134,13 +146,17 @@ public final class AuthorityEvaluator {
     }
     if (command instanceof RestoreSystemAccessCommand
         && targetAccess.map(access -> access.status() != SystemAccessStatus.SUSPENDED).orElse(true)) {
-      throw reject(AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED, "Lavado restore only supports SUSPENDED");
+      throw reject(
+          AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+          "Lavado restore only supports SUSPENDED");
     }
   }
 
   private void authorizeAcademic(CommandMetadata metadata, AuthorizationCommand command) {
     if (metadata.actor().type() != ActorType.SYSTEM || !"academic".equals(metadata.actor().service())) {
-      throw reject(AuthorizationErrorCode.ACTOR_CONTEXT_INVALID, "Academic requires SYSTEM/academic actor");
+      throw reject(
+          AuthorizationErrorCode.ACTOR_CONTEXT_INVALID,
+          "Academic requires SYSTEM/academic actor");
     }
     ImportExecution execution = command.importExecution();
     if (execution == null) {
@@ -159,7 +175,9 @@ public final class AuthorityEvaluator {
       }
       return;
     }
-    throw reject(AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED, "Academic operation is not allowlisted");
+    throw reject(
+        AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+        "Academic operation is not allowlisted");
   }
 
   private RoleCode requestedTargetRole(AuthorizationCommand command) {
@@ -183,7 +201,8 @@ public final class AuthorityEvaluator {
     return targetAccess.flatMap(access -> systems.findById(access.systemId()));
   }
 
-  private static AuthorizationRuleViolationException reject(AuthorizationErrorCode code, String message) {
+  private static AuthorizationRuleViolationException reject(
+      AuthorizationErrorCode code, String message) {
     return new AuthorizationRuleViolationException(code, message);
   }
 }
