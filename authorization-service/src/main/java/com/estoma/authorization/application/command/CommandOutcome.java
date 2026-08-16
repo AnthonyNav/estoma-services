@@ -26,6 +26,11 @@ public record CommandOutcome(
     }
   }
 
+  /** Semantic alias used by callers that reason about all outbound Result intents. */
+  public List<OutboundResultIntent> outboundResults() {
+    return resultIntents;
+  }
+
   public static CommandOutcome terminal(
       ApplicationResult result, List<DomainEventIntent> events, List<OutboundResultIntent> resultIntents) {
     return new CommandOutcome(Optional.of(result), events, resultIntents, false, null, false);
