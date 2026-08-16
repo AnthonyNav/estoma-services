@@ -97,6 +97,87 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     return transactions.inTransaction(() -> dispatchInTransaction(metadata, command));
   }
 
+  /**
+   * Explicit wake-up path for an already durable DEFERRED academic intention. It preserves the same
+   * messageId/idempotency record and never creates a second functional intention.
+   */
+  public CommandOutcome replayDeferred(CommandMetadata metadata, AuthorizationCommand command) {
+    validateEnvelope(metadata, command);
+    return transactions.inTransaction(() -> replayDeferredInTransaction(metadata, command));
+  }
+
+  private CommandOutcome replayDeferredInTransaction(
+      CommandMetadata metadata, AuthorizationCommand command) {
+    Instant now = clock.instant();
+    String fingerprint = CommandPayloads.fingerprint(metadata, command);
+    var delivery = inbox.find(COMMAND_CONSUMER, metadata.messageId())
+        .orElseThrow(() -> new IllegalStateException("deferred command Inbox entry is missing"));
+    if ("APPLIED".equals(delivery.status())) {
+      return CommandOutcome.duplicate();
+    }
+    IdempotencyRecord record = idempotency.find(
+            metadata.producer(), command.operationType(), metadata.idempotencyKey())
+        .orElseThrow(() -> new IllegalStateException("deferred command idempotency entry is missing"));
+    if (!record.requestFingerprint().equals(fingerprint)) {
+      throw new IllegalStateException("deferred command fingerprint no longer matches durable intent");
+    }
+    if (!"DEFERRED".equals(record.status())) {
+      inbox.markApplied(COMMAND_CONSUMER, metadata.messageId(), now, now);
+      return CommandOutcome.duplicate();
+    }
+    if (!"academic".equals(metadata.producer()) || command.importExecution() == null) {
+      throw new IllegalStateException("only coordinated Academic commands can be deferred in V1");
+    }
+
+    ImportExecution execution = command.importExecution();
+    Optional<Integer> latest = idempotency.findLatestExecutionGeneration(
+        metadata.producer(), execution.importId(), execution.planItemId());
+    if (latest.isPresent() && execution.executionGeneration() < latest.get()) {
+      return finalizeTerminal(
+          metadata,
+          command,
+          fingerprint,
+          HandledCommand.rejected(ApplicationResult.rejected(
+              AuthorizationErrorCode.STALE_EXECUTION_GENERATION.name(),
+              "deferred execution generation is older than the latest observed generation")),
+          now);
+    }
+
+    try {
+      Optional<SystemAccess> targetAccess = targetAccess(command);
+      Optional<AccountRoleAssignment> targetRole = command.targetAccountId() == null
+          ? Optional.empty()
+          : accountRoles.findByAccountId(command.targetAccountId());
+      if (targetRole.isEmpty() && targetAccess.isPresent()) {
+        targetRole = accountRoles.findByAccountId(targetAccess.get().accountId());
+      }
+      authority.authorize(metadata, command, targetRole, targetAccess);
+      HandledCommand handled = execute(metadata, command, targetRole, targetAccess, now);
+      if (handled.deferred()) {
+        return finalizeDeferred(metadata, command, fingerprint, handled.pendingReason(), now);
+      }
+      return finalizeTerminal(metadata, command, fingerprint, handled, now);
+    } catch (AuthorizationRuleViolationException exception) {
+      return finalizeTerminal(
+          metadata,
+          command,
+          fingerprint,
+          HandledCommand.rejected(
+              ApplicationResult.rejected(exception.code().name(), exception.getMessage())),
+          now);
+    } catch (DomainRuleViolationException exception) {
+      AuthorizationErrorCode code = exception.code().name().equals("REASON_REQUIRED")
+          ? AuthorizationErrorCode.REASON_DETAIL_REQUIRED
+          : AuthorizationErrorCode.INVALID_COMMAND;
+      return finalizeTerminal(
+          metadata,
+          command,
+          fingerprint,
+          HandledCommand.rejected(ApplicationResult.rejected(code.name(), exception.getMessage())),
+          now);
+    }
+  }
+
   private CommandOutcome dispatchInTransaction(CommandMetadata metadata, AuthorizationCommand command) {
     Instant now = clock.instant();
     String payloadJson = CommandPayloads.write(command);
@@ -252,7 +333,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     ApplicationResult result = new ApplicationResult(
         ApplicationResult.Status.valueOf(existing.resultStatus()),
         existing.resultDataJson(),
-        existing.errorCode() == null ? null : new ApplicationResult.Error(existing.errorCode(), existing.errorDetailsJson()));
+        existing.errorCode() == null
+            ? null
+            : new ApplicationResult.Error(existing.errorCode(), existing.errorDetailsJson()));
     return CommandOutcome.terminal(result, List.of(), List.of());
   }
 
@@ -485,7 +568,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       if ("academic".equals(metadata.producer()) && concurrent.roleCode() == RoleCode.ALUMNO) {
         provisioning.evaluate(command.accountId(), trigger(metadata, command.importExecution(), now));
         return HandledCommand.success(ApplicationResult.succeeded(Map.of(
-            "accountId", command.accountId(), "roleCode", concurrent.roleCode(), "changed", false,
+            "accountId", command.accountId(),
+            "roleCode", concurrent.roleCode(),
+            "changed", false,
             "newVersion", concurrent.version())));
       }
       throw reject(AuthorizationErrorCode.ACCOUNT_ROLE_ALREADY_ASSIGNED, "account already has a role");
@@ -524,13 +609,20 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     List<SystemAccess> suspended = new ArrayList<>();
     List<DomainEventIntent> events = new ArrayList<>();
     AccountRoleAssignment changed = AccountRoleAssignment.reconstitute(
-        current.accountId(), newRole.id(), newRole.code(), current.version() + 1,
-        current.assignedBy(), metadata.actor(), current.assignedAt(), now);
+        current.accountId(),
+        newRole.id(),
+        newRole.code(),
+        current.version() + 1,
+        current.assignedBy(),
+        metadata.actor(),
+        current.assignedAt(),
+        now);
     if (accountRoles.update(changed, command.expectedVersion()) != 1) {
       throw reject(AuthorizationErrorCode.ACCOUNT_ROLE_VERSION_CONFLICT, "role version changed concurrently");
     }
     for (SystemAccess access : accesses.findByAccountId(command.accountId())) {
-      if (access.status() != SystemAccessStatus.ACTIVE || roles.isAllowedInSystem(newRole.id(), access.systemId())) {
+      if (access.status() != SystemAccessStatus.ACTIVE
+          || roles.isAllowedInSystem(newRole.id(), access.systemId())) {
         continue;
       }
       SystemAccess suspendedAccess = access.suspend(
@@ -553,7 +645,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
             "newVersion", changed.version(),
             "suspendedSystemAccessIds", suspendedIds,
             "suspendedSystemAccessCount", suspended.size())),
-        events, changed.accountId(), changed.version());
+        events,
+        changed.accountId(),
+        changed.version());
   }
 
   private HandledCommand grant(
@@ -595,12 +689,15 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     SystemAccess access = SystemAccess.createNew(
         command.systemAccessId(), command.accountId(), system.id(), system.code(), metadata.actor(), now);
     if (!accesses.insertIfAbsent(access)) {
-      SystemAccess concurrent = accesses.findByAccountIdAndSystemId(command.accountId(), system.id()).orElseThrow(
-          () -> new IllegalStateException("access insert lost its row"));
+      SystemAccess concurrent = accesses.findByAccountIdAndSystemId(command.accountId(), system.id())
+          .orElseThrow(() -> new IllegalStateException("access insert lost its row"));
       if ("academic".equals(metadata.producer())) {
         return HandledCommand.success(ApplicationResult.succeeded(Map.of(
-            "systemAccessId", concurrent.systemAccessId(), "accountId", concurrent.accountId(),
-            "systemCode", concurrent.systemCode(), "status", concurrent.status(), "changed", false,
+            "systemAccessId", concurrent.systemAccessId(),
+            "accountId", concurrent.accountId(),
+            "systemCode", concurrent.systemCode(),
+            "status", concurrent.status(),
+            "changed", false,
             "newVersion", concurrent.version())));
       }
       throw reject(AuthorizationErrorCode.SYSTEM_ACCESS_ALREADY_EXISTS, "account/system access already exists");
@@ -640,10 +737,14 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
     return HandledCommand.success(
         ApplicationResult.succeeded(Map.of(
-            "systemAccessId", changed.systemAccessId(), "accountId", changed.accountId(),
-            "status", changed.status(), "changed", true, "newVersion", changed.version())),
+            "systemAccessId", changed.systemAccessId(),
+            "accountId", changed.accountId(),
+            "status", changed.status(),
+            "changed", true,
+            "newVersion", changed.version())),
         List.of(accessSuspendedEvent(metadata, changed, access.status(), now)),
-        changed.systemAccessId(), changed.version());
+        changed.systemAccessId(),
+        changed.version());
   }
 
   private HandledCommand revoke(
@@ -666,10 +767,14 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
     return HandledCommand.success(
         ApplicationResult.succeeded(Map.of(
-            "systemAccessId", changed.systemAccessId(), "accountId", changed.accountId(),
-            "status", changed.status(), "changed", true, "newVersion", changed.version())),
+            "systemAccessId", changed.systemAccessId(),
+            "accountId", changed.accountId(),
+            "status", changed.status(),
+            "changed", true,
+            "newVersion", changed.version())),
         List.of(accessRevokedEvent(metadata, changed, access.status(), now)),
-        changed.systemAccessId(), changed.version());
+        changed.systemAccessId(),
+        changed.version());
   }
 
   private HandledCommand restore(
@@ -702,10 +807,14 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
     return HandledCommand.success(
         ApplicationResult.succeeded(Map.of(
-            "systemAccessId", changed.systemAccessId(), "accountId", changed.accountId(),
-            "status", changed.status(), "changed", true, "newVersion", changed.version())),
+            "systemAccessId", changed.systemAccessId(),
+            "accountId", changed.accountId(),
+            "status", changed.status(),
+            "changed", true,
+            "newVersion", changed.version())),
         List.of(accessRestoredEvent(metadata, changed, access.status(), now)),
-        changed.systemAccessId(), changed.version());
+        changed.systemAccessId(),
+        changed.version());
   }
 
   private Optional<SystemAccess> targetAccess(AuthorizationCommand command) {
@@ -744,11 +853,17 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
     UUID targetAccountId = command.targetAccountId();
     boolean validDependency = execution.causalDependencies().stream()
-        .anyMatch(dependency -> targetAccountId.equals(dependency.expectedAggregateId())
-            && dependency.expectedEventType().startsWith("Account"));
+        .anyMatch(dependency ->
+            targetAccountId.equals(dependency.expectedAggregateId())
+                && "AccountCreated".equals(dependency.expectedEventType())
+                && "SUCCEEDED".equals(dependency.priorResultStatus()));
     boolean validEvidence = execution.authoritativeEvidence().stream()
-        .anyMatch(evidence -> targetAccountId.equals(evidence.entityId())
-            && (evidence.entityType().equals("Account") || evidence.entityType().equals("account")));
+        .anyMatch(evidence ->
+            targetAccountId.equals(evidence.entityId())
+                && "authentication".equals(evidence.sourceService())
+                && ("Account".equals(evidence.entityType()) || "account".equals(evidence.entityType()))
+                && ("SUCCEEDED".equals(evidence.sourceResultStatus())
+                    || "FOUND".equals(evidence.sourceResultStatus())));
     if (validDependency) {
       return HandledCommand.deferred("EVENT_PENDING");
     }
@@ -769,7 +884,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
 
   private boolean isSuperAdmin(ActorRef actor) {
     return actor.accountId() != null
-        && accountRoles.findByAccountId(actor.accountId()).map(role -> role.roleCode() == RoleCode.SUPERADMIN).orElse(false);
+        && accountRoles.findByAccountId(actor.accountId())
+            .map(role -> role.roleCode() == RoleCode.SUPERADMIN)
+            .orElse(false);
   }
 
   private PracticesProvisioningService.Trigger trigger(
@@ -793,12 +910,21 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("roleId", assignment.roleId());
     payload.put("roleCode", assignment.roleCode());
     payload.put("assignedAt", assignment.assignedAt());
-    return event(metadata, "AccountRoleAssigned", "authorization.account-role.assigned", assignment.accountId(),
-        assignment.version(), payload, now);
+    return event(
+        metadata,
+        "AccountRoleAssigned",
+        "authorization.account-role.assigned",
+        assignment.accountId(),
+        assignment.version(),
+        payload,
+        now);
   }
 
   private DomainEventIntent roleChangedEvent(
-      CommandMetadata metadata, AccountRoleAssignment previous, AccountRoleAssignment changed, Instant now) {
+      CommandMetadata metadata,
+      AccountRoleAssignment previous,
+      AccountRoleAssignment changed,
+      Instant now) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("accountId", changed.accountId());
     payload.put("previousRoleId", previous.roleId());
@@ -806,12 +932,21 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("newRoleId", changed.roleId());
     payload.put("newRoleCode", changed.roleCode());
     payload.put("changedAt", changed.updatedAt());
-    return event(metadata, "AccountRoleChanged", "authorization.account-role.changed", changed.accountId(),
-        changed.version(), payload, now);
+    return event(
+        metadata,
+        "AccountRoleChanged",
+        "authorization.account-role.changed",
+        changed.accountId(),
+        changed.version(),
+        payload,
+        now);
   }
 
   private DomainEventIntent accessGrantedEvent(
-      CommandMetadata metadata, SystemAccess access, AccountRoleAssignment role, Instant now) {
+      CommandMetadata metadata,
+      SystemAccess access,
+      AccountRoleAssignment role,
+      Instant now) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("systemAccessId", access.systemAccessId());
     payload.put("accountId", access.accountId());
@@ -821,12 +956,21 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("roleCode", role.roleCode());
     payload.put("status", access.status());
     payload.put("grantedAt", access.grantedAt());
-    return event(metadata, "SystemAccessGranted", "authorization.system-access.granted", access.systemAccessId(),
-        access.version(), payload, now);
+    return event(
+        metadata,
+        "SystemAccessGranted",
+        "authorization.system-access.granted",
+        access.systemAccessId(),
+        access.version(),
+        payload,
+        now);
   }
 
   private DomainEventIntent accessSuspendedEvent(
-      CommandMetadata metadata, SystemAccess access, SystemAccessStatus previousStatus, Instant now) {
+      CommandMetadata metadata,
+      SystemAccess access,
+      SystemAccessStatus previousStatus,
+      Instant now) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("systemAccessId", access.systemAccessId());
     payload.put("accountId", access.accountId());
@@ -837,12 +981,21 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("reasonCode", access.reasonCode());
     payload.put("reasonDetail", access.reasonDetail());
     payload.put("suspendedAt", access.suspendedAt());
-    return event(metadata, "SystemAccessSuspended", "authorization.system-access.suspended", access.systemAccessId(),
-        access.version(), payload, now);
+    return event(
+        metadata,
+        "SystemAccessSuspended",
+        "authorization.system-access.suspended",
+        access.systemAccessId(),
+        access.version(),
+        payload,
+        now);
   }
 
   private DomainEventIntent accessRevokedEvent(
-      CommandMetadata metadata, SystemAccess access, SystemAccessStatus previousStatus, Instant now) {
+      CommandMetadata metadata,
+      SystemAccess access,
+      SystemAccessStatus previousStatus,
+      Instant now) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("systemAccessId", access.systemAccessId());
     payload.put("accountId", access.accountId());
@@ -853,12 +1006,21 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("reasonCode", access.reasonCode());
     payload.put("reasonDetail", access.reasonDetail());
     payload.put("revokedAt", access.revokedAt());
-    return event(metadata, "SystemAccessRevoked", "authorization.system-access.revoked", access.systemAccessId(),
-        access.version(), payload, now);
+    return event(
+        metadata,
+        "SystemAccessRevoked",
+        "authorization.system-access.revoked",
+        access.systemAccessId(),
+        access.version(),
+        payload,
+        now);
   }
 
   private DomainEventIntent accessRestoredEvent(
-      CommandMetadata metadata, SystemAccess access, SystemAccessStatus previousStatus, Instant now) {
+      CommandMetadata metadata,
+      SystemAccess access,
+      SystemAccessStatus previousStatus,
+      Instant now) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("systemAccessId", access.systemAccessId());
     payload.put("accountId", access.accountId());
@@ -867,8 +1029,14 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("previousStatus", previousStatus);
     payload.put("status", access.status());
     payload.put("restoredAt", access.updatedAt());
-    return event(metadata, "SystemAccessRestored", "authorization.system-access.restored", access.systemAccessId(),
-        access.version(), payload, now);
+    return event(
+        metadata,
+        "SystemAccessRestored",
+        "authorization.system-access.restored",
+        access.systemAccessId(),
+        access.version(),
+        payload,
+        now);
   }
 
   private DomainEventIntent event(
@@ -896,7 +1064,8 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         now);
   }
 
-  private static AuthorizationRuleViolationException reject(AuthorizationErrorCode code, String message) {
+  private static AuthorizationRuleViolationException reject(
+      AuthorizationErrorCode code, String message) {
     return new AuthorizationRuleViolationException(code, message);
   }
 
@@ -922,7 +1091,10 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
 
     static HandledCommand success(
-        ApplicationResult result, List<DomainEventIntent> events, UUID aggregateId, int aggregateVersion) {
+        ApplicationResult result,
+        List<DomainEventIntent> events,
+        UUID aggregateId,
+        int aggregateVersion) {
       return new HandledCommand(result, events, aggregateId, aggregateVersion, false, null);
     }
 
