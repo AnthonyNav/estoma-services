@@ -10,6 +10,8 @@ import com.estoma.authorization.application.port.AuthorizationAuditRepository;
 import com.estoma.authorization.application.port.AuthorizationSnapshotRepository;
 import com.estoma.authorization.application.port.CommandDispatcher;
 import com.estoma.authorization.application.port.CommandIdempotencyRepository;
+import com.estoma.authorization.application.port.DeferredCommandDecoder;
+import com.estoma.authorization.application.port.DeferredProjectionEventDecoder;
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
@@ -22,6 +24,7 @@ import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.projection.PracticesProvisioningService;
 import com.estoma.authorization.application.projection.ProjectionEventProcessor;
 import com.estoma.authorization.application.query.AuthorizationSnapshotQueryService;
+import com.estoma.authorization.application.recovery.DeferredCommandRecoveryService;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResultHandler;
 import java.time.Clock;
@@ -89,29 +92,6 @@ class AuthorizationApplicationConfig {
   }
 
   @Bean
-  ProjectionRecoveryResultHandler projectionRecoveryResultHandler(
-      TransactionRunner transactions,
-      ProjectionRecoveryJobRepository jobs,
-      ProcessedMessageRepository inbox,
-      PersonStatusProjectionRepository persons,
-      AccountStatusProjectionRepository accounts,
-      AcademicEligibilityProjectionRepository eligibility,
-      ProjectionRecoveryCoordinator coordinator,
-      PracticesProvisioningService provisioning,
-      Clock clock) {
-    return new ProjectionRecoveryResultHandler(
-        transactions,
-        jobs,
-        inbox,
-        persons,
-        accounts,
-        eligibility,
-        coordinator,
-        provisioning,
-        clock);
-  }
-
-  @Bean
   AuthorizationSnapshotQueryService authorizationSnapshotQueryService(
       AuthorizationSnapshotRepository snapshots, Clock clock) {
     return new AuthorizationSnapshotQueryService(snapshots, clock);
@@ -153,6 +133,73 @@ class AuthorizationApplicationConfig {
   }
 
   @Bean
+  DeferredCommandRecoveryService deferredCommandRecoveryService(
+      ProcessedMessageRepository inbox,
+      DeferredCommandDecoder decoder,
+      AuthorizationCommandDispatcher dispatcher,
+      CommandIdempotencyRepository idempotency,
+      OutboxRepository outbox,
+      AuthorizationAuditRepository audit,
+      Clock clock) {
+    return new DeferredCommandRecoveryService(
+        inbox, decoder, dispatcher, idempotency, outbox, audit, clock);
+  }
+
+  @Bean
+  ProjectionEventProcessor projectionEventProcessor(
+      TransactionRunner transactions,
+      ProcessedMessageRepository inbox,
+      PersonStatusProjectionRepository persons,
+      AccountStatusProjectionRepository accounts,
+      AcademicEligibilityProjectionRepository eligibility,
+      PracticesProvisioningService provisioning,
+      DeferredProjectionEventDecoder deferredEventDecoder,
+      DeferredCommandRecoveryService deferredCommands,
+      AuthorizationAuditRepository audit,
+      Clock clock) {
+    return new ProjectionEventProcessor(
+        transactions,
+        inbox,
+        persons,
+        accounts,
+        eligibility,
+        provisioning,
+        deferredEventDecoder,
+        deferredCommands,
+        audit,
+        clock);
+  }
+
+  @Bean
+  ProjectionRecoveryResultHandler projectionRecoveryResultHandler(
+      TransactionRunner transactions,
+      ProjectionRecoveryJobRepository jobs,
+      ProcessedMessageRepository inbox,
+      PersonStatusProjectionRepository persons,
+      AccountStatusProjectionRepository accounts,
+      AcademicEligibilityProjectionRepository eligibility,
+      ProjectionRecoveryCoordinator coordinator,
+      PracticesProvisioningService provisioning,
+      DeferredProjectionEventDecoder deferredEventDecoder,
+      DeferredCommandRecoveryService deferredCommands,
+      ProjectionEventProcessor projectionEvents,
+      Clock clock) {
+    return new ProjectionRecoveryResultHandler(
+        transactions,
+        jobs,
+        inbox,
+        persons,
+        accounts,
+        eligibility,
+        coordinator,
+        provisioning,
+        deferredEventDecoder,
+        deferredCommands,
+        projectionEvents,
+        clock);
+  }
+
+  @Bean
   @Primary
   CommandDispatcher authorizationCommandProcessor(
       TransactionRunner transactions,
@@ -165,19 +212,5 @@ class AuthorizationApplicationConfig {
       Clock clock) {
     return new AuthorizationCommandProcessor(
         transactions, delegate, inbox, idempotency, resultDecoder, outbox, audit, clock);
-  }
-
-  @Bean
-  ProjectionEventProcessor projectionEventProcessor(
-      TransactionRunner transactions,
-      ProcessedMessageRepository inbox,
-      PersonStatusProjectionRepository persons,
-      AccountStatusProjectionRepository accounts,
-      AcademicEligibilityProjectionRepository eligibility,
-      PracticesProvisioningService provisioning,
-      AuthorizationAuditRepository audit,
-      Clock clock) {
-    return new ProjectionEventProcessor(
-        transactions, inbox, persons, accounts, eligibility, provisioning, audit, clock);
   }
 }
