@@ -2,17 +2,20 @@ package com.estoma.authorization.infrastructure.config;
 
 import com.estoma.authorization.application.authorization.AuthorityEvaluator;
 import com.estoma.authorization.application.command.AuthorizationCommandDispatcher;
+import com.estoma.authorization.application.command.AuthorizationCommandProcessor;
 import com.estoma.authorization.application.port.AccountRoleRepository;
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
 import com.estoma.authorization.application.port.AuthorizationAuditRepository;
 import com.estoma.authorization.application.port.AuthorizationSnapshotRepository;
+import com.estoma.authorization.application.port.CommandDispatcher;
 import com.estoma.authorization.application.port.CommandIdempotencyRepository;
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.port.RoleCatalogRepository;
+import com.estoma.authorization.application.port.StoredApplicationResultDecoder;
 import com.estoma.authorization.application.port.SystemAccessRepository;
 import com.estoma.authorization.application.port.SystemCatalogRepository;
 import com.estoma.authorization.application.port.TransactionRunner;
@@ -24,6 +27,7 @@ import com.estoma.authorization.application.recovery.ProjectionRecoveryResultHan
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 @Configuration
 class AuthorizationApplicationConfig {
@@ -146,6 +150,21 @@ class AuthorizationApplicationConfig {
         authority,
         provisioning,
         clock);
+  }
+
+  @Bean
+  @Primary
+  CommandDispatcher authorizationCommandProcessor(
+      TransactionRunner transactions,
+      AuthorizationCommandDispatcher delegate,
+      ProcessedMessageRepository inbox,
+      CommandIdempotencyRepository idempotency,
+      StoredApplicationResultDecoder resultDecoder,
+      OutboxRepository outbox,
+      AuthorizationAuditRepository audit,
+      Clock clock) {
+    return new AuthorizationCommandProcessor(
+        transactions, delegate, inbox, idempotency, resultDecoder, outbox, audit, clock);
   }
 
   @Bean
