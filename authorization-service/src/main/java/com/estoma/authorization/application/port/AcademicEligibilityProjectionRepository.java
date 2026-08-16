@@ -14,9 +14,9 @@ public interface AcademicEligibilityProjectionRepository {
 
   int upsertIfNewer(AcademicEligibilityProjection projection);
 
-  default int updatePendingReason(UUID studentAcademicProfileId, String systemCode, String pendingReason) {
-    return 0;
-  }
+  int updatePendingReason(UUID studentAcademicProfileId, String systemCode, String pendingReason);
+
+  int clearAll();
 
   record AcademicEligibilityProjection(
       UUID eligibilityId,
