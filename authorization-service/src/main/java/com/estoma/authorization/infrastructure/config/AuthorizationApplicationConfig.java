@@ -20,6 +20,7 @@ import com.estoma.authorization.application.port.RoleCatalogRepository;
 import com.estoma.authorization.application.port.StoredApplicationResultDecoder;
 import com.estoma.authorization.application.port.SystemAccessRepository;
 import com.estoma.authorization.application.port.SystemCatalogRepository;
+import com.estoma.authorization.application.port.TechnicalFailureClassifier;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.projection.PracticesProvisioningService;
 import com.estoma.authorization.application.projection.ProjectionEventProcessor;
@@ -27,6 +28,7 @@ import com.estoma.authorization.application.query.AuthorizationSnapshotQueryServ
 import com.estoma.authorization.application.recovery.DeferredCommandRecoveryService;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResultHandler;
+import com.estoma.authorization.infrastructure.transaction.SpringTechnicalFailureClassifier;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,6 +40,11 @@ class AuthorizationApplicationConfig {
   @Bean
   Clock authorizationClock() {
     return Clock.systemUTC();
+  }
+
+  @Bean
+  TechnicalFailureClassifier technicalFailureClassifier() {
+    return new SpringTechnicalFailureClassifier();
   }
 
   @Bean
@@ -214,6 +221,7 @@ class AuthorizationApplicationConfig {
       OutboxRepository outbox,
       AuthorizationAuditRepository audit,
       ProjectionRecoveryCoordinator recovery,
+      TechnicalFailureClassifier failureClassifier,
       Clock clock) {
     return new AuthorizationCommandProcessor(
         transactions,
@@ -224,6 +232,7 @@ class AuthorizationApplicationConfig {
         outbox,
         audit,
         recovery,
+        failureClassifier,
         clock);
   }
 }
