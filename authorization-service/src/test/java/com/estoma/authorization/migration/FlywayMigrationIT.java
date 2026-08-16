@@ -131,14 +131,17 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   void deferredReplayClaimRequiresACompleteFencingPair() {
     OffsetDateTime now = OffsetDateTime.now();
     UUID messageId = UUID.randomUUID();
+    UUID correlationId = UUID.randomUUID();
     jdbc.sql(
             "INSERT INTO processed_messages "
                 + "(consumer_name, message_id, status, message_type, message_version, message_kind, producer, "
-                + "actor, payload, received_at, occurred_at, deferred_reason, updated_at) "
+                + "correlation_id, actor, payload, received_at, occurred_at, deferred_reason, updated_at) "
                 + "VALUES ('authorization-events', :messageId, 'DEFERRED', 'AccountActivated', 1, 'EVENT', "
-                + "'authentication', '{\"type\":\"SYSTEM\",\"service\":\"authentication\"}'::jsonb, '{}'::jsonb, "
+                + "'authentication', :correlationId, "
+                + "'{\"type\":\"SYSTEM\",\"service\":\"authentication\"}'::jsonb, '{}'::jsonb, "
                 + ":now, :now, 'EVENT_PENDING', :now)")
         .param("messageId", messageId)
+        .param("correlationId", correlationId)
         .param("now", now)
         .update();
 
