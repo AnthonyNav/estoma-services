@@ -1,5 +1,7 @@
 package com.estoma.authorization.infrastructure.persistence;
 
+import com.estoma.authorization.application.exception.AuthorizationErrorCode;
+import com.estoma.authorization.application.exception.OptimisticLockConflictException;
 import com.estoma.authorization.application.port.SystemAccessRepository;
 import com.estoma.authorization.domain.model.SystemAccess;
 import java.util.List;
@@ -146,7 +148,7 @@ class JdbcSystemAccessRepository implements SystemAccessRepository {
   @Override
   public int update(SystemAccess access, int expectedVersion) {
     OptimisticVersionGuard.requireNext(expectedVersion, access.version());
-    return jdbc.sql(
+    int updated = jdbc.sql(
             """
             UPDATE system_accesses SET
               status = CAST(:status AS system_access_status), reason_code = :reasonCode, reason_detail = :reasonDetail,
@@ -181,6 +183,12 @@ class JdbcSystemAccessRepository implements SystemAccessRepository {
         .param("updatedAt", Timestamps.toTimestamp(access.updatedAt()))
         .param("expectedVersion", expectedVersion)
         .update();
+    if (updated != 1) {
+      throw new OptimisticLockConflictException(
+          AuthorizationErrorCode.SYSTEM_ACCESS_VERSION_CONFLICT,
+          "system access changed concurrently");
+    }
+    return updated;
   }
 
   private static String select() {
