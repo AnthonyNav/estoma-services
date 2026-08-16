@@ -24,6 +24,34 @@ public interface ProcessedMessageRepository {
     return updateDeferredReason(consumerName, messageId, deferredReason, updatedAt);
   }
 
+  /** Claims one DEFERRED delivery for explicit replay. Expired claims may be fenced and recovered. */
+  boolean claimDeferred(
+      String consumerName,
+      UUID messageId,
+      UUID claimToken,
+      Instant leaseUntil,
+      Instant now);
+
+  /** Completes a claimed replay only if the caller still owns the current fencing token. */
+  int markAppliedClaimed(
+      String consumerName,
+      UUID messageId,
+      UUID claimToken,
+      Instant appliedAt,
+      Instant updatedAt);
+
+  /** Keeps the message DEFERRED and releases the claim if the caller still owns the token. */
+  int updateDeferredReasonClaimed(
+      String consumerName,
+      UUID messageId,
+      UUID claimToken,
+      String deferredReason,
+      Instant updatedAt);
+
+  /** Releases a claim after a replay attempt that aborted before a terminal local decision. */
+  int releaseClaim(
+      String consumerName, UUID messageId, UUID claimToken, Instant updatedAt);
+
   boolean hasDeferredNewerThan(String consumerName, UUID aggregateId, int aggregateVersion);
 
   List<ProcessedMessage> findDeferredByAggregate(
