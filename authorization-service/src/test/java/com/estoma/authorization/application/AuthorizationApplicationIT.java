@@ -196,8 +196,7 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
         1,
         1,
         NOW,
-        "{}",
-        true);
+        "{}");
 
     assertThat(projectionEvents.process(event).status()).isEqualTo(ProjectionEventProcessor.Status.APPLIED);
     assertThat(accesses.findByAccountIdAndSystemId(accountId, PRACTICAS_ID)).get()
