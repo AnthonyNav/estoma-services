@@ -28,8 +28,54 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
   }
 
   @Override
+  public Optional<RecoveryJob> findActive(String projectionType, String scope, String entityKey) {
+    String entityPredicate = "FULL".equals(scope) ? "entity_key IS NULL" : "entity_key = :entityKey";
+    var spec = jdbc.sql(
+            "SELECT " + COLUMNS + " FROM projection_recovery_jobs "
+                + "WHERE projection_type = :projectionType AND scope = CAST(:scope AS recovery_scope) "
+                + "AND " + entityPredicate + " AND status IN ('PENDING', 'WAITING_RESULT') "
+                + "ORDER BY created_at LIMIT 1")
+        .param("projectionType", projectionType)
+        .param("scope", scope);
+    if (!"FULL".equals(scope)) {
+      spec = spec.param("entityKey", entityKey);
+    }
+    return spec.query(RecoveryJobRowMapper.INSTANCE).optional();
+  }
+
+  @Override
+  public Optional<RecoveryJob> findWaitingByQueryMessageId(UUID queryMessageId) {
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM projection_recovery_jobs "
+                + "WHERE status = 'WAITING_RESULT' AND current_query_message_id = :queryMessageId")
+        .param("queryMessageId", queryMessageId)
+        .query(RecoveryJobRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
+  public boolean hasActiveFull(String projectionType) {
+    return jdbc.sql(
+            "SELECT EXISTS (SELECT 1 FROM projection_recovery_jobs "
+                + "WHERE projection_type = :projectionType AND scope = 'FULL' "
+                + "AND status IN ('PENDING', 'WAITING_RESULT'))")
+        .param("projectionType", projectionType)
+        .query(Boolean.class)
+        .single();
+  }
+
+  @Override
   public void insert(RecoveryJob job) {
-    jdbc.sql(
+    insertSql(job, false);
+  }
+
+  @Override
+  public boolean insertIfAbsent(RecoveryJob job) {
+    return insertSql(job, true) == 1;
+  }
+
+  private int insertSql(RecoveryJob job, boolean ignoreConflict) {
+    return jdbc.sql(
             """
             INSERT INTO projection_recovery_jobs (
               recovery_job_id, projection_type, scope, entity_key, status, cursor, query_attempt,
@@ -40,7 +86,7 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
               :cursor, :queryAttempt, :currentQueryType, :currentQueryMessageId, :currentOperationId,
               :currentCorrelationId, :attempts, :lastErrorCode, :createdAt, :updatedAt, :completedAt, :claimToken, :leaseUntil
             )
-            """)
+            """ + (ignoreConflict ? " ON CONFLICT DO NOTHING" : ""))
         .param("recoveryJobId", job.recoveryJobId())
         .param("projectionType", job.projectionType())
         .param("scope", job.scope())
@@ -59,6 +105,43 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
         .param("completedAt", Timestamps.toTimestamp(job.completedAt()))
         .param("claimToken", job.claimToken())
         .param("leaseUntil", Timestamps.toTimestamp(job.leaseUntil()))
+        .update();
+  }
+
+  @Override
+  public int update(RecoveryJob job, String expectedStatus, UUID expectedCurrentQueryMessageId) {
+    return jdbc.sql(
+            """
+            UPDATE projection_recovery_jobs SET
+              status = CAST(:status AS recovery_job_status), cursor = :cursor,
+              query_attempt = :queryAttempt, current_query_type = :currentQueryType,
+              current_query_message_id = :currentQueryMessageId,
+              current_operation_id = :currentOperationId, current_correlation_id = :currentCorrelationId,
+              attempts = :attempts, last_error_code = :lastErrorCode, updated_at = :updatedAt,
+              completed_at = :completedAt, claim_token = :claimToken, lease_until = :leaseUntil
+            WHERE recovery_job_id = :recoveryJobId
+              AND status = CAST(:expectedStatus AS recovery_job_status)
+              AND (
+                :expectedCurrentQueryMessageId IS NULL
+                OR current_query_message_id = :expectedCurrentQueryMessageId
+              )
+            """)
+        .param("recoveryJobId", job.recoveryJobId())
+        .param("status", job.status())
+        .param("cursor", job.cursor())
+        .param("queryAttempt", job.queryAttempt())
+        .param("currentQueryType", job.currentQueryType())
+        .param("currentQueryMessageId", job.currentQueryMessageId())
+        .param("currentOperationId", job.currentOperationId())
+        .param("currentCorrelationId", job.currentCorrelationId())
+        .param("attempts", job.attempts())
+        .param("lastErrorCode", job.lastErrorCode())
+        .param("updatedAt", Timestamps.toTimestamp(job.updatedAt()))
+        .param("completedAt", Timestamps.toTimestamp(job.completedAt()))
+        .param("claimToken", job.claimToken())
+        .param("leaseUntil", Timestamps.toTimestamp(job.leaseUntil()))
+        .param("expectedStatus", expectedStatus)
+        .param("expectedCurrentQueryMessageId", expectedCurrentQueryMessageId)
         .update();
   }
 }
