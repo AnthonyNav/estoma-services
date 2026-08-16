@@ -2,6 +2,7 @@ package com.estoma.authorization.infrastructure.persistence;
 
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -83,11 +84,11 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
   }
 
   @Override
-  public int markDeferred(String consumerName, UUID messageId, String deferredReason, Instant updatedAt) {
+  public int updateDeferredReason(
+      String consumerName, UUID messageId, String deferredReason, Instant updatedAt) {
     return jdbc.sql(
-            "UPDATE processed_messages SET status = 'DEFERRED', applied_at = NULL, "
-                + "deferred_reason = :deferredReason, updated_at = :updatedAt "
-                + "WHERE consumer_name = :consumerName AND message_id = :messageId")
+            "UPDATE processed_messages SET deferred_reason = :deferredReason, updated_at = :updatedAt "
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED'")
         .param("consumerName", consumerName)
         .param("messageId", messageId)
         .param("deferredReason", deferredReason)
@@ -106,5 +107,19 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
         .param("aggregateVersion", aggregateVersion)
         .query(Boolean.class)
         .single();
+  }
+
+  @Override
+  public List<ProcessedMessage> findDeferredByAggregate(
+      String consumerName, UUID aggregateId, int limit) {
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM processed_messages "
+                + "WHERE consumer_name = :consumerName AND status = 'DEFERRED' AND aggregate_id = :aggregateId "
+                + "ORDER BY aggregate_version NULLS LAST, received_at, message_id LIMIT :limit")
+        .param("consumerName", consumerName)
+        .param("aggregateId", aggregateId)
+        .param("limit", limit)
+        .query(ProcessedMessageRowMapper.INSTANCE)
+        .list();
   }
 }
