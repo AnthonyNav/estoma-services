@@ -74,11 +74,15 @@ public final class PracticesProvisioningService {
       return;
     }
 
-    // Existence is required for administrative provisioning even though ACTIVE status is not.
     var account = accounts.findByAccountId(accountId);
+    String accountKey = "account:" + accountId;
+    String eligibilityKey =
+        "eligibility:" + eligibilityState.studentAcademicProfileId() + ":" + eligibilityState.systemCode();
     if (account.isEmpty()
-        || recoveryJobs.hasActiveFull("ACCOUNT_STATUS")
-        || recoveryJobs.hasActiveFull("ACADEMIC_ELIGIBILITY")
+        || !recoveryJobs.isProjectionTrusted("ACCOUNT_STATUS")
+        || !recoveryJobs.isProjectionTrusted("ACADEMIC_ELIGIBILITY")
+        || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", accountKey)
+        || !recoveryJobs.isEntityTrusted("ACADEMIC_ELIGIBILITY", eligibilityKey)
         || inbox.hasDeferredNewerThan(
             EVENT_CONSUMER, accountId, account.get().sourceVersion())) {
       return;
@@ -112,7 +116,6 @@ public final class PracticesProvisioningService {
         actor,
         trigger.occurredAt());
     if (!accesses.insertIfAbsent(access)) {
-      // A concurrent trigger won the unique(account_id, system_id) race. The converged state is satisfied.
       clearPendingReason(eligibilityState);
       return;
     }
