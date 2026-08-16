@@ -311,7 +311,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         execution == null ? null : execution.importId(),
         execution == null ? null : execution.planItemId(),
         execution == null ? null : execution.executionGeneration(),
-        execution == null ? null : "PROCESSING",
+        execution == null ? null : "EVENT_PENDING",
         now,
         null,
         now);
