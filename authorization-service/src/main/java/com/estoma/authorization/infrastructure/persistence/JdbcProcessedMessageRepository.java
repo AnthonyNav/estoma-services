@@ -74,7 +74,7 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
   public int markApplied(String consumerName, UUID messageId, Instant appliedAt, Instant updatedAt) {
     return jdbc.sql(
             "UPDATE processed_messages SET status = 'APPLIED', applied_at = :appliedAt, "
-                + "deferred_reason = NULL, updated_at = :updatedAt "
+                + "deferred_reason = NULL, claim_token = NULL, lease_until = NULL, updated_at = :updatedAt "
                 + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED'")
         .param("consumerName", consumerName)
         .param("messageId", messageId)
@@ -88,10 +88,85 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
       String consumerName, UUID messageId, String deferredReason, Instant updatedAt) {
     return jdbc.sql(
             "UPDATE processed_messages SET deferred_reason = :deferredReason, updated_at = :updatedAt "
-                + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED'")
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED' "
+                + "AND claim_token IS NULL")
         .param("consumerName", consumerName)
         .param("messageId", messageId)
         .param("deferredReason", deferredReason)
+        .param("updatedAt", Timestamps.toTimestamp(updatedAt))
+        .update();
+  }
+
+  @Override
+  public boolean claimDeferred(
+      String consumerName,
+      UUID messageId,
+      UUID claimToken,
+      Instant leaseUntil,
+      Instant now) {
+    return jdbc.sql(
+            "UPDATE processed_messages SET claim_token = :claimToken, lease_until = :leaseUntil, updated_at = :now "
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED' "
+                + "AND (claim_token IS NULL OR lease_until < :now)")
+        .param("consumerName", consumerName)
+        .param("messageId", messageId)
+        .param("claimToken", claimToken)
+        .param("leaseUntil", Timestamps.toTimestamp(leaseUntil))
+        .param("now", Timestamps.toTimestamp(now))
+        .update()
+        == 1;
+  }
+
+  @Override
+  public int markAppliedClaimed(
+      String consumerName,
+      UUID messageId,
+      UUID claimToken,
+      Instant appliedAt,
+      Instant updatedAt) {
+    return jdbc.sql(
+            "UPDATE processed_messages SET status = 'APPLIED', applied_at = :appliedAt, "
+                + "deferred_reason = NULL, claim_token = NULL, lease_until = NULL, updated_at = :updatedAt "
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED' "
+                + "AND claim_token = :claimToken")
+        .param("consumerName", consumerName)
+        .param("messageId", messageId)
+        .param("claimToken", claimToken)
+        .param("appliedAt", Timestamps.toTimestamp(appliedAt))
+        .param("updatedAt", Timestamps.toTimestamp(updatedAt))
+        .update();
+  }
+
+  @Override
+  public int updateDeferredReasonClaimed(
+      String consumerName,
+      UUID messageId,
+      UUID claimToken,
+      String deferredReason,
+      Instant updatedAt) {
+    return jdbc.sql(
+            "UPDATE processed_messages SET deferred_reason = :deferredReason, claim_token = NULL, "
+                + "lease_until = NULL, updated_at = :updatedAt "
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED' "
+                + "AND claim_token = :claimToken")
+        .param("consumerName", consumerName)
+        .param("messageId", messageId)
+        .param("claimToken", claimToken)
+        .param("deferredReason", deferredReason)
+        .param("updatedAt", Timestamps.toTimestamp(updatedAt))
+        .update();
+  }
+
+  @Override
+  public int releaseClaim(
+      String consumerName, UUID messageId, UUID claimToken, Instant updatedAt) {
+    return jdbc.sql(
+            "UPDATE processed_messages SET claim_token = NULL, lease_until = NULL, updated_at = :updatedAt "
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId AND status = 'DEFERRED' "
+                + "AND claim_token = :claimToken")
+        .param("consumerName", consumerName)
+        .param("messageId", messageId)
+        .param("claimToken", claimToken)
         .param("updatedAt", Timestamps.toTimestamp(updatedAt))
         .update();
   }
