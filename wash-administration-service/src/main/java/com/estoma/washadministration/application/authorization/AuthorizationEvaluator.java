@@ -4,8 +4,11 @@ import com.estoma.washadministration.application.command.ActorContext;
 import com.estoma.washadministration.application.command.CommandRejectedException;
 import com.estoma.washadministration.application.port.AuthorizationAccessProjectionRepository;
 import com.estoma.washadministration.application.port.AuthorizationRoleProjectionRepository;
+import com.estoma.washadministration.application.port.ProjectionRecoveryJobRepository;
+import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Evaluates V1 authorization from local projections only. */
@@ -37,12 +40,22 @@ public final class AuthorizationEvaluator {
 
   private final AuthorizationRoleProjectionRepository roles;
   private final AuthorizationAccessProjectionRepository accesses;
+  private final ProjectionRecoveryJobRepository recoveryJobs;
 
   public AuthorizationEvaluator(
       AuthorizationRoleProjectionRepository roles,
       AuthorizationAccessProjectionRepository accesses) {
+    this(roles, accesses, null);
+  }
+
+  @Autowired
+  public AuthorizationEvaluator(
+      AuthorizationRoleProjectionRepository roles,
+      AuthorizationAccessProjectionRepository accesses,
+      ProjectionRecoveryJobRepository recoveryJobs) {
     this.roles = roles;
     this.accesses = accesses;
+    this.recoveryJobs = recoveryJobs;
   }
 
   public boolean isAuthorized(ActorContext actor, String operationType) {
@@ -54,11 +67,25 @@ public final class AuthorizationEvaluator {
       return false;
     }
     UUID accountId = actor.accountId();
-    return roles.findByAccountId(accountId)
-            .map(AuthorizationRoleProjectionRepository.RoleProjection::roleCode)
+    if (recoveryJobs != null
+        && (recoveryJobs.hasActiveFullRecovery()
+            || recoveryJobs.hasFailedFullRecovery()
+            || recoveryJobs.hasActiveEntityRecovery(accountId)
+            || recoveryJobs.hasFailedEntityRecovery(accountId))) {
+      return false;
+    }
+    var role = roles.findByAccountId(accountId);
+    var access = accesses.findByAccountId(accountId, SYSTEM);
+    if (role.isEmpty() || access.isEmpty()) {
+      if (recoveryJobs != null) {
+        recoveryJobs.createEntity(accountId, Instant.now());
+      }
+      return false;
+    }
+    return role.map(AuthorizationRoleProjectionRepository.RoleProjection::roleCode)
             .filter(ROLE::equals)
             .isPresent()
-        && accesses.findByAccountId(accountId, SYSTEM)
+        && access
             .map(AuthorizationAccessProjectionRepository.AccessProjection::accessStatus)
             .filter("ACTIVE"::equals)
             .isPresent()
