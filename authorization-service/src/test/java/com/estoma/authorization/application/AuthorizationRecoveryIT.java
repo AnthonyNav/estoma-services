@@ -1,6 +1,7 @@
 package com.estoma.authorization.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.authorization.application.command.AssignAccountRoleCommand;
 import com.estoma.authorization.application.command.AuthoritativeEvidence;
@@ -129,6 +130,7 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
     UUID accountId = UUID.randomUUID();
     UUID personId = UUID.randomUUID();
     UUID commandMessageId = UUID.randomUUID();
+    UUID priorResultMessageId = UUID.randomUUID();
     UUID importId = UUID.randomUUID();
     UUID planItemId = UUID.randomUUID();
     String key = "academic-event-pending-key";
@@ -140,7 +142,7 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
         "ASSIGN_STUDENT_ROLE",
         List.of(new CausalDependency(
             "CreateAccount",
-            UUID.randomUUID(),
+            priorResultMessageId,
             "SUCCEEDED",
             "AccountCreated",
             accountId,
@@ -151,7 +153,8 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
         "AssignAccountRole",
         "academic",
         ActorRef.system("academic"),
-        key);
+        key,
+        priorResultMessageId);
 
     CommandOutcome deferred = commands.dispatch(
         commandMetadata,
@@ -179,6 +182,8 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
         .satisfies(record -> {
           assertThat(record.status()).isEqualTo("COMPLETED");
           assertThat(record.resultStatus()).isEqualTo("SUCCEEDED");
+          assertThat(record.resultDataJson())
+              .contains(importId.toString(), planItemId.toString(), "\"executionGeneration\":1");
         });
     assertThat(
             jdbc.sql(
@@ -203,8 +208,8 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
         List.of(),
         List.of(new AuthoritativeEvidence(
             "authentication",
-            "GetAccountStatusSnapshot",
-            "FOUND",
+            "CreateAccount",
+            "SUCCEEDED",
             UUID.randomUUID(),
             "Account",
             accountId,
@@ -238,6 +243,7 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
           assertThat(record.status()).isEqualTo("COMPLETED");
           assertThat(record.resultStatus()).isEqualTo("REJECTED");
           assertThat(record.errorCode()).isEqualTo("ACCOUNT_NOT_FOUND");
+          assertThat(record.resultDataJson()).contains("executionGeneration");
         });
   }
 
@@ -257,6 +263,36 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
         .isEqualTo(ProjectionRecoveryResultHandler.Status.NOT_FOUND_CONFLICT);
     assertThat(accounts.findByAccountId(accountId)).isPresent();
     assertThat(recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", "account:" + accountId)).isFalse();
+  }
+
+  @Test
+  void entityFoundForAnotherAccountIsRejectedBeforeProjectionMutation() {
+    UUID requestedAccountId = UUID.randomUUID();
+    UUID wrongAccountId = UUID.randomUUID();
+    UUID wrongPersonId = UUID.randomUUID();
+    var job = recovery.requestAccount(requestedAccountId);
+
+    ProjectionRecoveryResult mismatched = new ProjectionRecoveryResult(
+        recoveryMetadata(job, "authentication"),
+        ProjectionRecoveryResult.Status.FOUND,
+        List.of(new AccountSnapshot(
+            wrongAccountId,
+            wrongPersonId,
+            LoginType.MATRICULA,
+            ProjectedStatus.INACTIVE,
+            4,
+            NOW.plusSeconds(1))),
+        null,
+        false,
+        null);
+
+    assertThatThrownBy(() -> recoveryResults.handle(mismatched))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("snapshot identity");
+    assertThat(accounts.findByAccountId(wrongAccountId)).isEmpty();
+    assertThat(recoveryJobs.findById(job.recoveryJobId())).get()
+        .extracting(ProjectionRecoveryJobRepository.RecoveryJob::status)
+        .isEqualTo("WAITING_RESULT");
   }
 
   @Test
@@ -360,6 +396,28 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
         idempotencyKey,
         actor,
         NOW);
+  }
+
+  private static CommandMetadata metadata(
+      UUID messageId,
+      String type,
+      String producer,
+      ActorRef actor,
+      String idempotencyKey,
+      UUID causationId) {
+    return new CommandMetadata(
+        messageId,
+        type,
+        1,
+        producer,
+        NOW,
+        UUID.randomUUID(),
+        causationId,
+        UUID.randomUUID(),
+        idempotencyKey,
+        actor,
+        null,
+        null);
   }
 
   private static ProjectionRecoveryResult.Metadata recoveryMetadata(
