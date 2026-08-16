@@ -82,10 +82,17 @@ public final class AuthorityEvaluator {
     if (actor.type() != ActorType.ACCOUNT || actor.accountId() == null) {
       throw reject(AuthorizationErrorCode.ACTOR_CONTEXT_INVALID, "BFF commands require an ACCOUNT actor");
     }
-    if (recoveryJobs.hasActiveFull("ACCOUNT_STATUS") || recoveryJobs.hasActiveFull("PERSON_STATUS")) {
-      throw reject(AuthorizationErrorCode.ACTOR_NOT_AUTHORIZED, "critical actor projection rebuild is active");
+    if (!recoveryJobs.isProjectionTrusted("ACCOUNT_STATUS")
+        || !recoveryJobs.isProjectionTrusted("PERSON_STATUS")
+        || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", "account:" + actor.accountId())) {
+      throw reject(AuthorizationErrorCode.ACTOR_NOT_AUTHORIZED, "actor projection recovery is not trusted");
     }
     var actorAccount = accounts.findByAccountId(actor.accountId());
+    if (actorAccount.isPresent()
+        && !recoveryJobs.isEntityTrusted(
+            "PERSON_STATUS", "person:" + actorAccount.get().personId())) {
+      throw reject(AuthorizationErrorCode.ACTOR_NOT_AUTHORIZED, "actor person recovery is not trusted");
+    }
     var actorPerson = actorAccount.flatMap(account -> persons.findByPersonId(account.personId()));
     if (actorAccount.isEmpty()
         || actorPerson.isEmpty()
@@ -156,8 +163,20 @@ public final class AuthorityEvaluator {
   }
 
   private void requireTrustworthyActiveTarget(UUID accountId) {
+    if (!recoveryJobs.isProjectionTrusted("ACCOUNT_STATUS")
+        || !recoveryJobs.isProjectionTrusted("PERSON_STATUS")
+        || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", "account:" + accountId)) {
+      throw reject(
+          AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+          "target recovery is not trusted for restore");
+    }
     var account = accounts.findByAccountId(accountId)
         .orElseThrow(() -> reject(AuthorizationErrorCode.ACCOUNT_NOT_FOUND, "target account projection is absent"));
+    if (!recoveryJobs.isEntityTrusted("PERSON_STATUS", "person:" + account.personId())) {
+      throw reject(
+          AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+          "target person recovery is not trusted for restore");
+    }
     var person = persons.findByPersonId(account.personId())
         .orElseThrow(() -> reject(AuthorizationErrorCode.ACCOUNT_NOT_FOUND, "target person projection is absent"));
     if (account.status() != ProjectedStatus.ACTIVE
