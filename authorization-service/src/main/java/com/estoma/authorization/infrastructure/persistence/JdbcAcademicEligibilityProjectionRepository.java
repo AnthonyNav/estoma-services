@@ -1,6 +1,7 @@
 package com.estoma.authorization.infrastructure.persistence;
 
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -42,6 +43,16 @@ class JdbcAcademicEligibilityProjectionRepository implements AcademicEligibility
         .param("systemCode", systemCode)
         .query(AcademicEligibilityRowMapper.INSTANCE)
         .optional();
+  }
+
+  @Override
+  public List<UUID> findEligibleAccountIds(String systemCode) {
+    return jdbc.sql(
+            "SELECT DISTINCT account_id FROM academic_eligibility_projection "
+                + "WHERE system_code = :systemCode AND eligible = true ORDER BY account_id")
+        .param("systemCode", systemCode)
+        .query(UUID.class)
+        .list();
   }
 
   @Override
