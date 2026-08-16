@@ -7,6 +7,7 @@ import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.StoredApplicationResultDecoder;
 import com.estoma.authorization.application.port.TransactionRunner;
+import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.support.OutboxIntentWriter;
 import com.estoma.authorization.application.support.ResultIntentFactory;
 import java.time.Clock;
@@ -30,6 +31,7 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
   private final StoredApplicationResultDecoder resultDecoder;
   private final OutboxRepository outbox;
   private final AuthorizationAuditRepository audit;
+  private final ProjectionRecoveryCoordinator recovery;
   private final Clock clock;
 
   public AuthorizationCommandProcessor(
@@ -40,6 +42,7 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
       StoredApplicationResultDecoder resultDecoder,
       OutboxRepository outbox,
       AuthorizationAuditRepository audit,
+      ProjectionRecoveryCoordinator recovery,
       Clock clock) {
     this.transactions = transactions;
     this.delegate = delegate;
@@ -48,13 +51,21 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
     this.resultDecoder = resultDecoder;
     this.outbox = outbox;
     this.audit = audit;
+    this.recovery = recovery;
     this.clock = clock;
   }
 
   @Override
   public CommandOutcome dispatch(CommandMetadata metadata, AuthorizationCommand command) {
     validateEnvelopeShape(metadata, command);
-    return transactions.inTransaction(() -> processInTransaction(metadata, command));
+    CommandOutcome outcome =
+        transactions.inTransaction(() -> processInTransaction(metadata, command));
+    if (outcome.deferred()
+        && "PROJECTION_RECONCILIATION".equals(outcome.pendingReason())
+        && command.targetAccountId() != null) {
+      recovery.requestAccount(command.targetAccountId());
+    }
+    return outcome;
   }
 
   private CommandOutcome processInTransaction(
