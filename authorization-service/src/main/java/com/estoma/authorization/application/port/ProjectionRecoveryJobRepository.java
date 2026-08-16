@@ -14,6 +14,12 @@ public interface ProjectionRecoveryJobRepository {
 
   boolean hasActiveFull(String projectionType);
 
+  /** Latest FULL job is COMPLETED or no FULL job exists. */
+  boolean isProjectionTrusted(String projectionType);
+
+  /** Latest ENTITY job for the key is COMPLETED or no ENTITY job exists. */
+  boolean isEntityTrusted(String projectionType, String entityKey);
+
   void insert(RecoveryJob job);
 
   boolean insertIfAbsent(RecoveryJob job);
