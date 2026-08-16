@@ -17,6 +17,8 @@ import com.estoma.authorization.application.port.SystemCatalogRepository;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.projection.PracticesProvisioningService;
 import com.estoma.authorization.application.projection.ProjectionEventProcessor;
+import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
+import com.estoma.authorization.application.recovery.ProjectionRecoveryResultHandler;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -65,6 +67,42 @@ class AuthorizationApplicationConfig {
         recoveryJobs,
         outbox,
         audit);
+  }
+
+  @Bean
+  ProjectionRecoveryCoordinator projectionRecoveryCoordinator(
+      TransactionRunner transactions,
+      ProjectionRecoveryJobRepository jobs,
+      PersonStatusProjectionRepository persons,
+      AccountStatusProjectionRepository accounts,
+      AcademicEligibilityProjectionRepository eligibility,
+      OutboxRepository outbox,
+      Clock clock) {
+    return new ProjectionRecoveryCoordinator(
+        transactions, jobs, persons, accounts, eligibility, outbox, clock);
+  }
+
+  @Bean
+  ProjectionRecoveryResultHandler projectionRecoveryResultHandler(
+      TransactionRunner transactions,
+      ProjectionRecoveryJobRepository jobs,
+      ProcessedMessageRepository inbox,
+      PersonStatusProjectionRepository persons,
+      AccountStatusProjectionRepository accounts,
+      AcademicEligibilityProjectionRepository eligibility,
+      ProjectionRecoveryCoordinator coordinator,
+      PracticesProvisioningService provisioning,
+      Clock clock) {
+    return new ProjectionRecoveryResultHandler(
+        transactions,
+        jobs,
+        inbox,
+        persons,
+        accounts,
+        eligibility,
+        coordinator,
+        provisioning,
+        clock);
   }
 
   @Bean
