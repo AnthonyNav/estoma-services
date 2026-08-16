@@ -76,9 +76,24 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
     Optional<ProcessedMessageRepository.ProcessedMessage> delivery =
         transactions.inTransaction(() -> inbox.find(CONSUMER, metadata.messageId()));
     if (delivery.isPresent()) {
-      return "APPLIED".equals(delivery.get().status())
-          ? CommandOutcome.duplicate()
-          : CommandOutcome.deferred(delivery.get().deferredReason());
+      if ("APPLIED".equals(delivery.get().status())) {
+        return CommandOutcome.duplicate();
+      }
+      if (isStaleAcademicGeneration(metadata, command)) {
+        return transactions.inTransaction(() -> {
+          ProcessedMessageRepository.ProcessedMessage locked = inbox.findForUpdate(
+                  CONSUMER, metadata.messageId())
+              .orElseThrow(() -> new IllegalStateException("deferred command Inbox entry disappeared"));
+          if ("APPLIED".equals(locked.status())) {
+            return CommandOutcome.duplicate();
+          }
+          if (!isStaleAcademicGeneration(metadata, command)) {
+            return CommandOutcome.deferred(locked.deferredReason());
+          }
+          return delegate.replayDeferred(metadata, command);
+        });
+      }
+      return CommandOutcome.deferred(delivery.get().deferredReason());
     }
 
     String fingerprint = CommandPayloads.fingerprint(metadata, command);
