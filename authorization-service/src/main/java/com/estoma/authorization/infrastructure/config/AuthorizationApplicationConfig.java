@@ -6,6 +6,7 @@ import com.estoma.authorization.application.port.AccountRoleRepository;
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
 import com.estoma.authorization.application.port.AuthorizationAuditRepository;
+import com.estoma.authorization.application.port.AuthorizationSnapshotRepository;
 import com.estoma.authorization.application.port.CommandIdempotencyRepository;
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
@@ -17,6 +18,7 @@ import com.estoma.authorization.application.port.SystemCatalogRepository;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.projection.PracticesProvisioningService;
 import com.estoma.authorization.application.projection.ProjectionEventProcessor;
+import com.estoma.authorization.application.query.AuthorizationSnapshotQueryService;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResultHandler;
 import java.time.Clock;
@@ -103,6 +105,12 @@ class AuthorizationApplicationConfig {
         coordinator,
         provisioning,
         clock);
+  }
+
+  @Bean
+  AuthorizationSnapshotQueryService authorizationSnapshotQueryService(
+      AuthorizationSnapshotRepository snapshots, Clock clock) {
+    return new AuthorizationSnapshotQueryService(snapshots, clock);
   }
 
   @Bean
