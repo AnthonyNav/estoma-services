@@ -31,6 +31,10 @@ sessions or expose a business HTTP API.
 - Outbox Relay publisher confirms, consumer retry/DLQ and broker integration tests.
 - Mapping the already implemented Application Commands/Events/Queries/Results to the platform messaging contracts.
 
+Known implementation gaps are tracked in
+[`docs/implementation_gaps.md`](docs/implementation_gaps.md). PR2 remains open
+until the `BLOCKER` and `HIGH` items are corrected and revalidated.
+
 ## Operational Endpoints
 
 - `GET /actuator/health`
