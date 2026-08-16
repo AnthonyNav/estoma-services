@@ -8,8 +8,7 @@ public record PersonProjectionEvent(
     ProjectionEventMetadata metadata,
     UUID personId,
     ProjectedStatus status,
-    String payloadJson,
-    boolean causallyApplicable)
+    String payloadJson)
     implements ProjectionEvent {
 
   public PersonProjectionEvent {
