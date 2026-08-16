@@ -2,30 +2,32 @@ package com.estoma.authorization.application.recovery;
 
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
+import com.estoma.authorization.application.port.DeferredProjectionEventDecoder;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository.RecoveryJob;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.projection.PracticesProvisioningService;
+import com.estoma.authorization.application.projection.ProjectionEvent;
+import com.estoma.authorization.application.projection.ProjectionEventProcessor;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator.ProjectionType;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResult.AccountSnapshot;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResult.EligibilitySnapshot;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResult.PersonSnapshot;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResult.SnapshotItem;
-import com.estoma.authorization.domain.model.ActorRef;
 import com.estoma.authorization.domain.model.SystemCode;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.LinkedHashSet;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
-/** Applies authoritative snapshot Results to recovery jobs and projections in one local transaction. */
+/** Applies authoritative snapshot Results and wakes dependent durable work only after recovery commits. */
 public final class ProjectionRecoveryResultHandler {
 
   private static final String RESULT_CONSUMER = "authorization-recovery-results";
+  private static final String EVENT_CONSUMER = "authorization-events";
+  private static final int DEFERRED_DRAIN_LIMIT = 1000;
 
   private final TransactionRunner transactions;
   private final ProjectionRecoveryJobRepository jobs;
@@ -35,6 +37,9 @@ public final class ProjectionRecoveryResultHandler {
   private final AcademicEligibilityProjectionRepository eligibility;
   private final ProjectionRecoveryCoordinator coordinator;
   private final PracticesProvisioningService provisioning;
+  private final DeferredProjectionEventDecoder deferredEventDecoder;
+  private final DeferredCommandRecoveryService deferredCommands;
+  private final ProjectionEventProcessor projectionEvents;
   private final Clock clock;
 
   public ProjectionRecoveryResultHandler(
@@ -46,6 +51,9 @@ public final class ProjectionRecoveryResultHandler {
       AcademicEligibilityProjectionRepository eligibility,
       ProjectionRecoveryCoordinator coordinator,
       PracticesProvisioningService provisioning,
+      DeferredProjectionEventDecoder deferredEventDecoder,
+      DeferredCommandRecoveryService deferredCommands,
+      ProjectionEventProcessor projectionEvents,
       Clock clock) {
     this.transactions = transactions;
     this.jobs = jobs;
@@ -55,11 +63,16 @@ public final class ProjectionRecoveryResultHandler {
     this.eligibility = eligibility;
     this.coordinator = coordinator;
     this.provisioning = provisioning;
+    this.deferredEventDecoder = deferredEventDecoder;
+    this.deferredCommands = deferredCommands;
+    this.projectionEvents = projectionEvents;
     this.clock = clock;
   }
 
   public HandlingResult handle(ProjectionRecoveryResult result) {
-    return transactions.inTransaction(() -> handleInTransaction(result));
+    HandlingResult handling = transactions.inTransaction(() -> handleInTransaction(result));
+    afterCommittedRecovery(result, handling);
+    return handling;
   }
 
   private HandlingResult handleInTransaction(ProjectionRecoveryResult result) {
@@ -121,10 +134,7 @@ public final class ProjectionRecoveryResultHandler {
       throw new IllegalArgumentException("FULL recovery requires SUCCEEDED Result");
     }
     validateItemTypes(result, projectionType);
-    Set<UUID> provisioningAccounts = applyItems(result, projectionType);
-    for (UUID accountId : provisioningAccounts) {
-      evaluateProvisioning(accountId, result);
-    }
+    applyItems(result, projectionType);
 
     RecoveryJob updated;
     if (result.hasMore()) {
@@ -158,18 +168,13 @@ public final class ProjectionRecoveryResultHandler {
       throw new IllegalArgumentException("ENTITY recovery requires FOUND with one item or NOT_FOUND");
     }
     validateItemTypes(result, projectionType);
-    Set<UUID> provisioningAccounts = applyItems(result, projectionType);
-    for (UUID accountId : provisioningAccounts) {
-      evaluateProvisioning(accountId, result);
-    }
+    applyItems(result, projectionType);
     RecoveryJob completed = terminalJob(job, "COMPLETED", null, now);
     updateWaitingJob(completed, job);
     return new HandlingResult(Status.COMPLETED, completed.recoveryJobId());
   }
 
-  private Set<UUID> applyItems(
-      ProjectionRecoveryResult result, ProjectionType projectionType) {
-    Set<UUID> provisioningAccounts = new LinkedHashSet<>();
+  private void applyItems(ProjectionRecoveryResult result, ProjectionType projectionType) {
     for (SnapshotItem item : result.items()) {
       switch (projectionType) {
         case PERSON_STATUS -> {
@@ -186,7 +191,6 @@ public final class ProjectionRecoveryResultHandler {
               account.status(),
               account.sourceVersion(),
               account.updatedAt()));
-          provisioningAccounts.add(account.accountId());
         }
         case ACADEMIC_ELIGIBILITY -> {
           EligibilitySnapshot itemEligibility = (EligibilitySnapshot) item;
@@ -203,11 +207,95 @@ public final class ProjectionRecoveryResultHandler {
                   null,
                   itemEligibility.evaluatedAt(),
                   itemEligibility.updatedAt()));
-          provisioningAccounts.add(itemEligibility.accountId());
         }
       }
     }
-    return provisioningAccounts;
+  }
+
+  private void afterCommittedRecovery(
+      ProjectionRecoveryResult result, HandlingResult handling) {
+    if (handling.recoveryJobId() == null
+        || (handling.status() != Status.COMPLETED
+            && handling.status() != Status.NOT_FOUND_CONFIRMED)) {
+      return;
+    }
+    RecoveryJob job = jobs.findById(handling.recoveryJobId())
+        .orElseThrow(() -> new IllegalStateException("completed recovery job disappeared"));
+    ProjectionType projectionType = ProjectionType.valueOf(job.projectionType());
+    if ("FULL".equals(job.scope())) {
+      wakeAfterFull(result, projectionType);
+      return;
+    }
+    wakeAfterEntity(result, job, projectionType);
+  }
+
+  private void wakeAfterEntity(
+      ProjectionRecoveryResult result,
+      RecoveryJob job,
+      ProjectionType projectionType) {
+    boolean notFound = result.status() == ProjectionRecoveryResult.Status.NOT_FOUND;
+    switch (projectionType) {
+      case PERSON_STATUS -> {
+        UUID personId = parseUuid(job.entityKey(), "person:");
+        wakeDeferredEvents(personId, notFound);
+      }
+      case ACCOUNT_STATUS -> {
+        UUID accountId = parseUuid(job.entityKey(), "account:");
+        wakeDeferredEvents(accountId, notFound);
+        deferredCommands.replayForAccount(
+            accountId, "PROJECTION_RECONCILIATION", notFound);
+        if (!notFound) {
+          evaluateProvisioning(accountId, result);
+        }
+      }
+      case ACADEMIC_ELIGIBILITY -> {
+        if (!notFound && !result.items().isEmpty()) {
+          EligibilitySnapshot item = (EligibilitySnapshot) result.items().get(0);
+          evaluateProvisioning(item.accountId(), result);
+        }
+      }
+    }
+  }
+
+  private void wakeAfterFull(
+      ProjectionRecoveryResult result, ProjectionType projectionType) {
+    for (ProcessedMessageRepository.ProcessedMessage deferred :
+        inbox.findDeferred(EVENT_CONSUMER, "EVENT", DEFERRED_DRAIN_LIMIT)) {
+      boolean belongsToProjection = switch (projectionType) {
+        case PERSON_STATUS -> "users".equals(deferred.producer());
+        case ACCOUNT_STATUS -> "authentication".equals(deferred.producer());
+        case ACADEMIC_ELIGIBILITY -> false;
+      };
+      if (belongsToProjection) {
+        projectionEvents.replayDeferred(deferredEventDecoder.decode(deferred));
+      }
+    }
+    if (projectionType == ProjectionType.ACCOUNT_STATUS) {
+      deferredCommands.drainProjectionReconciliation();
+    }
+    if (projectionType == ProjectionType.ACCOUNT_STATUS
+        || projectionType == ProjectionType.ACADEMIC_ELIGIBILITY) {
+      for (UUID accountId : eligibility.findEligibleAccountIds(
+          SystemCode.PRACTICAS_PROFESIONALES.name())) {
+        evaluateProvisioning(accountId, result);
+      }
+    }
+  }
+
+  private void wakeDeferredEvents(UUID aggregateId, boolean authoritativeNotFound) {
+    for (ProcessedMessageRepository.ProcessedMessage deferred :
+        inbox.findDeferredByAggregate(EVENT_CONSUMER, aggregateId, DEFERRED_DRAIN_LIMIT)) {
+      if (authoritativeNotFound) {
+        Instant now = clock.instant();
+        transactions.inTransaction(() -> {
+          inbox.markApplied(EVENT_CONSUMER, deferred.messageId(), now, now);
+          return null;
+        });
+      } else {
+        ProjectionEvent decoded = deferredEventDecoder.decode(deferred);
+        projectionEvents.replayDeferred(decoded);
+      }
+    }
   }
 
   private void evaluateProvisioning(UUID accountId, ProjectionRecoveryResult result) {
