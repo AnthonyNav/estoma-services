@@ -6,6 +6,4 @@ public sealed interface ProjectionEvent
   ProjectionEventMetadata metadata();
 
   String payloadJson();
-
-  boolean causallyApplicable();
 }
