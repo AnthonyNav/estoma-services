@@ -145,6 +145,7 @@ class AuthorizationApplicationConfig {
 
   @Bean
   DeferredCommandRecoveryService deferredCommandRecoveryService(
+      TransactionRunner transactions,
       ProcessedMessageRepository inbox,
       DeferredCommandDecoder decoder,
       AuthorizationCommandDispatcher dispatcher,
@@ -153,7 +154,7 @@ class AuthorizationApplicationConfig {
       AuthorizationAuditRepository audit,
       Clock clock) {
     return new DeferredCommandRecoveryService(
-        inbox, decoder, dispatcher, idempotency, outbox, audit, clock);
+        transactions, inbox, decoder, dispatcher, idempotency, outbox, audit, clock);
   }
 
   @Bean
