@@ -19,12 +19,12 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   @Autowired private JdbcClient jdbc;
 
   @Test
-  void migrationIsAppliedAndRerunningIsANoOp() {
+  void migrationsAreAppliedAndRerunningIsANoOp() {
     MigrationInfo[] applied = flyway.info().applied();
 
-    assertThat(applied).hasSize(1);
-    assertThat(applied[0].getVersion().toString()).isEqualTo("1");
-    assertThat(applied[0].getState().isFailed()).isFalse();
+    assertThat(applied).hasSize(2);
+    assertThat(applied).extracting(info -> info.getVersion().toString()).containsExactly("1", "2");
+    assertThat(applied).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
     assertThat(flyway.migrate().migrationsExecuted).isZero();
   }
 
@@ -128,7 +128,7 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   }
 
   @Test
-  void runtimeRoleCannotDeleteOrModifyStaticCatalogsAndAuditIsAppendOnly() {
+  void runtimeRoleUsesLeastPrivilegeIncludingControlledProjectionRebuildDelete() {
     assertThat(
             jdbc.sql(
                     "SELECT privilege_type FROM information_schema.role_table_grants "
@@ -144,6 +144,20 @@ class FlywayMigrationIT extends AbstractPostgresIT {
                 .query(String.class)
                 .list())
         .containsOnly("SELECT");
+    assertThat(
+            jdbc.sql(
+                    "SELECT privilege_type FROM information_schema.role_table_grants "
+                        + "WHERE grantee = current_user AND table_name = 'account_status_projection'")
+                .query(String.class)
+                .list())
+        .contains("SELECT", "INSERT", "UPDATE", "DELETE");
+    assertThat(
+            jdbc.sql(
+                    "SELECT privilege_type FROM information_schema.role_table_grants "
+                        + "WHERE grantee = current_user AND table_name = 'system_accesses'")
+                .query(String.class)
+                .list())
+        .doesNotContain("DELETE");
   }
 
   @Test
