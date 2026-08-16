@@ -10,6 +10,7 @@ import com.estoma.washadministration.application.port.CabinRepository;
 import com.estoma.washadministration.application.port.CommandIdempotencyRepository;
 import com.estoma.washadministration.application.port.OutboxRepository;
 import com.estoma.washadministration.application.port.ProcessedMessageRepository;
+import com.estoma.washadministration.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.washadministration.application.port.ResourcePriorityRepository;
 import com.estoma.washadministration.application.port.ServiceCalendarRepository;
 import com.estoma.washadministration.application.port.ServiceScheduleRepository;
@@ -57,7 +58,19 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
   @Autowired private ProcessedMessageRepository processedMessages;
   @Autowired private CommandIdempotencyRepository idempotency;
   @Autowired private OutboxRepository outbox;
+  @Autowired private ProjectionRecoveryJobRepository recoveryJobs;
   @Autowired private JdbcClient jdbc;
+
+  @Test
+  void authorizationProjectionClearUsesTheRecoveryLockAndRemovesBothProjectionParts() {
+    roles.upsert(ACCOUNT_ID, "ADMINISTRADOR_LAVADO", 1, NOW);
+    accesses.upsert(ACCOUNT_ID, "LAVADO_ULTRASONICO", "ACTIVE", 1, NOW);
+
+    recoveryJobs.clearAuthorizationProjection();
+
+    assertThat(roles.findByAccountId(ACCOUNT_ID)).isEmpty();
+    assertThat(accesses.findByAccountId(ACCOUNT_ID, "LAVADO_ULTRASONICO")).isEmpty();
+  }
 
   @Test
   void calendarRepositoryRoundTripsAndUsesAtomicOptimisticLocking() {

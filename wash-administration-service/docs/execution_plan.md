@@ -546,26 +546,23 @@ contract/integration tests
 
 No debe reescribir reglas de dominio.
 
-## Gate Obligatorio Antes De Empezar
+## Gate Contractual Resuelto
 
-Resolver en `estomatologia-platform-docs` la contradicción actual entre:
-
-```text
-commands.wash-administration-service
-queries.wash-administration-service
-```
-
-versus la convención transversal basada en:
+`estomatologia-platform-docs` resolvió la nomenclatura en el commit canónico
+`459fdd4`. PR3 usa exclusivamente:
 
 ```text
 logicalComponentId = wash-administration
 commands.wash-administration
 queries.wash-administration
+events.wash-administration
+results.wash-administration
 ```
 
-No implementar aliases permanentes ni ambas topologías.
-
-Una vez corregida la fuente canónica, PR3 usa exclusivamente el nombre aprobado.
+No se implementan aliases permanentes ni topologías paralelas con sufijo
+`-service`. Los requesters de `GetWashAdministrationConfiguration` son
+`appointments` y `wash-execution`; el detalle queda en la fuente canónica de
+plataforma y en `pr3-contract-gate.md`.
 
 ## Scope
 

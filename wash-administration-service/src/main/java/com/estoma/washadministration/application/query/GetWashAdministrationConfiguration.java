@@ -23,7 +23,10 @@ import org.springframework.transaction.annotation.Isolation;
 
 /** Authoritative, side-effect-free configuration snapshot for service consumers. */
 @Component
-@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+@Transactional(
+    readOnly = true,
+    isolation = Isolation.REPEATABLE_READ,
+    noRollbackFor = GetWashAdministrationConfiguration.QueryRejectedException.class)
 public class GetWashAdministrationConfiguration {
 
   private static final List<String> ALLOWED_REQUESTERS = List.of("appointments", "wash-execution");
