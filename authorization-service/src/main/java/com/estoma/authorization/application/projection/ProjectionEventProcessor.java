@@ -3,9 +3,11 @@ package com.estoma.authorization.application.projection;
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
 import com.estoma.authorization.application.port.AuthorizationAuditRepository;
+import com.estoma.authorization.application.port.DeferredProjectionEventDecoder;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.TransactionRunner;
+import com.estoma.authorization.application.recovery.DeferredCommandRecoveryService;
 import com.estoma.authorization.domain.model.ProjectedStatus;
 import com.estoma.authorization.domain.model.SystemCode;
 import java.time.Clock;
@@ -17,12 +19,15 @@ import java.util.UUID;
 public final class ProjectionEventProcessor {
 
   private static final String CONSUMER = "authorization-events";
+  private static final int DEFERRED_DRAIN_LIMIT = 500;
   private final TransactionRunner transactions;
   private final ProcessedMessageRepository inbox;
   private final PersonStatusProjectionRepository persons;
   private final AccountStatusProjectionRepository accounts;
   private final AcademicEligibilityProjectionRepository eligibility;
   private final PracticesProvisioningService provisioning;
+  private final DeferredProjectionEventDecoder deferredEventDecoder;
+  private final DeferredCommandRecoveryService deferredCommands;
   private final AuthorizationAuditRepository audit;
   private final Clock clock;
 
@@ -33,6 +38,8 @@ public final class ProjectionEventProcessor {
       AccountStatusProjectionRepository accounts,
       AcademicEligibilityProjectionRepository eligibility,
       PracticesProvisioningService provisioning,
+      DeferredProjectionEventDecoder deferredEventDecoder,
+      DeferredCommandRecoveryService deferredCommands,
       AuthorizationAuditRepository audit,
       Clock clock) {
     this.transactions = transactions;
@@ -41,16 +48,25 @@ public final class ProjectionEventProcessor {
     this.accounts = accounts;
     this.eligibility = eligibility;
     this.provisioning = provisioning;
+    this.deferredEventDecoder = deferredEventDecoder;
+    this.deferredCommands = deferredCommands;
     this.audit = audit;
     this.clock = clock;
   }
 
   /** Normal delivery. A redelivery of an already DEFERRED message is ACK-safe and not re-evaluated. */
   public ProcessingResult process(ProjectionEvent event) {
-    return transactions.inTransaction(() -> processInTransaction(event, false));
+    boolean alreadyApplied = inbox.find(CONSUMER, event.metadata().messageId())
+        .map(message -> "APPLIED".equals(message.status()))
+        .orElse(false);
+    ProcessingResult result = transactions.inTransaction(() -> processInTransaction(event, false));
+    if (!alreadyApplied && result.status() == Status.APPLIED) {
+      wakeAfterApplied(event);
+    }
+    return result;
   }
 
-  /** Explicit recovery path for the original deferred messageId. */
+  /** Explicit recovery path for the original deferred messageId. Wake-up is controlled by the caller. */
   public ProcessingResult replayDeferred(ProjectionEvent event) {
     return transactions.inTransaction(() -> processInTransaction(event, true));
   }
@@ -114,22 +130,27 @@ public final class ProjectionEventProcessor {
           ? account.loginType()
           : current.orElseThrow().loginType();
       changed = accounts.upsertIfNewer(new AccountStatusProjectionRepository.AccountStatusProjection(
-          account.accountId(), account.personId(), loginType, account.status(),
-          metadata.aggregateVersion(), metadata.occurredAt())) == 1;
+          account.accountId(),
+          account.personId(),
+          loginType,
+          account.status(),
+          metadata.aggregateVersion(),
+          metadata.occurredAt())) == 1;
       provisioningAccountId = account.accountId();
     } else if (event instanceof AcademicEligibilityProjectionEvent academic) {
-      changed = eligibility.upsertIfNewer(new AcademicEligibilityProjectionRepository.AcademicEligibilityProjection(
-          academic.eligibilityId(),
-          academic.studentAcademicProfileId(),
-          academic.systemCode(),
-          academic.accountId(),
-          academic.eligible(),
-          academic.policyVersion(),
-          academic.eligibilityVersion(),
-          academic.academicProfileVersion(),
-          null,
-          academic.evaluatedAt(),
-          metadata.occurredAt())) == 1;
+      changed = eligibility.upsertIfNewer(
+          new AcademicEligibilityProjectionRepository.AcademicEligibilityProjection(
+              academic.eligibilityId(),
+              academic.studentAcademicProfileId(),
+              academic.systemCode(),
+              academic.accountId(),
+              academic.eligible(),
+              academic.policyVersion(),
+              academic.eligibilityVersion(),
+              academic.academicProfileVersion(),
+              null,
+              academic.evaluatedAt(),
+              metadata.occurredAt())) == 1;
       provisioningAccountId = academic.accountId();
     } else {
       throw new IllegalArgumentException("unsupported projection event: " + event.getClass());
@@ -170,6 +191,18 @@ public final class ProjectionEventProcessor {
         null,
         now));
     return new ProcessingResult(Status.APPLIED, changed);
+  }
+
+  private void wakeAfterApplied(ProjectionEvent event) {
+    UUID aggregateId = event.metadata().aggregateId();
+    for (ProcessedMessageRepository.ProcessedMessage deferred :
+        inbox.findDeferredByAggregate(CONSUMER, aggregateId, DEFERRED_DRAIN_LIMIT)) {
+      ProjectionEvent decoded = deferredEventDecoder.decode(deferred);
+      replayDeferred(decoded);
+    }
+    if (event instanceof AccountProjectionEvent account) {
+      deferredCommands.replayForAccount(account.accountId(), "EVENT_PENDING", false);
+    }
   }
 
   private boolean isStale(ProjectionEvent event) {
