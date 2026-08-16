@@ -8,7 +8,8 @@ public record CommandOutcome(
     List<DomainEventIntent> events,
     List<OutboundResultIntent> resultIntents,
     boolean deferred,
-    String pendingReason) {
+    String pendingReason,
+    boolean duplicateDelivery) {
 
   public CommandOutcome {
     result = result == null ? Optional.empty() : result;
@@ -20,14 +21,21 @@ public record CommandOutcome(
     if (deferred && result.isPresent()) {
       throw new IllegalArgumentException("deferred outcomes cannot contain a terminal result");
     }
+    if (duplicateDelivery && (!events.isEmpty() || !resultIntents.isEmpty())) {
+      throw new IllegalArgumentException("duplicate delivery cannot create outbound effects");
+    }
   }
 
   public static CommandOutcome terminal(
       ApplicationResult result, List<DomainEventIntent> events, List<OutboundResultIntent> resultIntents) {
-    return new CommandOutcome(Optional.of(result), events, resultIntents, false, null);
+    return new CommandOutcome(Optional.of(result), events, resultIntents, false, null, false);
   }
 
   public static CommandOutcome deferred(String pendingReason) {
-    return new CommandOutcome(Optional.empty(), List.of(), List.of(), true, pendingReason);
+    return new CommandOutcome(Optional.empty(), List.of(), List.of(), true, pendingReason, false);
+  }
+
+  public static CommandOutcome duplicate() {
+    return new CommandOutcome(Optional.empty(), List.of(), List.of(), false, null, true);
   }
 }
