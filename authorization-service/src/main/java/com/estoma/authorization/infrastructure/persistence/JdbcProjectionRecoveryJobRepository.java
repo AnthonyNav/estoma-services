@@ -65,6 +65,34 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
   }
 
   @Override
+  public boolean isProjectionTrusted(String projectionType) {
+    return latestStatus(projectionType, "FULL", null)
+        .map("COMPLETED"::equals)
+        .orElse(true);
+  }
+
+  @Override
+  public boolean isEntityTrusted(String projectionType, String entityKey) {
+    return latestStatus(projectionType, "ENTITY", entityKey)
+        .map("COMPLETED"::equals)
+        .orElse(true);
+  }
+
+  private Optional<String> latestStatus(String projectionType, String scope, String entityKey) {
+    String entityPredicate = "FULL".equals(scope) ? "entity_key IS NULL" : "entity_key = :entityKey";
+    var spec = jdbc.sql(
+            "SELECT status::text FROM projection_recovery_jobs "
+                + "WHERE projection_type = :projectionType AND scope = CAST(:scope AS recovery_scope) "
+                + "AND " + entityPredicate + " ORDER BY updated_at DESC, created_at DESC LIMIT 1")
+        .param("projectionType", projectionType)
+        .param("scope", scope);
+    if (!"FULL".equals(scope)) {
+      spec = spec.param("entityKey", entityKey);
+    }
+    return spec.query(String.class).optional();
+  }
+
+  @Override
   public void insert(RecoveryJob job) {
     insertSql(job, false);
   }
