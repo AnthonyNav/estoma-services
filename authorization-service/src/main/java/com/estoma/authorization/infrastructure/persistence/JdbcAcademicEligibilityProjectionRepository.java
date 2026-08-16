@@ -93,4 +93,9 @@ class JdbcAcademicEligibilityProjectionRepository implements AcademicEligibility
         .param("pendingReason", pendingReason)
         .update();
   }
+
+  @Override
+  public int clearAll() {
+    return jdbc.sql("DELETE FROM academic_eligibility_projection").update();
+  }
 }
