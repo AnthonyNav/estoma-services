@@ -138,7 +138,10 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
 
   @Override
   public int update(RecoveryJob job, String expectedStatus, UUID expectedCurrentQueryMessageId) {
-    return jdbc.sql(
+    String expectedQueryPredicate = expectedCurrentQueryMessageId == null
+        ? ""
+        : " AND current_query_message_id = :expectedCurrentQueryMessageId";
+    var statement = jdbc.sql(
             """
             UPDATE projection_recovery_jobs SET
               status = CAST(:status AS recovery_job_status), cursor = :cursor,
@@ -149,11 +152,7 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
               completed_at = :completedAt, claim_token = :claimToken, lease_until = :leaseUntil
             WHERE recovery_job_id = :recoveryJobId
               AND status = CAST(:expectedStatus AS recovery_job_status)
-              AND (
-                :expectedCurrentQueryMessageId IS NULL
-                OR current_query_message_id = :expectedCurrentQueryMessageId
-              )
-            """)
+            """ + expectedQueryPredicate)
         .param("recoveryJobId", job.recoveryJobId())
         .param("status", job.status())
         .param("cursor", job.cursor())
@@ -168,8 +167,10 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
         .param("completedAt", Timestamps.toTimestamp(job.completedAt()))
         .param("claimToken", job.claimToken())
         .param("leaseUntil", Timestamps.toTimestamp(job.leaseUntil()))
-        .param("expectedStatus", expectedStatus)
-        .param("expectedCurrentQueryMessageId", expectedCurrentQueryMessageId)
-        .update();
+        .param("expectedStatus", expectedStatus);
+    if (expectedCurrentQueryMessageId != null) {
+      statement = statement.param("expectedCurrentQueryMessageId", expectedCurrentQueryMessageId);
+    }
+    return statement.update();
   }
 }
