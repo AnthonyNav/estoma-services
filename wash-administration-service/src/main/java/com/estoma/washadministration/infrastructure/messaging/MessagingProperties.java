@@ -7,7 +7,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record MessagingProperties(
     Duration publisherConfirmTimeout,
     int outboxClaimBatchSize,
-    int outboxMaxAttempts,
     long outboxPollInterval,
     boolean outboxRelayEnabled,
     long recoveryPollInterval,
@@ -20,9 +19,6 @@ public record MessagingProperties(
     }
     if (outboxClaimBatchSize <= 0) {
       outboxClaimBatchSize = 50;
-    }
-    if (outboxMaxAttempts <= 0) {
-      outboxMaxAttempts = 10;
     }
     if (outboxPollInterval <= 0) {
       outboxPollInterval = 1_000L;

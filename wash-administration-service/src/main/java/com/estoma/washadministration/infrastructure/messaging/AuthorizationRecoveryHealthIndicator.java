@@ -17,11 +17,14 @@ public class AuthorizationRecoveryHealthIndicator implements HealthIndicator {
   @Override
   public Health health() {
     try {
+      if (jobs.hasFailedFullRecovery()) {
+        return Health.down().withDetail("reason", "authorization projection FULL recovery failed").build();
+      }
       if (jobs.hasActiveFullRecovery()) {
         return Health.down().withDetail("reason", "authorization projection FULL recovery is active").build();
       }
-      if (jobs.hasFailedFullRecovery()) {
-        return Health.down().withDetail("reason", "authorization projection FULL recovery failed").build();
+      if (!jobs.hasCompletedFullRecovery()) {
+        return Health.down().withDetail("reason", "authorization projection has not completed initial FULL recovery").build();
       }
       return Health.up().build();
     } catch (RuntimeException exception) {

@@ -5,7 +5,6 @@ import com.estoma.washadministration.application.command.CommandRejectedExceptio
 import com.estoma.washadministration.application.port.AuthorizationAccessProjectionRepository;
 import com.estoma.washadministration.application.port.AuthorizationRoleProjectionRepository;
 import com.estoma.washadministration.application.port.ProjectionRecoveryJobRepository;
-import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,28 +67,46 @@ public final class AuthorizationEvaluator {
     }
     UUID accountId = actor.accountId();
     if (recoveryJobs != null
-        && (recoveryJobs.hasActiveFullRecovery()
+        && (!recoveryJobs.hasCompletedFullRecovery()
+            || recoveryJobs.hasActiveFullRecovery()
             || recoveryJobs.hasFailedFullRecovery()
             || recoveryJobs.hasActiveEntityRecovery(accountId)
             || recoveryJobs.hasFailedEntityRecovery(accountId))) {
       return false;
     }
-    var role = roles.findByAccountId(accountId);
-    var access = accesses.findByAccountId(accountId, SYSTEM);
-    if (role.isEmpty() || access.isEmpty()) {
-      if (recoveryJobs != null) {
-        recoveryJobs.createEntity(accountId, Instant.now());
-      }
-      return false;
-    }
-    return role.map(AuthorizationRoleProjectionRepository.RoleProjection::roleCode)
+    return roles.findByAccountId(accountId)
+            .map(AuthorizationRoleProjectionRepository.RoleProjection::roleCode)
             .filter(ROLE::equals)
             .isPresent()
-        && access
+        && accesses.findByAccountId(accountId, SYSTEM)
             .map(AuthorizationAccessProjectionRepository.AccessProjection::accessStatus)
             .filter("ACTIVE"::equals)
             .isPresent()
         && ADMIN_PERMISSIONS.contains(permission);
+  }
+
+  /**
+   * Pure decision used after a rejected Command has rolled back its mutation savepoint.
+   * Recovery scheduling itself is deliberately outside this evaluator.
+   */
+  public boolean needsEntityRecovery(ActorContext actor) {
+    if (recoveryJobs == null
+        || actor == null
+        || !"ACCOUNT".equals(actor.type())
+        || actor.accountId() == null) {
+      return false;
+    }
+    UUID accountId = actor.accountId();
+    if (!recoveryJobs.hasCompletedFullRecovery()
+        || recoveryJobs.hasActiveFullRecovery()
+        || recoveryJobs.hasFailedFullRecovery()
+        || recoveryJobs.hasActiveEntityRecovery(accountId)
+        || recoveryJobs.hasFailedEntityRecovery(accountId)
+        || recoveryJobs.hasCompletedEntityRecovery(accountId)) {
+      return false;
+    }
+    return roles.findByAccountId(accountId).isEmpty()
+        || accesses.findByAccountId(accountId, SYSTEM).isEmpty();
   }
 
   public void require(ActorContext actor, String operationType) {

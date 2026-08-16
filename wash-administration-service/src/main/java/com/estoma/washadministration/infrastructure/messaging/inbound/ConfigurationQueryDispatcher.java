@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
@@ -29,7 +30,8 @@ public class ConfigurationQueryDispatcher {
     this.json = json;
   }
 
-  @Transactional
+  /** Snapshot read and correlated Result Outbox share one REPEATABLE_READ transaction. */
+  @Transactional(isolation = Isolation.REPEATABLE_READ)
   public void dispatch(MessageEnvelope envelope, java.time.LocalDate referenceDate) {
     Instant now = Instant.now();
     try {

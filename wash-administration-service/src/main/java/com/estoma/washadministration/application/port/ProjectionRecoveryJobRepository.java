@@ -39,11 +39,21 @@ public interface ProjectionRecoveryJobRepository {
 
   boolean hasFailedFullRecovery();
 
+  /** Latest FULL generation completed successfully and is the trusted projection generation. */
+  default boolean hasCompletedFullRecovery() {
+    return false;
+  }
+
   default boolean hasActiveEntityRecovery(UUID accountId) {
     return false;
   }
 
   default boolean hasFailedEntityRecovery(UUID accountId) {
+    return false;
+  }
+
+  /** Latest point repair completed, including an authoritative FOUND/NOT_FOUND absence. */
+  default boolean hasCompletedEntityRecovery(UUID accountId) {
     return false;
   }
 

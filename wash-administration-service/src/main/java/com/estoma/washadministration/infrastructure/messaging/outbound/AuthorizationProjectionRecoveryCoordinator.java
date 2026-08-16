@@ -9,7 +9,6 @@ import com.estoma.washadministration.contracts.Actor;
 import com.estoma.washadministration.contracts.query.GetAccountAuthorizationSnapshotRequest;
 import com.estoma.washadministration.contracts.query.ListAccountAuthorizationSnapshotsPageRequest;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -43,6 +42,21 @@ public class AuthorizationProjectionRecoveryCoordinator {
   @Transactional
   public RecoveryJob requestFull() {
     return jobs.createFull(Instant.now());
+  }
+
+  /**
+   * A database without a successfully completed FULL generation is not trusted for authorization.
+   * Create exactly one bootstrap job; active/failed generations are never silently replaced.
+   */
+  @Transactional
+  public boolean ensureFullRecoveryInitialized() {
+    if (jobs.hasCompletedFullRecovery()
+        || jobs.hasActiveFullRecovery()
+        || jobs.hasFailedFullRecovery()) {
+      return false;
+    }
+    jobs.createFull(Instant.now());
+    return true;
   }
 
   @Transactional

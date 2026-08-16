@@ -20,6 +20,7 @@ public class ProjectionRecoveryWorker {
   @Scheduled(fixedDelayString = "${estoma.messaging.recovery-poll-interval:1000}")
   public void scheduledWork() {
     if (properties.recoveryWorkerEnabled()) {
+      coordinator.ensureFullRecoveryInitialized();
       coordinator.requeueExpiredResults(Instant.now().minus(properties.recoveryResultTimeout()));
       coordinator.processNext();
     }

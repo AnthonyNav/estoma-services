@@ -34,7 +34,7 @@ public abstract class AbstractPostgresIT {
     RABBITMQ.start();
   }
 
-  @Autowired private JdbcClient jdbc;
+  @Autowired protected JdbcClient jdbc;
 
   @DynamicPropertySource
   static void registerPostgresProperties(DynamicPropertyRegistry registry) {
@@ -58,5 +58,24 @@ public abstract class AbstractPostgresIT {
                 + "authorization_access_projection, authorization_role_projection, administrative_closures, "
                 + "tanks, cabins, service_schedules, resource_priorities, service_calendars RESTART IDENTITY CASCADE")
         .update();
+    seedTrustedAuthorizationGeneration();
+  }
+
+  protected void seedTrustedAuthorizationGeneration() {
+    jdbc.sql(
+            """
+            INSERT INTO projection_recovery_jobs (
+              recovery_job_id, projection_type, scope, status,
+              created_at, updated_at, completed_at
+            ) VALUES (
+              '00000000-0000-0000-0000-00000000f001'::uuid,
+              'AUTHORIZATION', 'FULL', 'COMPLETED', now(), now(), now()
+            )
+            """)
+        .update();
+  }
+
+  protected void clearAuthorizationRecoveryHistory() {
+    jdbc.sql("DELETE FROM projection_recovery_jobs WHERE projection_type = 'AUTHORIZATION'").update();
   }
 }

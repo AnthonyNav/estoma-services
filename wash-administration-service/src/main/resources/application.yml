@@ -90,7 +90,6 @@ estoma:
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     publisher-confirm-timeout: ${ESTOMA_PUBLISHER_CONFIRM_TIMEOUT:5s}
     outbox-claim-batch-size: ${ESTOMA_OUTBOX_CLAIM_BATCH_SIZE:50}
-    outbox-max-attempts: ${ESTOMA_OUTBOX_MAX_ATTEMPTS:10}
     outbox-poll-interval: ${ESTOMA_OUTBOX_POLL_INTERVAL:1000}
     outbox-relay-enabled: ${ESTOMA_OUTBOX_RELAY_ENABLED:true}
     recovery-worker-enabled: ${ESTOMA_RECOVERY_WORKER_ENABLED:true}

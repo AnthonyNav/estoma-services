@@ -1,5 +1,6 @@
 package com.estoma.washadministration.application.command;
 
+import com.estoma.washadministration.application.authorization.AuthorizationEvaluator;
 import com.estoma.washadministration.application.command.CommandOutcome.Status;
 import com.estoma.washadministration.application.port.AdministrativeAuditRepository;
 import com.estoma.washadministration.application.port.AdministrativeAuditRepository.AuditRecord;
@@ -9,6 +10,7 @@ import com.estoma.washadministration.application.port.JsonCodec;
 import com.estoma.washadministration.application.port.OutboxRepository;
 import com.estoma.washadministration.application.port.OutboxRepository.OutboxMessage;
 import com.estoma.washadministration.application.port.ProcessedMessageRepository;
+import com.estoma.washadministration.application.port.ProjectionRecoveryJobRepository;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -30,6 +32,8 @@ public class WashAdministrationCommandDispatcher {
   private final OutboxRepository outbox;
   private final JsonCodec json;
   private final WashAdministrationCommandHandler handler;
+  private final AuthorizationEvaluator authorization;
+  private final ProjectionRecoveryJobRepository recoveryJobs;
 
   public WashAdministrationCommandDispatcher(
       ProcessedMessageRepository processedMessages,
@@ -37,13 +41,17 @@ public class WashAdministrationCommandDispatcher {
       AdministrativeAuditRepository audit,
       OutboxRepository outbox,
       JsonCodec json,
-      WashAdministrationCommandHandler handler) {
+      WashAdministrationCommandHandler handler,
+      AuthorizationEvaluator authorization,
+      ProjectionRecoveryJobRepository recoveryJobs) {
     this.processedMessages = processedMessages;
     this.idempotency = idempotency;
     this.audit = audit;
     this.outbox = outbox;
     this.json = json;
     this.handler = handler;
+    this.authorization = authorization;
+    this.recoveryJobs = recoveryJobs;
   }
 
   @Transactional
@@ -151,8 +159,20 @@ public class WashAdministrationCommandDispatcher {
           change.aggregateId(), change.aggregateVersion());
     } catch (CommandRejectedException exception) {
       rollback(savepoint);
+      scheduleAuthorizationRecoveryAfterRollback(request, exception.code(), now);
       return reject(
           request, exception.code(), exception.aggregateId(), now, true);
+    }
+  }
+
+  private void scheduleAuthorizationRecoveryAfterRollback(
+      CommandRequest request, String rejectionCode, Instant now) {
+    if (!"ACTOR_NOT_AUTHORIZED".equals(rejectionCode)) {
+      return;
+    }
+    ActorContext actor = request.metadata().actor();
+    if (authorization.needsEntityRecovery(actor)) {
+      recoveryJobs.createEntity(actor.accountId(), now);
     }
   }
 

@@ -2,10 +2,8 @@ package com.estoma.washadministration.infrastructure.messaging.outbound;
 
 import com.estoma.washadministration.application.port.OutboxRepository;
 import com.estoma.washadministration.application.port.OutboxRepository.OutboxRecord;
-import com.estoma.washadministration.contracts.Actor;
 import com.estoma.washadministration.contracts.MessageEnvelope;
 import com.estoma.washadministration.contracts.MessageKind;
-import com.estoma.washadministration.contracts.MessagingNames;
 import com.estoma.washadministration.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.washadministration.infrastructure.messaging.MessagingProperties;
 import java.time.Instant;
@@ -25,6 +23,7 @@ public class OutboxRelay {
   private final RoutingKeyResolver routingKeys;
   private final ConfirmedRabbitPublisher publisher;
   private final EnvelopeJsonCodec codec;
+  private final OutboundWirePayloadMapper wirePayloads;
   private final MessagingProperties properties;
   private final OutboxBackoffPolicy backoff;
   private final TransactionTemplate transaction;
@@ -34,6 +33,7 @@ public class OutboxRelay {
       RoutingKeyResolver routingKeys,
       ConfirmedRabbitPublisher publisher,
       EnvelopeJsonCodec codec,
+      OutboundWirePayloadMapper wirePayloads,
       MessagingProperties properties,
       OutboxBackoffPolicy backoff,
       org.springframework.transaction.PlatformTransactionManager transactionManager) {
@@ -41,6 +41,7 @@ public class OutboxRelay {
     this.routingKeys = routingKeys;
     this.publisher = publisher;
     this.codec = codec;
+    this.wirePayloads = wirePayloads;
     this.properties = properties;
     this.backoff = backoff;
     this.transaction = new TransactionTemplate(transactionManager);
@@ -75,63 +76,98 @@ public class OutboxRelay {
           throw new IllegalStateException("Outbox publish fencing transition failed");
         }
       } catch (RabbitPublishException exception) {
-        handleFailure(record, claimToken, exception.code().name());
+        handleTransientFailure(record, claimToken, exception.code().name());
+      } catch (PermanentOutboxException exception) {
+        handlePermanentFailure(record, claimToken, OutboxFailureCode.OUTBOX_CONTRACT_INVALID.name());
       } catch (Exception exception) {
-        handleFailure(record, claimToken, OutboxFailureCode.PUBLISH_UNEXPECTED_ERROR.name());
+        // Unknown failures preserve the durable publication obligation. Operators can observe age/attempts
+        // and explicitly quarantine a row if it is proven permanently non-publishable.
+        handleTransientFailure(record, claimToken, OutboxFailureCode.PUBLISH_UNEXPECTED_ERROR.name());
       }
     }
   }
 
   private void publish(OutboxRecord record) {
-    MessageKind kind = MessageKind.valueOf(record.messageKind());
-    RoutingKeyResolver.Destination destination =
-        routingKeys.resolve(kind, record.messageType(), record.logicalDestination());
-    MessageEnvelope envelope =
-        new MessageEnvelope(
-            record.messageId(),
-            record.messageType(),
-            record.messageVersion(),
-            kind,
-            record.producer(),
-            record.occurredAt(),
-            record.correlationId(),
-            record.causationId(),
-            record.operationId(),
-            record.idempotencyKey(),
-            record.aggregateId(),
-            record.aggregateVersion(),
-            codec.readActor(record.actorJson()),
-            codec.readTree(record.payloadJson()));
-    MessageProperties properties = new MessageProperties();
-    properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
-    properties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
-    properties.setMessageId(record.messageId().toString());
-    Message message = new Message(codec.encode(envelope), properties);
-    if (kind == MessageKind.EVENT) {
-      publisher.publishEvent(destination.exchange(), destination.routingKey(), message);
-    } else if (kind == MessageKind.RESULT || kind == MessageKind.QUERY) {
-      publisher.publishRequiredRoute(destination.exchange(), destination.routingKey(), message);
+    PreparedMessage prepared = prepare(record);
+    if (prepared.kind() == MessageKind.EVENT) {
+      publisher.publishEvent(
+          prepared.destination().exchange(), prepared.destination().routingKey(), prepared.message());
+    } else if (prepared.kind() == MessageKind.RESULT || prepared.kind() == MessageKind.QUERY) {
+      publisher.publishRequiredRoute(
+          prepared.destination().exchange(), prepared.destination().routingKey(), prepared.message());
     } else {
-      throw new IllegalArgumentException("unsupported Outbox message kind: " + kind);
+      throw new PermanentOutboxException("unsupported Outbox message kind: " + prepared.kind(), null);
     }
   }
 
-  private void handleFailure(OutboxRecord record, UUID claimToken, String errorCode) {
+  private PreparedMessage prepare(OutboxRecord record) {
+    try {
+      MessageKind kind = MessageKind.valueOf(record.messageKind());
+      RoutingKeyResolver.Destination destination =
+          routingKeys.resolve(kind, record.messageType(), record.logicalDestination());
+      MessageEnvelope envelope =
+          new MessageEnvelope(
+              record.messageId(),
+              record.messageType(),
+              record.messageVersion(),
+              kind,
+              record.producer(),
+              record.occurredAt(),
+              record.correlationId(),
+              record.causationId(),
+              record.operationId(),
+              record.idempotencyKey(),
+              record.aggregateId(),
+              record.aggregateVersion(),
+              codec.readActor(record.actorJson()),
+              wirePayloads.map(kind, record.messageType(), record.payloadJson()));
+      MessageProperties messageProperties = new MessageProperties();
+      messageProperties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+      messageProperties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+      messageProperties.setMessageId(record.messageId().toString());
+      return new PreparedMessage(
+          kind,
+          destination,
+          new Message(codec.encode(envelope), messageProperties));
+    } catch (PermanentOutboxException exception) {
+      throw exception;
+    } catch (RuntimeException exception) {
+      throw new PermanentOutboxException("invalid durable Outbox contract", exception);
+    }
+  }
+
+  private void handleTransientFailure(OutboxRecord record, UUID claimToken, String errorCode) {
+    int attemptsAfterFailure = record.attempts() + 1;
     Boolean updated =
         transaction.execute(
-            status -> {
-              int attemptsAfterFailure = record.attempts() + 1;
-              if (attemptsAfterFailure >= properties.outboxMaxAttempts()) {
-                return outbox.markFailed(record.messageId(), claimToken, errorCode);
-              }
-              return outbox.releaseForRetry(
-                  record.messageId(),
-                  claimToken,
-                  Instant.now().plus(backoff.delayForAttempt(attemptsAfterFailure)),
-                  errorCode);
-            });
+            status ->
+                outbox.releaseForRetry(
+                    record.messageId(),
+                    claimToken,
+                    Instant.now().plus(backoff.delayForAttempt(attemptsAfterFailure)),
+                    errorCode));
     if (!Boolean.TRUE.equals(updated)) {
-      throw new IllegalStateException("Outbox failure fencing transition failed");
+      throw new IllegalStateException("Outbox retry fencing transition failed");
+    }
+  }
+
+  private void handlePermanentFailure(OutboxRecord record, UUID claimToken, String errorCode) {
+    Boolean updated =
+        transaction.execute(
+            status -> outbox.markFailed(record.messageId(), claimToken, errorCode));
+    if (!Boolean.TRUE.equals(updated)) {
+      throw new IllegalStateException("Outbox permanent failure fencing transition failed");
+    }
+  }
+
+  private record PreparedMessage(
+      MessageKind kind,
+      RoutingKeyResolver.Destination destination,
+      Message message) {}
+
+  private static final class PermanentOutboxException extends RuntimeException {
+    PermanentOutboxException(String message, Throwable cause) {
+      super(message, cause);
     }
   }
 }

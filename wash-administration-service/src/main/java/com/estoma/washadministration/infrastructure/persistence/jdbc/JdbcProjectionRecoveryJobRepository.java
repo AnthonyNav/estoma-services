@@ -13,7 +13,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobRepository {
 
-  private static final String PROJECTION = "AUTHORIZATION";
   private final JdbcClient jdbc;
 
   public JdbcProjectionRecoveryJobRepository(JdbcClient jdbc) {
@@ -29,22 +28,19 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
             WHERE status = 'PENDING' AND lease_until IS NOT NULL AND lease_until < now()
             """)
         .update();
-    Optional<UUID> id =
-        jdbc.sql(
-                """
-                SELECT recovery_job_id
-                FROM projection_recovery_jobs
-                WHERE projection_type = 'AUTHORIZATION' AND status = 'PENDING'
-                  AND (claim_token IS NULL OR lease_until < now())
-                ORDER BY created_at, recovery_job_id
-                LIMIT 1
-                FOR UPDATE SKIP LOCKED
-                """)
-            .query((rs, rowNum) -> rs.getObject("recovery_job_id", UUID.class))
-            .optional();
-    if (id.isEmpty()) {
-      return Optional.empty();
-    }
+    Optional<UUID> id = jdbc.sql(
+            """
+            SELECT recovery_job_id
+            FROM projection_recovery_jobs
+            WHERE projection_type = 'AUTHORIZATION' AND status = 'PENDING'
+              AND (claim_token IS NULL OR lease_until < now())
+            ORDER BY created_at, recovery_job_id
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """)
+        .query((rs, rowNum) -> rs.getObject("recovery_job_id", UUID.class))
+        .optional();
+    if (id.isEmpty()) return Optional.empty();
     jdbc.sql(
             """
             UPDATE projection_recovery_jobs
@@ -109,14 +105,8 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
   }
 
   @Override
-  public boolean markWaiting(
-      UUID recoveryJobId,
-      UUID claimToken,
-      String queryType,
-      UUID queryMessageId,
-      UUID operationId,
-      UUID correlationId,
-      int queryAttempt) {
+  public boolean markWaiting(UUID recoveryJobId, UUID claimToken, String queryType,
+      UUID queryMessageId, UUID operationId, UUID correlationId, int queryAttempt) {
     return jdbc.sql(
             """
             UPDATE projection_recovery_jobs
@@ -133,8 +123,7 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         .param("operationId", operationId)
         .param("correlationId", correlationId)
         .param("queryAttempt", queryAttempt)
-        .update()
-        == 1;
+        .update() == 1;
   }
 
   @Override
@@ -151,8 +140,7 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         .param("recoveryJobId", recoveryJobId)
         .param("queryMessageId", queryMessageId)
         .param("cursor", cursor)
-        .update()
-        == 1;
+        .update() == 1;
   }
 
   @Override
@@ -168,8 +156,7 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
             """)
         .param("recoveryJobId", recoveryJobId)
         .param("queryMessageId", queryMessageId)
-        .update()
-        == 1;
+        .update() == 1;
   }
 
   @Override
@@ -187,8 +174,7 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         .param("recoveryJobId", recoveryJobId)
         .param("queryMessageId", queryMessageId)
         .param("errorCode", errorCode)
-        .update()
-        == 1;
+        .update() == 1;
   }
 
   @Override
@@ -217,67 +203,83 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
 
   @Override
   public boolean hasActiveFullRecovery() {
-    return jdbc.sql(
-            "SELECT count(*) FROM projection_recovery_jobs WHERE projection_type = 'AUTHORIZATION' AND scope = 'FULL' AND status IN ('PENDING', 'WAITING_RESULT')")
-        .query(Long.class)
-        .single() > 0;
+    String status = latestFullStatus().orElse(null);
+    return "PENDING".equals(status) || "WAITING_RESULT".equals(status);
   }
 
   @Override
   public boolean hasFailedFullRecovery() {
-    return jdbc.sql(
-            "SELECT status FROM projection_recovery_jobs WHERE projection_type = 'AUTHORIZATION' AND scope = 'FULL' ORDER BY created_at DESC LIMIT 1")
-        .query(String.class)
-        .optional()
-        .map("FAILED"::equals)
-        .orElse(false);
+    return latestFullStatus().map("FAILED"::equals).orElse(false);
+  }
+
+  @Override
+  public boolean hasCompletedFullRecovery() {
+    return latestFullStatus().map("COMPLETED"::equals).orElse(false);
   }
 
   @Override
   public boolean hasActiveEntityRecovery(UUID accountId) {
-    return jdbc.sql(
-            "SELECT count(*) FROM projection_recovery_jobs WHERE projection_type = 'AUTHORIZATION' AND scope = 'ENTITY' AND entity_key = :entityKey AND status IN ('PENDING', 'WAITING_RESULT')")
-        .param("entityKey", "account:" + accountId)
-        .query(Long.class)
-        .single() > 0;
+    String status = latestRelevantEntityStatus(accountId).orElse(null);
+    return "PENDING".equals(status) || "WAITING_RESULT".equals(status);
   }
 
   @Override
   public boolean hasFailedEntityRecovery(UUID accountId) {
+    return latestRelevantEntityStatus(accountId).map("FAILED"::equals).orElse(false);
+  }
+
+  @Override
+  public boolean hasCompletedEntityRecovery(UUID accountId) {
+    return latestRelevantEntityStatus(accountId).map("COMPLETED"::equals).orElse(false);
+  }
+
+  private Optional<String> latestFullStatus() {
     return jdbc.sql(
-            "SELECT status FROM projection_recovery_jobs WHERE projection_type = 'AUTHORIZATION' AND scope = 'ENTITY' AND entity_key = :entityKey ORDER BY created_at DESC LIMIT 1")
+            "SELECT status::text FROM projection_recovery_jobs WHERE projection_type = 'AUTHORIZATION' AND scope = 'FULL' ORDER BY created_at DESC, recovery_job_id DESC LIMIT 1")
+        .query(String.class).optional();
+  }
+
+  /** Point repairs older than the latest successful FULL generation are superseded by that generation. */
+  private Optional<String> latestRelevantEntityStatus(UUID accountId) {
+    return jdbc.sql(
+            """
+            SELECT status::text
+            FROM projection_recovery_jobs
+            WHERE projection_type = 'AUTHORIZATION'
+              AND scope = 'ENTITY'
+              AND entity_key = :entityKey
+              AND created_at > COALESCE(
+                    (SELECT max(completed_at)
+                     FROM projection_recovery_jobs
+                     WHERE projection_type = 'AUTHORIZATION'
+                       AND scope = 'FULL'
+                       AND status = 'COMPLETED'),
+                    '-infinity'::timestamptz)
+            ORDER BY created_at DESC, recovery_job_id DESC
+            LIMIT 1
+            """)
         .param("entityKey", "account:" + accountId)
-        .query(String.class)
-        .optional()
-        .map("FAILED"::equals)
-        .orElse(false);
+        .query(String.class).optional();
   }
 
   private void lockAuthorizationProjection() {
-    jdbc.sql(
-            "SELECT pg_advisory_xact_lock(hashtextextended('wash-administration.authorization', 0))")
-        .query((rs, rowNum) -> 1)
-        .list();
+    jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('wash-administration.authorization', 0))")
+        .query((rs, rowNum) -> 1).list();
   }
 
   private Optional<RecoveryJob> findById(UUID id) {
     return jdbc.sql(baseSelect() + " WHERE recovery_job_id = :recoveryJobId")
-        .param("recoveryJobId", id)
-        .query((rs, rowNum) -> map(rs))
-        .optional();
+        .param("recoveryJobId", id).query((rs, rowNum) -> map(rs)).optional();
   }
 
   private Optional<RecoveryJob> findEntity(UUID accountId) {
     return jdbc.sql(baseSelect() + " WHERE projection_type = 'AUTHORIZATION' AND scope = 'ENTITY' AND entity_key = :entityKey ORDER BY created_at DESC LIMIT 1")
-        .param("entityKey", "account:" + accountId)
-        .query((rs, rowNum) -> map(rs))
-        .optional();
+        .param("entityKey", "account:" + accountId).query((rs, rowNum) -> map(rs)).optional();
   }
 
   private Optional<RecoveryJob> findActiveFull() {
     return jdbc.sql(baseSelect() + " WHERE projection_type = 'AUTHORIZATION' AND scope = 'FULL' AND status IN ('PENDING', 'WAITING_RESULT') ORDER BY created_at DESC LIMIT 1")
-        .query((rs, rowNum) -> map(rs))
-        .optional();
+        .query((rs, rowNum) -> map(rs)).optional();
   }
 
   private static String baseSelect() {
@@ -292,23 +294,13 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
 
   private static RecoveryJob map(java.sql.ResultSet rs) throws java.sql.SQLException {
     return new RecoveryJob(
-        rs.getObject("recovery_job_id", UUID.class),
-        rs.getString("projection_type"),
-        Scope.valueOf(rs.getString("scope")),
-        rs.getString("entity_key"),
-        Status.valueOf(rs.getString("status")),
-        rs.getString("cursor"),
-        rs.getInt("query_attempt"),
-        rs.getString("current_query_type"),
-        rs.getObject("current_query_message_id", UUID.class),
-        rs.getObject("current_operation_id", UUID.class),
-        rs.getObject("current_correlation_id", UUID.class),
-        rs.getInt("attempts"),
-        rs.getString("last_error_code"),
-        Timestamps.toInstant(rs, "created_at"),
-        Timestamps.toInstant(rs, "updated_at"),
-        Timestamps.toInstant(rs, "completed_at"),
-        rs.getObject("claim_token", UUID.class),
-        Timestamps.toInstant(rs, "lease_until"));
+        rs.getObject("recovery_job_id", UUID.class), rs.getString("projection_type"),
+        Scope.valueOf(rs.getString("scope")), rs.getString("entity_key"),
+        Status.valueOf(rs.getString("status")), rs.getString("cursor"), rs.getInt("query_attempt"),
+        rs.getString("current_query_type"), rs.getObject("current_query_message_id", UUID.class),
+        rs.getObject("current_operation_id", UUID.class), rs.getObject("current_correlation_id", UUID.class),
+        rs.getInt("attempts"), rs.getString("last_error_code"), Timestamps.toInstant(rs, "created_at"),
+        Timestamps.toInstant(rs, "updated_at"), Timestamps.toInstant(rs, "completed_at"),
+        rs.getObject("claim_token", UUID.class), Timestamps.toInstant(rs, "lease_until"));
   }
 }
