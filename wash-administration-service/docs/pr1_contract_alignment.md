@@ -13,7 +13,7 @@ af603c80ebb1259b155209e81a0fd3a0469a6fba
 Before accepting PR1, the canonical documentation was rechecked at:
 
 ```text
-ba9c03e2d7bccfc48211bdc4279f3c23bd03f6db
+459fdd4
 ```
 
 The canonical repository remains authoritative over this file.
