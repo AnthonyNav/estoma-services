@@ -122,4 +122,20 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
         .query(ProcessedMessageRowMapper.INSTANCE)
         .list();
   }
+
+  @Override
+  public List<ProcessedMessage> findDeferredCommandsByAccountId(
+      String consumerName, UUID accountId, int limit) {
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM processed_messages "
+                + "WHERE consumer_name = :consumerName AND status = 'DEFERRED' "
+                + "AND message_kind = 'COMMAND' AND producer = 'academic' "
+                + "AND payload ->> 'accountId' = :accountId "
+                + "ORDER BY received_at, message_id LIMIT :limit")
+        .param("consumerName", consumerName)
+        .param("accountId", accountId.toString())
+        .param("limit", limit)
+        .query(ProcessedMessageRowMapper.INSTANCE)
+        .list();
+  }
 }
