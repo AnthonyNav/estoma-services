@@ -209,8 +209,17 @@ class AuthorizationApplicationConfig {
       StoredApplicationResultDecoder resultDecoder,
       OutboxRepository outbox,
       AuthorizationAuditRepository audit,
+      ProjectionRecoveryCoordinator recovery,
       Clock clock) {
     return new AuthorizationCommandProcessor(
-        transactions, delegate, inbox, idempotency, resultDecoder, outbox, audit, clock);
+        transactions,
+        delegate,
+        inbox,
+        idempotency,
+        resultDecoder,
+        outbox,
+        audit,
+        recovery,
+        clock);
   }
 }
