@@ -37,6 +37,36 @@ public record CommandMetadata(
     Objects.requireNonNull(actor, "actor");
   }
 
+  /** Convenience constructor for broker-agnostic Application callers; kind is safely fixed to COMMAND. */
+  public CommandMetadata(
+      UUID messageId,
+      String messageType,
+      int messageVersion,
+      String producer,
+      Instant occurredAt,
+      UUID correlationId,
+      UUID causationId,
+      UUID operationId,
+      String idempotencyKey,
+      ActorRef actor,
+      UUID aggregateId,
+      Integer aggregateVersion) {
+    this(
+        messageId,
+        messageType,
+        messageVersion,
+        "COMMAND",
+        producer,
+        occurredAt,
+        correlationId,
+        causationId,
+        operationId,
+        idempotencyKey,
+        actor,
+        aggregateId,
+        aggregateVersion);
+  }
+
   public static CommandMetadata create(
       UUID messageId,
       String messageType,
