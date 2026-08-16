@@ -138,4 +138,17 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
         .query(ProcessedMessageRowMapper.INSTANCE)
         .list();
   }
+
+  @Override
+  public List<ProcessedMessage> findDeferred(String consumerName, String messageKind, int limit) {
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM processed_messages "
+                + "WHERE consumer_name = :consumerName AND status = 'DEFERRED' "
+                + "AND message_kind = :messageKind ORDER BY received_at, message_id LIMIT :limit")
+        .param("consumerName", consumerName)
+        .param("messageKind", messageKind)
+        .param("limit", limit)
+        .query(ProcessedMessageRowMapper.INSTANCE)
+        .list();
+  }
 }
