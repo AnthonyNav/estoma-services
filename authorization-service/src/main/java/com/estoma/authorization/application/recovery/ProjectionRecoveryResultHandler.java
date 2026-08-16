@@ -168,10 +168,31 @@ public final class ProjectionRecoveryResultHandler {
       throw new IllegalArgumentException("ENTITY recovery requires FOUND with one item or NOT_FOUND");
     }
     validateItemTypes(result, projectionType);
+    validateEntityIdentity(job, projectionType, result.items().get(0));
     applyItems(result, projectionType);
     RecoveryJob completed = terminalJob(job, "COMPLETED", null, now);
     updateWaitingJob(completed, job);
     return new HandlingResult(Status.COMPLETED, completed.recoveryJobId());
+  }
+
+  private static void validateEntityIdentity(
+      RecoveryJob job, ProjectionType projectionType, SnapshotItem item) {
+    boolean matches = switch (projectionType) {
+      case PERSON_STATUS ->
+          ((PersonSnapshot) item).personId().equals(parseUuid(job.entityKey(), "person:"));
+      case ACCOUNT_STATUS ->
+          ((AccountSnapshot) item).accountId().equals(parseUuid(job.entityKey(), "account:"));
+      case ACADEMIC_ELIGIBILITY -> {
+        EligibilityKey key = parseEligibilityKey(job.entityKey());
+        EligibilitySnapshot snapshot = (EligibilitySnapshot) item;
+        yield snapshot.studentAcademicProfileId().equals(key.profileId())
+            && snapshot.systemCode().equals(key.systemCode());
+      }
+    };
+    if (!matches) {
+      throw new IllegalArgumentException(
+          "ENTITY recovery snapshot identity does not match requested entityKey");
+    }
   }
 
   private void applyItems(ProjectionRecoveryResult result, ProjectionType projectionType) {
