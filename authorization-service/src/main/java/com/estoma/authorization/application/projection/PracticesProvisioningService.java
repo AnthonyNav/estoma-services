@@ -2,9 +2,12 @@ package com.estoma.authorization.application.projection;
 
 import com.estoma.authorization.application.command.DomainEventIntent;
 import com.estoma.authorization.application.port.AccountRoleRepository;
+import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
 import com.estoma.authorization.application.port.AuthorizationAuditRepository;
 import com.estoma.authorization.application.port.OutboxRepository;
+import com.estoma.authorization.application.port.ProcessedMessageRepository;
+import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.port.RoleCatalogRepository;
 import com.estoma.authorization.application.port.SystemAccessRepository;
 import com.estoma.authorization.application.port.SystemCatalogRepository;
@@ -24,33 +27,45 @@ import java.util.UUID;
 
 public final class PracticesProvisioningService {
 
+  private static final String EVENT_CONSUMER = "authorization-events";
+
   private final AcademicEligibilityProjectionRepository eligibility;
+  private final AccountStatusProjectionRepository accounts;
   private final AccountRoleRepository accountRoles;
   private final RoleCatalogRepository roles;
   private final SystemCatalogRepository systems;
   private final SystemAccessRepository accesses;
+  private final ProcessedMessageRepository inbox;
+  private final ProjectionRecoveryJobRepository recoveryJobs;
   private final OutboxRepository outbox;
   private final AuthorizationAuditRepository audit;
 
   public PracticesProvisioningService(
       AcademicEligibilityProjectionRepository eligibility,
+      AccountStatusProjectionRepository accounts,
       AccountRoleRepository accountRoles,
       RoleCatalogRepository roles,
       SystemCatalogRepository systems,
       SystemAccessRepository accesses,
+      ProcessedMessageRepository inbox,
+      ProjectionRecoveryJobRepository recoveryJobs,
       OutboxRepository outbox,
       AuthorizationAuditRepository audit) {
     this.eligibility = eligibility;
+    this.accounts = accounts;
     this.accountRoles = accountRoles;
     this.roles = roles;
     this.systems = systems;
     this.accesses = accesses;
+    this.inbox = inbox;
+    this.recoveryJobs = recoveryJobs;
     this.outbox = outbox;
     this.audit = audit;
   }
 
   public void evaluate(UUID accountId, Trigger trigger) {
-    var currentEligibility = eligibility.findByAccountIdAndSystemCode(accountId, SystemCode.PRACTICAS_PROFESIONALES.name());
+    var currentEligibility = eligibility.findByAccountIdAndSystemCode(
+        accountId, SystemCode.PRACTICAS_PROFESIONALES.name());
     if (currentEligibility.isEmpty()) {
       return;
     }
@@ -58,6 +73,17 @@ public final class PracticesProvisioningService {
     if (!eligibilityState.eligible() || eligibilityState.policyVersion() != 1) {
       return;
     }
+
+    // Existence is required for administrative provisioning even though ACTIVE status is not.
+    var account = accounts.findByAccountId(accountId);
+    if (account.isEmpty()
+        || recoveryJobs.hasActiveFull("ACCOUNT_STATUS")
+        || recoveryJobs.hasActiveFull("ACADEMIC_ELIGIBILITY")
+        || inbox.hasDeferredNewerThan(
+            EVENT_CONSUMER, accountId, account.get().sourceVersion())) {
+      return;
+    }
+
     Optional<AccountRoleAssignment> roleAssignment = accountRoles.findByAccountId(accountId);
     if (roleAssignment.isEmpty() || roleAssignment.get().roleCode() != RoleCode.ALUMNO) {
       return;
@@ -73,19 +99,21 @@ public final class PracticesProvisioningService {
     }
     Optional<SystemAccess> existing = accesses.findByAccountIdAndSystemId(accountId, system.get().id());
     if (existing.isPresent()) {
-      if (eligibilityState.pendingReason() != null) {
-        eligibility.updatePendingReason(
-            eligibilityState.studentAcademicProfileId(),
-            eligibilityState.systemCode(),
-            null);
-      }
+      clearPendingReason(eligibilityState);
       return;
     }
 
     ActorRef actor = ActorRef.system("authorization");
     SystemAccess access = SystemAccess.createNew(
-        UUID.randomUUID(), accountId, system.get().id(), SystemCode.PRACTICAS_PROFESIONALES, actor, trigger.occurredAt());
+        UUID.randomUUID(),
+        accountId,
+        system.get().id(),
+        SystemCode.PRACTICAS_PROFESIONALES,
+        actor,
+        trigger.occurredAt());
     if (!accesses.insertIfAbsent(access)) {
+      // A concurrent trigger won the unique(account_id, system_id) race. The converged state is satisfied.
+      clearPendingReason(eligibilityState);
       return;
     }
     Map<String, Object> eventPayload = new LinkedHashMap<>();
@@ -132,6 +160,11 @@ public final class PracticesProvisioningService {
         null,
         null,
         trigger.occurredAt()));
+    clearPendingReason(eligibilityState);
+  }
+
+  private void clearPendingReason(
+      AcademicEligibilityProjectionRepository.AcademicEligibilityProjection eligibilityState) {
     if (eligibilityState.pendingReason() != null) {
       eligibility.updatePendingReason(
           eligibilityState.studentAcademicProfileId(), eligibilityState.systemCode(), null);
