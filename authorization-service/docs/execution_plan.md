@@ -6,8 +6,8 @@ Implementar `authorization-service` con arquitectura hexagonal mediante **exacta
 
 ```text
 PR1 → dominio + persistencia + foundation hexagonal
-PR2 → comportamiento funcional local + Inbox/idempotencia/Outbox sin broker
-PR3 → recovery/snapshots + contratos wire ejecutables + RabbitMQ + conexiones externas
+PR2 → comportamiento completo + recovery sin broker
+PR3 → contratos wire ejecutables + RabbitMQ + conexiones externas
 ```
 
 Este PR que agrega `docs/system_contract.md` y `docs/execution_plan.md` es preparatorio y **no cuenta como uno de los tres PRs de implementación**.
@@ -43,9 +43,9 @@ PR3
 Nombres sugeridos:
 
 ```text
-PR1 branch: authorization-service/feat/authorization-domain-persistence
-PR2 branch: authorization-service/feat/authorization-application-recovery
-PR3 branch: authorization-service/feat/authorization-messaging-contracts
+PR1 branch: feat/authorization-domain-persistence
+PR2 branch: feat/authorization-application-recovery
+PR3 branch: feat/authorization-messaging-contracts
 ```
 
 Los nombres pueden variar sin cambiar el scope.
@@ -495,11 +495,11 @@ No métricas RabbitMQ todavía.
 
 ---
 
-# PR2 — Complete Application Behavior Without Broker
+# PR2 — Complete Application Behavior And Recovery Without Broker
 
 ## Propósito
 
-Terminar el comportamiento funcional local de Authorization usando PostgreSQL real, pero todavía sin RabbitMQ, recovery remoto ni contratos wire.
+Terminar **todo el comportamiento funcional y técnico local de Authorization** usando PostgreSQL real, pero todavía sin RabbitMQ ni contratos wire.
 
 Al finalizar PR2:
 
@@ -509,12 +509,13 @@ los seis Commands funcionan
 + proyecciones funcionan
 + aprovisionamiento de Prácticas funciona
 + Inbox/idempotency/Outbox/audit funcionan
-+ Academic `DEFERRED` queda durable y reaplicable por la misma intención
++ recovery funciona mediante ports
++ snapshot Queries funcionan como use cases
 ```
 
 Toda la lógica debe poder probarse invocando Application directamente.
 
-PR3 agrega recovery/snapshots y adapta mensajería externa a este comportamiento ya probado.
+PR3 sólo adapta mensajería externa a este comportamiento ya probado.
 
 ## Scope
 
@@ -542,39 +543,15 @@ OutboundQueryIntent
 
 ```text
 messageId
-messageType
-messageVersion
-messageKind
 producer
-occurredAt
 correlationId
 causationId?
 operationId
 idempotencyKey
 actor
-aggregateId?
-aggregateVersion?
 ```
 
 No usar anotaciones JSON/AMQP.
-
-Para Commands coordinados por Academic, `importExecution` conserva el contexto
-completo de la intención:
-
-```text
-importId
-planItemId
-executionGeneration
-authorizedByAccountId
-scope
-causalDependency? / causalDependencies[]?
-authoritativeEvidence[]?
-```
-
-Las dependencias incluyen, cuando existan, `priorCommandType`,
-`priorResultMessageId`, `priorResultStatus=SUCCEEDED`, `expectedEventType`,
-`expectedAggregateId` y `minimumSourceVersion?`. La evidencia procede del
-owner autoritativo; no se infiere desde Academic.
 
 ### 2. Command Dispatcher Broker-Agnostic
 
@@ -594,7 +571,7 @@ validar producer/ActorContext
 → authority
 → use case
 → audit
-→ Result intent si terminal
+→ Result intent
 → Event intent(s)
 → commit
 ```
@@ -613,17 +590,6 @@ Implementar:
 - versión inicial;
 - `AccountRoleAssigned` intent;
 - Result canónico.
-
-Academic puede quedar `DEFERRED` cuando la Cuenta no sea visible:
-
-```text
-causalDependency con Event futuro garantizado → EVENT_PENDING
-evidencia autoritativa sin Event futuro → PROJECTION_RECONCILIATION
-sin evidencia suficiente → REJECTED ACCOUNT_NOT_FOUND
-```
-
-`DEFERRED` no emite Result terminal. Conserva la intención completa para que
-PR3 la reclame y reevalúe sin crear otro Command ni otro `messageId`.
 
 Academic ensure:
 
@@ -656,10 +622,7 @@ Pruebas:
 - varios;
 - rollback completo si una parte falla;
 - conflicto concurrente;
-- no concesión directa de acceso compatible nuevo.
-
-El cambio no concede accesos directamente, pero puede disparar la evaluación
-derivada de elegibilidad de Prácticas fuera del efecto directo del Command.
+- no auto-grant de acceso compatible nuevo.
 
 ### 5. `GrantSystemAccess`
 
@@ -681,10 +644,6 @@ relación preexistente cualquier estado
 → sin restauración
 ```
 
-La ausencia de Cuenta académica puede quedar `DEFERRED` únicamente con
-causalidad/evidencia válida, usando `EVENT_PENDING` o
-`PROJECTION_RECONCILIATION`. Sin evidencia suficiente se rechaza.
-
 Probar carrera de dos Grants contra unique `(account_id, system_id)`.
 
 ### 6. Suspend / Revoke / Restore
@@ -705,9 +664,6 @@ Con:
 - actor/scope;
 - SUPERADMIN para restore desde REVOKED;
 - Result + Event intents.
-
-`RevokeSystemAccess` acepta un acceso existente no revocado (`ACTIVE` o
-`SUSPENDED`) y rechaza `REVOKED` con el código canónico correspondiente.
 
 ### 7. Authority Evaluator
 
@@ -795,10 +751,6 @@ producer + operationType + idempotencyKey
 
 Fingerprint canónico.
 
-El fingerprint incluye actor, target, campos funcionales, `expectedVersion` e
-`importExecution` completo cuando aplique. Excluye `messageId`, IDs de
-transporte y timestamps.
-
 Casos:
 
 ```text
@@ -816,10 +768,6 @@ importId
 planItemId
 executionGeneration
 pendingReason
-authorizedByAccountId
-scope
-causalDependency(s)
-authoritativeEvidence(s)
 ```
 
 Una generación anterior no puede reaplicarse después de observar una mayor.
@@ -882,7 +830,7 @@ Triggers internos:
 eligibility updater
 account updater
 role assignment/change
-system activation
+snapshot/recovery aplicado
 reconciliation
 ```
 
@@ -894,8 +842,7 @@ Reglas:
 - acceso existente cualquier estado = no-op;
 - false eligibility no muta acceso;
 - unknown policy fail-closed;
-- no Result de Command para derivación;
-- la activación de un sistema también puede disparar la reevaluación local.
+- no Result de Command para derivación.
 
 ### 14. `pendingReason`
 
@@ -913,20 +860,115 @@ PROJECTION_RECONCILIATION
 
 `PROJECTION_RECONCILIATION`:
 
-- persiste la espera y mantiene fail-closed;
-- PR3 crea/reutiliza recovery ENTITY y resuelve la proyección mediante snapshot.
+- crea/reutiliza recovery ENTITY;
+- mantiene fail-closed hasta resolución.
 
-### 15. Recovery, Snapshots Y Readiness
+### 15. Recovery Job Orchestration
 
-La orquestación de recovery `ENTITY/FULL`, los handlers de Results de
-snapshots, `GetAccountAuthorizationSnapshot`,
-`ListAccountAuthorizationSnapshotsPage`, el rebuild `REBUILDING/READY` y el
-readiness asociado pertenecen a PR3 junto con sus contratos y conexiones
-externas.
+Implementar state machine broker-agnostic:
 
-PR2 sólo deja persistidos los campos técnicos necesarios y las intenciones
-`QUERY` neutrales al transporte; no inicia Queries de recovery ni usa
-snapshots para autorizar un Command.
+```text
+PENDING
+→ construir OutboundQueryIntent + guardar current query metadata
+→ WAITING_RESULT
+
+WAITING_RESULT
+→ aplicar internal QueryResult
+→ PENDING siguiente página / COMPLETED / FAILED
+```
+
+Ports:
+
+```text
+ProjectionRecoveryCoordinator
+ProjectionRecoveryJobRepository
+RecoveryQueryOutboxPort
+DeferredMessageReplayer
+```
+
+No espera síncrona.
+
+### 16. Recovery Result Handler Interno
+
+Implementar modelos internos de Results de snapshots.
+
+Reglas:
+
+```text
+causationId != currentQueryMessageId
+→ stale Result
+→ no mutación
+
+FOUND newer version
+→ aplicar
+
+FOUND stale version
+→ ignorar snapshot
+
+NOT_FOUND + local ausente
+→ confirmar ausencia
+
+NOT_FOUND + local presente
+→ marcar discrepancia/fail-closed
+→ re-query/FULL
+```
+
+Result + Inbox + projection + cursor/job update deben ser atómicos.
+
+### 17. FULL Rebuild
+
+Implementar abstracción para:
+
+```text
+REBUILDING
+READY
+```
+
+Debe soportar destino vacío/nueva generación o clear guarded equivalente.
+
+Pruebas sin broker deben simular:
+
+- snapshot page;
+- Event más nuevo antes de page;
+- Event más nuevo después de page;
+- creación detrás del cursor representada por Event;
+- fila fantasma eliminada por rebuild;
+- restart continuando desde cursor persistido.
+
+La cola real se conecta en PR3; PR2 prueba la lógica de convergencia.
+
+### 18. Snapshot Queries Que Authorization Expone
+
+Implementar use cases internos:
+
+```text
+GetAccountAuthorizationSnapshot
+ListAccountAuthorizationSnapshotsPage
+```
+
+Sin Rabbit listener todavía.
+
+Probar:
+
+- `FOUND` con role y acceso;
+- role conocido + sin acceso → FOUND + empty accesses;
+- `NOT_FOUND` sólo cuando no existe estado Authorization dentro del scope;
+- `systemCode` filtra accesos;
+- requesters limitados no pueden ampliar scope;
+- paginación keyset estable;
+- `roleVersion` y `accessVersion` independientes.
+
+### 19. Readiness Lógico Sin Broker
+
+Crear componentes de estado interno para que PR3 pueda exponer readiness final:
+
+```text
+projection READY/REBUILDING
+critical recovery failed
+eligibility bootstrap required
+```
+
+PR2 no agrega chequeos RabbitMQ.
 
 ### 20. Tests PR2
 
@@ -941,8 +983,9 @@ Unit/Application:
 - projections;
 - `DEFERRED`;
 - idempotencia;
-- envelope/payload canónico;
-- Academic `importExecution` completo.
+- recovery;
+- FULL rebuild;
+- NOT_FOUND race-safe.
 
 PostgreSQL integration:
 
@@ -950,7 +993,8 @@ PostgreSQL integration:
 - ChangeRole + N suspensiones rollback-safe;
 - carrera de Grant/provisioning;
 - optimistic locking;
-- persistencia de `DEFERRED` y reentrega segura de la misma intención.
+- claims de recovery;
+- restart/resume de jobs.
 
 ## Out Of Scope PR2
 
@@ -966,9 +1010,6 @@ PostgreSQL integration:
 - DTOs wire;
 - routing/bindings físicos;
 - Testcontainers RabbitMQ;
-- recovery coordinator y recovery Result handler;
-- Queries de snapshot y FULL rebuild;
-- claims/leases de `projection_recovery_jobs`;
 - cambios en BFF/Academic/Users/Auth/Lavado.
 
 ## Acceptance Criteria PR2
@@ -985,41 +1026,24 @@ PostgreSQL integration:
 - Derived Practices provisioning es idempotente/race-safe.
 - `eligible=false` no muta `SystemAccess`.
 - policy desconocida falla cerrada.
-- Academic `DEFERRED` no produce Result terminal hasta resolverse.
-- `StudentAcademicEligibilityChanged` se aplica aunque falten prerrequisitos de provisioning.
+- Recovery ENTITY/FULL es durable y reanudable.
+- Result tardío no avanza job equivocado.
+- NOT_FOUND contradictorio no borra estado concurrente.
+- Snapshot Queries se prueban directamente desde Application.
 - Domain/Application siguen libres de AMQP/wire DTOs.
 - ArchUnit sigue pasando.
 
 ---
 
-# PR3 — Projection Recovery, Executable Messaging Contracts And External Connections
+# PR3 — Executable Messaging Contracts And External Connections
 
 ## Propósito
 
-Completar recovery/snapshots de proyecciones y conectar el comportamiento terminado en PR2 con RabbitMQ, materializando los contratos wire ejecutables de `authorization-service`.
+Conectar el comportamiento terminado en PR2 con RabbitMQ y materializar los contratos wire ejecutables de `authorization-service`.
 
 PR3 **no agrega nuevas reglas de negocio**.
 
 Si PR3 necesita cambiar la semántica de un Command, authority rule, eligibility rule, transaction o recovery invariant, significa que PR1/PR2 o la documentación canónica quedaron incompletos y debe corregirse primero ese problema.
-
-### 0. Recovery Y Snapshots
-
-Implementar la máquina durable `ENTITY/FULL` definida por
-`projection-recovery.md`, incluyendo:
-
-- claims/fencing sin mantener transacciones abiertas durante `WAITING_RESULT`;
-- Queries autoritativas de Users, Authentication y Academic;
-- `GetAccountAuthorizationSnapshot` y `ListAccountAuthorizationSnapshotsPage`;
-- Results `FOUND`, `NOT_FOUND` y `FAILED` sin asumir estado ante fallo;
-- validación de `causationId` contra `currentQueryMessageId`;
-- reintento con nuevo `messageId` y `queryAttempt`;
-- reaplicación de Inbox `DEFERRED` con el mismo `messageId`;
-- `NOT_FOUND` race-safe y FULL rebuild sobre destino vacío/nueva generación;
-- readiness `READY/REBUILDING` y fail-closed durante recovery.
-
-El handler de recovery debe reclamar/bloquear el job antes de validar o aplicar
-un Result. Un Result tardío se confirma como stale sin mutar proyección ni
-cursor.
 
 ## Scope
 
@@ -1261,7 +1285,7 @@ Result listener:
 validate wire
 → map
 → Consumer Inbox
-→ ProjectionRecovery Result handler PR3
+→ ProjectionRecovery Result handler PR2
 → projection/cursor/job update
 → commit
 → ACK
@@ -1533,7 +1557,8 @@ Antes de PR3:
 - authority completa;
 - Inbox/idempotency/Outbox/audit completos;
 - Practices provisioning completo;
-- Academic `DEFERRED` persistido sin Result terminal;
+- recovery completo mediante ports;
+- snapshot Queries completos;
 - `./mvnw clean verify` verde;
 - volver a revisar `estomatologia-platform-docs/main` para drift.
 
