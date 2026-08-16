@@ -18,6 +18,12 @@ public interface ProcessedMessageRepository {
   int updateDeferredReason(
       String consumerName, UUID messageId, String deferredReason, Instant updatedAt);
 
+  /** Compatibility name for application code; semantics remain DEFERRED -> DEFERRED only. */
+  default int markDeferred(
+      String consumerName, UUID messageId, String deferredReason, Instant updatedAt) {
+    return updateDeferredReason(consumerName, messageId, deferredReason, updatedAt);
+  }
+
   boolean hasDeferredNewerThan(String consumerName, UUID aggregateId, int aggregateVersion);
 
   List<ProcessedMessage> findDeferredByAggregate(
