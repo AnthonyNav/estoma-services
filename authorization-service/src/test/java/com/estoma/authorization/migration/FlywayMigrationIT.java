@@ -22,8 +22,8 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   void migrationsAreAppliedAndRerunningIsANoOp() {
     MigrationInfo[] applied = flyway.info().applied();
 
-    assertThat(applied).hasSize(2);
-    assertThat(applied).extracting(info -> info.getVersion().toString()).containsExactly("1", "2");
+    assertThat(applied).hasSize(3);
+    assertThat(applied).extracting(info -> info.getVersion().toString()).containsExactly("1", "2", "3");
     assertThat(applied).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
     assertThat(flyway.migrate().migrationsExecuted).isZero();
   }
@@ -125,6 +125,31 @@ class FlywayMigrationIT extends AbstractPostgresIT {
                     .update())
         .isInstanceOf(DataIntegrityViolationException.class)
         .hasMessageContaining("ux_recovery_full_active");
+  }
+
+  @Test
+  void deferredReplayClaimRequiresACompleteFencingPair() {
+    OffsetDateTime now = OffsetDateTime.now();
+    UUID messageId = UUID.randomUUID();
+    jdbc.sql(
+            "INSERT INTO processed_messages "
+                + "(consumer_name, message_id, status, message_type, message_version, message_kind, producer, "
+                + "actor, payload, received_at, occurred_at, deferred_reason, updated_at) "
+                + "VALUES ('authorization-events', :messageId, 'DEFERRED', 'AccountActivated', 1, 'EVENT', "
+                + "'authentication', '{\"type\":\"SYSTEM\",\"service\":\"authentication\"}'::jsonb, '{}'::jsonb, "
+                + ":now, :now, 'EVENT_PENDING', :now)")
+        .param("messageId", messageId)
+        .param("now", now)
+        .update();
+
+    assertThatThrownBy(() -> jdbc.sql(
+            "UPDATE processed_messages SET claim_token = :claimToken "
+                + "WHERE consumer_name = 'authorization-events' AND message_id = :messageId")
+        .param("claimToken", UUID.randomUUID())
+        .param("messageId", messageId)
+        .update())
+        .isInstanceOf(DataIntegrityViolationException.class)
+        .hasMessageContaining("ck_processed_message_claim");
   }
 
   @Test
