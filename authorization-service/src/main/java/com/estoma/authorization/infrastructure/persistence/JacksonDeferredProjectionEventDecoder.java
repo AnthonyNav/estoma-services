@@ -35,9 +35,9 @@ class JacksonDeferredProjectionEventDecoder implements DeferredProjectionEventDe
         message.causationId(),
         message.operationId(),
         message.idempotencyKey(),
+        message.actor(),
         message.aggregateId(),
-        requireAggregateVersion(message),
-        message.actor());
+        requireAggregateVersion(message));
 
     return switch (message.messageType()) {
       case "PersonCreated", "PersonActivated", "PersonDeactivated" ->
