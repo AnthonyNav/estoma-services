@@ -1,5 +1,7 @@
 package com.estoma.authorization.infrastructure.persistence;
 
+import com.estoma.authorization.application.exception.AuthorizationErrorCode;
+import com.estoma.authorization.application.exception.OptimisticLockConflictException;
 import com.estoma.authorization.application.port.AccountRoleRepository;
 import com.estoma.authorization.domain.model.AccountRoleAssignment;
 import java.util.Optional;
@@ -81,7 +83,7 @@ class JdbcAccountRoleRepository implements AccountRoleRepository {
   @Override
   public int update(AccountRoleAssignment assignment, int expectedVersion) {
     OptimisticVersionGuard.requireNext(expectedVersion, assignment.version());
-    return jdbc.sql(
+    int updated = jdbc.sql(
             """
             UPDATE account_roles SET
               role_id = :roleId,
@@ -100,5 +102,11 @@ class JdbcAccountRoleRepository implements AccountRoleRepository {
         .param("updatedAt", Timestamps.toTimestamp(assignment.updatedAt()))
         .param("expectedVersion", expectedVersion)
         .update();
+    if (updated != 1) {
+      throw new OptimisticLockConflictException(
+          AuthorizationErrorCode.ACCOUNT_ROLE_VERSION_CONFLICT,
+          "account role changed concurrently");
+    }
+    return updated;
   }
 }
