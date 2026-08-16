@@ -10,6 +10,7 @@ import com.estoma.authorization.application.port.CommandIdempotencyRepository;
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
+import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.port.RoleCatalogRepository;
 import com.estoma.authorization.application.port.SystemAccessRepository;
 import com.estoma.authorization.application.port.SystemCatalogRepository;
@@ -35,20 +36,35 @@ class AuthorizationApplicationConfig {
       AccountRoleRepository accountRoles,
       RoleCatalogRepository roles,
       SystemCatalogRepository systems,
-      ProcessedMessageRepository inbox) {
-    return new AuthorityEvaluator(accounts, persons, accountRoles, roles, systems, inbox);
+      ProcessedMessageRepository inbox,
+      ProjectionRecoveryJobRepository recoveryJobs) {
+    return new AuthorityEvaluator(
+        accounts, persons, accountRoles, roles, systems, inbox, recoveryJobs);
   }
 
   @Bean
   PracticesProvisioningService practicesProvisioningService(
       AcademicEligibilityProjectionRepository eligibility,
+      AccountStatusProjectionRepository accounts,
       AccountRoleRepository accountRoles,
       RoleCatalogRepository roles,
       SystemCatalogRepository systems,
       SystemAccessRepository accesses,
+      ProcessedMessageRepository inbox,
+      ProjectionRecoveryJobRepository recoveryJobs,
       OutboxRepository outbox,
       AuthorizationAuditRepository audit) {
-    return new PracticesProvisioningService(eligibility, accountRoles, roles, systems, accesses, outbox, audit);
+    return new PracticesProvisioningService(
+        eligibility,
+        accounts,
+        accountRoles,
+        roles,
+        systems,
+        accesses,
+        inbox,
+        recoveryJobs,
+        outbox,
+        audit);
   }
 
   @Bean
@@ -94,8 +110,9 @@ class AuthorizationApplicationConfig {
       AccountStatusProjectionRepository accounts,
       AcademicEligibilityProjectionRepository eligibility,
       PracticesProvisioningService provisioning,
-      AuthorizationAuditRepository audit) {
+      AuthorizationAuditRepository audit,
+      Clock clock) {
     return new ProjectionEventProcessor(
-        transactions, inbox, persons, accounts, eligibility, provisioning, audit);
+        transactions, inbox, persons, accounts, eligibility, provisioning, audit, clock);
   }
 }
