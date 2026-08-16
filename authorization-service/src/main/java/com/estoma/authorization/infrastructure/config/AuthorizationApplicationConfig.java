@@ -54,6 +54,19 @@ class AuthorizationApplicationConfig {
   }
 
   @Bean
+  ProjectionRecoveryCoordinator projectionRecoveryCoordinator(
+      TransactionRunner transactions,
+      ProjectionRecoveryJobRepository jobs,
+      PersonStatusProjectionRepository persons,
+      AccountStatusProjectionRepository accounts,
+      AcademicEligibilityProjectionRepository eligibility,
+      OutboxRepository outbox,
+      Clock clock) {
+    return new ProjectionRecoveryCoordinator(
+        transactions, jobs, persons, accounts, eligibility, outbox, clock);
+  }
+
+  @Bean
   PracticesProvisioningService practicesProvisioningService(
       AcademicEligibilityProjectionRepository eligibility,
       AccountStatusProjectionRepository accounts,
@@ -63,6 +76,7 @@ class AuthorizationApplicationConfig {
       SystemAccessRepository accesses,
       ProcessedMessageRepository inbox,
       ProjectionRecoveryJobRepository recoveryJobs,
+      ProjectionRecoveryCoordinator recovery,
       OutboxRepository outbox,
       AuthorizationAuditRepository audit) {
     return new PracticesProvisioningService(
@@ -74,21 +88,9 @@ class AuthorizationApplicationConfig {
         accesses,
         inbox,
         recoveryJobs,
+        recovery,
         outbox,
         audit);
-  }
-
-  @Bean
-  ProjectionRecoveryCoordinator projectionRecoveryCoordinator(
-      TransactionRunner transactions,
-      ProjectionRecoveryJobRepository jobs,
-      PersonStatusProjectionRepository persons,
-      AccountStatusProjectionRepository accounts,
-      AcademicEligibilityProjectionRepository eligibility,
-      OutboxRepository outbox,
-      Clock clock) {
-    return new ProjectionRecoveryCoordinator(
-        transactions, jobs, persons, accounts, eligibility, outbox, clock);
   }
 
   @Bean
@@ -108,6 +110,7 @@ class AuthorizationApplicationConfig {
       OutboxRepository outbox,
       PersonStatusProjectionRepository persons,
       ProcessedMessageRepository inbox,
+      ProjectionRecoveryJobRepository recoveryJobs,
       RoleCatalogRepository roles,
       SystemAccessRepository accesses,
       SystemCatalogRepository systems,
@@ -124,6 +127,7 @@ class AuthorizationApplicationConfig {
         outbox,
         persons,
         inbox,
+        recoveryJobs,
         roles,
         accesses,
         systems,
