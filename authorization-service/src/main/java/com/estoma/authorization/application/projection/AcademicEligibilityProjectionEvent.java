@@ -15,8 +15,7 @@ public record AcademicEligibilityProjectionEvent(
     int eligibilityVersion,
     int academicProfileVersion,
     Instant evaluatedAt,
-    String payloadJson,
-    boolean causallyApplicable)
+    String payloadJson)
     implements ProjectionEvent {
 
   public AcademicEligibilityProjectionEvent {
