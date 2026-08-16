@@ -1,82 +1,192 @@
-# PR3 Contract Inconsistencies
+# PR3 Contract Resolutions
 
-Status: BLOCKED
-Date: 2026-08-14
+Status: APPROVED FOR IMPLEMENTATION
+Date: 2026-08-15
 Scope: academic-service student-import PR3
 
-No implementation changes were made after these inconsistencies were found.
+The inconsistencies previously recorded in this file are resolved. They are no longer blockers for PR3 implementation.
 
-## 1. Obsolete Plan Item Type
+The resolutions below are technical/contractual alignments derived from the existing V1 model and the merged PR2 implementation. They do not introduce new business rules.
 
-`03-services/shared/academic-service/data-model.md` lists
-`UPDATE_STUDENT_PROFILE` in the allowed `student_import_plan_item_type` values
-(sections 8.1 and 9).
+## 1. Plan Item Type
 
-The same contract family defines `ChangeStudentSemester` as the specific
-semester operation, and the approved PR2 implementation uses
-`CHANGE_STUDENT_SEMESTER`. There is no generic `UpdateStudentAcademicProfile`
-operation in V1.
+Decision: `UPDATE_STUDENT_PROFILE` is obsolete and must not be used in V1.
 
-Required decision: remove `UPDATE_STUDENT_PROFILE` from the canonical data
-model and replace it with `CHANGE_STUDENT_SEMESTER`, or explicitly reopen the
-V1 command model before continuing PR3.
+Canonical persisted Plan Item type:
 
-References:
+```text
+CHANGE_STUDENT_SEMESTER
+```
 
-- `03-services/shared/academic-service/data-model.md:412-435,619-637`
-- `03-services/shared/academic-service/commands.md:53,69`
-- `academic-service/docs/student-import-pr2-open-questions.md:606-626` on the
-  PR2 branch
+Rationale:
 
-## 2. Result Correlation Fields Are Duplicated In One Contract
+- V1 has no generic `UpdateStudentAcademicProfile` operation.
+- `ChangeStudentSemester` is the owner-specific mutation for semester changes.
+- PR2 already persists and executes `CHANGE_STUDENT_SEMESTER`.
 
-`03-services/shared/academic-service/commands.md:366` says Results for
-internal Commands must include `operationId` and `idempotencyKey` inside
-`payload.data`.
+Implementation rule:
 
-The transversal envelope contract defines both as envelope fields, and the
-approved PR2 decisions explicitly say that `payload.data` should add only
-`importId`, `planItemId` and `executionGeneration`; `operationId` and
-`idempotencyKey` must not be duplicated there.
+```text
+UPDATE_STUDENT_PROFILE       -> forbidden / stale documentation
+CHANGE_STUDENT_SEMESTER     -> canonical V1 Plan Item
+```
 
-Required decision: confirm that `operationId` and `idempotencyKey` remain only
-in the envelope, with import correlation fields in `payload.data`, or define a
-new canonical payload shape before PR3 contract schemas are created.
+Any schema, enum, fixture or integration contract created in PR3 must use `CHANGE_STUDENT_SEMESTER`.
 
-References:
+## 2. Result Correlation Fields
 
-- `02-architecture/messaging-architecture.md:549-564,775-787`
-- `03-services/shared/academic-service/commands.md:366`
-- `academic-service/docs/student-import-pr2-open-questions.md:231-264` on the
-  PR2 branch
+Decision: `operationId` and `idempotencyKey` remain envelope metadata and must not be duplicated in `payload.data`.
 
-## 3. Validation/Application Command Boundary Is Unclear
+Canonical coordinated Result shape:
 
-`03-services/shared/academic-service/commands.md:64-67` documents
-`ValidateStudentImport` and `ApplyStudentImport` as Commands with Results.
-`student-import.md` also describes them as operations.
+```text
+envelope.operationId
+envelope.idempotencyKey
 
-The approved PR2 implementation does not route either operation through
-`AcademicCommandDispatcher`. It runs validation and application through the
-durable scheduled `StudentImportValidationWorker` and
-`StudentImportApplicationManager`; the dispatcher currently accepts only the
-BFF commands, including `StartStudentImport` and `ResumeStudentImport`.
+payload.status = SUCCEEDED | REJECTED | FAILED | EXPIRED
+payload.data {
+  importId
+  planItemId
+  executionGeneration
+  ...command-specific canonical data when applicable
+}
+payload.error?
+```
 
-Required decision: confirm that validation and application are internal
-durable process-manager operations with no RabbitMQ Command/Result surface, or
-require their explicit wire contracts, dispatcher handlers, idempotency rules,
-and topology before PR3.
+Required correlation responsibilities:
 
-References:
+- `messageId`: delivery deduplication / Consumer Inbox.
+- `operationId`: logical operation correlation.
+- `idempotencyKey`: functional intention within an execution generation.
+- `importId + planItemId + executionGeneration`: identifies the current import Plan Item execution.
 
-- `03-services/shared/academic-service/commands.md:64-67,347,364-368`
-- `03-services/shared/academic-service/student-import.md:1115-1127`
-- PR2 branch `AcademicCommandDispatcher` allow-list and scheduled worker/
-  manager implementation
+PR3 receivers and contract schemas must reject or ignore stale generations according to their owner contract, while Academic completes a Plan Item only from a correlated terminal Result belonging to a Command actually published for that Plan Item/generation.
+
+No new payload copy of `operationId` or `idempotencyKey` is introduced.
+
+## 3. Validation / Application Boundary
+
+Decision: `ValidateStudentImport` and `ApplyStudentImport` are internal durable Process Manager phases in V1. They are not RabbitMQ Command/Result surfaces.
+
+External durable administrative Commands remain:
+
+```text
+StartStudentImport
+ResumeStudentImport
+```
+
+Internal execution remains:
+
+```text
+StartStudentImport accepted
+  -> VALIDATING
+  -> StudentImportValidationWorker
+  -> VALIDATED or REJECTED
+  -> StudentImportApplicationManager
+  -> APPLYING
+  -> COMPLETED or APPLICATION_FAILED
+```
+
+Consequences:
+
+- Do not add `ValidateStudentImport` or `ApplyStudentImport` to `AcademicCommandDispatcher`.
+- Do not create `ValidateStudentImportResult` or `ApplyStudentImportResult` wire schemas.
+- Do not add RabbitMQ routing, Inbox/Outbox request handling or BFF orchestration for those two internal phases.
+- Keep domain/process Events such as `StudentImportValidated`, `StudentImportRejected`, `StudentImportApplicationStarted`, `StudentImportApplicationFailed`, `StudentImportCompleted` and progress Events.
+- `FINALIZE_STUDENT_IMPORT` remains an internal Plan Item at the end of the application phase; it is not a public Command.
+
+## 4. PR3 Integration Contract
+
+PR3 should proceed using these canonical rules:
+
+### Academic producer
+
+```text
+producer = academic
+actor = SYSTEM { service: academic }
+```
+
+Plan authorization/context belongs in:
+
+```text
+payload.importExecution {
+  importId
+  planItemId
+  executionGeneration
+  authorizedByAccountId
+  scope
+  causalDependencies[]
+  authoritativeEvidence[]
+}
+```
+
+`scope` does not belong in `ActorContext`.
+
+### Coordinated Result routing
+
+```text
+exchange = platform.results
+routing key = academic
+queue = results.academic
+```
+
+### Allowed cross-service operations
+
+Users:
+
+```text
+CreatePerson
+UpdatePerson
+```
+
+Authentication:
+
+```text
+CreateAccount
+ActivateAccount
+DeactivateAccount
+```
+
+Authorization:
+
+```text
+AssignAccountRole
+GrantSystemAccess
+```
+
+For Authorization, the Academic import may grant only:
+
+```text
+LAVADO_ULTRASONICO
+```
+
+`PRACTICAS_PROFESIONALES` remains eligibility-derived and must never be planned as `GrantSystemAccess` by the import.
+
+## 5. Canonical Documentation Cleanup
+
+The shared platform documentation still contains stale prose corresponding to the three issues above. PR3 implementation must follow the approved resolutions in this file and the merged PR2 behavior; the stale text must be aligned as documentation cleanup and must not be used to re-open the V1 behavior.
+
+Required canonical cleanup targets:
+
+- `03-services/shared/academic-service/data-model.md`
+  - replace `UPDATE_STUDENT_PROFILE` with `CHANGE_STUDENT_SEMESTER`.
+- `03-services/shared/academic-service/commands.md`
+  - remove `ValidateStudentImport` / `ApplyStudentImport` as RabbitMQ Commands;
+  - remove duplicated `operationId` / `idempotencyKey` from coordinated `payload.data` descriptions.
+- `03-services/shared/academic-service/student-import.md`
+  - describe validation/application as internal durable phases, not wire Commands.
+- `03-services/shared/users-service/commands.md`
+  - coordinated Result data contains `importId`, `planItemId`, `executionGeneration`; `operationId` and `idempotencyKey` remain in the envelope.
 
 ## Resume Gate
 
-PR3 implementation must remain paused until the canonical documentation is
-resolved and the decision is reflected in the implementation branch. After
-resolution, re-check the academic command, data-model, event, query and
-messaging contracts before creating JSON Schemas or changing RabbitMQ wiring.
+PR3 is **UNBLOCKED**.
+
+The agent may continue implementation without requesting decisions for the three issues previously recorded here. Any new inconsistency must be evaluated against:
+
+1. merged `develop` implementation,
+2. the transversal messaging contract,
+3. owner service contracts,
+4. the resolutions in this file.
+
+Do not change business behavior merely to match stale implementation or stale prose in another service.
