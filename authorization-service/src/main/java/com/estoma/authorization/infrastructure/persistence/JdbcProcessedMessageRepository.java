@@ -33,6 +33,17 @@ class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
   }
 
   @Override
+  public Optional<ProcessedMessage> findForUpdate(String consumerName, UUID messageId) {
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM processed_messages "
+                + "WHERE consumer_name = :consumerName AND message_id = :messageId FOR UPDATE")
+        .param("consumerName", consumerName)
+        .param("messageId", messageId)
+        .query(ProcessedMessageRowMapper.INSTANCE)
+        .optional();
+  }
+
+  @Override
   public boolean insertIfAbsent(ProcessedMessage message) {
     return jdbc.sql(
             """
