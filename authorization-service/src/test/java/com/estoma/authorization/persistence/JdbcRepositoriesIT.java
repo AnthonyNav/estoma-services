@@ -3,6 +3,7 @@ package com.estoma.authorization.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.estoma.authorization.application.exception.OptimisticLockConflictException;
 import com.estoma.authorization.application.port.AccountRoleRepository;
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository;
@@ -42,7 +43,7 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
   @Autowired private SystemAccessRepository accesses;
   @Autowired private PersonStatusProjectionRepository persons;
   @Autowired private AccountStatusProjectionRepository accounts;
-  @Autowired private com.estoma.authorization.application.port.AcademicEligibilityProjectionRepository eligibility;
+  @Autowired private AcademicEligibilityProjectionRepository eligibility;
   @Autowired private ProcessedMessageRepository inbox;
   @Autowired private CommandIdempotencyRepository idempotency;
   @Autowired private OutboxRepository outbox;
@@ -76,7 +77,8 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
             assignment.assignedAt(),
             NOW.plusSeconds(1));
     assertThat(accountRoles.update(changed, 1)).isOne();
-    assertThat(accountRoles.update(changed, 1)).isZero();
+    assertThatThrownBy(() -> accountRoles.update(changed, 1))
+        .isInstanceOf(OptimisticLockConflictException.class);
 
     UUID accessId = UUID.randomUUID();
     SystemAccess access =
@@ -89,8 +91,14 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
             NOW);
     accesses.insert(access);
     SystemAccess suspended =
-        access.suspend(SystemAccessReasonCode.ADMINISTRATIVE, null, ActorRef.account(UUID.randomUUID()), NOW.plusSeconds(1));
+        access.suspend(
+            SystemAccessReasonCode.ADMINISTRATIVE,
+            null,
+            ActorRef.account(UUID.randomUUID()),
+            NOW.plusSeconds(1));
     assertThat(accesses.update(suspended, 1)).isOne();
+    assertThatThrownBy(() -> accesses.update(suspended, 1))
+        .isInstanceOf(OptimisticLockConflictException.class);
     assertThat(accesses.findByAccountId(accountId)).extracting(SystemAccess::status)
         .containsExactly(SystemAccessStatus.SUSPENDED);
   }
