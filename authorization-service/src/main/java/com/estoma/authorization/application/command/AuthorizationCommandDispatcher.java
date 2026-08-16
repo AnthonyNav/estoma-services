@@ -13,6 +13,7 @@ import com.estoma.authorization.application.port.CommandIdempotencyRepository.Id
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
+import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.port.RoleCatalogRepository;
 import com.estoma.authorization.application.port.SystemAccessRepository;
 import com.estoma.authorization.application.port.SystemCatalogRepository;
@@ -30,6 +31,7 @@ import com.estoma.authorization.domain.model.SystemAccess;
 import com.estoma.authorization.domain.model.SystemAccessReasonCode;
 import com.estoma.authorization.domain.model.SystemAccessStatus;
 import com.estoma.authorization.domain.model.SystemCatalog;
+import com.estoma.authorization.domain.model.SystemCode;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -51,6 +53,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
   private final OutboxRepository outbox;
   private final PersonStatusProjectionRepository persons;
   private final ProcessedMessageRepository inbox;
+  private final ProjectionRecoveryJobRepository recoveryJobs;
   private final RoleCatalogRepository roles;
   private final SystemAccessRepository accesses;
   private final SystemCatalogRepository systems;
@@ -68,6 +71,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       OutboxRepository outbox,
       PersonStatusProjectionRepository persons,
       ProcessedMessageRepository inbox,
+      ProjectionRecoveryJobRepository recoveryJobs,
       RoleCatalogRepository roles,
       SystemAccessRepository accesses,
       SystemCatalogRepository systems,
@@ -83,6 +87,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     this.outbox = outbox;
     this.persons = persons;
     this.inbox = inbox;
+    this.recoveryJobs = recoveryJobs;
     this.roles = roles;
     this.accesses = accesses;
     this.systems = systems;
@@ -97,10 +102,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     return transactions.inTransaction(() -> dispatchInTransaction(metadata, command));
   }
 
-  /**
-   * Explicit wake-up path for an already durable DEFERRED academic intention. It preserves the same
-   * messageId/idempotency record and never creates a second functional intention.
-   */
+  /** Re-evaluates the original durable Academic DEFERRED intention. */
   public CommandOutcome replayDeferred(CommandMetadata metadata, AuthorizationCommand command) {
     validateEnvelope(metadata, command);
     return transactions.inTransaction(() -> replayDeferredInTransaction(metadata, command));
@@ -129,10 +131,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       throw new IllegalStateException("only coordinated Academic commands can be deferred in V1");
     }
 
-    ImportExecution execution = command.importExecution();
-    Optional<Integer> latest = idempotency.findLatestExecutionGeneration(
-        metadata.producer(), execution.importId(), execution.planItemId());
-    if (latest.isPresent() && execution.executionGeneration() < latest.get()) {
+    if (isStaleAcademicGeneration(metadata, command)) {
       return finalizeTerminal(
           metadata,
           command,
@@ -190,26 +189,22 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       return handleExistingIdempotency(metadata, command, fingerprint, existing.get(), now);
     }
 
-    if ("academic".equals(metadata.producer())) {
-      ImportExecution execution = command.importExecution();
-      Optional<Integer> latest = idempotency.findLatestExecutionGeneration(
-          metadata.producer(), execution.importId(), execution.planItemId());
-      if (latest.isPresent() && execution.executionGeneration() < latest.get()) {
-        return finalizeStandaloneRejection(
-            metadata,
-            command,
-            ApplicationResult.rejected(
-                AuthorizationErrorCode.STALE_EXECUTION_GENERATION.name(),
-                "execution generation is older than the latest observed generation"),
-            now);
-      }
-    }
-
     IdempotencyRecord initial = initialIdempotencyRecord(metadata, command, fingerprint, now);
     if (!idempotency.insertIfAbsent(initial)) {
       return idempotency.find(metadata.producer(), command.operationType(), metadata.idempotencyKey())
           .map(record -> handleExistingIdempotency(metadata, command, fingerprint, record, now))
           .orElseThrow(() -> new IllegalStateException("idempotency reservation disappeared"));
+    }
+
+    if (isStaleAcademicGeneration(metadata, command)) {
+      return finalizeTerminal(
+          metadata,
+          command,
+          fingerprint,
+          HandledCommand.rejected(ApplicationResult.rejected(
+              AuthorizationErrorCode.STALE_EXECUTION_GENERATION.name(),
+              "execution generation is older than the latest observed generation")),
+          now);
     }
 
     try {
@@ -244,6 +239,18 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
           HandledCommand.rejected(ApplicationResult.rejected(code.name(), exception.getMessage())),
           now);
     }
+  }
+
+  private boolean isStaleAcademicGeneration(
+      CommandMetadata metadata, AuthorizationCommand command) {
+    ImportExecution execution = command.importExecution();
+    if (!"academic".equals(metadata.producer()) || execution == null) {
+      return false;
+    }
+    return idempotency.findLatestExecutionGeneration(
+            metadata.producer(), execution.importId(), execution.planItemId())
+        .map(latest -> execution.executionGeneration() < latest)
+        .orElse(false);
   }
 
   private void validateEnvelope(CommandMetadata metadata, AuthorizationCommand command) {
@@ -304,7 +311,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         execution == null ? null : execution.importId(),
         execution == null ? null : execution.planItemId(),
         execution == null ? null : execution.executionGeneration(),
-        "academic".equals(metadata.producer()) ? "EVENT_PENDING" : null,
+        execution == null ? null : "PROCESSING",
         now,
         null,
         now);
@@ -326,6 +333,16 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
           now);
     }
     if ("DEFERRED".equals(existing.status())) {
+      if (isStaleAcademicGeneration(metadata, command)) {
+        return finalizeTerminal(
+            metadata,
+            command,
+            fingerprint,
+            HandledCommand.rejected(ApplicationResult.rejected(
+                AuthorizationErrorCode.STALE_EXECUTION_GENERATION.name(),
+                "deferred execution generation is older than the latest observed generation")),
+            now);
+      }
       inbox.markDeferred(COMMAND_CONSUMER, metadata.messageId(), existing.pendingReason(), now);
       return CommandOutcome.deferred(existing.pendingReason());
     }
@@ -340,7 +357,8 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
   }
 
   private CommandOutcome finalizeStandaloneRejection(
-      CommandMetadata metadata, AuthorizationCommand command, ApplicationResult result, Instant now) {
+      CommandMetadata metadata, AuthorizationCommand command, ApplicationResult rawResult, Instant now) {
+    ApplicationResult result = CommandResultSupport.ensureImportExecutionData(command, rawResult);
     OutboundResultIntent resultIntent = resultIntent(metadata, command, result, null, null, now);
     OutboxIntentWriter.append(outbox, resultIntent);
     appendAudit(metadata, command, result, null, null, now);
@@ -403,7 +421,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       String fingerprint,
       HandledCommand handled,
       Instant now) {
-    ApplicationResult result = handled.result();
+    ApplicationResult result = CommandResultSupport.ensureImportExecutionData(command, handled.result());
     for (DomainEventIntent event : handled.events()) {
       OutboxIntentWriter.append(outbox, event);
     }
@@ -411,6 +429,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         metadata, command, result, handled.aggregateId(), handled.aggregateVersion(), now);
     OutboxIntentWriter.append(outbox, resultIntent);
     ImportExecution execution = command.importExecution();
+    IdempotencyRecord previous = idempotency.find(
+            metadata.producer(), command.operationType(), metadata.idempotencyKey())
+        .orElseThrow(() -> new IllegalStateException("terminal idempotency record is missing"));
     idempotency.update(new IdempotencyRecord(
         metadata.producer(),
         command.operationType(),
@@ -427,7 +448,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         execution == null ? null : execution.planItemId(),
         execution == null ? null : execution.executionGeneration(),
         null,
-        now,
+        previous.createdAt(),
         now,
         now));
     inbox.markApplied(COMMAND_CONSUMER, metadata.messageId(), now, now);
@@ -539,10 +560,11 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       Optional<AccountRoleAssignment> targetRole,
       Instant now) {
     var account = accounts.findByAccountId(command.accountId());
+    Optional<HandledCommand> academicWait = academicAccountWait(metadata, command, account);
+    if (academicWait.isPresent()) {
+      return academicWait.get();
+    }
     if (account.isEmpty()) {
-      if ("academic".equals(metadata.producer())) {
-        return deferredOrMissing(metadata, command, AuthorizationErrorCode.ACCOUNT_NOT_FOUND);
-      }
       throw reject(AuthorizationErrorCode.ACCOUNT_NOT_FOUND, "account projection is absent");
     }
     RoleCatalog role = activeRole(command.roleCode());
@@ -552,11 +574,15 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     if (targetRole.isPresent()) {
       if ("academic".equals(metadata.producer()) && targetRole.get().roleCode() == RoleCode.ALUMNO) {
         provisioning.evaluate(command.accountId(), trigger(metadata, command.importExecution(), now));
-        return HandledCommand.success(ApplicationResult.succeeded(Map.of(
-            "accountId", command.accountId(),
-            "roleCode", targetRole.get().roleCode(),
-            "changed", false,
-            "newVersion", targetRole.get().version())));
+        return HandledCommand.success(
+            ApplicationResult.succeeded(CommandResultSupport.withImportExecution(command, Map.of(
+                "accountId", command.accountId(),
+                "roleCode", targetRole.get().roleCode(),
+                "changed", false,
+                "newVersion", targetRole.get().version()))),
+            List.of(),
+            targetRole.get().accountId(),
+            targetRole.get().version());
       }
       throw reject(AuthorizationErrorCode.ACCOUNT_ROLE_ALREADY_ASSIGNED, "account already has a role");
     }
@@ -567,22 +593,26 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
           () -> new IllegalStateException("role insert lost its row"));
       if ("academic".equals(metadata.producer()) && concurrent.roleCode() == RoleCode.ALUMNO) {
         provisioning.evaluate(command.accountId(), trigger(metadata, command.importExecution(), now));
-        return HandledCommand.success(ApplicationResult.succeeded(Map.of(
-            "accountId", command.accountId(),
-            "roleCode", concurrent.roleCode(),
-            "changed", false,
-            "newVersion", concurrent.version())));
+        return HandledCommand.success(
+            ApplicationResult.succeeded(CommandResultSupport.withImportExecution(command, Map.of(
+                "accountId", command.accountId(),
+                "roleCode", concurrent.roleCode(),
+                "changed", false,
+                "newVersion", concurrent.version()))),
+            List.of(),
+            concurrent.accountId(),
+            concurrent.version());
       }
       throw reject(AuthorizationErrorCode.ACCOUNT_ROLE_ALREADY_ASSIGNED, "account already has a role");
     }
     DomainEventIntent event = roleAssignedEvent(metadata, assignment, now);
     provisioning.evaluate(command.accountId(), trigger(metadata, command.importExecution(), now));
     return HandledCommand.success(
-        ApplicationResult.succeeded(Map.of(
+        ApplicationResult.succeeded(CommandResultSupport.withImportExecution(command, Map.of(
             "accountId", command.accountId(),
             "roleCode", role.code(),
             "changed", true,
-            "newVersion", assignment.version())),
+            "newVersion", assignment.version()))),
         List.of(event), assignment.accountId(), assignment.version());
   }
 
@@ -617,9 +647,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         metadata.actor(),
         current.assignedAt(),
         now);
-    if (accountRoles.update(changed, command.expectedVersion()) != 1) {
-      throw reject(AuthorizationErrorCode.ACCOUNT_ROLE_VERSION_CONFLICT, "role version changed concurrently");
-    }
+    accountRoles.update(changed, command.expectedVersion());
     for (SystemAccess access : accesses.findByAccountId(command.accountId())) {
       if (access.status() != SystemAccessStatus.ACTIVE
           || roles.isAllowedInSystem(newRole.id(), access.systemId())) {
@@ -627,9 +655,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       }
       SystemAccess suspendedAccess = access.suspend(
           SystemAccessReasonCode.ROLE_CHANGED, null, metadata.actor(), now);
-      if (accesses.update(suspendedAccess, access.version()) != 1) {
-        throw reject(AuthorizationErrorCode.SYSTEM_ACCESS_VERSION_CONFLICT, "access changed concurrently");
-      }
+      accesses.update(suspendedAccess, access.version());
       suspended.add(suspendedAccess);
       events.add(accessSuspendedEvent(metadata, suspendedAccess, access.status(), now));
     }
@@ -656,14 +682,18 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       Optional<AccountRoleAssignment> targetRole,
       Instant now) {
     var account = accounts.findByAccountId(command.accountId());
+    Optional<HandledCommand> academicWait = academicAccountWait(metadata, command, account);
+    if (academicWait.isPresent()) {
+      return academicWait.get();
+    }
     if (account.isEmpty()) {
-      if ("academic".equals(metadata.producer())) {
-        return deferredOrMissing(metadata, command, AuthorizationErrorCode.ACCOUNT_NOT_FOUND);
-      }
       throw reject(AuthorizationErrorCode.ACCOUNT_NOT_FOUND, "account projection is absent");
     }
     AccountRoleAssignment roleAssignment = targetRole.orElseThrow(
         () -> reject(AuthorizationErrorCode.ACCOUNT_ROLE_NOT_FOUND, "account has no role"));
+    if ("academic".equals(metadata.producer()) && roleAssignment.roleCode() != RoleCode.ALUMNO) {
+      throw reject(AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED, "Academic Grant requires ALUMNO target role");
+    }
     RoleCatalog role = roles.findById(roleAssignment.roleId())
         .orElseThrow(() -> reject(AuthorizationErrorCode.ROLE_NOT_FOUND, "role is missing"));
     if (role.status() != CatalogStatus.ACTIVE) {
@@ -673,16 +703,22 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     if (!roles.isAllowedInSystem(role.id(), system.id())) {
       throw reject(AuthorizationErrorCode.ROLE_NOT_ALLOWED_IN_SYSTEM, "role is not allowed in system");
     }
+    validatePracticesGrantEligibility(metadata, command, system);
+
     Optional<SystemAccess> existing = accesses.findByAccountIdAndSystemId(command.accountId(), system.id());
     if (existing.isPresent()) {
       if ("academic".equals(metadata.producer())) {
-        return HandledCommand.success(ApplicationResult.succeeded(Map.of(
-            "systemAccessId", existing.get().systemAccessId(),
-            "accountId", existing.get().accountId(),
-            "systemCode", existing.get().systemCode(),
-            "status", existing.get().status(),
-            "changed", false,
-            "newVersion", existing.get().version())));
+        return HandledCommand.success(
+            ApplicationResult.succeeded(CommandResultSupport.withImportExecution(command, Map.of(
+                "systemAccessId", existing.get().systemAccessId(),
+                "accountId", existing.get().accountId(),
+                "systemCode", existing.get().systemCode(),
+                "status", existing.get().status(),
+                "changed", false,
+                "newVersion", existing.get().version()))),
+            List.of(),
+            existing.get().systemAccessId(),
+            existing.get().version());
       }
       throw reject(AuthorizationErrorCode.SYSTEM_ACCESS_ALREADY_EXISTS, "account/system access already exists");
     }
@@ -692,26 +728,51 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       SystemAccess concurrent = accesses.findByAccountIdAndSystemId(command.accountId(), system.id())
           .orElseThrow(() -> new IllegalStateException("access insert lost its row"));
       if ("academic".equals(metadata.producer())) {
-        return HandledCommand.success(ApplicationResult.succeeded(Map.of(
-            "systemAccessId", concurrent.systemAccessId(),
-            "accountId", concurrent.accountId(),
-            "systemCode", concurrent.systemCode(),
-            "status", concurrent.status(),
-            "changed", false,
-            "newVersion", concurrent.version())));
+        return HandledCommand.success(
+            ApplicationResult.succeeded(CommandResultSupport.withImportExecution(command, Map.of(
+                "systemAccessId", concurrent.systemAccessId(),
+                "accountId", concurrent.accountId(),
+                "systemCode", concurrent.systemCode(),
+                "status", concurrent.status(),
+                "changed", false,
+                "newVersion", concurrent.version()))),
+            List.of(),
+            concurrent.systemAccessId(),
+            concurrent.version());
       }
       throw reject(AuthorizationErrorCode.SYSTEM_ACCESS_ALREADY_EXISTS, "account/system access already exists");
     }
     DomainEventIntent event = accessGrantedEvent(metadata, access, roleAssignment, now);
     return HandledCommand.success(
-        ApplicationResult.succeeded(Map.of(
+        ApplicationResult.succeeded(CommandResultSupport.withImportExecution(command, Map.of(
             "systemAccessId", access.systemAccessId(),
             "accountId", access.accountId(),
             "systemCode", access.systemCode(),
             "status", access.status(),
             "changed", true,
-            "newVersion", access.version())),
+            "newVersion", access.version()))),
         List.of(event), access.systemAccessId(), access.version());
+  }
+
+  private void validatePracticesGrantEligibility(
+      CommandMetadata metadata, GrantSystemAccessCommand command, SystemCatalog system) {
+    if (system.code() != SystemCode.PRACTICAS_PROFESIONALES || !"bff".equals(metadata.producer())) {
+      return;
+    }
+    var projected = eligibility.findByAccountIdAndSystemCode(
+        command.accountId(), SystemCode.PRACTICAS_PROFESIONALES.name())
+        .orElseThrow(() -> reject(
+            AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+            "Practices Grant requires academic eligibility"));
+    String key = "eligibility:" + projected.studentAcademicProfileId() + ":" + projected.systemCode();
+    if (!projected.eligible()
+        || projected.policyVersion() != 1
+        || !recoveryJobs.isProjectionTrusted("ACADEMIC_ELIGIBILITY")
+        || !recoveryJobs.isEntityTrusted("ACADEMIC_ELIGIBILITY", key)) {
+      throw reject(
+          AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+          "Practices Grant target is not currently eligible/trustworthy");
+    }
   }
 
   private HandledCommand suspend(
@@ -732,9 +793,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
     validateDirectReason(command.reasonCode(), command.reasonDetail());
     SystemAccess changed = access.suspend(command.reasonCode(), command.reasonDetail(), metadata.actor(), now);
-    if (accesses.update(changed, access.version()) != 1) {
-      throw reject(AuthorizationErrorCode.SYSTEM_ACCESS_VERSION_CONFLICT, "access changed concurrently");
-    }
+    accesses.update(changed, access.version());
     return HandledCommand.success(
         ApplicationResult.succeeded(Map.of(
             "systemAccessId", changed.systemAccessId(),
@@ -762,9 +821,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
     validateDirectReason(command.reasonCode(), command.reasonDetail());
     SystemAccess changed = access.revoke(command.reasonCode(), command.reasonDetail(), metadata.actor(), now);
-    if (accesses.update(changed, access.version()) != 1) {
-      throw reject(AuthorizationErrorCode.SYSTEM_ACCESS_VERSION_CONFLICT, "access changed concurrently");
-    }
+    accesses.update(changed, access.version());
     return HandledCommand.success(
         ApplicationResult.succeeded(Map.of(
             "systemAccessId", changed.systemAccessId(),
@@ -802,9 +859,7 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       throw reject(AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED, "only SUPERADMIN can restore REVOKED access");
     }
     SystemAccess changed = access.restore(metadata.actor(), now);
-    if (accesses.update(changed, access.version()) != 1) {
-      throw reject(AuthorizationErrorCode.SYSTEM_ACCESS_VERSION_CONFLICT, "access changed concurrently");
-    }
+    accesses.update(changed, access.version());
     return HandledCommand.success(
         ApplicationResult.succeeded(Map.of(
             "systemAccessId", changed.systemAccessId(),
@@ -815,6 +870,65 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         List.of(accessRestoredEvent(metadata, changed, access.status(), now)),
         changed.systemAccessId(),
         changed.version());
+  }
+
+  private Optional<HandledCommand> academicAccountWait(
+      CommandMetadata metadata,
+      AuthorizationCommand command,
+      Optional<AccountStatusProjectionRepository.AccountStatusProjection> account) {
+    if (!"academic".equals(metadata.producer())) {
+      return Optional.empty();
+    }
+    ImportExecution execution = command.importExecution();
+    UUID targetAccountId = command.targetAccountId();
+    boolean hasDependency = false;
+    for (CausalDependency dependency : execution.causalDependencies()) {
+      hasDependency = true;
+      if (!targetAccountId.equals(dependency.expectedAggregateId())
+          || !"CreateAccount".equals(dependency.priorCommandType())
+          || !"AccountCreated".equals(dependency.expectedEventType())
+          || !"SUCCEEDED".equals(dependency.priorResultStatus())
+          || metadata.causationId() == null
+          || !metadata.causationId().equals(dependency.priorResultMessageId())) {
+        throw reject(
+            AuthorizationErrorCode.ACTOR_CONTEXT_INVALID,
+            "Academic causalDependency is not valid for Account provisioning");
+      }
+      if (account.isEmpty()
+          || (dependency.minimumSourceVersion() != null
+              && account.get().sourceVersion() < dependency.minimumSourceVersion())) {
+        return Optional.of(HandledCommand.deferred("EVENT_PENDING"));
+      }
+    }
+
+    boolean hasAccountEvidence = false;
+    for (AuthoritativeEvidence evidence : execution.authoritativeEvidence()) {
+      boolean refersToAccount = targetAccountId.equals(evidence.entityId())
+          || "Account".equalsIgnoreCase(evidence.entityType());
+      if (!refersToAccount) {
+        continue;
+      }
+      hasAccountEvidence = true;
+      if (!targetAccountId.equals(evidence.entityId())
+          || !"Account".equalsIgnoreCase(evidence.entityType())
+          || !"authentication".equals(evidence.sourceService())
+          || !"CreateAccount".equals(evidence.sourceOperation())
+          || !"SUCCEEDED".equals(evidence.sourceResultStatus())) {
+        throw reject(
+            AuthorizationErrorCode.ACTOR_CONTEXT_INVALID,
+            "Academic authoritative Account evidence is invalid");
+      }
+      if (account.isEmpty()
+          || (evidence.evidenceVersion() != null
+              && account.get().sourceVersion() < evidence.evidenceVersion())) {
+        return Optional.of(HandledCommand.deferred("PROJECTION_RECONCILIATION"));
+      }
+    }
+
+    if (account.isEmpty() && !hasDependency && !hasAccountEvidence) {
+      return Optional.empty();
+    }
+    return Optional.empty();
   }
 
   private Optional<SystemAccess> targetAccess(AuthorizationCommand command) {
@@ -836,41 +950,13 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     return role;
   }
 
-  private SystemCatalog activeSystem(com.estoma.authorization.domain.model.SystemCode code) {
+  private SystemCatalog activeSystem(SystemCode code) {
     SystemCatalog system = systems.findByCode(code.name())
         .orElseThrow(() -> reject(AuthorizationErrorCode.SYSTEM_NOT_FOUND, "system does not exist"));
     if (system.status() != CatalogStatus.ACTIVE) {
       throw reject(AuthorizationErrorCode.SYSTEM_INACTIVE, "system is inactive");
     }
     return system;
-  }
-
-  private HandledCommand deferredOrMissing(
-      CommandMetadata metadata, AuthorizationCommand command, AuthorizationErrorCode missingCode) {
-    ImportExecution execution = command.importExecution();
-    if (execution == null) {
-      throw reject(missingCode, "required projection is absent");
-    }
-    UUID targetAccountId = command.targetAccountId();
-    boolean validDependency = execution.causalDependencies().stream()
-        .anyMatch(dependency ->
-            targetAccountId.equals(dependency.expectedAggregateId())
-                && "AccountCreated".equals(dependency.expectedEventType())
-                && "SUCCEEDED".equals(dependency.priorResultStatus()));
-    boolean validEvidence = execution.authoritativeEvidence().stream()
-        .anyMatch(evidence ->
-            targetAccountId.equals(evidence.entityId())
-                && "authentication".equals(evidence.sourceService())
-                && ("Account".equals(evidence.entityType()) || "account".equals(evidence.entityType()))
-                && ("SUCCEEDED".equals(evidence.sourceResultStatus())
-                    || "FOUND".equals(evidence.sourceResultStatus())));
-    if (validDependency) {
-      return HandledCommand.deferred("EVENT_PENDING");
-    }
-    if (validEvidence) {
-      return HandledCommand.deferred("PROJECTION_RECONCILIATION");
-    }
-    throw reject(missingCode, "required account projection is absent");
   }
 
   private void validateDirectReason(SystemAccessReasonCode reason, String detail) {
