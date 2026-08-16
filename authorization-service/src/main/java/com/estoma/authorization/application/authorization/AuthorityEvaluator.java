@@ -117,6 +117,9 @@ public final class AuthorityEvaluator {
         || requestedTargetRole(command) == RoleCode.SUPERADMIN) {
       throw reject(AuthorizationErrorCode.SUPERADMIN_TARGET_FORBIDDEN, "SUPERADMIN target is outside V1");
     }
+    if (command instanceof RestoreSystemAccessCommand) {
+      requireTrustworthyActiveTarget(targetAccountId);
+    }
 
     RoleCode actorRoleCode = actorRole.roleCode();
     if (actorRoleCode == RoleCode.SUPERADMIN) {
@@ -149,6 +152,21 @@ public final class AuthorityEvaluator {
       throw reject(
           AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
           "Lavado restore only supports SUSPENDED");
+    }
+  }
+
+  private void requireTrustworthyActiveTarget(UUID accountId) {
+    var account = accounts.findByAccountId(accountId)
+        .orElseThrow(() -> reject(AuthorizationErrorCode.ACCOUNT_NOT_FOUND, "target account projection is absent"));
+    var person = persons.findByPersonId(account.personId())
+        .orElseThrow(() -> reject(AuthorizationErrorCode.ACCOUNT_NOT_FOUND, "target person projection is absent"));
+    if (account.status() != ProjectedStatus.ACTIVE
+        || person.status() != ProjectedStatus.ACTIVE
+        || inbox.hasDeferredNewerThan(EVENT_CONSUMER, accountId, account.sourceVersion())
+        || inbox.hasDeferredNewerThan(EVENT_CONSUMER, account.personId(), person.sourceVersion())) {
+      throw reject(
+          AuthorizationErrorCode.TARGET_SCOPE_NOT_ALLOWED,
+          "target account/person is inactive or not trustworthy for restore");
     }
   }
 
