@@ -1,7 +1,7 @@
 package com.estoma.authorization.application.command;
 
-import java.util.UUID;
 import java.util.Objects;
+import java.util.UUID;
 
 public record AuthoritativeEvidence(
     String sourceService,
@@ -16,6 +16,7 @@ public record AuthoritativeEvidence(
     requireText(sourceService, "sourceService");
     requireText(sourceOperation, "sourceOperation");
     requireText(sourceResultStatus, "sourceResultStatus");
+    Objects.requireNonNull(sourceResultMessageId, "sourceResultMessageId");
     requireText(entityType, "entityType");
     Objects.requireNonNull(entityId, "entityId");
     if (!sourceResultStatus.equals("SUCCEEDED") && !sourceResultStatus.equals("FOUND")) {
