@@ -6,9 +6,14 @@ import com.estoma.authorization.application.port.AuthorizationAuditRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.TransactionRunner;
+import com.estoma.authorization.domain.model.ProjectedStatus;
+import com.estoma.authorization.domain.model.SystemCode;
+import java.time.Clock;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
+/** Applies external projection events without trusting transport code to decide causal validity. */
 public final class ProjectionEventProcessor {
 
   private static final String CONSUMER = "authorization-events";
@@ -19,6 +24,7 @@ public final class ProjectionEventProcessor {
   private final AcademicEligibilityProjectionRepository eligibility;
   private final PracticesProvisioningService provisioning;
   private final AuthorizationAuditRepository audit;
+  private final Clock clock;
 
   public ProjectionEventProcessor(
       TransactionRunner transactions,
@@ -27,7 +33,8 @@ public final class ProjectionEventProcessor {
       AccountStatusProjectionRepository accounts,
       AcademicEligibilityProjectionRepository eligibility,
       PracticesProvisioningService provisioning,
-      AuthorizationAuditRepository audit) {
+      AuthorizationAuditRepository audit,
+      Clock clock) {
     this.transactions = transactions;
     this.inbox = inbox;
     this.persons = persons;
@@ -35,43 +42,64 @@ public final class ProjectionEventProcessor {
     this.eligibility = eligibility;
     this.provisioning = provisioning;
     this.audit = audit;
+    this.clock = clock;
   }
 
+  /** Normal delivery. A redelivery of an already DEFERRED message is ACK-safe and not re-evaluated. */
   public ProcessingResult process(ProjectionEvent event) {
-    return transactions.inTransaction(() -> processInTransaction(event));
+    return transactions.inTransaction(() -> processInTransaction(event, false));
   }
 
-  private ProcessingResult processInTransaction(ProjectionEvent event) {
+  /** Explicit recovery path for the original deferred messageId. */
+  public ProcessingResult replayDeferred(ProjectionEvent event) {
+    return transactions.inTransaction(() -> processInTransaction(event, true));
+  }
+
+  private ProcessingResult processInTransaction(ProjectionEvent event, boolean explicitReplay) {
+    validateContract(event);
     ProjectionEventMetadata metadata = event.metadata();
-    ProcessedMessageRepository.ProcessedMessage stored = new ProcessedMessageRepository.ProcessedMessage(
-        CONSUMER,
-        metadata.messageId(),
-        "DEFERRED",
-        metadata.messageType(),
-        metadata.messageVersion(),
-        "EVENT",
-        metadata.producer(),
-        metadata.correlationId(),
-        metadata.causationId(),
-        metadata.operationId(),
-        metadata.idempotencyKey(),
-        metadata.aggregateId(),
-        metadata.aggregateVersion(),
-        metadata.actor(),
-        event.payloadJson(),
-        metadata.occurredAt(),
-        metadata.occurredAt(),
-        null,
-        event.causallyApplicable() ? "PROCESSING" : "EVENT_PENDING",
-        metadata.occurredAt());
-    boolean inserted = inbox.insertIfAbsent(stored);
-    if (!inserted) {
-      var existing = inbox.find(CONSUMER, metadata.messageId());
-      if (existing.isPresent() && "APPLIED".equals(existing.get().status())) {
+    Instant now = clock.instant();
+
+    Optional<ProcessedMessageRepository.ProcessedMessage> existing =
+        inbox.find(CONSUMER, metadata.messageId());
+    if (existing.isPresent()) {
+      if ("APPLIED".equals(existing.get().status())) {
         return new ProcessingResult(Status.APPLIED, false);
       }
+      if (!explicitReplay) {
+        return new ProcessingResult(Status.DEFERRED, false);
+      }
+    } else {
+      inbox.insertIfAbsent(new ProcessedMessageRepository.ProcessedMessage(
+          CONSUMER,
+          metadata.messageId(),
+          "DEFERRED",
+          metadata.messageType(),
+          metadata.messageVersion(),
+          "EVENT",
+          metadata.producer(),
+          metadata.correlationId(),
+          metadata.causationId(),
+          metadata.operationId(),
+          metadata.idempotencyKey(),
+          metadata.aggregateId(),
+          metadata.aggregateVersion(),
+          metadata.actor(),
+          event.payloadJson(),
+          now,
+          metadata.occurredAt(),
+          null,
+          "PROCESSING",
+          now));
     }
-    if (!event.causallyApplicable()) {
+
+    if (isStale(event)) {
+      inbox.markApplied(CONSUMER, metadata.messageId(), now, now);
+      return new ProcessingResult(Status.APPLIED, false);
+    }
+
+    if (!isCausallyApplicable(event)) {
+      inbox.updateDeferredReason(CONSUMER, metadata.messageId(), "EVENT_PENDING", now);
       return new ProcessingResult(Status.DEFERRED, false);
     }
 
@@ -81,8 +109,12 @@ public final class ProjectionEventProcessor {
       changed = persons.upsertIfNewer(new PersonStatusProjectionRepository.PersonStatusProjection(
           person.personId(), person.status(), metadata.aggregateVersion(), metadata.occurredAt())) == 1;
     } else if (event instanceof AccountProjectionEvent account) {
+      var current = accounts.findByAccountId(account.accountId());
+      var loginType = "AccountCreated".equals(metadata.messageType())
+          ? account.loginType()
+          : current.orElseThrow().loginType();
       changed = accounts.upsertIfNewer(new AccountStatusProjectionRepository.AccountStatusProjection(
-          account.accountId(), account.personId(), account.loginType(), account.status(),
+          account.accountId(), account.personId(), loginType, account.status(),
           metadata.aggregateVersion(), metadata.occurredAt())) == 1;
       provisioningAccountId = account.accountId();
     } else if (event instanceof AcademicEligibilityProjectionEvent academic) {
@@ -117,7 +149,7 @@ public final class ProjectionEventProcessor {
               null,
               metadata.occurredAt()));
     }
-    inbox.markApplied(CONSUMER, metadata.messageId(), Instant.now(), Instant.now());
+    inbox.markApplied(CONSUMER, metadata.messageId(), now, now);
     audit.append(new AuthorizationAuditRepository.AuditEntry(
         UUID.randomUUID(),
         metadata.messageId(),
@@ -125,7 +157,7 @@ public final class ProjectionEventProcessor {
         eventAggregateType(event),
         metadata.aggregateId(),
         metadata.aggregateVersion(),
-        "PROJECTION_APPLIED",
+        changed ? "PROJECTION_APPLIED" : "PROJECTION_STALE_RESOLVED",
         metadata.actor(),
         null,
         null,
@@ -136,8 +168,91 @@ public final class ProjectionEventProcessor {
         "SUCCEEDED",
         null,
         null,
-        metadata.occurredAt()));
+        now));
     return new ProcessingResult(Status.APPLIED, changed);
+  }
+
+  private boolean isStale(ProjectionEvent event) {
+    ProjectionEventMetadata metadata = event.metadata();
+    if (event instanceof PersonProjectionEvent person) {
+      return persons.findByPersonId(person.personId())
+          .map(current -> metadata.aggregateVersion() <= current.sourceVersion())
+          .orElse(false);
+    }
+    if (event instanceof AccountProjectionEvent account) {
+      return accounts.findByAccountId(account.accountId())
+          .map(current -> metadata.aggregateVersion() <= current.sourceVersion())
+          .orElse(false);
+    }
+    AcademicEligibilityProjectionEvent academic = (AcademicEligibilityProjectionEvent) event;
+    return eligibility.findByStudentProfileAndSystem(
+            academic.studentAcademicProfileId(), academic.systemCode())
+        .map(current -> academic.eligibilityVersion() <= current.eligibilityVersion())
+        .orElse(false);
+  }
+
+  private boolean isCausallyApplicable(ProjectionEvent event) {
+    String type = event.metadata().messageType();
+    if (event instanceof AcademicEligibilityProjectionEvent) {
+      return true;
+    }
+    if (event instanceof PersonProjectionEvent person) {
+      boolean exists = persons.findByPersonId(person.personId()).isPresent();
+      return "PersonCreated".equals(type) ? !exists : exists;
+    }
+    AccountProjectionEvent account = (AccountProjectionEvent) event;
+    Optional<AccountStatusProjectionRepository.AccountStatusProjection> current =
+        accounts.findByAccountId(account.accountId());
+    if ("AccountCreated".equals(type)) {
+      return current.isEmpty();
+    }
+    return current.filter(value -> value.personId().equals(account.personId())).isPresent();
+  }
+
+  private static void validateContract(ProjectionEvent event) {
+    ProjectionEventMetadata metadata = event.metadata();
+    if (event instanceof PersonProjectionEvent person) {
+      if (!"users".equals(metadata.producer()) || !metadata.aggregateId().equals(person.personId())) {
+        throw new IllegalArgumentException("invalid Person event owner or aggregate");
+      }
+      boolean active = person.status() == ProjectedStatus.ACTIVE;
+      if (!("PersonCreated".equals(metadata.messageType()) && active)
+          && !("PersonActivated".equals(metadata.messageType()) && active)
+          && !("PersonDeactivated".equals(metadata.messageType()) && !active)) {
+        throw new IllegalArgumentException("invalid Person event transition");
+      }
+      return;
+    }
+    if (event instanceof AccountProjectionEvent account) {
+      if (!"authentication".equals(metadata.producer())
+          || !metadata.aggregateId().equals(account.accountId())) {
+        throw new IllegalArgumentException("invalid Account event owner or aggregate");
+      }
+      if ("AccountCreated".equals(metadata.messageType())) {
+        if (account.loginType() == null || account.status() != ProjectedStatus.INACTIVE) {
+          throw new IllegalArgumentException("AccountCreated requires loginType and INACTIVE status");
+        }
+      } else if ("AccountActivated".equals(metadata.messageType())) {
+        if (account.status() != ProjectedStatus.ACTIVE) {
+          throw new IllegalArgumentException("AccountActivated requires ACTIVE status");
+        }
+      } else if ("AccountDeactivated".equals(metadata.messageType())) {
+        if (account.status() != ProjectedStatus.INACTIVE) {
+          throw new IllegalArgumentException("AccountDeactivated requires INACTIVE status");
+        }
+      } else {
+        throw new IllegalArgumentException("unsupported Account event type");
+      }
+      return;
+    }
+    AcademicEligibilityProjectionEvent academic = (AcademicEligibilityProjectionEvent) event;
+    if (!"academic".equals(metadata.producer())
+        || !"StudentAcademicEligibilityChanged".equals(metadata.messageType())
+        || !metadata.aggregateId().equals(academic.eligibilityId())
+        || metadata.aggregateVersion() != academic.eligibilityVersion()
+        || !SystemCode.PRACTICAS_PROFESIONALES.name().equals(academic.systemCode())) {
+      throw new IllegalArgumentException("invalid Academic eligibility event contract");
+    }
   }
 
   private static String eventAggregateType(ProjectionEvent event) {
