@@ -10,6 +10,9 @@ public interface ProcessedMessageRepository {
 
   Optional<ProcessedMessage> find(String consumerName, UUID messageId);
 
+  /** Locks the Inbox row for the current local transaction; used to serialize Command replay. */
+  Optional<ProcessedMessage> findForUpdate(String consumerName, UUID messageId);
+
   boolean insertIfAbsent(ProcessedMessage message);
 
   int markApplied(String consumerName, UUID messageId, Instant appliedAt, Instant updatedAt);
