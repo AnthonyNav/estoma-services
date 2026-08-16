@@ -10,6 +10,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.rabbitmq.RabbitMQContainer;
 
 @SpringBootTest
 @Testcontainers
@@ -25,8 +26,12 @@ public abstract class AbstractPostgresIT {
           .withUrlParam("socketTimeout", "10")
           .withUrlParam("connectTimeout", "10");
 
+  protected static final RabbitMQContainer RABBITMQ =
+      new RabbitMQContainer("rabbitmq:3.13-management-alpine");
+
   static {
     POSTGRES.start();
+    RABBITMQ.start();
   }
 
   @Autowired private JdbcClient jdbc;
@@ -40,6 +45,10 @@ public abstract class AbstractPostgresIT {
     registry.add("spring.flyway.user", POSTGRES::getUsername);
     registry.add("spring.flyway.password", POSTGRES::getPassword);
     registry.add("spring.flyway.placeholders.runtime_role", POSTGRES::getUsername);
+    registry.add("spring.rabbitmq.host", RABBITMQ::getHost);
+    registry.add("spring.rabbitmq.port", RABBITMQ::getAmqpPort);
+    registry.add("spring.rabbitmq.username", RABBITMQ::getAdminUsername);
+    registry.add("spring.rabbitmq.password", RABBITMQ::getAdminPassword);
   }
 
   @BeforeEach
