@@ -2,24 +2,24 @@ package com.estoma.authorization.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.estoma.authorization.application.command.ApplicationResult;
 import com.estoma.authorization.application.command.AssignAccountRoleCommand;
+import com.estoma.authorization.application.command.AuthorizationCommandDispatcher;
 import com.estoma.authorization.application.command.CausalDependency;
 import com.estoma.authorization.application.command.ChangeAccountRoleCommand;
 import com.estoma.authorization.application.command.CommandMetadata;
 import com.estoma.authorization.application.command.GrantSystemAccessCommand;
 import com.estoma.authorization.application.command.ImportExecution;
-import com.estoma.authorization.application.command.ApplicationResult;
-import com.estoma.authorization.application.command.AuthorizationCommandDispatcher;
 import com.estoma.authorization.application.command.RevokeSystemAccessCommand;
 import com.estoma.authorization.application.command.RestoreSystemAccessCommand;
 import com.estoma.authorization.application.command.SuspendSystemAccessCommand;
-import com.estoma.authorization.application.projection.AcademicEligibilityProjectionEvent;
-import com.estoma.authorization.application.projection.ProjectionEventMetadata;
-import com.estoma.authorization.application.projection.ProjectionEventProcessor;
 import com.estoma.authorization.application.port.AccountRoleRepository;
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.SystemAccessRepository;
+import com.estoma.authorization.application.projection.AcademicEligibilityProjectionEvent;
+import com.estoma.authorization.application.projection.ProjectionEventMetadata;
+import com.estoma.authorization.application.projection.ProjectionEventProcessor;
 import com.estoma.authorization.domain.model.AccountRoleAssignment;
 import com.estoma.authorization.domain.model.ActorRef;
 import com.estoma.authorization.domain.model.LoginType;
@@ -42,7 +42,6 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
   private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
   private static final UUID SUPERADMIN_ID = UUID.fromString("00000000-0000-0000-0000-000000000205");
   private static final UUID SUPERVISOR_ID = UUID.fromString("00000000-0000-0000-0000-000000000202");
-  private static final UUID ADMIN_PRACTICAS_ID = UUID.fromString("00000000-0000-0000-0000-000000000204");
   private static final UUID LAVADO_ID = UUID.fromString("00000000-0000-0000-0000-000000000101");
   private static final UUID PRACTICAS_ID = UUID.fromString("00000000-0000-0000-0000-000000000102");
   private static final UUID ALUMNO_ID = UUID.fromString("00000000-0000-0000-0000-000000000201");
@@ -108,6 +107,7 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
   void academicAssignWithCausalEvidenceRemainsDeferredWithoutTerminalResult() {
     UUID targetId = UUID.randomUUID();
     UUID correlationId = UUID.randomUUID();
+    UUID priorResultMessageId = UUID.randomUUID();
     ImportExecution execution = new ImportExecution(
         UUID.randomUUID(),
         UUID.randomUUID(),
@@ -116,7 +116,7 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
         "ASSIGN_STUDENT_ROLE",
         List.of(new CausalDependency(
             "CreateAccount",
-            UUID.randomUUID(),
+            priorResultMessageId,
             "SUCCEEDED",
             "AccountCreated",
             targetId,
@@ -124,7 +124,13 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
         List.of());
 
     var outcome = dispatcher.dispatch(
-        metadata("AssignAccountRole", "academic", ActorRef.system("academic"), correlationId, "academic-key"),
+        metadata(
+            "AssignAccountRole",
+            "academic",
+            ActorRef.system("academic"),
+            correlationId,
+            "academic-key",
+            priorResultMessageId),
         new AssignAccountRoleCommand(targetId, RoleCode.ALUMNO, execution));
 
     assertThat(outcome.deferred()).isTrue();
@@ -143,24 +149,39 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
     UUID targetId = UUID.randomUUID();
     UUID importId = UUID.randomUUID();
     UUID planItemId = UUID.randomUUID();
+    UUID priorResultMessageId = UUID.randomUUID();
     CausalDependency dependency = new CausalDependency(
-        "CreateAccount", UUID.randomUUID(), "SUCCEEDED", "AccountCreated", targetId, 1);
+        "CreateAccount", priorResultMessageId, "SUCCEEDED", "AccountCreated", targetId, 1);
     ImportExecution newer = new ImportExecution(
         importId, planItemId, 2, UUID.randomUUID(), "ASSIGN_STUDENT_ROLE", List.of(dependency), List.of());
     dispatcher.dispatch(
-        metadata("AssignAccountRole", "academic", ActorRef.system("academic"), UUID.randomUUID(), "generation-2"),
+        metadata(
+            "AssignAccountRole",
+            "academic",
+            ActorRef.system("academic"),
+            UUID.randomUUID(),
+            "generation-2",
+            priorResultMessageId),
         new AssignAccountRoleCommand(targetId, RoleCode.ALUMNO, newer));
 
     ImportExecution older = new ImportExecution(
         importId, planItemId, 1, UUID.randomUUID(), "ASSIGN_STUDENT_ROLE", List.of(dependency), List.of());
     var outcome = dispatcher.dispatch(
-        metadata("AssignAccountRole", "academic", ActorRef.system("academic"), UUID.randomUUID(), "generation-1"),
+        metadata(
+            "AssignAccountRole",
+            "academic",
+            ActorRef.system("academic"),
+            UUID.randomUUID(),
+            "generation-1",
+            priorResultMessageId),
         new AssignAccountRoleCommand(targetId, RoleCode.ALUMNO, older));
 
     assertThat(outcome.result()).get().satisfies(result -> {
       assertThat(result.status()).isEqualTo(ApplicationResult.Status.REJECTED);
       assertThat(result.error()).extracting(ApplicationResult.Error::code)
           .isEqualTo("STALE_EXECUTION_GENERATION");
+      assertThat(result.dataJson())
+          .contains(importId.toString(), planItemId.toString(), "\"executionGeneration\":1");
     });
   }
 
@@ -172,7 +193,7 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
     UUID eligibilityId = UUID.randomUUID();
     UUID profileId = UUID.randomUUID();
     UUID messageId = UUID.randomUUID();
-    ProjectionEventMetadata metadata = new ProjectionEventMetadata(
+    ProjectionEventMetadata eventMetadata = new ProjectionEventMetadata(
         messageId,
         "StudentAcademicEligibilityChanged",
         1,
@@ -186,7 +207,7 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
         eligibilityId,
         1);
     AcademicEligibilityProjectionEvent event = new AcademicEligibilityProjectionEvent(
-        metadata,
+        eventMetadata,
         eligibilityId,
         profileId,
         "PRACTICAS_PROFESIONALES",
@@ -215,8 +236,10 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
         accessId, accountId, LAVADO_ID, SystemCode.LAVADO_ULTRASONICO, ActorRef.system("academic"), NOW);
     accesses.insert(granted.suspend(
         SystemAccessReasonCode.ADMINISTRATIVE, null, ActorRef.account(UUID.randomUUID()), NOW.plusSeconds(1)));
+    UUID importId = UUID.randomUUID();
+    UUID planItemId = UUID.randomUUID();
     ImportExecution execution = ImportExecution.of(
-        UUID.randomUUID(), UUID.randomUUID(), 1, UUID.randomUUID(), "GRANT_STUDENT_SYSTEM_ACCESS");
+        importId, planItemId, 1, UUID.randomUUID(), "GRANT_STUDENT_SYSTEM_ACCESS");
 
     var outcome = dispatcher.dispatch(
         metadata("GrantSystemAccess", "academic", ActorRef.system("academic"), UUID.randomUUID(), "grant-key"),
@@ -224,7 +247,16 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
 
     assertThat(outcome.result()).get().satisfies(result -> {
       assertThat(result.status()).isEqualTo(ApplicationResult.Status.SUCCEEDED);
-      assertThat(result.dataJson()).contains("\"changed\":false");
+      assertThat(result.dataJson())
+          .contains(
+              "\"changed\":false",
+              importId.toString(),
+              planItemId.toString(),
+              "\"executionGeneration\":1");
+    });
+    assertThat(outcome.outboundResults()).singleElement().satisfies(result -> {
+      assertThat(result.aggregateId()).isEqualTo(accessId);
+      assertThat(result.aggregateVersion()).isEqualTo(2);
     });
     assertThat(accesses.findById(accessId)).get().extracting(SystemAccess::status)
         .isEqualTo(SystemAccessStatus.SUSPENDED);
@@ -301,6 +333,28 @@ class AuthorizationApplicationIT extends AbstractPostgresIT {
       String type, String producer, ActorRef actor, UUID correlationId, String idempotencyKey) {
     return CommandMetadata.create(
         UUID.randomUUID(), type, producer, correlationId, UUID.randomUUID(), idempotencyKey, actor, NOW);
+  }
+
+  private static CommandMetadata metadata(
+      String type,
+      String producer,
+      ActorRef actor,
+      UUID correlationId,
+      String idempotencyKey,
+      UUID causationId) {
+    return new CommandMetadata(
+        UUID.randomUUID(),
+        type,
+        1,
+        producer,
+        NOW,
+        correlationId,
+        causationId,
+        UUID.randomUUID(),
+        idempotencyKey,
+        actor,
+        null,
+        null);
   }
 
   private long outboxCount(UUID correlationId) {
