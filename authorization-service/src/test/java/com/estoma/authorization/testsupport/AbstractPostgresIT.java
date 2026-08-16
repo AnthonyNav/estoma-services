@@ -2,6 +2,7 @@ package com.estoma.authorization.testsupport;
 
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -32,6 +33,20 @@ public abstract class AbstractPostgresIT {
   static {
     POSTGRES.start();
     createRuntimeRole();
+  }
+
+  @BeforeEach
+  void clearRuntimeState() {
+    try (var connection = DriverManager.getConnection(POSTGRES.getJdbcUrl(), MIGRATION_USER, MIGRATION_PASSWORD);
+        var statement = connection.createStatement()) {
+      statement.execute(
+          "TRUNCATE TABLE account_roles, system_accesses, account_status_projection, "
+              + "person_status_projection, academic_eligibility_projection, "
+              + "command_idempotency_records, authorization_audit_entries, processed_messages, "
+              + "outbox_messages, projection_recovery_jobs CASCADE");
+    } catch (SQLException exception) {
+      throw new IllegalStateException("failed to clear integration runtime state", exception);
+    }
   }
 
   @DynamicPropertySource
