@@ -11,6 +11,7 @@ import com.estoma.authorization.application.recovery.DeferredCommandRecoveryServ
 import com.estoma.authorization.domain.model.ProjectedStatus;
 import com.estoma.authorization.domain.model.SystemCode;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,6 +21,7 @@ public final class ProjectionEventProcessor {
 
   private static final String CONSUMER = "authorization-events";
   private static final int DEFERRED_DRAIN_LIMIT = 500;
+  private static final Duration REPLAY_LEASE = Duration.ofSeconds(30);
   private final TransactionRunner transactions;
   private final ProcessedMessageRepository inbox;
   private final PersonStatusProjectionRepository persons;
@@ -59,19 +61,41 @@ public final class ProjectionEventProcessor {
     boolean alreadyApplied = inbox.find(CONSUMER, event.metadata().messageId())
         .map(message -> "APPLIED".equals(message.status()))
         .orElse(false);
-    ProcessingResult result = transactions.inTransaction(() -> processInTransaction(event, false));
+    ProcessingResult result = transactions.inTransaction(() -> processInTransaction(event, null));
     if (!alreadyApplied && result.status() == Status.APPLIED) {
       wakeAfterApplied(event);
     }
     return result;
   }
 
-  /** Explicit recovery path for the original deferred messageId. Wake-up is controlled by the caller. */
+  /**
+   * Explicit recovery path for the original deferred messageId. A durable lease/fencing token
+   * prevents two recovery workers from applying the same deferred event concurrently.
+   */
   public ProcessingResult replayDeferred(ProjectionEvent event) {
-    return transactions.inTransaction(() -> processInTransaction(event, true));
+    UUID claimToken = UUID.randomUUID();
+    Instant claimedAt = clock.instant();
+    boolean claimed = transactions.inTransaction(() -> inbox.claimDeferred(
+        CONSUMER,
+        event.metadata().messageId(),
+        claimToken,
+        claimedAt.plus(REPLAY_LEASE),
+        claimedAt));
+    if (!claimed) {
+      return new ProcessingResult(Status.DEFERRED, false);
+    }
+    try {
+      return transactions.inTransaction(() -> processInTransaction(event, claimToken));
+    } catch (RuntimeException failure) {
+      transactions.inTransaction(() -> {
+        inbox.releaseClaim(CONSUMER, event.metadata().messageId(), claimToken, clock.instant());
+        return null;
+      });
+      throw failure;
+    }
   }
 
-  private ProcessingResult processInTransaction(ProjectionEvent event, boolean explicitReplay) {
+  private ProcessingResult processInTransaction(ProjectionEvent event, UUID claimToken) {
     validateContract(event);
     ProjectionEventMetadata metadata = event.metadata();
     Instant now = clock.instant();
@@ -82,10 +106,13 @@ public final class ProjectionEventProcessor {
       if ("APPLIED".equals(existing.get().status())) {
         return new ProcessingResult(Status.APPLIED, false);
       }
-      if (!explicitReplay) {
+      if (claimToken == null) {
         return new ProcessingResult(Status.DEFERRED, false);
       }
     } else {
+      if (claimToken != null) {
+        throw new IllegalStateException("claimed deferred message disappeared");
+      }
       inbox.insertIfAbsent(new ProcessedMessageRepository.ProcessedMessage(
           CONSUMER,
           metadata.messageId(),
@@ -110,12 +137,12 @@ public final class ProjectionEventProcessor {
     }
 
     if (isStale(event)) {
-      inbox.markApplied(CONSUMER, metadata.messageId(), now, now);
+      markApplied(metadata.messageId(), claimToken, now);
       return new ProcessingResult(Status.APPLIED, false);
     }
 
     if (!isCausallyApplicable(event)) {
-      inbox.updateDeferredReason(CONSUMER, metadata.messageId(), "EVENT_PENDING", now);
+      keepDeferred(metadata.messageId(), claimToken, "EVENT_PENDING", now);
       return new ProcessingResult(Status.DEFERRED, false);
     }
 
@@ -170,7 +197,7 @@ public final class ProjectionEventProcessor {
               null,
               metadata.occurredAt()));
     }
-    inbox.markApplied(CONSUMER, metadata.messageId(), now, now);
+    markApplied(metadata.messageId(), claimToken, now);
     audit.append(new AuthorizationAuditRepository.AuditEntry(
         UUID.randomUUID(),
         metadata.messageId(),
@@ -191,6 +218,25 @@ public final class ProjectionEventProcessor {
         null,
         now));
     return new ProcessingResult(Status.APPLIED, changed);
+  }
+
+  private void markApplied(UUID messageId, UUID claimToken, Instant now) {
+    int updated = claimToken == null
+        ? inbox.markApplied(CONSUMER, messageId, now, now)
+        : inbox.markAppliedClaimed(CONSUMER, messageId, claimToken, now, now);
+    if (updated != 1) {
+      throw new IllegalStateException("deferred replay lost its Inbox fencing token");
+    }
+  }
+
+  private void keepDeferred(
+      UUID messageId, UUID claimToken, String reason, Instant now) {
+    int updated = claimToken == null
+        ? inbox.updateDeferredReason(CONSUMER, messageId, reason, now)
+        : inbox.updateDeferredReasonClaimed(CONSUMER, messageId, claimToken, reason, now);
+    if (updated != 1) {
+      throw new IllegalStateException("deferred replay lost its Inbox fencing token");
+    }
   }
 
   private void wakeAfterApplied(ProjectionEvent event) {
