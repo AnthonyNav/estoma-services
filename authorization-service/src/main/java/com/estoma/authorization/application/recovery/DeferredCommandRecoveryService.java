@@ -10,6 +10,7 @@ import com.estoma.authorization.application.port.CommandIdempotencyRepository;
 import com.estoma.authorization.application.port.DeferredCommandDecoder;
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
+import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.support.CanonicalJson;
 import com.estoma.authorization.application.support.OutboxIntentWriter;
 import com.estoma.authorization.application.support.ResultIntentFactory;
@@ -27,6 +28,7 @@ public final class DeferredCommandRecoveryService {
   private static final String COMMAND_CONSUMER = "authorization-commands";
   private static final int DEFAULT_LIMIT = 500;
 
+  private final TransactionRunner transactions;
   private final ProcessedMessageRepository inbox;
   private final DeferredCommandDecoder decoder;
   private final AuthorizationCommandDispatcher dispatcher;
@@ -36,6 +38,7 @@ public final class DeferredCommandRecoveryService {
   private final Clock clock;
 
   public DeferredCommandRecoveryService(
+      TransactionRunner transactions,
       ProcessedMessageRepository inbox,
       DeferredCommandDecoder decoder,
       AuthorizationCommandDispatcher dispatcher,
@@ -43,6 +46,7 @@ public final class DeferredCommandRecoveryService {
       OutboxRepository outbox,
       AuthorizationAuditRepository audit,
       Clock clock) {
+    this.transactions = transactions;
     this.inbox = inbox;
     this.decoder = decoder;
     this.dispatcher = dispatcher;
@@ -60,10 +64,7 @@ public final class DeferredCommandRecoveryService {
       if (!expectedPendingReason.equals(message.deferredReason())) {
         continue;
       }
-      DeferredCommandDecoder.DecodedCommand decoded = decoder.decode(message);
-      outcomes.add(authoritativeNotFound
-          ? resolveAuthoritativeAbsence(decoded)
-          : dispatcher.replayDeferred(decoded.metadata(), decoded.command()));
+      outcomes.add(replayLocked(message.messageId(), expectedPendingReason, authoritativeNotFound));
     }
     return List.copyOf(outcomes);
   }
@@ -75,10 +76,28 @@ public final class DeferredCommandRecoveryService {
       if (!"PROJECTION_RECONCILIATION".equals(message.deferredReason())) {
         continue;
       }
-      DeferredCommandDecoder.DecodedCommand decoded = decoder.decode(message);
-      outcomes.add(dispatcher.replayDeferred(decoded.metadata(), decoded.command()));
+      outcomes.add(replayLocked(message.messageId(), "PROJECTION_RECONCILIATION", false));
     }
     return List.copyOf(outcomes);
+  }
+
+  private CommandOutcome replayLocked(
+      UUID messageId, String expectedPendingReason, boolean authoritativeNotFound) {
+    return transactions.inTransaction(() -> {
+      ProcessedMessageRepository.ProcessedMessage locked = inbox.findForUpdate(COMMAND_CONSUMER, messageId)
+          .orElseThrow(() -> new IllegalStateException("deferred command Inbox entry disappeared"));
+      if ("APPLIED".equals(locked.status())) {
+        return CommandOutcome.duplicate();
+      }
+      if (!"DEFERRED".equals(locked.status())
+          || !expectedPendingReason.equals(locked.deferredReason())) {
+        return CommandOutcome.deferred(locked.deferredReason());
+      }
+      DeferredCommandDecoder.DecodedCommand decoded = decoder.decode(locked);
+      return authoritativeNotFound
+          ? resolveAuthoritativeAbsence(decoded)
+          : dispatcher.replayDeferred(decoded.metadata(), decoded.command());
+    });
   }
 
   private CommandOutcome resolveAuthoritativeAbsence(
