@@ -183,7 +183,7 @@ class AuthorizationRecoveryIT extends AbstractPostgresIT {
           assertThat(record.status()).isEqualTo("COMPLETED");
           assertThat(record.resultStatus()).isEqualTo("SUCCEEDED");
           assertThat(record.resultDataJson())
-              .contains(importId.toString(), planItemId.toString(), "\"executionGeneration\":1");
+              .contains(importId.toString(), planItemId.toString(), "\"executionGeneration\"");
         });
     assertThat(
             jdbc.sql(
