@@ -2,6 +2,18 @@ spring:
   task:
     scheduling:
       enabled: false
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: true
+        retry:
+          enabled: false
+
+estoma:
+  messaging:
+    topology-declare: true
+    outbox-relay-enabled: false
+    recovery-worker-enabled: false
 
 management:
   metrics:

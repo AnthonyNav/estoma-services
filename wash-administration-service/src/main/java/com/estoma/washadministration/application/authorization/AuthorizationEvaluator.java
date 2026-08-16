@@ -4,8 +4,10 @@ import com.estoma.washadministration.application.command.ActorContext;
 import com.estoma.washadministration.application.command.CommandRejectedException;
 import com.estoma.washadministration.application.port.AuthorizationAccessProjectionRepository;
 import com.estoma.washadministration.application.port.AuthorizationRoleProjectionRepository;
+import com.estoma.washadministration.application.port.ProjectionRecoveryJobRepository;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Evaluates V1 authorization from local projections only. */
@@ -37,12 +39,22 @@ public final class AuthorizationEvaluator {
 
   private final AuthorizationRoleProjectionRepository roles;
   private final AuthorizationAccessProjectionRepository accesses;
+  private final ProjectionRecoveryJobRepository recoveryJobs;
 
   public AuthorizationEvaluator(
       AuthorizationRoleProjectionRepository roles,
       AuthorizationAccessProjectionRepository accesses) {
+    this(roles, accesses, null);
+  }
+
+  @Autowired
+  public AuthorizationEvaluator(
+      AuthorizationRoleProjectionRepository roles,
+      AuthorizationAccessProjectionRepository accesses,
+      ProjectionRecoveryJobRepository recoveryJobs) {
     this.roles = roles;
     this.accesses = accesses;
+    this.recoveryJobs = recoveryJobs;
   }
 
   public boolean isAuthorized(ActorContext actor, String operationType) {
@@ -54,6 +66,14 @@ public final class AuthorizationEvaluator {
       return false;
     }
     UUID accountId = actor.accountId();
+    if (recoveryJobs != null
+        && (!recoveryJobs.hasCompletedFullRecovery()
+            || recoveryJobs.hasActiveFullRecovery()
+            || recoveryJobs.hasFailedFullRecovery()
+            || recoveryJobs.hasActiveEntityRecovery(accountId)
+            || recoveryJobs.hasFailedEntityRecovery(accountId))) {
+      return false;
+    }
     return roles.findByAccountId(accountId)
             .map(AuthorizationRoleProjectionRepository.RoleProjection::roleCode)
             .filter(ROLE::equals)
@@ -63,6 +83,30 @@ public final class AuthorizationEvaluator {
             .filter("ACTIVE"::equals)
             .isPresent()
         && ADMIN_PERMISSIONS.contains(permission);
+  }
+
+  /**
+   * Pure decision used after a rejected Command has rolled back its mutation savepoint.
+   * Recovery scheduling itself is deliberately outside this evaluator.
+   */
+  public boolean needsEntityRecovery(ActorContext actor) {
+    if (recoveryJobs == null
+        || actor == null
+        || !"ACCOUNT".equals(actor.type())
+        || actor.accountId() == null) {
+      return false;
+    }
+    UUID accountId = actor.accountId();
+    if (!recoveryJobs.hasCompletedFullRecovery()
+        || recoveryJobs.hasActiveFullRecovery()
+        || recoveryJobs.hasFailedFullRecovery()
+        || recoveryJobs.hasActiveEntityRecovery(accountId)
+        || recoveryJobs.hasFailedEntityRecovery(accountId)
+        || recoveryJobs.hasCompletedEntityRecovery(accountId)) {
+      return false;
+    }
+    return roles.findByAccountId(accountId).isEmpty()
+        || accesses.findByAccountId(accountId, SYSTEM).isEmpty();
   }
 
   public void require(ActorContext actor, String operationType) {

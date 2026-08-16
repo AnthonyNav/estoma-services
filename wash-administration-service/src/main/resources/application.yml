@@ -25,6 +25,20 @@ spring:
     placeholders:
       runtime_role: ${WASH_ADMINISTRATION_DB_RUNTIME_USER:wash_administration_service}
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        retry:
+          enabled: false
+        default-requeue-rejected: false
+
 server:
   port: 8080
 
@@ -54,7 +68,7 @@ management:
         startup:
           include: db, schemaVersion
         readiness:
-          include: db, schemaVersion
+          include: db, schemaVersion, rabbit, commandConsumer, queryConsumer, authorizationEventConsumer, authorizationRecoveryResultConsumer, outboxRelay, authorizationRecovery
         liveness:
           include: livenessState
     info:
@@ -69,3 +83,15 @@ info:
   app:
     name: wash-administration-service
     version: 0.1.0
+
+estoma:
+  environment: ${ESTOMA_ENVIRONMENT:local}
+  messaging:
+    topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
+    publisher-confirm-timeout: ${ESTOMA_PUBLISHER_CONFIRM_TIMEOUT:5s}
+    outbox-claim-batch-size: ${ESTOMA_OUTBOX_CLAIM_BATCH_SIZE:50}
+    outbox-poll-interval: ${ESTOMA_OUTBOX_POLL_INTERVAL:1000}
+    outbox-relay-enabled: ${ESTOMA_OUTBOX_RELAY_ENABLED:true}
+    recovery-worker-enabled: ${ESTOMA_RECOVERY_WORKER_ENABLED:true}
+    recovery-poll-interval: ${ESTOMA_RECOVERY_POLL_INTERVAL:1000}
+    recovery-result-timeout: ${ESTOMA_RECOVERY_RESULT_TIMEOUT:30s}

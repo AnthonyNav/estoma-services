@@ -48,6 +48,7 @@ public class AuthorizationProjectionUpdater {
       return false;
     }
 
+    roles.lockProjection();
     Instant now = event.occurredAt() == null ? Instant.now() : event.occurredAt();
     if (!processedMessages.registerIfAbsent(CONSUMER, event.messageId(), null, now)) {
       return false;

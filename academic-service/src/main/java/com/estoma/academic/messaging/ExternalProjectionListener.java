@@ -54,7 +54,9 @@ public class ExternalProjectionListener {
     switch (e.messageType()) {
       case "PersonCreated", "PersonActivated", "PersonDeactivated" -> upsertPerson(uuid(p,"personId", e.aggregateId()), status(p), version);
       case "PersonUpdated" -> updatePerson(uuid(p,"personId", e.aggregateId()), status(p), version);
-      case "AccountCreated", "AccountActivated", "AccountDeactivated" -> upsertAccount(uuid(p,"accountId",e.aggregateId()), uuid(p,"personId",null), text(p,"loginType"), status(p), version);
+      case "AccountCreated" -> upsertAccount(uuid(p,"accountId",e.aggregateId()), uuid(p,"personId",null), text(p,"loginType"), status(p), null, version);
+      case "AccountActivated" -> upsertAccount(uuid(p,"accountId",e.aggregateId()), uuid(p,"personId",null), text(p,"loginType"), status(p), null, version);
+      case "AccountDeactivated" -> upsertAccount(uuid(p,"accountId",e.aggregateId()), uuid(p,"personId",null), text(p,"loginType"), status(p), requiredText(p,"reasonCode"), version);
       case "AccountRoleAssigned" -> upsertAuthorization(uuid(p,"accountId",e.aggregateId()), requiredText(p,"roleCode"), "ACTIVE", version);
       case "AccountRoleChanged" -> changeAuthorization(uuid(p,"accountId",e.aggregateId()), requiredText(p,"previousRoleCode"), requiredText(p,"newRoleCode"), version);
       case "SystemAccessGranted", "SystemAccessRestored" -> upsertSystemAccess(uuid(p,"accountId",e.aggregateId()), requiredText(p,"systemCode"), "ACTIVE", version);
@@ -67,23 +69,27 @@ public class ExternalProjectionListener {
 
   private void upsertPerson(UUID id, String status, int version) { if (id != null && status != null) jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,:status,:version,now()) ON CONFLICT (person_id) DO UPDATE SET status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at WHERE person_status_projection.source_version < excluded.source_version").param("id",id).param("status",status).param("version",version).update(); }
   private void updatePerson(UUID id, String status, int version) { if (status != null) upsertPerson(id,status,version); else if (id != null) jdbc.sql("UPDATE person_status_projection SET source_version=:version,updated_at=now() WHERE person_id=:id AND source_version < :version").param("id",id).param("version",version).update(); }
-  private void upsertAccount(UUID id, UUID person, String login, String status, int version) {
+  private void upsertAccount(UUID id, UUID person, String login, String status, String deactivationReasonCode, int version) {
     if (id == null || status == null) return;
     jdbc.sql("""
-        INSERT INTO account_status_projection (account_id,person_id,login_type,status,source_version,updated_at)
-        VALUES (:id,:person,:login,:status,:version,now())
+        INSERT INTO account_status_projection (
+          account_id,person_id,login_type,status,source_version,last_deactivation_reason_code,updated_at)
+        VALUES (:id,:person,:login,:status,:version,:reason,now())
         ON CONFLICT (account_id) DO UPDATE SET
           person_id=COALESCE(account_status_projection.person_id,excluded.person_id),
           login_type=COALESCE(account_status_projection.login_type,excluded.login_type),
           status=CASE WHEN account_status_projection.source_version < excluded.source_version
                       THEN excluded.status ELSE account_status_projection.status END,
+          last_deactivation_reason_code=CASE WHEN account_status_projection.source_version < excluded.source_version
+                      THEN excluded.last_deactivation_reason_code ELSE account_status_projection.last_deactivation_reason_code END,
           source_version=GREATEST(account_status_projection.source_version,excluded.source_version),
           updated_at=CASE WHEN account_status_projection.source_version < excluded.source_version
                           OR (account_status_projection.person_id IS NULL AND excluded.person_id IS NOT NULL)
                           OR (account_status_projection.login_type IS NULL AND excluded.login_type IS NOT NULL)
                           THEN now() ELSE account_status_projection.updated_at END
         """)
-        .param("id",id).param("person",person).param("login",login).param("status",status).param("version",version).update();
+        .param("id",id).param("person",person).param("login",login).param("status",status)
+        .param("reason",deactivationReasonCode).param("version",version).update();
   }
   private void upsertAuthorization(UUID id, String role, String status, int version) { if (id != null && role != null) jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:id,:role,:status,:version,now()) ON CONFLICT (account_id,role_code) DO UPDATE SET status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at WHERE authorization_context_projection.source_version < excluded.source_version").param("id",id).param("role",role).param("status",status).param("version",version).update(); }
   private void changeAuthorization(UUID id, String oldRole, String newRole, int version) { if (oldRole != null && !oldRole.equals(newRole)) upsertAuthorization(id,oldRole,"INACTIVE",version); upsertAuthorization(id,newRole,"ACTIVE",version); }
@@ -97,7 +103,7 @@ public class ExternalProjectionListener {
       case "PersonUpdated" -> requiredUuid(p, "personId");
       case "AccountCreated" -> { requiredUuid(p, "accountId"); requiredUuid(p, "personId"); requiredText(p, "loginType"); requiredLoginType(p); requiredStatus(p, "INACTIVE"); }
       case "AccountActivated" -> { requiredUuid(p, "accountId"); requiredUuid(p, "personId"); requiredStatus(p, "ACTIVE"); }
-      case "AccountDeactivated" -> { requiredUuid(p, "accountId"); requiredUuid(p, "personId"); requiredStatus(p, "INACTIVE"); }
+      case "AccountDeactivated" -> { requiredUuid(p, "accountId"); requiredUuid(p, "personId"); requiredStatus(p, "INACTIVE"); requiredText(p, "reasonCode"); }
       case "AccountRoleAssigned" -> { requiredUuid(p, "accountId"); requiredText(p, "roleCode"); }
       case "AccountRoleChanged" -> { requiredUuid(p, "accountId"); requiredText(p, "previousRoleCode"); requiredText(p, "newRoleCode"); }
       case "SystemAccessGranted", "SystemAccessRestored" -> { requiredUuid(p, "accountId"); requiredText(p, "systemCode"); requiredStatus(p, "ACTIVE"); }

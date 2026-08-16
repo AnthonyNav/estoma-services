@@ -49,6 +49,14 @@ class JdbcAuthorizationRoleProjectionRepository implements AuthorizationRoleProj
         .param("updatedAt", Timestamps.toTimestamp(updatedAt))
         .update();
   }
+
+  @Override
+  public void lockProjection() {
+    jdbc.sql(
+            "SELECT pg_advisory_xact_lock(hashtextextended('wash-administration.authorization', 0))")
+        .query((rs, rowNum) -> 1)
+        .list();
+  }
 }
 
 @Repository

@@ -56,7 +56,7 @@ class AcademicPeriodReadinessIT {
 
   @BeforeEach
   void reset() {
-    jdbc.sql("TRUNCATE TABLE outbox_messages,processed_messages,idempotency_records,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection CASCADE").update();
+    jdbc.sql("TRUNCATE TABLE outbox_messages,processed_messages,idempotency_records,student_import_validation_errors,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection CASCADE").update();
     jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',1,now())")
         .param("id", adminPerson)
         .update();
@@ -122,6 +122,71 @@ class AcademicPeriodReadinessIT {
         .put("academicPeriodId", period.toString())
         .put("nrc", "NRC-1")
         .put("name", "Clinical"))).errorCode()).isEqualTo("ACTOR_NOT_AUTHORIZED");
+  }
+
+  @Test
+  void acceptsImportWithFrozenContextAndBlocksPeriodChangesWhileItValidates() {
+    UUID importId = UUID.randomUUID();
+    assertThat(dispatcher.dispatch(command("StartStudentImport", mapper.createObjectNode()
+        .put("importId", importId.toString())
+        .put("fileReference", importId.toString())
+        .put("fileChecksum", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        .put("requestedByAccountId", admin.toString()))).status()).isEqualTo("SUCCEEDED");
+
+    assertThat(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id")
+        .param("id", importId)
+        .query(String.class)
+        .single()).isEqualTo("VALIDATING");
+    assertThat(jdbc.sql("SELECT academic_period_id FROM student_import_processes WHERE import_id=:id")
+        .param("id", importId)
+        .query(UUID.class)
+        .single()).isEqualTo(period);
+    assertThat(dispatcher.dispatch(command("CreateAndActivateAcademicPeriod", mapper.createObjectNode()
+        .put("code", "2026-2")
+        .put("name", "Summer")
+        .put("startDate", "2026-06-01")
+        .put("endDate", "2026-08-31")
+        .put("requestedByAccountId", admin.toString())
+        .put("warningAcknowledged", true))).errorCode()).isEqualTo("ACADEMIC_PERIOD_CHANGE_BLOCKED_BY_IMPORT");
+  }
+
+  @Test
+  void retryAfterImportFailedFreezesTheRecoveredPeriodVersion() {
+    jdbc.sql("UPDATE academic_periods SET academic_data_status='IMPORT_FAILED',version=4 WHERE academic_period_id=:id")
+        .param("id", period).update();
+    UUID importId = UUID.randomUUID();
+
+    assertThat(dispatcher.dispatch(command("StartStudentImport", mapper.createObjectNode()
+        .put("importId", importId.toString())
+        .put("fileReference", importId.toString())
+        .put("fileChecksum", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        .put("requestedByAccountId", admin.toString()))).status()).isEqualTo("SUCCEEDED");
+
+    assertThat(jdbc.sql("SELECT version FROM academic_periods WHERE academic_period_id=:id")
+        .param("id", period).query(Integer.class).single()).isEqualTo(5);
+    assertThat(jdbc.sql("SELECT academic_period_version FROM student_import_processes WHERE import_id=:id")
+        .param("id", importId).query(Integer.class).single()).isEqualTo(5);
+    assertThat(jdbc.sql("SELECT academic_data_status::text FROM academic_periods WHERE academic_period_id=:id")
+        .param("id", period).query(String.class).single()).isEqualTo("PENDING_IMPORT");
+  }
+
+  @Test
+  void startImportIsIdempotentOnlyForTheSameFrozenFile() {
+    UUID importId = UUID.randomUUID();
+    var payload = mapper.createObjectNode()
+        .put("importId", importId.toString())
+        .put("fileReference", importId.toString())
+        .put("fileChecksum", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+        .put("requestedByAccountId", admin.toString());
+    assertThat(dispatcher.dispatch(command("StartStudentImport", payload.deepCopy())).status()).isEqualTo("SUCCEEDED");
+    assertThat(dispatcher.dispatch(command("StartStudentImport", payload.deepCopy())).status()).isEqualTo("SUCCEEDED");
+    assertThat(jdbc.sql("SELECT count(*) FROM student_import_processes WHERE import_id=:id")
+        .param("id", importId)
+        .query(Long.class)
+        .single()).isEqualTo(1);
+
+    payload.put("fileChecksum", "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210");
+    assertThat(dispatcher.dispatch(command("StartStudentImport", payload)).errorCode()).isEqualTo("IMPORT_ALREADY_EXISTS");
   }
 
   @Test
