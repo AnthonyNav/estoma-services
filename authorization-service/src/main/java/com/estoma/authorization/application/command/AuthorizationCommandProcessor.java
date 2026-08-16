@@ -8,6 +8,7 @@ import com.estoma.authorization.application.port.CommandIdempotencyRepository;
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.StoredApplicationResultDecoder;
+import com.estoma.authorization.application.port.TechnicalFailureClassifier;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.support.CanonicalJson;
@@ -26,7 +27,9 @@ import java.util.UUID;
  * <p>Delivery dedupe is independent from functional idempotency. The delegate owns the business
  * transaction; this boundary deliberately does not wrap a new command execution in another
  * transaction so optimistic-lock/technical failures can roll the complete mutation back before a
- * terminal REJECTED/FAILED Result is persisted in a fresh transaction.
+ * terminal REJECTED/FAILED Result is persisted in a fresh transaction. Retryable infrastructure
+ * failures escape this boundary so the PR3 transport policy can apply retry/backoff before deciding
+ * that a Command has reached a terminal technical failure.
  */
 public final class AuthorizationCommandProcessor implements CommandDispatcher {
 
@@ -40,6 +43,7 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
   private final OutboxRepository outbox;
   private final AuthorizationAuditRepository audit;
   private final ProjectionRecoveryCoordinator recovery;
+  private final TechnicalFailureClassifier failureClassifier;
   private final Clock clock;
 
   public AuthorizationCommandProcessor(
@@ -51,6 +55,7 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
       OutboxRepository outbox,
       AuthorizationAuditRepository audit,
       ProjectionRecoveryCoordinator recovery,
+      TechnicalFailureClassifier failureClassifier,
       Clock clock) {
     this.transactions = transactions;
     this.delegate = delegate;
@@ -60,6 +65,7 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
     this.outbox = outbox;
     this.audit = audit;
     this.recovery = recovery;
+    this.failureClassifier = failureClassifier;
     this.clock = clock;
   }
 
@@ -109,6 +115,9 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
           null,
           null));
     } catch (RuntimeException technicalFailure) {
+      if (failureClassifier.isRetryable(technicalFailure)) {
+        throw technicalFailure;
+      }
       try {
         outcome = transactions.inTransaction(() -> recordTerminalWithoutBusinessMutation(
             metadata,
