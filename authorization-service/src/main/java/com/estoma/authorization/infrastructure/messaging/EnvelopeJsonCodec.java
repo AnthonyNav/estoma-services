@@ -5,7 +5,6 @@ import com.estoma.authorization.contracts.MessageKind;
 import com.estoma.authorization.contracts.WireActor;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -101,9 +100,7 @@ public final class EnvelopeJsonCodec {
     }
     ObjectNode copy = (ObjectNode) value.deepCopy();
     List<String> nullFields = new ArrayList<>();
-    Iterator<Map.Entry<String, JsonNode>> fields = copy.fields();
-    while (fields.hasNext()) {
-      Map.Entry<String, JsonNode> field = fields.next();
+    for (Map.Entry<String, JsonNode> field : copy.properties()) {
       if (field.getValue().isNull()) {
         nullFields.add(field.getKey());
       }
