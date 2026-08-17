@@ -11,7 +11,6 @@ import org.springframework.stereotype.Component;
 public final class MessagingLog {
 
   private static final Logger LOG = LoggerFactory.getLogger(MessagingLog.class);
-  private static final String ATTEMPT_HEADER = "x-estoma-delivery-attempt";
 
   public void processed(
       MessageEnvelope envelope,
@@ -66,7 +65,7 @@ public final class MessagingLog {
   }
 
   private static int attempt(Message message) {
-    Object value = message.getMessageProperties().getHeaders().get(ATTEMPT_HEADER);
+    Object value = message.getMessageProperties().getHeaders().get(AmqpNames.HEADER_ATTEMPT);
     return value instanceof Number number && number.intValue() > 0 ? number.intValue() : 1;
   }
 }
