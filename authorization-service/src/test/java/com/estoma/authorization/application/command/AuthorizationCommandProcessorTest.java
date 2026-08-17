@@ -60,7 +60,7 @@ class AuthorizationCommandProcessorTest {
         null);
     AssignAccountRoleCommand command = new AssignAccountRoleCommand(
         UUID.randomUUID(), RoleCode.ADMINISTRADOR_PRACTICAS, null);
-    when(inbox.find("authorization-commands", messageId)).thenReturn(Optional.empty());
+    when(inbox.find("authorization-commands", messageId)).thenReturn(Optional.empty(), Optional.empty());
     when(idempotency.find("bff", "AssignAccountRole", idempotencyKey))
         .thenReturn(Optional.empty(), Optional.of(terminalRecord));
     when(delegate.dispatch(eq(metadata), eq(command)))

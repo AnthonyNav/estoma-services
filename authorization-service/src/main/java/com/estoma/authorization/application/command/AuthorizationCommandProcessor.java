@@ -164,6 +164,11 @@ public final class AuthorizationCommandProcessor
 
   private CommandOutcome replayConcurrentTerminalResult(
       CommandMetadata metadata, AuthorizationCommand command) {
+    if (inbox.find(CONSUMER, metadata.messageId())
+        .filter(delivery -> "APPLIED".equals(delivery.status()))
+        .isPresent()) {
+      return CommandOutcome.duplicate();
+    }
     CommandIdempotencyRepository.IdempotencyRecord record = idempotency.find(
             metadata.producer(), command.operationType(), metadata.idempotencyKey())
         .filter(value -> !"DEFERRED".equals(value.status()))
