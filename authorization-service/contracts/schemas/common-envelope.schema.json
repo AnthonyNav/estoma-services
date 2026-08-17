@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/common-envelope.schema.json",
+  "title": "Authorization V1 common envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "messageId",
+    "messageType",
+    "messageVersion",
+    "messageKind",
+    "producer",
+    "occurredAt",
+    "correlationId",
+    "actor",
+    "payload"
+  ],
+  "properties": {
+    "messageId": { "type": "string", "format": "uuid" },
+    "messageType": { "type": "string", "minLength": 1 },
+    "messageVersion": { "const": 1 },
+    "messageKind": { "enum": ["COMMAND", "EVENT", "QUERY", "RESULT"] },
+    "producer": { "type": "string", "minLength": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "correlationId": { "type": "string", "format": "uuid" },
+    "causationId": { "type": "string", "format": "uuid" },
+    "operationId": { "type": "string", "format": "uuid" },
+    "idempotencyKey": { "type": "string", "format": "uuid" },
+    "aggregateId": { "type": "string", "format": "uuid" },
+    "aggregateVersion": { "type": "integer", "minimum": 1 },
+    "actor": { "$ref": "actor.schema.json" },
+    "payload": { "type": "object" }
+  }
+}

@@ -1,0 +1,61 @@
+asyncapi: 3.0.0
+info:
+  title: Authorization Service V1
+  version: 1.0.0
+  description: Durable Authorization Commands, Events, Queries, and Results.
+servers:
+  rabbitmq:
+    host: localhost:5672
+    protocol: amqp
+channels:
+  commands.authorization:
+    address: commands.authorization
+    messages:
+      authorizationCommand:
+        $ref: '#/components/messages/AuthorizationCommand'
+  events.authorization:
+    address: events.authorization
+    messages:
+      externalProjectionEvent:
+        $ref: '#/components/messages/ExternalProjectionEvent'
+  queries.authorization:
+    address: queries.authorization
+    messages:
+      authorizationQuery:
+        $ref: '#/components/messages/AuthorizationQuery'
+  results.authorization:
+    address: results.authorization
+    messages:
+      recoveryResult:
+        $ref: '#/components/messages/RecoveryResult'
+operations:
+  consumeAuthorizationCommand:
+    action: receive
+    channel:
+      $ref: '#/channels/commands.authorization'
+  consumeExternalProjectionEvent:
+    action: receive
+    channel:
+      $ref: '#/channels/events.authorization'
+  consumeAuthorizationQuery:
+    action: receive
+    channel:
+      $ref: '#/channels/queries.authorization'
+  consumeRecoveryResult:
+    action: receive
+    channel:
+      $ref: '#/channels/results.authorization'
+components:
+  messages:
+    AuthorizationCommand:
+      payload:
+        $ref: './schemas/common-envelope.schema.json'
+    ExternalProjectionEvent:
+      payload:
+        $ref: './schemas/common-envelope.schema.json'
+    AuthorizationQuery:
+      payload:
+        $ref: './schemas/common-envelope.schema.json'
+    RecoveryResult:
+      payload:
+        $ref: './schemas/common-envelope.schema.json'

@@ -25,6 +25,20 @@ spring:
     placeholders:
       runtime_role: ${AUTHORIZATION_DB_RUNTIME_USER:authorization_service}
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: false
+
 server:
   port: 8080
 
@@ -32,6 +46,21 @@ logging:
   structured:
     format:
       console: ecs
+
+estoma:
+  messaging:
+    topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
+    listeners-enabled: ${ESTOMA_MESSAGING_LISTENERS_ENABLED:true}
+    publisher-confirm-timeout: ${ESTOMA_PUBLISHER_CONFIRM_TIMEOUT:5s}
+    outbox-claim-batch-size: ${ESTOMA_OUTBOX_CLAIM_BATCH_SIZE:50}
+    outbox-lease: ${ESTOMA_OUTBOX_LEASE:2m}
+    outbox-poll-interval: ${ESTOMA_OUTBOX_POLL_INTERVAL:1s}
+    outbox-relay-enabled: ${ESTOMA_OUTBOX_RELAY_ENABLED:true}
+    recovery-poll-interval: ${ESTOMA_RECOVERY_POLL_INTERVAL:1s}
+    recovery-worker-enabled: ${ESTOMA_RECOVERY_WORKER_ENABLED:true}
+    recovery-result-timeout: ${ESTOMA_RECOVERY_RESULT_TIMEOUT:30s}
+    retry-1-ttl: ${ESTOMA_MESSAGING_RETRY_1_TTL:5s}
+    retry-2-ttl: ${ESTOMA_MESSAGING_RETRY_2_TTL:30s}
 
 management:
   endpoints:
