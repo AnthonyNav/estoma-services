@@ -4,7 +4,7 @@
 
 `RESOLVED_FOR_IMPLEMENTATION`
 
-- Service baseline: `estoma-services/develop` at `314240c359bbbf3b6b4ea6a849abc0a9f98c9287`.
+- Service baseline: `estoma-services/develop` at `55db3a7b5d65c00740d41039ec3dea4523330553`.
 - Canonical documentation reviewed: `estomatologia-platform-docs/main` at `1578db7976433c099ab77d032e70544ad4aa2ec3`.
 - Related canonical gate: `03-services/shared/authorization-service/pr3-contract-gate.md`.
 - Final canonical resolution: `03-services/shared/authorization-service/pr3-final-contract-resolution.md`.
@@ -89,5 +89,6 @@ PR3 must use this record with:
 4. `03-services/shared/authorization-service/pr3-final-contract-resolution.md`.
 
 The implementation branch is based on `estoma-services/develop` at
-`314240c359bbbf3b6b4ea6a849abc0a9f98c9287` and must stop if a later canonical
-contract conflicts with the wire behavior under construction.
+`55db3a7b5d65c00740d41039ec3dea4523330553`. It was synchronized with that
+baseline before opening the PR3 implementation pull request and must stop if a
+later canonical contract conflicts with the wire behavior under construction.
