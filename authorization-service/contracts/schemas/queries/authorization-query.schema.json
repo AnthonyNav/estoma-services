@@ -52,7 +52,7 @@
               "additionalProperties": false,
               "required": ["limit"],
               "properties": {
-                "cursor": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                "cursor": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
                 "limit": {
                   "allOf": [
                     { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
