@@ -1,9 +1,11 @@
 package com.estoma.authorization.infrastructure.messaging.inbound;
 
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResultHandler;
+import com.estoma.authorization.contracts.MessageEnvelope;
 import com.estoma.authorization.contracts.MessageKind;
 import com.estoma.authorization.contracts.MessagingNames;
 import com.estoma.authorization.infrastructure.messaging.EnvelopeJsonCodec;
+import com.estoma.authorization.infrastructure.messaging.MessagingLog;
 import com.estoma.authorization.infrastructure.messaging.MessagingMetrics;
 import com.estoma.authorization.infrastructure.messaging.outbound.RabbitPublishException;
 import com.rabbitmq.client.Channel;
@@ -35,6 +37,7 @@ final class RecoveryResultListener {
   private final TransientFailureClassifier classifier;
   private final FailureRouter failures;
   private final MessagingMetrics metrics;
+  private final MessagingLog log;
 
   RecoveryResultListener(
       EnvelopeJsonCodec codec,
@@ -43,7 +46,8 @@ final class RecoveryResultListener {
       ProjectionRecoveryResultHandler handler,
       TransientFailureClassifier classifier,
       FailureRouter failures,
-      MessagingMetrics metrics) {
+      MessagingMetrics metrics,
+      MessagingLog log) {
     this.codec = codec;
     this.validator = validator;
     this.mapper = mapper;
@@ -51,6 +55,7 @@ final class RecoveryResultListener {
     this.classifier = classifier;
     this.failures = failures;
     this.metrics = metrics;
+    this.log = log;
   }
 
   @RabbitListener(id = "recoveryResultConsumer", queues = MessagingNames.RESULT_QUEUE, containerFactory = "manualAckContainerFactory")
@@ -65,8 +70,10 @@ final class RecoveryResultListener {
 
   private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
+    MessageEnvelope envelope;
     try {
-      var result = mapper.map(validator.validate(codec.readTree(message.getBody()), MessageKind.RESULT, TYPES));
+      envelope = validator.validate(codec.readTree(message.getBody()), MessageKind.RESULT, TYPES);
+      var result = mapper.map(envelope);
       var handling = handler.handle(result);
       metrics.consumed(CONSUMER);
       if (handling.status() == ProjectionRecoveryResultHandler.Status.DUPLICATE) {
@@ -74,10 +81,14 @@ final class RecoveryResultListener {
       } else if (handling.status() == ProjectionRecoveryResultHandler.Status.STALE_RESULT) {
         metrics.staleRecoveryResult();
       }
+      String errorCode = result.errorCode();
+      log.processed(envelope, message, CONSUMER, handling.status().name(), errorCode);
       channel.basicAck(deliveryTag, false);
     } catch (InvalidMessageException exception) {
+      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
       routeInvalid(message, channel, deliveryTag);
     } catch (RuntimeException exception) {
+      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception);
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
     }
   }
