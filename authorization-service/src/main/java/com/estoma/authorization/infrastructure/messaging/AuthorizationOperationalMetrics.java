@@ -112,18 +112,28 @@ final class AuthorizationOperationalMetrics implements MeterBinder {
 
     FunctionCounter.builder("authorization.projection.deferred.reapplied", this, ignored -> count(
             """
-            SELECT count(*) FROM authorization_audit_entries
-            WHERE action = 'PROJECTION_DEFERRED_REAPPLIED'
+            SELECT count(*)
+            FROM authorization_audit_entries audit
+            JOIN processed_messages inbox
+              ON inbox.consumer_name = 'authorization-events'
+             AND inbox.message_id = audit.source_message_id
+            WHERE audit.action = 'PROJECTION_APPLIED'
+              AND inbox.applied_at > inbox.received_at
             """))
         .description("Deferred projection Events successfully reapplied")
         .register(registry);
 
     FunctionCounter.builder("authorization.projection.deferred.stale.resolved", this, ignored -> count(
             """
-            SELECT count(*) FROM authorization_audit_entries
-            WHERE action = 'PROJECTION_STALE_RESOLVED'
+            SELECT count(*)
+            FROM authorization_audit_entries audit
+            JOIN processed_messages inbox
+              ON inbox.consumer_name = 'authorization-events'
+             AND inbox.message_id = audit.source_message_id
+            WHERE audit.action = 'PROJECTION_STALE_RESOLVED'
+              AND inbox.applied_at > inbox.received_at
             """))
-        .description("Deferred or raced projection Events resolved as stale")
+        .description("Deferred projection Events resolved as stale")
         .register(registry);
 
     Gauge.builder("authorization_eligibility_pending", this, ignored -> count(
