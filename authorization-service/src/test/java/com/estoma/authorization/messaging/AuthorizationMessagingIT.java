@@ -6,6 +6,7 @@ import static org.awaitility.Awaitility.await;
 import com.estoma.authorization.application.port.AccountRoleRepository;
 import com.estoma.authorization.application.port.AccountStatusProjectionRepository;
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
+import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.contracts.MessageEnvelope;
 import com.estoma.authorization.contracts.MessageKind;
@@ -19,8 +20,10 @@ import com.estoma.authorization.domain.model.RoleCode;
 import com.estoma.authorization.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.authorization.infrastructure.messaging.outbound.OutboxRelay;
 import com.estoma.authorization.testsupport.AbstractMessagingIT;
+import java.util.ArrayList;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -49,15 +52,15 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
   @Autowired private PersonStatusProjectionRepository persons;
   @Autowired private AccountStatusProjectionRepository accounts;
   @Autowired private AccountRoleRepository accountRoles;
+  @Autowired private ProjectionRecoveryJobRepository recoveryJobs;
   @Autowired private JdbcClient jdbc;
 
-  private String temporaryQueue;
+  private final List<String> temporaryQueues = new ArrayList<>();
 
   @AfterEach
   void deleteTemporaryQueue() {
-    if (temporaryQueue != null) {
-      amqpAdmin.deleteQueue(temporaryQueue);
-    }
+    temporaryQueues.forEach(amqpAdmin::deleteQueue);
+    temporaryQueues.clear();
   }
 
   @Test
@@ -159,6 +162,57 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
   }
 
   @Test
+  void rejectedCommandPublishesOnlyARejectedResult() {
+    UUID actor = seedSuperadmin();
+    String resultQueue = declareDirectResultQueue("bff");
+    String eventQueue = declareEventQueue("authorization.#");
+
+    send(assignRoleCommand(
+        UUID.randomUUID(), actor, actor, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID().toString()),
+        MessagingNames.COMMANDS_EXCHANGE,
+        MessagingNames.LOGICAL_COMPONENT_ID);
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_kind = 'RESULT'")
+            .query(Long.class)
+            .single()).isEqualTo(1));
+    relay.relay();
+
+    JsonNode result = receive(resultQueue);
+    assertThat(result.path("payload").path("status").asText()).isEqualTo("REJECTED");
+    assertThat(result.path("payload").has("data")).isFalse();
+    assertThat(result.path("payload").path("error").path("details").isObject()).isTrue();
+    assertThat(rabbit.receive(eventQueue, 250)).isNull();
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_kind = 'EVENT'")
+        .query(Long.class)
+        .single()).isZero();
+  }
+
+  @Test
+  void duplicateBrokerDeliveryCommitsOneMutationEventAndResult() {
+    UUID actor = seedSuperadmin();
+    UUID target = seedAccount(LoginType.USERNAME);
+    String resultQueue = declareDirectResultQueue("bff");
+    String eventQueue = declareEventQueue("authorization.account-role.assigned");
+    MessageEnvelope command = assignRoleCommand(
+        UUID.randomUUID(), actor, target, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID().toString());
+
+    send(command, MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID);
+    send(command, MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID);
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+      assertThat(accountRoles.findByAccountId(target)).isPresent();
+      assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages")
+          .query(Long.class)
+          .single()).isEqualTo(2);
+    });
+    relay.relay();
+
+    assertThat(receive(resultQueue).path("payload").path("status").asText()).isEqualTo("SUCCEEDED");
+    assertThat(receive(eventQueue).path("messageType").asText()).isEqualTo("AccountRoleAssigned");
+  }
+
+  @Test
   void externalEventAndCorrelatedRecoveryResultApplyThroughBroker() {
     UUID personId = UUID.randomUUID();
     send(new MessageEnvelope(
@@ -191,7 +245,7 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
 
     UUID accountId = UUID.randomUUID();
     String ownerQueue = declareDirectQueue(MessagingNames.QUERIES_EXCHANGE, "authentication");
-    recovery.requestAccount(accountId);
+    var job = recovery.requestAccount(accountId);
     relay.relay();
     JsonNode request = receive(ownerQueue);
     UUID queryId = UUID.fromString(request.path("messageId").asText());
@@ -222,7 +276,45 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
         MessagingNames.RESULTS_EXCHANGE,
         MessagingNames.LOGICAL_COMPONENT_ID);
 
-    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(accounts.findByAccountId(accountId)).isPresent());
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+      assertThat(accounts.findByAccountId(accountId)).isPresent();
+      assertThat(recoveryJobs.findById(job.recoveryJobId())).get()
+          .extracting(ProjectionRecoveryJobRepository.RecoveryJob::status)
+          .isEqualTo("COMPLETED");
+    });
+  }
+
+  @Test
+  void lateRecoveryResultLeavesTheCompletedProjectionUntouched() {
+    UUID personId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    String ownerQueue = declareDirectQueue(MessagingNames.QUERIES_EXCHANGE, "authentication");
+    var job = recovery.requestAccount(accountId);
+    relay.relay();
+    JsonNode request = receive(ownerQueue);
+
+    send(accountSnapshotFound(request, accountId, personId),
+        MessagingNames.RESULTS_EXCHANGE,
+        MessagingNames.LOGICAL_COMPONENT_ID);
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        recoveryJobs.findById(job.recoveryJobId())).get()
+        .extracting(ProjectionRecoveryJobRepository.RecoveryJob::status)
+        .isEqualTo("COMPLETED"));
+
+    send(accountSnapshotNotFound(request),
+        MessagingNames.RESULTS_EXCHANGE,
+        MessagingNames.LOGICAL_COMPONENT_ID);
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT count(*) FROM processed_messages WHERE consumer_name = 'authorization-recovery-results'")
+            .query(Long.class)
+            .single()).isEqualTo(2));
+
+    assertThat(accounts.findByAccountId(accountId)).get()
+        .extracting(AccountStatusProjectionRepository.AccountStatusProjection::sourceVersion)
+        .isEqualTo(1);
+    assertThat(recoveryJobs.findById(job.recoveryJobId())).get()
+        .extracting(ProjectionRecoveryJobRepository.RecoveryJob::status)
+        .isEqualTo("COMPLETED");
   }
 
   @Test
@@ -273,19 +365,91 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
   }
 
   private String declareDirectQueue(String exchangeName, String routingKey) {
-    temporaryQueue = "authorization-it-" + UUID.randomUUID();
-    Queue queue = new Queue(temporaryQueue, false, true, true);
+    String queueName = "authorization-it-" + UUID.randomUUID();
+    temporaryQueues.add(queueName);
+    Queue queue = new Queue(queueName, false, true, true);
     amqpAdmin.declareQueue(queue);
     amqpAdmin.declareBinding(BindingBuilder.bind(queue).to(new DirectExchange(exchangeName)).with(routingKey));
-    return temporaryQueue;
+    return queueName;
   }
 
   private String declareEventQueue(String routingKey) {
-    temporaryQueue = "authorization-it-" + UUID.randomUUID();
-    Queue queue = new Queue(temporaryQueue, false, true, true);
+    String queueName = "authorization-it-" + UUID.randomUUID();
+    temporaryQueues.add(queueName);
+    Queue queue = new Queue(queueName, false, true, true);
     amqpAdmin.declareQueue(queue);
     amqpAdmin.declareBinding(BindingBuilder.bind(queue).to(new TopicExchange(MessagingNames.EVENTS_EXCHANGE)).with(routingKey));
-    return temporaryQueue;
+    return queueName;
+  }
+
+  private MessageEnvelope assignRoleCommand(
+      UUID messageId,
+      UUID actorId,
+      UUID accountId,
+      UUID correlationId,
+      UUID operationId,
+      String idempotencyKey) {
+    return new MessageEnvelope(
+        messageId,
+        "AssignAccountRole",
+        1,
+        MessageKind.COMMAND,
+        "bff",
+        NOW,
+        correlationId,
+        null,
+        operationId,
+        idempotencyKey,
+        null,
+        null,
+        new WireActor("ACCOUNT", actorId, null),
+        mapper.createObjectNode()
+            .put("accountId", accountId.toString())
+            .put("roleCode", "ADMINISTRADOR_PRACTICAS"));
+  }
+
+  private MessageEnvelope accountSnapshotFound(JsonNode request, UUID accountId, UUID personId) {
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        "GetAccountStatusSnapshotResult",
+        1,
+        MessageKind.RESULT,
+        "authentication",
+        NOW,
+        UUID.fromString(request.path("correlationId").asText()),
+        UUID.fromString(request.path("messageId").asText()),
+        UUID.fromString(request.path("operationId").asText()),
+        null,
+        null,
+        null,
+        new WireActor("SYSTEM", null, "authentication"),
+        mapper.createObjectNode()
+            .put("status", "FOUND")
+            .set("data", mapper.createObjectNode()
+                .put("accountId", accountId.toString())
+                .put("personId", personId.toString())
+                .put("loginType", "USERNAME")
+                .put("status", "ACTIVE")
+                .put("sourceVersion", 1)
+                .put("updatedAt", NOW.toString())));
+  }
+
+  private MessageEnvelope accountSnapshotNotFound(JsonNode request) {
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        "GetAccountStatusSnapshotResult",
+        1,
+        MessageKind.RESULT,
+        "authentication",
+        NOW,
+        UUID.fromString(request.path("correlationId").asText()),
+        UUID.fromString(request.path("messageId").asText()),
+        UUID.fromString(request.path("operationId").asText()),
+        null,
+        null,
+        null,
+        new WireActor("SYSTEM", null, "authentication"),
+        mapper.createObjectNode().put("status", "NOT_FOUND"));
   }
 
   private void send(MessageEnvelope envelope, String exchange, String routingKey) {
