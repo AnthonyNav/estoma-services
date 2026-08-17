@@ -2,7 +2,7 @@ package com.estoma.authorization.infrastructure.messaging.outbound;
 
 import java.util.UUID;
 
-final class RabbitPublishException extends RuntimeException {
+public final class RabbitPublishException extends RuntimeException {
 
   private final PublishFailureCode code;
   private final UUID attemptId;
