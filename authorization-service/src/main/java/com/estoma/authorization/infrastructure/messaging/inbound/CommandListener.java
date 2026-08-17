@@ -60,6 +60,15 @@ final class CommandListener {
 
   @RabbitListener(id = "commandConsumer", queues = MessagingNames.COMMAND_QUEUE, containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
+    long started = System.nanoTime();
+    try {
+      handle(message, channel);
+    } finally {
+      metrics.processingDuration(CONSUMER, System.nanoTime() - started);
+    }
+  }
+
+  private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     CommandMessageMapper.MappedCommand mapped;
     try {
@@ -70,8 +79,10 @@ final class CommandListener {
     }
 
     metrics.consumed(CONSUMER);
+    metrics.commandReceived();
     try {
       CommandOutcome outcome = dispatcher.dispatch(mapped.metadata(), mapped.command());
+      metrics.commandOutcome(outcome);
       if (outcome.duplicateDelivery()) {
         metrics.duplicate(CONSUMER);
       }
@@ -91,7 +102,8 @@ final class CommandListener {
       long deliveryTag,
       CommandMessageMapper.MappedCommand mapped) throws IOException {
     try {
-      terminalFailures.recordTerminalFailure(mapped.metadata(), mapped.command());
+      CommandOutcome outcome = terminalFailures.recordTerminalFailure(mapped.metadata(), mapped.command());
+      metrics.commandOutcome(outcome);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException terminalPersistenceFailure) {
       routeInvalid(message, channel, deliveryTag);
