@@ -30,15 +30,26 @@ sessions or expose a business HTTP API.
 The PR2 audit register is in [`docs/implementation_gaps.md`](docs/implementation_gaps.md).
 All recorded `BLOCKER` and `HIGH` findings are resolved and covered by regression tests.
 
-## Deferred To PR3
+## PR3 Messaging And Contracts
 
-- RabbitMQ topology/listeners/publishers.
-- Executable wire DTOs, AsyncAPI and JSON Schemas.
-- Outbox Relay publisher confirms, consumer retry/DLQ and broker integration tests.
-- Mapping the already implemented Application Commands/Events/Queries/Results to the platform messaging contracts.
+PR3 materializes the already-complete PR2 behavior through:
 
-The resolved decisions governing implementation are recorded in
+- RabbitMQ topology/listeners/publishers;
+- executable wire DTOs, AsyncAPI and JSON Schemas;
+- Outbox Relay publisher confirms, consumer retry/DLQ and broker integration tests;
+- mapping the already implemented Application Commands/Events/Queries/Results to the platform messaging contracts.
+
+The resolved decisions governing implementation and the **current PR3 baseline**
+are recorded in
 [`docs/pr3_preimplementation_decisions.md`](docs/pr3_preimplementation_decisions.md).
+That record supersedes the historical PR1 observation SHA still described in
+`docs/system_contract.md`; the canonical platform documentation remains the
+source of truth whenever local documentation differs.
+
+Current canonical Authorization resolution: `estomatologia-platform-docs`
+`1578db7976433c099ab77d032e70544ad4aa2ec3`. The later canonical `main`
+advance through `4391b156912085925b94030f2816847679e9640e` changes only Lavado/Wash
+Execution documentation and introduces no Authorization contract drift.
 
 ## Operational Endpoints
 
