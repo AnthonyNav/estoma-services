@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/results/authorization-query-result.schema.json",
+  "title": "Authorization V1 snapshot query results",
+  "oneOf": [
+    { "$ref": "#/$defs/getAccountAuthorizationSnapshotResult" },
+    { "$ref": "#/$defs/listAccountAuthorizationSnapshotsPageResult" }
+  ],
+  "$defs": {
+    "resultEnvelope": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "not": { "required": ["idempotencyKey"] },
+          "properties": {
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" }
+          }
+        }
+      ]
+    },
+    "systemAccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "systemId", "systemCode", "status", "accessVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "systemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+        "status": { "$ref": "../common-envelope.schema.json#/$defs/systemAccessStatus" },
+        "accessVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId", "systemAccesses"],
+      "properties": {
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "role": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["roleCode", "roleVersion"],
+          "properties": {
+            "roleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+            "roleVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+          }
+        },
+        "systemAccesses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/systemAccess" }
+        },
+        "snapshotGeneratedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+      }
+    },
+    "pointFoundPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "FOUND" },
+        "data": {
+          "allOf": [
+            { "$ref": "#/$defs/snapshot" },
+            { "required": ["snapshotGeneratedAt"] }
+          ]
+        }
+      }
+    },
+    "pointNotFoundPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "const": "NOT_FOUND" } }
+    },
+    "rejectedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "error"],
+      "properties": {
+        "status": { "const": "REJECTED" },
+        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
+      }
+    },
+    "pageSucceededPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "SUCCEEDED" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["items", "hasMore", "snapshotGeneratedAt"],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/snapshot" }
+            },
+            "nextCursor": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+            "hasMore": { "type": "boolean" },
+            "snapshotGeneratedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "hasMore": { "const": true } }, "required": ["hasMore"] },
+              "then": { "required": ["nextCursor"] },
+              "else": { "not": { "required": ["nextCursor"] } }
+            }
+          ]
+        }
+      }
+    },
+    "getAccountAuthorizationSnapshotResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetAccountAuthorizationSnapshotResult" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/pointFoundPayload" },
+                { "$ref": "#/$defs/pointNotFoundPayload" },
+                { "$ref": "#/$defs/rejectedPayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "listAccountAuthorizationSnapshotsPageResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListAccountAuthorizationSnapshotsPageResult" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/pageSucceededPayload" },
+                { "$ref": "#/$defs/rejectedPayload" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

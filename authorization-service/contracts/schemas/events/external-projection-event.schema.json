@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/events/external-projection-event.schema.json",
+  "title": "Authorization V1 external projection events",
+  "oneOf": [
+    { "$ref": "#/$defs/personCreated" },
+    { "$ref": "#/$defs/personActivated" },
+    { "$ref": "#/$defs/personDeactivated" },
+    { "$ref": "#/$defs/accountCreated" },
+    { "$ref": "#/$defs/accountActivated" },
+    { "$ref": "#/$defs/accountDeactivated" },
+    { "$ref": "#/$defs/studentAcademicEligibilityChanged" }
+  ],
+  "$defs": {
+    "eventEnvelope": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "aggregateId", "aggregateVersion"],
+          "properties": { "messageKind": { "const": "EVENT" } }
+        }
+      ]
+    },
+    "otherReason": {
+      "type": "object",
+      "properties": {
+        "reasonCode": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "reasonDetail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "reasonCode": { "const": "OTHER" } }, "required": ["reasonCode"] },
+          "then": { "required": ["reasonDetail"] },
+          "else": { "not": { "required": ["reasonDetail"] } }
+        }
+      ]
+    },
+    "personCreated": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "PersonCreated" },
+            "producer": { "const": "users" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "personId",
+                "firstName",
+                "paternalSurname",
+                "maternalSurname",
+                "institutionalEmail",
+                "phone",
+                "status",
+                "version",
+                "createdAt"
+              ],
+              "properties": {
+                "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "firstName": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                "paternalSurname": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                "maternalSurname": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                "institutionalEmail": { "type": "string", "format": "email" },
+                "phone": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                "status": { "const": "ACTIVE" },
+                "version": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                "createdAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "personActivated": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "PersonActivated" },
+            "producer": { "const": "users" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["personId", "status", "version", "activatedAt"],
+              "properties": {
+                "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "status": { "const": "ACTIVE" },
+                "version": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                "activatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "personDeactivated": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "PersonDeactivated" },
+            "producer": { "const": "users" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/otherReason" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["personId", "status", "version", "deactivatedAt", "reasonCode"],
+                  "properties": {
+                    "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "status": { "const": "INACTIVE" },
+                    "version": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                    "deactivatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" },
+                    "reasonCode": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                    "reasonDetail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "accountCreated": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "AccountCreated" },
+            "producer": { "const": "authentication" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["accountId", "personId", "loginType", "status", "createdAt"],
+              "properties": {
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "loginType": { "$ref": "../common-envelope.schema.json#/$defs/loginType" },
+                "status": { "const": "INACTIVE" },
+                "createdAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "accountActivated": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "AccountActivated" },
+            "producer": { "const": "authentication" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "accountId",
+                "personId",
+                "previousStatus",
+                "status",
+                "activationReason",
+                "activatedAt"
+              ],
+              "properties": {
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "previousStatus": { "$ref": "../common-envelope.schema.json#/$defs/projectedStatus" },
+                "status": { "const": "ACTIVE" },
+                "activationReason": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                "activatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "accountDeactivated": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "AccountDeactivated" },
+            "producer": { "const": "authentication" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/otherReason" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "accountId",
+                    "personId",
+                    "previousStatus",
+                    "status",
+                    "reasonCode",
+                    "deactivatedAt"
+                  ],
+                  "properties": {
+                    "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "previousStatus": { "$ref": "../common-envelope.schema.json#/$defs/projectedStatus" },
+                    "status": { "const": "INACTIVE" },
+                    "reasonCode": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                    "reasonDetail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                    "deactivatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "studentAcademicEligibilityChanged": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "StudentAcademicEligibilityChanged" },
+            "producer": { "const": "academic" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "eligibilityId",
+                "studentAcademicProfileId",
+                "accountId",
+                "systemCode",
+                "eligible",
+                "policyVersion",
+                "eligibilityVersion",
+                "academicProfileVersion",
+                "evaluatedAt"
+              ],
+              "properties": {
+                "eligibilityId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "studentAcademicProfileId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemCode": { "const": "PRACTICAS_PROFESIONALES" },
+                "eligible": { "type": "boolean" },
+                "policyVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                "eligibilityVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                "academicProfileVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                "evaluatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

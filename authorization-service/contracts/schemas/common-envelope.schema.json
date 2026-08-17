@@ -16,19 +16,55 @@
     "payload"
   ],
   "properties": {
-    "messageId": { "type": "string", "format": "uuid" },
-    "messageType": { "type": "string", "minLength": 1 },
+    "messageId": { "$ref": "#/$defs/uuid" },
+    "messageType": { "$ref": "#/$defs/nonBlankText" },
     "messageVersion": { "const": 1 },
     "messageKind": { "enum": ["COMMAND", "EVENT", "QUERY", "RESULT"] },
-    "producer": { "type": "string", "minLength": 1 },
-    "occurredAt": { "type": "string", "format": "date-time" },
-    "correlationId": { "type": "string", "format": "uuid" },
-    "causationId": { "type": "string", "format": "uuid" },
-    "operationId": { "type": "string", "format": "uuid" },
-    "idempotencyKey": { "type": "string", "format": "uuid" },
-    "aggregateId": { "type": "string", "format": "uuid" },
-    "aggregateVersion": { "type": "integer", "minimum": 1 },
+    "producer": { "$ref": "#/$defs/nonBlankText" },
+    "occurredAt": { "$ref": "#/$defs/timestamp" },
+    "correlationId": { "$ref": "#/$defs/uuid" },
+    "causationId": { "$ref": "#/$defs/uuid" },
+    "operationId": { "$ref": "#/$defs/uuid" },
+    "idempotencyKey": { "$ref": "#/$defs/uuid" },
+    "aggregateId": { "$ref": "#/$defs/uuid" },
+    "aggregateVersion": { "$ref": "#/$defs/positiveInteger" },
     "actor": { "$ref": "actor.schema.json" },
     "payload": { "type": "object" }
+  },
+  "$defs": {
+    "uuid": { "type": "string", "format": "uuid" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "nonBlankText": { "type": "string", "minLength": 1 },
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "roleCode": {
+      "enum": [
+        "ALUMNO",
+        "SUPERVISOR_LAVADO",
+        "ADMINISTRADOR_LAVADO",
+        "ADMINISTRADOR_PRACTICAS",
+        "SUPERADMIN"
+      ]
+    },
+    "systemCode": { "enum": ["LAVADO_ULTRASONICO", "PRACTICAS_PROFESIONALES"] },
+    "systemAccessStatus": { "enum": ["ACTIVE", "SUSPENDED", "REVOKED"] },
+    "projectedStatus": { "enum": ["ACTIVE", "INACTIVE"] },
+    "loginType": { "enum": ["MATRICULA", "USERNAME"] },
+    "publicReasonCode": { "enum": ["ADMINISTRATIVE", "SECURITY", "OTHER"] },
+    "systemAccessEventReasonCode": {
+      "enum": ["ADMINISTRATIVE", "ROLE_CHANGED", "SECURITY", "OTHER"]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": { "$ref": "#/$defs/nonBlankText" },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
   }
 }

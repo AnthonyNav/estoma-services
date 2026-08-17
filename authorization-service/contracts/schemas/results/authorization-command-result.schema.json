@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/results/authorization-command-result.schema.json",
+  "title": "Authorization V1 command results",
+  "oneOf": [
+    { "$ref": "#/$defs/assignAccountRoleResult" },
+    { "$ref": "#/$defs/changeAccountRoleResult" },
+    { "$ref": "#/$defs/grantSystemAccessResult" },
+    { "$ref": "#/$defs/suspendSystemAccessResult" },
+    { "$ref": "#/$defs/revokeSystemAccessResult" },
+    { "$ref": "#/$defs/restoreSystemAccessResult" }
+  ],
+  "$defs": {
+    "importCorrelationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["importId", "planItemId", "executionGeneration"],
+      "properties": {
+        "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "resultPayload": {
+      "type": "object",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "required": ["status", "data"],
+          "properties": {
+            "status": { "const": "SUCCEEDED" },
+            "data": { "type": "object" }
+          }
+        },
+        {
+          "additionalProperties": false,
+          "required": ["status", "error"],
+          "properties": {
+            "status": { "enum": ["REJECTED", "FAILED"] },
+            "data": { "$ref": "#/$defs/importCorrelationData" },
+            "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
+          }
+        }
+      ]
+    },
+    "assignData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId", "roleCode", "changed", "newVersion"],
+      "properties": {
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "roleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+        "changed": { "type": "boolean" },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "changeData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accountId",
+        "previousRole",
+        "newRole",
+        "changed",
+        "newVersion",
+        "suspendedSystemAccessIds",
+        "suspendedSystemAccessCount"
+      ],
+      "properties": {
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "previousRole": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+        "newRole": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "suspendedSystemAccessIds": {
+          "type": "array",
+          "items": { "$ref": "../common-envelope.schema.json#/$defs/uuid" }
+        },
+        "suspendedSystemAccessCount": { "$ref": "../common-envelope.schema.json#/$defs/nonNegativeInteger" }
+      }
+    },
+    "grantData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "systemCode", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+        "status": { "$ref": "../common-envelope.schema.json#/$defs/systemAccessStatus" },
+        "changed": { "type": "boolean" },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "suspendData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "status": { "const": "SUSPENDED" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "revokeData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "status": { "const": "REVOKED" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "restoreData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "status": { "const": "ACTIVE" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "assignAccountRoleResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "properties": {
+            "messageType": { "const": "AssignAccountRoleResult" },
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/resultPayload" },
+                {
+                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
+                  "then": { "properties": { "data": { "$ref": "#/$defs/assignData" } } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "changeAccountRoleResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "properties": {
+            "messageType": { "const": "ChangeAccountRoleResult" },
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/resultPayload" },
+                {
+                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
+                  "then": { "properties": { "data": { "$ref": "#/$defs/changeData" } } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "grantSystemAccessResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "properties": {
+            "messageType": { "const": "GrantSystemAccessResult" },
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/resultPayload" },
+                {
+                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
+                  "then": { "properties": { "data": { "$ref": "#/$defs/grantData" } } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "suspendSystemAccessResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "properties": {
+            "messageType": { "const": "SuspendSystemAccessResult" },
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/resultPayload" },
+                {
+                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
+                  "then": { "properties": { "data": { "$ref": "#/$defs/suspendData" } } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "revokeSystemAccessResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "properties": {
+            "messageType": { "const": "RevokeSystemAccessResult" },
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/resultPayload" },
+                {
+                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
+                  "then": { "properties": { "data": { "$ref": "#/$defs/revokeData" } } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "restoreSystemAccessResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "properties": {
+            "messageType": { "const": "RestoreSystemAccessResult" },
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/resultPayload" },
+                {
+                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
+                  "then": { "properties": { "data": { "$ref": "#/$defs/restoreData" } } }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

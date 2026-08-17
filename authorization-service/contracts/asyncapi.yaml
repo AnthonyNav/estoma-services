@@ -2,60 +2,478 @@ asyncapi: 3.0.0
 info:
   title: Authorization Service V1
   version: 1.0.0
-  description: Durable Authorization Commands, Events, Queries, and Results.
+  description: >
+    Durable Authorization Commands, Events, Queries, and Results. This document
+    covers only queues owned by Authorization and exchanges/routing keys used by
+    its adapters. External event and recovery-result schemas are compatibility
+    copies; their producing service remains the functional contract owner.
 servers:
   rabbitmq:
-    host: localhost:5672
+    host: '{host}:{port}'
     protocol: amqp
+    variables:
+      host:
+        default: localhost
+      port:
+        default: '5672'
+defaultContentType: application/json
 channels:
   commands.authorization:
     address: commands.authorization
+    description: >
+      Durable queue bound to the platform.commands direct exchange with routing
+      key authorization. Retry queues are commands.authorization.retry.1 and
+      commands.authorization.retry.2; terminal failures use
+      commands.authorization.dlq.
     messages:
-      authorizationCommand:
-        $ref: '#/components/messages/AuthorizationCommand'
+      assignAccountRole:
+        $ref: '#/components/messages/AssignAccountRole'
+      changeAccountRole:
+        $ref: '#/components/messages/ChangeAccountRole'
+      grantSystemAccess:
+        $ref: '#/components/messages/GrantSystemAccess'
+      suspendSystemAccess:
+        $ref: '#/components/messages/SuspendSystemAccess'
+      revokeSystemAccess:
+        $ref: '#/components/messages/RevokeSystemAccess'
+      restoreSystemAccess:
+        $ref: '#/components/messages/RestoreSystemAccess'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: commands.authorization
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: commands.authorization.dlq
   events.authorization:
     address: events.authorization
+    description: >
+      Durable queue consuming platform.events topic bindings users.person.*,
+      authentication.account.*, and academic.student-eligibility.changed. Retry
+      queues are events.authorization.retry.1 and events.authorization.retry.2;
+      terminal failures use events.authorization.dlq.
     messages:
-      externalProjectionEvent:
-        $ref: '#/components/messages/ExternalProjectionEvent'
+      personCreated:
+        $ref: '#/components/messages/PersonCreated'
+      personActivated:
+        $ref: '#/components/messages/PersonActivated'
+      personDeactivated:
+        $ref: '#/components/messages/PersonDeactivated'
+      accountCreated:
+        $ref: '#/components/messages/AccountCreated'
+      accountActivated:
+        $ref: '#/components/messages/AccountActivated'
+      accountDeactivated:
+        $ref: '#/components/messages/AccountDeactivated'
+      studentAcademicEligibilityChanged:
+        $ref: '#/components/messages/StudentAcademicEligibilityChanged'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: events.authorization
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: events.authorization.dlq
   queries.authorization:
     address: queries.authorization
+    description: >
+      Durable queue bound to the platform.queries direct exchange with routing
+      key authorization. Retry queues are queries.authorization.retry.1 and
+      queries.authorization.retry.2; terminal failures use queries.authorization.dlq.
     messages:
-      authorizationQuery:
-        $ref: '#/components/messages/AuthorizationQuery'
+      getAccountAuthorizationSnapshot:
+        $ref: '#/components/messages/GetAccountAuthorizationSnapshot'
+      listAccountAuthorizationSnapshotsPage:
+        $ref: '#/components/messages/ListAccountAuthorizationSnapshotsPage'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: queries.authorization
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: queries.authorization.dlq
   results.authorization:
     address: results.authorization
+    description: >
+      Durable queue bound to the platform.results direct exchange with routing
+      key authorization. It accepts only projection recovery Results, never BFF
+      or Academic command Results. Retry queues are results.authorization.retry.1
+      and results.authorization.retry.2; terminal failures use results.authorization.dlq.
     messages:
-      recoveryResult:
-        $ref: '#/components/messages/RecoveryResult'
+      getPersonStatusSnapshotResult:
+        $ref: '#/components/messages/GetPersonStatusSnapshotResult'
+      listPersonStatusSnapshotsPageResult:
+        $ref: '#/components/messages/ListPersonStatusSnapshotsPageResult'
+      getAccountStatusSnapshotResult:
+        $ref: '#/components/messages/GetAccountStatusSnapshotResult'
+      listAccountStatusSnapshotsPageResult:
+        $ref: '#/components/messages/ListAccountStatusSnapshotsPageResult'
+      getStudentAcademicEligibilitySnapshotResult:
+        $ref: '#/components/messages/GetStudentAcademicEligibilitySnapshotResult'
+      listStudentAcademicEligibilitySnapshotsPageResult:
+        $ref: '#/components/messages/ListStudentAcademicEligibilitySnapshotsPageResult'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: results.authorization
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: results.authorization.dlq
+  platform.results:
+    address: platform.results
+    description: >
+      Direct exchange. Authorization publishes command and exposed-query Results
+      with the original requester logical id as the routing key. Authorization
+      does not own requester result queues.
+    messages:
+      assignAccountRoleResult:
+        $ref: '#/components/messages/AssignAccountRoleResult'
+      changeAccountRoleResult:
+        $ref: '#/components/messages/ChangeAccountRoleResult'
+      grantSystemAccessResult:
+        $ref: '#/components/messages/GrantSystemAccessResult'
+      suspendSystemAccessResult:
+        $ref: '#/components/messages/SuspendSystemAccessResult'
+      revokeSystemAccessResult:
+        $ref: '#/components/messages/RevokeSystemAccessResult'
+      restoreSystemAccessResult:
+        $ref: '#/components/messages/RestoreSystemAccessResult'
+      getAccountAuthorizationSnapshotResult:
+        $ref: '#/components/messages/GetAccountAuthorizationSnapshotResult'
+      listAccountAuthorizationSnapshotsPageResult:
+        $ref: '#/components/messages/ListAccountAuthorizationSnapshotsPageResult'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: platform.results
+          type: direct
+          durable: true
+  platform.events:
+    address: platform.events
+    description: >
+      Topic exchange. Authorization publishes six durable facts through its
+      Transactional Outbox using the routing keys declared on each message.
+    messages:
+      accountRoleAssigned:
+        $ref: '#/components/messages/AccountRoleAssigned'
+      accountRoleChanged:
+        $ref: '#/components/messages/AccountRoleChanged'
+      systemAccessGranted:
+        $ref: '#/components/messages/SystemAccessGranted'
+      systemAccessSuspended:
+        $ref: '#/components/messages/SystemAccessSuspended'
+      systemAccessRevoked:
+        $ref: '#/components/messages/SystemAccessRevoked'
+      systemAccessRestored:
+        $ref: '#/components/messages/SystemAccessRestored'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: platform.events
+          type: topic
+          durable: true
+  platform.queries:
+    address: platform.queries
+    description: >
+      Direct exchange. Authorization publishes recovery Queries through its
+      Transactional Outbox to users, authentication, or academic.
+    messages:
+      getPersonStatusSnapshot:
+        $ref: '#/components/messages/GetPersonStatusSnapshot'
+      listPersonStatusSnapshotsPage:
+        $ref: '#/components/messages/ListPersonStatusSnapshotsPage'
+      getAccountStatusSnapshot:
+        $ref: '#/components/messages/GetAccountStatusSnapshot'
+      listAccountStatusSnapshotsPage:
+        $ref: '#/components/messages/ListAccountStatusSnapshotsPage'
+      getStudentAcademicEligibilitySnapshot:
+        $ref: '#/components/messages/GetStudentAcademicEligibilitySnapshot'
+      listStudentAcademicEligibilitySnapshotsPage:
+        $ref: '#/components/messages/ListStudentAcademicEligibilitySnapshotsPage'
+    bindings:
+      amqp:
+        is: routingKey
+        exchange:
+          name: platform.queries
+          type: direct
+          durable: true
 operations:
-  consumeAuthorizationCommand:
+  receiveAuthorizationCommands:
     action: receive
     channel:
       $ref: '#/channels/commands.authorization'
-  consumeExternalProjectionEvent:
+    messages:
+      - $ref: '#/channels/commands.authorization/messages/assignAccountRole'
+      - $ref: '#/channels/commands.authorization/messages/changeAccountRole'
+      - $ref: '#/channels/commands.authorization/messages/grantSystemAccess'
+      - $ref: '#/channels/commands.authorization/messages/suspendSystemAccess'
+      - $ref: '#/channels/commands.authorization/messages/revokeSystemAccess'
+      - $ref: '#/channels/commands.authorization/messages/restoreSystemAccess'
+  receiveExternalProjectionEvents:
     action: receive
     channel:
       $ref: '#/channels/events.authorization'
-  consumeAuthorizationQuery:
+    messages:
+      - $ref: '#/channels/events.authorization/messages/personCreated'
+      - $ref: '#/channels/events.authorization/messages/personActivated'
+      - $ref: '#/channels/events.authorization/messages/personDeactivated'
+      - $ref: '#/channels/events.authorization/messages/accountCreated'
+      - $ref: '#/channels/events.authorization/messages/accountActivated'
+      - $ref: '#/channels/events.authorization/messages/accountDeactivated'
+      - $ref: '#/channels/events.authorization/messages/studentAcademicEligibilityChanged'
+  receiveAuthorizationQueries:
     action: receive
     channel:
       $ref: '#/channels/queries.authorization'
-  consumeRecoveryResult:
+    messages:
+      - $ref: '#/channels/queries.authorization/messages/getAccountAuthorizationSnapshot'
+      - $ref: '#/channels/queries.authorization/messages/listAccountAuthorizationSnapshotsPage'
+  receiveRecoveryResults:
     action: receive
     channel:
       $ref: '#/channels/results.authorization'
+    messages:
+      - $ref: '#/channels/results.authorization/messages/getPersonStatusSnapshotResult'
+      - $ref: '#/channels/results.authorization/messages/listPersonStatusSnapshotsPageResult'
+      - $ref: '#/channels/results.authorization/messages/getAccountStatusSnapshotResult'
+      - $ref: '#/channels/results.authorization/messages/listAccountStatusSnapshotsPageResult'
+      - $ref: '#/channels/results.authorization/messages/getStudentAcademicEligibilitySnapshotResult'
+      - $ref: '#/channels/results.authorization/messages/listStudentAcademicEligibilitySnapshotsPageResult'
+  sendAuthorizationResults:
+    action: send
+    channel:
+      $ref: '#/channels/platform.results'
+    messages:
+      - $ref: '#/channels/platform.results/messages/assignAccountRoleResult'
+      - $ref: '#/channels/platform.results/messages/changeAccountRoleResult'
+      - $ref: '#/channels/platform.results/messages/grantSystemAccessResult'
+      - $ref: '#/channels/platform.results/messages/suspendSystemAccessResult'
+      - $ref: '#/channels/platform.results/messages/revokeSystemAccessResult'
+      - $ref: '#/channels/platform.results/messages/restoreSystemAccessResult'
+      - $ref: '#/channels/platform.results/messages/getAccountAuthorizationSnapshotResult'
+      - $ref: '#/channels/platform.results/messages/listAccountAuthorizationSnapshotsPageResult'
+  sendAuthorizationEvents:
+    action: send
+    channel:
+      $ref: '#/channels/platform.events'
+    messages:
+      - $ref: '#/channels/platform.events/messages/accountRoleAssigned'
+      - $ref: '#/channels/platform.events/messages/accountRoleChanged'
+      - $ref: '#/channels/platform.events/messages/systemAccessGranted'
+      - $ref: '#/channels/platform.events/messages/systemAccessSuspended'
+      - $ref: '#/channels/platform.events/messages/systemAccessRevoked'
+      - $ref: '#/channels/platform.events/messages/systemAccessRestored'
+  sendRecoveryQueries:
+    action: send
+    channel:
+      $ref: '#/channels/platform.queries'
+    messages:
+      - $ref: '#/channels/platform.queries/messages/getPersonStatusSnapshot'
+      - $ref: '#/channels/platform.queries/messages/listPersonStatusSnapshotsPage'
+      - $ref: '#/channels/platform.queries/messages/getAccountStatusSnapshot'
+      - $ref: '#/channels/platform.queries/messages/listAccountStatusSnapshotsPage'
+      - $ref: '#/channels/platform.queries/messages/getStudentAcademicEligibilitySnapshot'
+      - $ref: '#/channels/platform.queries/messages/listStudentAcademicEligibilitySnapshotsPage'
 components:
   messages:
-    AuthorizationCommand:
+    AssignAccountRole:
+      name: AssignAccountRole
       payload:
-        $ref: './schemas/common-envelope.schema.json'
-    ExternalProjectionEvent:
+        $ref: './schemas/commands/authorization-command.schema.json#/$defs/assignAccountRole'
+    ChangeAccountRole:
+      name: ChangeAccountRole
       payload:
-        $ref: './schemas/common-envelope.schema.json'
-    AuthorizationQuery:
+        $ref: './schemas/commands/authorization-command.schema.json#/$defs/changeAccountRole'
+    GrantSystemAccess:
+      name: GrantSystemAccess
       payload:
-        $ref: './schemas/common-envelope.schema.json'
-    RecoveryResult:
+        $ref: './schemas/commands/authorization-command.schema.json#/$defs/grantSystemAccess'
+    SuspendSystemAccess:
+      name: SuspendSystemAccess
       payload:
-        $ref: './schemas/common-envelope.schema.json'
+        $ref: './schemas/commands/authorization-command.schema.json#/$defs/suspendSystemAccess'
+    RevokeSystemAccess:
+      name: RevokeSystemAccess
+      payload:
+        $ref: './schemas/commands/authorization-command.schema.json#/$defs/revokeSystemAccess'
+    RestoreSystemAccess:
+      name: RestoreSystemAccess
+      payload:
+        $ref: './schemas/commands/authorization-command.schema.json#/$defs/restoreSystemAccess'
+    AssignAccountRoleResult:
+      name: AssignAccountRoleResult
+      payload:
+        $ref: './schemas/results/authorization-command-result.schema.json#/$defs/assignAccountRoleResult'
+    ChangeAccountRoleResult:
+      name: ChangeAccountRoleResult
+      payload:
+        $ref: './schemas/results/authorization-command-result.schema.json#/$defs/changeAccountRoleResult'
+    GrantSystemAccessResult:
+      name: GrantSystemAccessResult
+      payload:
+        $ref: './schemas/results/authorization-command-result.schema.json#/$defs/grantSystemAccessResult'
+    SuspendSystemAccessResult:
+      name: SuspendSystemAccessResult
+      payload:
+        $ref: './schemas/results/authorization-command-result.schema.json#/$defs/suspendSystemAccessResult'
+    RevokeSystemAccessResult:
+      name: RevokeSystemAccessResult
+      payload:
+        $ref: './schemas/results/authorization-command-result.schema.json#/$defs/revokeSystemAccessResult'
+    RestoreSystemAccessResult:
+      name: RestoreSystemAccessResult
+      payload:
+        $ref: './schemas/results/authorization-command-result.schema.json#/$defs/restoreSystemAccessResult'
+    AccountRoleAssigned:
+      name: AccountRoleAssigned
+      description: Routing key authorization.account-role.assigned.
+      payload:
+        $ref: './schemas/events/authorization-event.schema.json#/$defs/accountRoleAssigned'
+    AccountRoleChanged:
+      name: AccountRoleChanged
+      description: Routing key authorization.account-role.changed.
+      payload:
+        $ref: './schemas/events/authorization-event.schema.json#/$defs/accountRoleChanged'
+    SystemAccessGranted:
+      name: SystemAccessGranted
+      description: Routing key authorization.system-access.granted.
+      payload:
+        $ref: './schemas/events/authorization-event.schema.json#/$defs/systemAccessGranted'
+    SystemAccessSuspended:
+      name: SystemAccessSuspended
+      description: Routing key authorization.system-access.suspended.
+      payload:
+        $ref: './schemas/events/authorization-event.schema.json#/$defs/systemAccessSuspended'
+    SystemAccessRevoked:
+      name: SystemAccessRevoked
+      description: Routing key authorization.system-access.revoked.
+      payload:
+        $ref: './schemas/events/authorization-event.schema.json#/$defs/systemAccessRevoked'
+    SystemAccessRestored:
+      name: SystemAccessRestored
+      description: Routing key authorization.system-access.restored.
+      payload:
+        $ref: './schemas/events/authorization-event.schema.json#/$defs/systemAccessRestored'
+    PersonCreated:
+      name: PersonCreated
+      description: Consumed from users.person.created.
+      payload:
+        $ref: './schemas/events/external-projection-event.schema.json#/$defs/personCreated'
+    PersonActivated:
+      name: PersonActivated
+      description: Consumed from users.person.activated.
+      payload:
+        $ref: './schemas/events/external-projection-event.schema.json#/$defs/personActivated'
+    PersonDeactivated:
+      name: PersonDeactivated
+      description: Consumed from users.person.deactivated.
+      payload:
+        $ref: './schemas/events/external-projection-event.schema.json#/$defs/personDeactivated'
+    AccountCreated:
+      name: AccountCreated
+      description: Consumed from authentication.account.created.
+      payload:
+        $ref: './schemas/events/external-projection-event.schema.json#/$defs/accountCreated'
+    AccountActivated:
+      name: AccountActivated
+      description: Consumed from authentication.account.activated.
+      payload:
+        $ref: './schemas/events/external-projection-event.schema.json#/$defs/accountActivated'
+    AccountDeactivated:
+      name: AccountDeactivated
+      description: Consumed from authentication.account.deactivated.
+      payload:
+        $ref: './schemas/events/external-projection-event.schema.json#/$defs/accountDeactivated'
+    StudentAcademicEligibilityChanged:
+      name: StudentAcademicEligibilityChanged
+      description: Consumed from academic.student-eligibility.changed.
+      payload:
+        $ref: './schemas/events/external-projection-event.schema.json#/$defs/studentAcademicEligibilityChanged'
+    GetAccountAuthorizationSnapshot:
+      name: GetAccountAuthorizationSnapshot
+      payload:
+        $ref: './schemas/queries/authorization-query.schema.json#/$defs/getAccountAuthorizationSnapshot'
+    ListAccountAuthorizationSnapshotsPage:
+      name: ListAccountAuthorizationSnapshotsPage
+      payload:
+        $ref: './schemas/queries/authorization-query.schema.json#/$defs/listAccountAuthorizationSnapshotsPage'
+    GetAccountAuthorizationSnapshotResult:
+      name: GetAccountAuthorizationSnapshotResult
+      payload:
+        $ref: './schemas/results/authorization-query-result.schema.json#/$defs/getAccountAuthorizationSnapshotResult'
+    ListAccountAuthorizationSnapshotsPageResult:
+      name: ListAccountAuthorizationSnapshotsPageResult
+      payload:
+        $ref: './schemas/results/authorization-query-result.schema.json#/$defs/listAccountAuthorizationSnapshotsPageResult'
+    GetPersonStatusSnapshot:
+      name: GetPersonStatusSnapshot
+      description: Published to platform.queries with routing key users.
+      payload:
+        $ref: './schemas/queries/recovery-query.schema.json#/$defs/getPersonStatusSnapshot'
+    ListPersonStatusSnapshotsPage:
+      name: ListPersonStatusSnapshotsPage
+      description: Published to platform.queries with routing key users.
+      payload:
+        $ref: './schemas/queries/recovery-query.schema.json#/$defs/listPersonStatusSnapshotsPage'
+    GetAccountStatusSnapshot:
+      name: GetAccountStatusSnapshot
+      description: Published to platform.queries with routing key authentication.
+      payload:
+        $ref: './schemas/queries/recovery-query.schema.json#/$defs/getAccountStatusSnapshot'
+    ListAccountStatusSnapshotsPage:
+      name: ListAccountStatusSnapshotsPage
+      description: Published to platform.queries with routing key authentication.
+      payload:
+        $ref: './schemas/queries/recovery-query.schema.json#/$defs/listAccountStatusSnapshotsPage'
+    GetStudentAcademicEligibilitySnapshot:
+      name: GetStudentAcademicEligibilitySnapshot
+      description: Published to platform.queries with routing key academic.
+      payload:
+        $ref: './schemas/queries/recovery-query.schema.json#/$defs/getStudentAcademicEligibilitySnapshot'
+    ListStudentAcademicEligibilitySnapshotsPage:
+      name: ListStudentAcademicEligibilitySnapshotsPage
+      description: Published to platform.queries with routing key academic.
+      payload:
+        $ref: './schemas/queries/recovery-query.schema.json#/$defs/listStudentAcademicEligibilitySnapshotsPage'
+    GetPersonStatusSnapshotResult:
+      name: GetPersonStatusSnapshotResult
+      payload:
+        $ref: './schemas/results/recovery-result.schema.json#/$defs/getPersonStatusSnapshotResult'
+    ListPersonStatusSnapshotsPageResult:
+      name: ListPersonStatusSnapshotsPageResult
+      payload:
+        $ref: './schemas/results/recovery-result.schema.json#/$defs/listPersonStatusSnapshotsPageResult'
+    GetAccountStatusSnapshotResult:
+      name: GetAccountStatusSnapshotResult
+      payload:
+        $ref: './schemas/results/recovery-result.schema.json#/$defs/getAccountStatusSnapshotResult'
+    ListAccountStatusSnapshotsPageResult:
+      name: ListAccountStatusSnapshotsPageResult
+      payload:
+        $ref: './schemas/results/recovery-result.schema.json#/$defs/listAccountStatusSnapshotsPageResult'
+    GetStudentAcademicEligibilitySnapshotResult:
+      name: GetStudentAcademicEligibilitySnapshotResult
+      payload:
+        $ref: './schemas/results/recovery-result.schema.json#/$defs/getStudentAcademicEligibilitySnapshotResult'
+    ListStudentAcademicEligibilitySnapshotsPageResult:
+      name: ListStudentAcademicEligibilitySnapshotsPageResult
+      payload:
+        $ref: './schemas/results/recovery-result.schema.json#/$defs/listStudentAcademicEligibilitySnapshotsPageResult'
