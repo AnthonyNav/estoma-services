@@ -85,7 +85,7 @@ public final class PracticesProvisioningService {
 
     if (!recoveryJobs.isProjectionTrusted("ACADEMIC_ELIGIBILITY")
         || !recoveryJobs.isEntityTrusted("ACADEMIC_ELIGIBILITY", eligibilityKey)) {
-      setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION");
+      setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION", trigger);
       return;
     }
 
@@ -95,12 +95,12 @@ public final class PracticesProvisioningService {
           .anyMatch(message -> "authentication".equals(message.producer())
               && "AccountCreated".equals(message.messageType()));
       if (accountEventPending) {
-        setPendingReason(eligibilityState, "EVENT_PENDING");
+        setPendingReason(eligibilityState, "EVENT_PENDING", trigger);
         return;
       }
       if (accountRoles.findByAccountId(accountId).isPresent()
           || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", accountKey)) {
-        setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION");
+        setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION", trigger);
         recovery.requestAccount(accountId);
       }
       return;
@@ -108,13 +108,13 @@ public final class PracticesProvisioningService {
 
     if (!recoveryJobs.isProjectionTrusted("ACCOUNT_STATUS")
         || !recoveryJobs.isEntityTrusted("ACCOUNT_STATUS", accountKey)) {
-      setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION");
+      setPendingReason(eligibilityState, "PROJECTION_RECONCILIATION", trigger);
       recovery.requestAccount(accountId);
       return;
     }
     if (inbox.hasDeferredNewerThan(
         EVENT_CONSUMER, accountId, account.get().sourceVersion())) {
-      setPendingReason(eligibilityState, "EVENT_PENDING");
+      setPendingReason(eligibilityState, "EVENT_PENDING", trigger);
       return;
     }
 
@@ -200,10 +200,33 @@ public final class PracticesProvisioningService {
 
   private void setPendingReason(
       AcademicEligibilityProjectionRepository.AcademicEligibilityProjection eligibilityState,
-      String pendingReason) {
-    if (!pendingReason.equals(eligibilityState.pendingReason())) {
-      eligibility.updatePendingReason(
-          eligibilityState.studentAcademicProfileId(), eligibilityState.systemCode(), pendingReason);
+      String pendingReason,
+      Trigger trigger) {
+    if (pendingReason.equals(eligibilityState.pendingReason())) {
+      return;
+    }
+    eligibility.updatePendingReason(
+        eligibilityState.studentAcademicProfileId(), eligibilityState.systemCode(), pendingReason);
+    if ("PROJECTION_RECONCILIATION".equals(pendingReason)) {
+      audit.append(new AuthorizationAuditRepository.AuditEntry(
+          UUID.randomUUID(),
+          trigger.messageId(),
+          trigger.sourceProducer(),
+          "AcademicEligibility",
+          eligibilityState.eligibilityId(),
+          eligibilityState.eligibilityVersion(),
+          "ELIGIBILITY_RECONCILIATION_REQUESTED",
+          ActorRef.system("authorization"),
+          trigger.businessInitiatorAccountId(),
+          trigger.businessImportId(),
+          trigger.correlationId(),
+          trigger.causationId(),
+          trigger.operationId(),
+          trigger.idempotencyKey(),
+          "DEFERRED",
+          "PROJECTION_RECONCILIATION",
+          null,
+          trigger.occurredAt()));
     }
   }
 
