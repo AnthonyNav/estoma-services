@@ -366,7 +366,7 @@ public class StudentImportValidationWorker {
       Instant now) {
     outbox.append(messageId, "ResolvePersonByInstitutionalEmail", "QUERY", importId, processVersion,
         importId, null, codec.json(map("institutionalEmail", email)),
-        codec.json(map("operationId", operationId, "actor", SYSTEM_ACTOR)), now);
+         codec.json(map("destination", "users", "operationId", operationId, "actor", SYSTEM_ACTOR)), now);
   }
 
   private void recordFileAccessFailure(UUID importId, Instant now) {

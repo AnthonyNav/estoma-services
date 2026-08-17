@@ -1,7 +1,7 @@
 package com.estoma.academic.messaging;
 
-import com.estoma.academic.application.StudentImportApplicationManager;
-import com.estoma.academic.application.StudentImportPersonResolutionResults;
+import com.estoma.academic.contract.MessageEnvelope;
+import com.estoma.academic.observability.AcademicMessagingMetrics;
 import com.rabbitmq.client.Channel;
 import java.io.IOException;
 import org.slf4j.Logger;
@@ -17,34 +17,55 @@ public class StudentImportResultListener {
   private static final Logger log = LoggerFactory.getLogger(StudentImportResultListener.class);
 
   private final EnvelopeCodec codec;
-  private final StudentImportApplicationManager applications;
-  private final StudentImportPersonResolutionResults resolutions;
+  private final StudentImportResultDispatcher dispatcher;
   private final RetryPublisher retryPublisher;
+  private final AcademicMessagingMetrics metrics;
 
   StudentImportResultListener(
       EnvelopeCodec codec,
-      StudentImportApplicationManager applications,
-      StudentImportPersonResolutionResults resolutions,
-      RetryPublisher retryPublisher) {
+      StudentImportResultDispatcher dispatcher,
+      RetryPublisher retryPublisher,
+      AcademicMessagingMetrics metrics) {
     this.codec = codec;
-    this.applications = applications;
-    this.resolutions = resolutions;
+    this.dispatcher = dispatcher;
     this.retryPublisher = retryPublisher;
+    this.metrics = metrics;
   }
 
   @RabbitListener(id="academicResultListener",queues=AcademicTopology.RESULT_QUEUE,containerFactory="manualAckContainerFactory")
   public void consume(Message message, Channel channel) throws IOException {
     long tag = message.getMessageProperties().getDeliveryTag();
+    MessageEnvelope result;
     try {
-      var result = codec.decode(message.getBody());
-      if ("ResolvePersonByInstitutionalEmailResult".equals(result.messageType())) resolutions.apply(result);
-      else applications.applyResult(result);
+      result = codec.decode(message.getBody());
+    } catch (RuntimeException ex) {
+      log.warn("invalid academic result messageId={} error={}",
+          message.getMessageProperties().getMessageId(), ex.toString());
+      if (retryPublisher.deadLetter(message, "academic.results")) channel.basicAck(tag, false);
+      else channel.basicNack(tag, false, true);
+      return;
+    }
+    try {
+      StudentImportResultDispatcher.Outcome outcome = dispatcher.dispatch(result);
+      if (outcome == StudentImportResultDispatcher.Outcome.STALE) {
+        metrics.staleResult();
+        log.info("ignored stale academic result messageId={} type={}", result.messageId(), result.messageType());
+      } else if (outcome == StudentImportResultDispatcher.Outcome.DUPLICATE) {
+        metrics.duplicate();
+      }
       channel.basicAck(tag, false);
     } catch (RuntimeException ex) {
       log.warn("academic import result failed messageId={} error={}",
           message.getMessageProperties().getMessageId(), ex.toString());
-      if (retryPublisher.retry(message, "academic.results.retry")) channel.basicAck(tag, false);
-      else channel.basicNack(tag, false, false);
+      if (ex instanceof IllegalArgumentException) {
+        if (retryPublisher.deadLetter(message, "academic.results")) channel.basicAck(tag, false);
+        else channel.basicNack(tag, false, true);
+      } else {
+        RetryPublisher.RetryOutcome outcome = retryPublisher.retry(message, "academic.results.retry");
+        if (outcome == RetryPublisher.RetryOutcome.PUBLISHED) channel.basicAck(tag, false);
+        else if (outcome == RetryPublisher.RetryOutcome.EXHAUSTED) channel.basicNack(tag, false, false);
+        else channel.basicNack(tag, false, true);
+      }
     }
   }
 }

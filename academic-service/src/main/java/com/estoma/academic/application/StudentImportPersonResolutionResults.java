@@ -31,7 +31,7 @@ public class StudentImportPersonResolutionResults {
     this.rejectionService = rejectionService;
   }
 
-  /** Applies one Users result to the logical query work identified by correlation and operation id. */
+  /** Applies one Users Result to the logical Query work identified by correlation and operation id. */
   @Transactional
   public boolean apply(MessageEnvelope envelope) {
     validateResultEnvelope(envelope);
@@ -43,10 +43,17 @@ public class StudentImportPersonResolutionResults {
         VALUES ('academic.results',:id,:correlation,:type,:kind,:producer,:aggregate,:version,
           CAST(:envelope AS jsonb),'APPLIED',NULL,:now)
         ON CONFLICT DO NOTHING
-        """).param("id", envelope.messageId()).param("correlation", envelope.correlationId())
-        .param("type", envelope.messageType()).param("kind", envelope.messageKind()).param("producer", envelope.producer())
-        .param("aggregate", envelope.aggregateId()).param("version", envelope.aggregateVersion())
-        .param("envelope", codec.json(envelope)).param("now", java.sql.Timestamp.from(now)).update() == 0) {
+        """)
+        .param("id", envelope.messageId())
+        .param("correlation", envelope.correlationId())
+        .param("type", envelope.messageType())
+        .param("kind", envelope.messageKind())
+        .param("producer", envelope.producer())
+        .param("aggregate", envelope.aggregateId())
+        .param("version", envelope.aggregateVersion())
+        .param("envelope", codec.json(envelope))
+        .param("now", java.sql.Timestamp.from(now))
+        .update() == 0) {
       return false;
     }
 
@@ -55,29 +62,68 @@ public class StudentImportPersonResolutionResults {
         FROM student_import_validation_work
         WHERE work_type=:type AND import_id=:import AND current_operation_id=:operation
         FOR UPDATE
-        """).param("type", WORK_TYPE).param("import", envelope.correlationId())
+        """)
+        .param("type", WORK_TYPE)
+        .param("import", envelope.correlationId())
         .param("operation", envelope.operationId())
-        .query((rs, n) -> new Work(rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, UUID.class), rs.getString(4)))
+        .query((rs, n) -> new Work(
+            rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, UUID.class), rs.getString(4)))
         .optional().orElse(null);
-    if (work == null || !knownQueryAttempt(envelope, work)) return true;
+    if (work == null || !knownQueryAttempt(envelope, work)) {
+      return true;
+    }
+    if (!"WAITING_RESULT".equals(work.status)) {
+      return true;
+    }
+
+    String resultStatus = envelope.payload().path("status").asString();
+    if ("REJECTED".equals(resultStatus) || "FAILED".equals(resultStatus)) {
+      // This is a terminal Result for this Query attempt, not a workbook/business rejection.
+      // Keep the logical work unresolved and preserve the existing next_attempt_at so the
+      // validation worker republishes the same operationId according to its capped retry cadence.
+      jdbc.sql("""
+          UPDATE student_import_validation_work
+          SET last_error_code=:error,last_error_at=:now,updated_at=:now
+          WHERE import_id=:importId AND work_type=:type AND work_key=:email
+            AND current_operation_id=:operation AND status='WAITING_RESULT'
+          """)
+          .param("error", "PERSON_RESOLUTION_" + resultStatus)
+          .param("now", java.sql.Timestamp.from(now))
+          .param("importId", work.importId)
+          .param("type", WORK_TYPE)
+          .param("email", work.email)
+          .param("operation", work.operationId)
+          .update();
+      return true;
+    }
 
     PersonResolution resolution = resolution(work.email, envelope.payload().path("data"));
-    if (!"WAITING_RESULT".equals(work.status)) return true;
     Map<String, Object> result = new java.util.LinkedHashMap<>();
     result.put("outcome", resolution.outcome().name());
     result.put("sourceResultMessageId", envelope.messageId());
-    if (resolution.personId() != null) result.put("personId", resolution.personId());
-    if (resolution.status() != null) result.put("status", resolution.status());
+    if (resolution.personId() != null) {
+      result.put("personId", resolution.personId());
+    }
+    if (resolution.status() != null) {
+      result.put("status", resolution.status());
+    }
     int changed = jdbc.sql("""
         UPDATE student_import_validation_work
         SET status='SUCCEEDED',result=CAST(:result AS jsonb),next_attempt_at=NULL,
             last_error_code=NULL,last_error_at=NULL,updated_at=:now
         WHERE import_id=:importId AND work_type=:type AND work_key=:email
           AND current_operation_id=:operation AND status='WAITING_RESULT'
-        """).param("result", codec.json(result))
-        .param("now", java.sql.Timestamp.from(now)).param("importId", work.importId).param("type", WORK_TYPE)
-        .param("email", work.email).param("operation", work.operationId).update();
-    if (changed != 1) return true;
+        """)
+        .param("result", codec.json(result))
+        .param("now", java.sql.Timestamp.from(now))
+        .param("importId", work.importId)
+        .param("type", WORK_TYPE)
+        .param("email", work.email)
+        .param("operation", work.operationId)
+        .update();
+    if (changed != 1) {
+      return true;
+    }
     if (resolution.outcome() == Outcome.INACTIVE_MATCH) {
       rejectionService.rejectIdentityConflict(
           work.importId,
@@ -97,37 +143,63 @@ public class StudentImportPersonResolutionResults {
             AND correlation_id=:import
             AND payload->>'institutionalEmail'=:email
             AND metadata->>'operationId'=:operation)
-        """).param("causation", envelope.causationId()).param("import", work.importId)
-        .param("email", work.email).param("operation", work.operationId.toString())
+        """)
+        .param("causation", envelope.causationId())
+        .param("import", work.importId)
+        .param("email", work.email)
+        .param("operation", work.operationId.toString())
         .query(Boolean.class).single();
   }
 
   private static void validate(PersonResolution resolution, String email) {
-    if (resolution.outcome() == null) throw new IllegalArgumentException("resolution outcome is required");
+    if (resolution.outcome() == null) {
+      throw new IllegalArgumentException("resolution outcome is required");
+    }
     switch (resolution.outcome()) {
       case FOUND -> {
-        if (resolution.personId() == null || !"ACTIVE".equals(resolution.status())) throw new IllegalArgumentException("FOUND must identify an active Person");
+        if (resolution.personId() == null || !"ACTIVE".equals(resolution.status())) {
+          throw new IllegalArgumentException("FOUND must identify an active Person");
+        }
       }
       case INACTIVE_MATCH -> {
-        if (resolution.personId() == null || !"INACTIVE".equals(resolution.status())) throw new IllegalArgumentException("INACTIVE_MATCH must identify an inactive Person");
+        if (resolution.personId() == null || !"INACTIVE".equals(resolution.status())) {
+          throw new IllegalArgumentException("INACTIVE_MATCH must identify an inactive Person");
+        }
       }
       case NOT_FOUND -> {
-        if (resolution.personId() != null || resolution.status() != null) throw new IllegalArgumentException("NOT_FOUND must not disclose a Person");
+        if (resolution.personId() != null || resolution.status() != null) {
+          throw new IllegalArgumentException("NOT_FOUND must not disclose a Person");
+        }
       }
     }
-    if (email.isBlank()) throw new IllegalArgumentException("institutional email is required");
+    if (email.isBlank()) {
+      throw new IllegalArgumentException("institutional email is required");
+    }
   }
 
   private static void validateResultEnvelope(MessageEnvelope envelope) {
-    if (envelope == null || envelope.messageId() == null || envelope.correlationId() == null
-        || envelope.causationId() == null || envelope.operationId() == null
+    if (envelope == null || envelope.messageVersion() != 1 || envelope.messageId() == null
+        || envelope.correlationId() == null || envelope.causationId() == null || envelope.operationId() == null
         || !"ResolvePersonByInstitutionalEmailResult".equals(envelope.messageType())
         || !"RESULT".equals(envelope.messageKind()) || !"users".equals(envelope.producer())
-        || envelope.payload() == null || !envelope.payload().isObject()
-        || !"SUCCEEDED".equals(envelope.payload().path("status").asString())
-        || !envelope.payload().path("data").isObject()) {
+        || envelope.payload() == null || !envelope.payload().isObject()) {
       throw new IllegalArgumentException("invalid ResolvePersonByInstitutionalEmailResult envelope");
     }
+    String status = envelope.payload().path("status").asString();
+    if ("SUCCEEDED".equals(status)) {
+      if (!envelope.payload().path("data").isObject()) {
+        throw new IllegalArgumentException("SUCCEEDED person-resolution Result requires data");
+      }
+      return;
+    }
+    if ("REJECTED".equals(status) || "FAILED".equals(status)) {
+      String code = envelope.payload().path("error").path("code").asString();
+      if (code.isBlank()) {
+        throw new IllegalArgumentException("terminal person-resolution failure requires error.code");
+      }
+      return;
+    }
+    throw new IllegalArgumentException("unsupported person-resolution Result status");
   }
 
   private static PersonResolution resolution(String email, JsonNode data) {
@@ -143,7 +215,10 @@ public class StudentImportPersonResolutionResults {
     } catch (IllegalArgumentException ex) {
       throw new IllegalArgumentException("invalid person-resolution personId", ex);
     }
-    PersonResolution resolution = new PersonResolution(email, outcome, personId,
+    PersonResolution resolution = new PersonResolution(
+        email,
+        outcome,
+        personId,
         data.hasNonNull("status") ? data.path("status").asString() : null);
     validate(resolution, email);
     return resolution;
