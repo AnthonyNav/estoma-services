@@ -99,14 +99,35 @@ public final class EnvelopeJsonCodec {
       throw new IllegalArgumentException("payload must be an object");
     }
     ObjectNode copy = (ObjectNode) value.deepCopy();
+    removeNullObjectFields(copy);
+    return copy;
+  }
+
+  private static void removeNullObjectFields(ObjectNode object) {
     List<String> nullFields = new ArrayList<>();
-    for (Map.Entry<String, JsonNode> field : copy.properties()) {
+    for (Map.Entry<String, JsonNode> field : object.properties()) {
       if (field.getValue().isNull()) {
         nullFields.add(field.getKey());
+      } else if (field.getValue().isObject()) {
+        removeNullObjectFields((ObjectNode) field.getValue());
+      } else if (field.getValue().isArray()) {
+        removeNullArrayItems(field.getValue());
       }
     }
-    copy.remove(nullFields);
-    return copy;
+    object.remove(nullFields);
+  }
+
+  private static void removeNullArrayItems(JsonNode array) {
+    for (JsonNode item : array) {
+      if (item.isNull()) {
+        throw new IllegalArgumentException("payload arrays must not contain null values");
+      }
+      if (item.isObject()) {
+        removeNullObjectFields((ObjectNode) item);
+      } else if (item.isArray()) {
+        removeNullArrayItems(item);
+      }
+    }
   }
 
   private static UUID requiredUuid(JsonNode node, String field) {

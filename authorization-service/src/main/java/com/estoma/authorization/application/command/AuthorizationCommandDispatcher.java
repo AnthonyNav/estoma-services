@@ -21,6 +21,7 @@ import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.projection.PracticesProvisioningService;
 import com.estoma.authorization.application.support.CanonicalJson;
 import com.estoma.authorization.application.support.OutboxIntentWriter;
+import com.estoma.authorization.application.support.ResultIntentFactory;
 import com.estoma.authorization.domain.exception.DomainRuleViolationException;
 import com.estoma.authorization.domain.model.AccountRoleAssignment;
 import com.estoma.authorization.domain.model.ActorRef;
@@ -463,17 +464,6 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       UUID aggregateId,
       Integer aggregateVersion,
       Instant occurredAt) {
-    Map<String, Object> payload = new LinkedHashMap<>();
-    payload.put("status", result.status());
-    payload.put("data", result.dataJson() == null ? null : new RawJson(result.dataJson()));
-    if (result.error() == null) {
-      payload.put("error", null);
-    } else {
-      Map<String, Object> error = new LinkedHashMap<>();
-      error.put("code", result.error().code());
-      error.put("details", result.error().details());
-      payload.put("error", error);
-    }
     return new OutboundResultIntent(
         UUID.randomUUID(),
         command.operationType() + "Result",
@@ -487,26 +477,8 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
         aggregateVersion,
         metadata.correlationId(),
         metadata.messageId(),
-        rawObjectJson(payload),
+        ResultIntentFactory.payload(result),
         occurredAt);
-  }
-
-  private static String rawObjectJson(Map<String, Object> values) {
-    StringBuilder json = new StringBuilder("{");
-    boolean first = true;
-    for (Map.Entry<String, Object> entry : values.entrySet()) {
-      if (!first) {
-        json.append(',');
-      }
-      first = false;
-      json.append(CanonicalJson.write(entry.getKey())).append(':');
-      if (entry.getValue() instanceof RawJson raw) {
-        json.append(raw.value());
-      } else {
-        json.append(CanonicalJson.write(entry.getValue()));
-      }
-    }
-    return json.append('}').toString();
   }
 
   private void appendAudit(
@@ -1065,7 +1037,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("previousStatus", previousStatus);
     payload.put("status", access.status());
     payload.put("reasonCode", access.reasonCode());
-    payload.put("reasonDetail", access.reasonDetail());
+    if (access.reasonDetail() != null) {
+      payload.put("reasonDetail", access.reasonDetail());
+    }
     payload.put("suspendedAt", access.suspendedAt());
     return event(
         metadata,
@@ -1090,7 +1064,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     payload.put("previousStatus", previousStatus);
     payload.put("status", access.status());
     payload.put("reasonCode", access.reasonCode());
-    payload.put("reasonDetail", access.reasonDetail());
+    if (access.reasonDetail() != null) {
+      payload.put("reasonDetail", access.reasonDetail());
+    }
     payload.put("revokedAt", access.revokedAt());
     return event(
         metadata,
@@ -1154,8 +1130,6 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       AuthorizationErrorCode code, String message) {
     return new AuthorizationRuleViolationException(code, message);
   }
-
-  private record RawJson(String value) {}
 
   private record HandledCommand(
       ApplicationResult result,

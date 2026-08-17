@@ -20,17 +20,6 @@ public final class ResultIntentFactory {
       UUID aggregateId,
       Integer aggregateVersion,
       Instant occurredAt) {
-    Map<String, Object> payload = new LinkedHashMap<>();
-    payload.put("status", result.status());
-    payload.put("data", result.dataJson() == null ? null : new RawJson(result.dataJson()));
-    if (result.error() == null) {
-      payload.put("error", null);
-    } else {
-      Map<String, Object> error = new LinkedHashMap<>();
-      error.put("code", result.error().code());
-      error.put("details", result.error().details());
-      payload.put("error", error);
-    }
     return new OutboundResultIntent(
         UUID.randomUUID(),
         command.operationType() + "Result",
@@ -44,8 +33,25 @@ public final class ResultIntentFactory {
         aggregateVersion,
         metadata.correlationId(),
         metadata.messageId(),
-        rawObjectJson(payload),
+        payload(result),
         occurredAt);
+  }
+
+  public static String payload(ApplicationResult result) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("status", result.status());
+    if (result.dataJson() != null) {
+      payload.put("data", new RawJson(result.dataJson()));
+    }
+    if (result.error() != null) {
+      Map<String, Object> error = new LinkedHashMap<>();
+      error.put("code", result.error().code());
+      if (result.error().details() != null && !result.error().details().isBlank()) {
+        error.put("details", Map.of("message", result.error().details()));
+      }
+      payload.put("error", error);
+    }
+    return rawObjectJson(payload);
   }
 
   private static String rawObjectJson(Map<String, Object> values) {

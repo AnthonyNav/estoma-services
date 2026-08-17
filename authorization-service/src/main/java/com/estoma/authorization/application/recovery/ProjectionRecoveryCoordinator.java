@@ -251,7 +251,9 @@ public final class ProjectionRecoveryCoordinator {
       default -> throw new IllegalStateException("unsupported projection type");
     }
     if (full) {
-      payload.put("cursor", job.cursor());
+      if (job.cursor() != null) {
+        payload.put("cursor", job.cursor());
+      }
       payload.put("limit", DEFAULT_PAGE_SIZE);
     }
     return new OutboundQueryIntent(

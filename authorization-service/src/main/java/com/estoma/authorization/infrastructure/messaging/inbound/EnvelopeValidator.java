@@ -111,7 +111,6 @@ final class EnvelopeValidator {
       case RESULT -> {
         WireValues.uuid(raw, "causationId");
         WireValues.uuid(raw, "operationId");
-        forbidden(raw, "idempotencyKey");
       }
     }
   }
