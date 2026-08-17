@@ -8,6 +8,7 @@ import com.estoma.authorization.application.projection.ProjectionEventMetadata;
 import com.estoma.authorization.contracts.MessageEnvelope;
 import com.estoma.authorization.domain.model.LoginType;
 import com.estoma.authorization.domain.model.ProjectedStatus;
+import com.estoma.authorization.domain.model.SystemCode;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -58,9 +59,21 @@ final class ExternalEventMessageMapper {
         ? Set.of("personId", "status", "version", "deactivatedAt", "reasonCode")
         : allowed;
     WireValues.fields(payload, required, allowed);
+    WireValues.uuid(payload, "personId");
     ProjectedStatus status = WireValues.enumValue(payload, "status", ProjectedStatus.class);
+    WireValues.positiveInt(payload, "version");
     if (!expectedStatus.equals(status.name())) {
       throw new InvalidMessageException("Person status does not match Event type");
+    }
+    if ("PersonCreated".equals(metadata.messageType())) {
+      WireValues.text(payload, "firstName");
+      WireValues.text(payload, "paternalSurname");
+      WireValues.text(payload, "maternalSurname");
+      WireValues.text(payload, "institutionalEmail");
+      WireValues.text(payload, "phone");
+      WireValues.instant(payload, "createdAt");
+    } else if ("PersonActivated".equals(metadata.messageType())) {
+      WireValues.instant(payload, "activatedAt");
     }
     if ("PersonDeactivated".equals(metadata.messageType())) {
       String reasonCode = WireValues.text(payload, "reasonCode");
@@ -68,6 +81,7 @@ final class ExternalEventMessageMapper {
       if ("OTHER".equals(reasonCode) != (reasonDetail != null)) {
         throw new InvalidMessageException("Person reasonDetail is conditional on OTHER");
       }
+      WireValues.instant(payload, "deactivatedAt");
     }
     if (!"users".equals(metadata.producer())
         || !metadata.aggregateId().equals(WireValues.uuid(payload, "personId"))
@@ -84,7 +98,11 @@ final class ExternalEventMessageMapper {
   private AccountProjectionEvent accountCreated(ProjectionEventMetadata metadata, JsonNode payload) {
     Set<String> fields = Set.of("accountId", "personId", "loginType", "status", "createdAt");
     WireValues.fields(payload, fields, fields);
+    WireValues.uuid(payload, "accountId");
+    WireValues.uuid(payload, "personId");
+    WireValues.enumValue(payload, "loginType", LoginType.class);
     ProjectedStatus status = WireValues.enumValue(payload, "status", ProjectedStatus.class);
+    WireValues.instant(payload, "createdAt");
     if (status != ProjectedStatus.INACTIVE) {
       throw new InvalidMessageException("AccountCreated requires INACTIVE status");
     }
@@ -107,15 +125,23 @@ final class ExternalEventMessageMapper {
         ? Set.of("accountId", "personId", "previousStatus", "status", "reasonCode", "deactivatedAt")
         : fields;
     WireValues.fields(payload, required, fields);
+    WireValues.uuid(payload, "accountId");
+    WireValues.uuid(payload, "personId");
+    WireValues.enumValue(payload, "previousStatus", ProjectedStatus.class);
     ProjectedStatus status = WireValues.enumValue(payload, "status", ProjectedStatus.class);
     if (!expectedStatus.equals(status.name())) {
       throw new InvalidMessageException("Account status does not match Event type");
     }
     if ("AccountDeactivated".equals(metadata.messageType())) {
+      WireValues.text(payload, "reasonCode");
       String reasonDetail = WireValues.optionalText(payload, "reasonDetail");
       if ("OTHER".equals(WireValues.text(payload, "reasonCode")) != (reasonDetail != null)) {
         throw new InvalidMessageException("Account reasonDetail is conditional on OTHER");
       }
+      WireValues.instant(payload, "deactivatedAt");
+    } else {
+      WireValues.text(payload, "activationReason");
+      WireValues.instant(payload, "activatedAt");
     }
     if (!"authentication".equals(metadata.producer())
         || !metadata.aggregateId().equals(WireValues.uuid(payload, "accountId"))) {
@@ -143,6 +169,18 @@ final class ExternalEventMessageMapper {
         "academicProfileVersion",
         "evaluatedAt");
     WireValues.fields(payload, fields, fields);
+    WireValues.uuid(payload, "eligibilityId");
+    WireValues.uuid(payload, "studentAcademicProfileId");
+    WireValues.uuid(payload, "accountId");
+    String systemCode = WireValues.text(payload, "systemCode");
+    if (!SystemCode.PRACTICAS_PROFESIONALES.name().equals(systemCode)) {
+      throw new InvalidMessageException("unsupported academic eligibility systemCode");
+    }
+    WireValues.bool(payload, "eligible");
+    WireValues.positiveInt(payload, "policyVersion");
+    WireValues.positiveInt(payload, "eligibilityVersion");
+    WireValues.positiveInt(payload, "academicProfileVersion");
+    WireValues.instant(payload, "evaluatedAt");
     if (!"academic".equals(metadata.producer())
         || !metadata.aggregateId().equals(WireValues.uuid(payload, "eligibilityId"))
         || metadata.aggregateVersion() != WireValues.positiveInt(payload, "eligibilityVersion")) {
@@ -152,7 +190,7 @@ final class ExternalEventMessageMapper {
         metadata,
         WireValues.uuid(payload, "eligibilityId"),
         WireValues.uuid(payload, "studentAcademicProfileId"),
-        WireValues.text(payload, "systemCode"),
+        systemCode,
         WireValues.uuid(payload, "accountId"),
         WireValues.bool(payload, "eligible"),
         WireValues.positiveInt(payload, "policyVersion"),

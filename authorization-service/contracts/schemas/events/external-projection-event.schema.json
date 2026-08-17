@@ -61,7 +61,7 @@
                 "firstName": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
                 "paternalSurname": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
                 "maternalSurname": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
-                "institutionalEmail": { "type": "string", "format": "email" },
+                "institutionalEmail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
                 "phone": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
                 "status": { "const": "ACTIVE" },
                 "version": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
