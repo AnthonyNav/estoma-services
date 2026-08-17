@@ -23,7 +23,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Claims in a short transaction, publishes outside it, then fences the state transition. */
-@Component
+@Component("outboxRelayService")
 public final class OutboxRelay {
 
   private final OutboxRepository outbox;
