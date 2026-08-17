@@ -33,6 +33,7 @@ public final class OutboxRelay {
   private final OutboxBackoffPolicy backoff;
   private final TransactionTemplate transactions;
   private final Clock clock;
+  private final Counter publishAttempts;
   private final Counter published;
   private final Counter retried;
   private final Counter failed;
@@ -54,10 +55,11 @@ public final class OutboxRelay {
     this.backoff = backoff;
     this.transactions = new TransactionTemplate(transactionManager);
     this.clock = authorizationClock;
-    this.published = Counter.builder("authorization.messaging.outbox.published").register(meterRegistry);
-    this.retried = Counter.builder("authorization.messaging.outbox.retried").register(meterRegistry);
-    this.failed = Counter.builder("authorization.messaging.outbox.failed").register(meterRegistry);
-    this.claimLost = Counter.builder("authorization.messaging.outbox.claim_lost").register(meterRegistry);
+    this.publishAttempts = Counter.builder("authorization.outbox.publish.attempts").register(meterRegistry);
+    this.published = Counter.builder("authorization.outbox.publish.success").register(meterRegistry);
+    this.retried = Counter.builder("authorization.outbox.publish.retry").register(meterRegistry);
+    this.failed = Counter.builder("authorization.outbox.failed").register(meterRegistry);
+    this.claimLost = Counter.builder("authorization.outbox.claim.lost").register(meterRegistry);
   }
 
   @Scheduled(fixedDelayString = "${estoma.messaging.outbox-poll-interval:1s}")
@@ -83,6 +85,7 @@ public final class OutboxRelay {
 
   private void relayOne(OutboxMessage message, UUID claimToken) {
     try {
+      publishAttempts.increment();
       publish(message);
       Boolean marked = transactions.execute(status ->
           outbox.markPublished(message.messageId(), claimToken, clock.instant()));
