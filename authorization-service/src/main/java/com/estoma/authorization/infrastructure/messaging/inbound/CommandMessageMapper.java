@@ -227,7 +227,6 @@ final class CommandMessageMapper {
             "sourceService",
             "sourceOperation",
             "sourceResultStatus",
-            "sourceResultMessageId",
             "entityType",
             "entityId"),
         EVIDENCE_FIELDS);
@@ -235,7 +234,7 @@ final class CommandMessageMapper {
         WireValues.text(value, "sourceService"),
         WireValues.text(value, "sourceOperation"),
         WireValues.text(value, "sourceResultStatus"),
-        WireValues.uuid(value, "sourceResultMessageId"),
+        WireValues.optionalUuid(value, "sourceResultMessageId"),
         WireValues.text(value, "entityType"),
         WireValues.uuid(value, "entityId"),
         WireValues.optionalPositiveInt(value, "evidenceVersion"));
