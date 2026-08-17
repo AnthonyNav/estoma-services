@@ -55,9 +55,13 @@ final class ExternalEventMessageMapper {
 
   private PersonProjectionEvent person(
       ProjectionEventMetadata metadata, JsonNode payload, String expectedStatus, Set<String> allowed) {
-    Set<String> required = "PersonDeactivated".equals(metadata.messageType())
-        ? Set.of("personId", "status", "version", "deactivatedAt", "reasonCode")
-        : allowed;
+    Set<String> required = switch (metadata.messageType()) {
+      case "PersonCreated" -> Set.of(
+          "personId", "firstName", "paternalSurname", "institutionalEmail", "status", "version", "createdAt");
+      case "PersonDeactivated" -> Set.of(
+          "personId", "status", "version", "deactivatedAt", "reasonCode");
+      default -> allowed;
+    };
     WireValues.fields(payload, required, allowed);
     WireValues.uuid(payload, "personId");
     ProjectedStatus status = WireValues.enumValue(payload, "status", ProjectedStatus.class);
@@ -68,9 +72,13 @@ final class ExternalEventMessageMapper {
     if ("PersonCreated".equals(metadata.messageType())) {
       WireValues.text(payload, "firstName");
       WireValues.text(payload, "paternalSurname");
-      WireValues.text(payload, "maternalSurname");
+      if (payload.has("maternalSurname")) {
+        WireValues.text(payload, "maternalSurname");
+      }
       WireValues.text(payload, "institutionalEmail");
-      WireValues.text(payload, "phone");
+      if (payload.has("phone")) {
+        WireValues.text(payload, "phone");
+      }
       WireValues.instant(payload, "createdAt");
     } else if ("PersonActivated".equals(metadata.messageType())) {
       WireValues.instant(payload, "activatedAt");
@@ -78,8 +86,8 @@ final class ExternalEventMessageMapper {
     if ("PersonDeactivated".equals(metadata.messageType())) {
       String reasonCode = WireValues.text(payload, "reasonCode");
       String reasonDetail = WireValues.optionalText(payload, "reasonDetail");
-      if ("OTHER".equals(reasonCode) != (reasonDetail != null)) {
-        throw new InvalidMessageException("Person reasonDetail is conditional on OTHER");
+      if ("OTHER".equals(reasonCode) && reasonDetail == null) {
+        throw new InvalidMessageException("Person reasonDetail is required for OTHER");
       }
       WireValues.instant(payload, "deactivatedAt");
     }
@@ -133,10 +141,10 @@ final class ExternalEventMessageMapper {
       throw new InvalidMessageException("Account status does not match Event type");
     }
     if ("AccountDeactivated".equals(metadata.messageType())) {
-      WireValues.text(payload, "reasonCode");
+      String reasonCode = WireValues.text(payload, "reasonCode");
       String reasonDetail = WireValues.optionalText(payload, "reasonDetail");
-      if ("OTHER".equals(WireValues.text(payload, "reasonCode")) != (reasonDetail != null)) {
-        throw new InvalidMessageException("Account reasonDetail is conditional on OTHER");
+      if ("OTHER".equals(reasonCode) && reasonDetail == null) {
+        throw new InvalidMessageException("Account reasonDetail is required for OTHER");
       }
       WireValues.instant(payload, "deactivatedAt");
     } else {
