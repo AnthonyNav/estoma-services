@@ -348,16 +348,16 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       inbox.markDeferred(COMMAND_CONSUMER, metadata.messageId(), existing.pendingReason(), now);
       return CommandOutcome.deferred(existing.pendingReason());
     }
-    if (!newDelivery) {
-      return CommandOutcome.duplicate();
-    }
-    inbox.markApplied(COMMAND_CONSUMER, metadata.messageId(), now, now);
     ApplicationResult result = new ApplicationResult(
         ApplicationResult.Status.valueOf(existing.resultStatus()),
         existing.resultDataJson(),
         existing.errorCode() == null
             ? null
             : new ApplicationResult.Error(existing.errorCode(), existing.errorDetailsJson()));
+    if (!newDelivery) {
+      return CommandOutcome.duplicateTerminal(result);
+    }
+    inbox.markApplied(COMMAND_CONSUMER, metadata.messageId(), now, now);
     return CommandOutcome.terminal(result, List.of(), List.of());
   }
 

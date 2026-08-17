@@ -43,4 +43,9 @@ public record CommandOutcome(
   public static CommandOutcome duplicate() {
     return new CommandOutcome(Optional.empty(), List.of(), List.of(), false, null, true);
   }
+
+  /** Keeps a direct application caller's terminal Result while marking the delivery as already applied. */
+  public static CommandOutcome duplicateTerminal(ApplicationResult result) {
+    return new CommandOutcome(Optional.of(result), List.of(), List.of(), false, null, true);
+  }
 }

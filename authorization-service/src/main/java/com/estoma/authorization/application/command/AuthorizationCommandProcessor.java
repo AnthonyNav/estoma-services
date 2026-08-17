@@ -156,6 +156,9 @@ public final class AuthorizationCommandProcessor
         && command.targetAccountId() != null) {
       recovery.requestAccount(command.targetAccountId());
     }
+    if (outcome.duplicateDelivery()) {
+      return CommandOutcome.duplicate();
+    }
     if (outcome.result().isPresent() && outcome.outboundResults().isEmpty()) {
       return transactions.inTransaction(() -> replayConcurrentTerminalResult(metadata, command));
     }
