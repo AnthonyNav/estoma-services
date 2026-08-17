@@ -156,7 +156,19 @@ public final class AuthorizationCommandProcessor
         && command.targetAccountId() != null) {
       recovery.requestAccount(command.targetAccountId());
     }
+    if (outcome.result().isPresent() && outcome.outboundResults().isEmpty()) {
+      return transactions.inTransaction(() -> replayConcurrentTerminalResult(metadata, command));
+    }
     return outcome;
+  }
+
+  private CommandOutcome replayConcurrentTerminalResult(
+      CommandMetadata metadata, AuthorizationCommand command) {
+    CommandIdempotencyRepository.IdempotencyRecord record = idempotency.find(
+            metadata.producer(), command.operationType(), metadata.idempotencyKey())
+        .filter(value -> !"DEFERRED".equals(value.status()))
+        .orElseThrow(() -> new IllegalStateException("terminal idempotency record disappeared"));
+    return replayTerminalResult(metadata, command, record);
   }
 
   /**
