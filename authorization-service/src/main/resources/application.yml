@@ -79,7 +79,7 @@ management:
       show-components: never
       group:
         readiness:
-          include: db,schemaVersion
+          include: db,schemaVersion,rabbit,outboxRelay
         liveness:
           include: livenessState
     prometheus:
