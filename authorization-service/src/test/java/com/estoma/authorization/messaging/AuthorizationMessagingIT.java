@@ -42,6 +42,7 @@ import tools.jackson.databind.ObjectMapper;
 class AuthorizationMessagingIT extends AbstractMessagingIT {
 
   private static final Instant NOW = Instant.parse("2026-08-16T00:00:00Z");
+  private static final UUID ALUMNO_ROLE_ID = UUID.fromString("00000000-0000-0000-0000-000000000201");
   private static final UUID SUPERADMIN_ROLE_ID = UUID.fromString("00000000-0000-0000-0000-000000000205");
 
   @Autowired private RabbitTemplate rabbit;
@@ -318,6 +319,36 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
   }
 
   @Test
+  void duplicateEligibilityEventGrantsPracticesAccessExactlyOnce() {
+    UUID accountId = seedAccount(LoginType.MATRICULA);
+    accountRoles.insert(AccountRoleAssignment.createNew(
+        accountId, ALUMNO_ROLE_ID, RoleCode.ALUMNO, ActorRef.system("academic"), NOW));
+    UUID eligibilityId = UUID.randomUUID();
+    MessageEnvelope event = eligibilityEvent(UUID.randomUUID(), eligibilityId, UUID.randomUUID(), accountId);
+    String eventQueue = declareEventQueue("authorization.system-access.granted");
+
+    send(event, MessagingNames.EVENTS_EXCHANGE, "academic.student-eligibility.changed");
+    send(event, MessagingNames.EVENTS_EXCHANGE, "academic.student-eligibility.changed");
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+      assertThat(jdbc.sql("SELECT count(*) FROM system_accesses WHERE account_id = :accountId")
+          .param("accountId", accountId)
+          .query(Long.class)
+          .single()).isEqualTo(1);
+      assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'SystemAccessGranted'")
+          .query(Long.class)
+          .single()).isEqualTo(1);
+    });
+    relay.relay();
+
+    JsonNode granted = receive(eventQueue);
+    assertThat(granted.path("messageType").asText()).isEqualTo("SystemAccessGranted");
+    assertThat(granted.path("payload").path("accountId").asText()).isEqualTo(accountId.toString());
+    assertThat(granted.path("payload").path("systemCode").asText()).isEqualTo("PRACTICAS_PROFESIONALES");
+    assertThat(rabbit.receive(eventQueue, 250)).isNull();
+  }
+
+  @Test
   void invalidWireMessageIsConfirmedIntoTheCommandDlq() {
     send(new MessageEnvelope(
         UUID.randomUUID(),
@@ -450,6 +481,34 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
         null,
         new WireActor("SYSTEM", null, "authentication"),
         mapper.createObjectNode().put("status", "NOT_FOUND"));
+  }
+
+  private MessageEnvelope eligibilityEvent(
+      UUID messageId, UUID eligibilityId, UUID studentAcademicProfileId, UUID accountId) {
+    return new MessageEnvelope(
+        messageId,
+        "StudentAcademicEligibilityChanged",
+        1,
+        MessageKind.EVENT,
+        "academic",
+        NOW,
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        null,
+        null,
+        eligibilityId,
+        1,
+        new WireActor("SYSTEM", null, "academic"),
+        mapper.createObjectNode()
+            .put("eligibilityId", eligibilityId.toString())
+            .put("studentAcademicProfileId", studentAcademicProfileId.toString())
+            .put("accountId", accountId.toString())
+            .put("systemCode", "PRACTICAS_PROFESIONALES")
+            .put("eligible", true)
+            .put("policyVersion", 1)
+            .put("eligibilityVersion", 1)
+            .put("academicProfileVersion", 1)
+            .put("evaluatedAt", NOW.toString()));
   }
 
   private void send(MessageEnvelope envelope, String exchange, String routingKey) {
