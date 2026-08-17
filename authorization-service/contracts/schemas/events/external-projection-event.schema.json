@@ -30,8 +30,7 @@
       "allOf": [
         {
           "if": { "properties": { "reasonCode": { "const": "OTHER" } }, "required": ["reasonCode"] },
-          "then": { "required": ["reasonDetail"] },
-          "else": { "not": { "required": ["reasonDetail"] } }
+          "then": { "required": ["reasonDetail"] }
         }
       ]
     },
@@ -49,9 +48,7 @@
                 "personId",
                 "firstName",
                 "paternalSurname",
-                "maternalSurname",
                 "institutionalEmail",
-                "phone",
                 "status",
                 "version",
                 "createdAt"
