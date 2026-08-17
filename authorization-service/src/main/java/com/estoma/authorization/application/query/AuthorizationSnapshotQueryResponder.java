@@ -43,6 +43,33 @@ public final class AuthorizationSnapshotQueryResponder {
     return transactions.inTransaction(() -> respondInTransaction(metadata, query));
   }
 
+  /**
+   * Persists the terminal technical outcome for a valid Query after transport retry is exhausted,
+   * or immediately for a non-retryable technical failure. The listener ACKs only after this
+   * transaction commits; if this transaction also fails the delivery must be isolated in the DLQ.
+   */
+  public OutboundQueryResultIntent respondFailed(
+      AuthorizationQueryMetadata metadata, String errorCode) {
+    return transactions.inTransaction(() -> {
+      Instant now = clock.instant();
+      OutboundQueryResultIntent intent = new OutboundQueryResultIntent(
+          UUID.randomUUID(),
+          metadata.messageType() + "Result",
+          "authorization",
+          metadata.producer(),
+          metadata.operationId(),
+          metadata.actor(),
+          metadata.correlationId(),
+          metadata.messageId(),
+          CanonicalJson.write(Map.of(
+              "status", "FAILED",
+              "error", Map.of("code", errorCode))),
+          now);
+      OutboxIntentWriter.append(outbox, intent);
+      return intent;
+    });
+  }
+
   private OutboundQueryResultIntent respondInTransaction(
       AuthorizationQueryMetadata metadata, AuthorizationSnapshotQuery query) {
     QueryResult result;
