@@ -1,6 +1,7 @@
 package com.estoma.authorization.application.port;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -13,6 +14,12 @@ public interface ProjectionRecoveryJobRepository {
   Optional<RecoveryJob> findWaitingByQueryMessageId(UUID queryMessageId);
 
   boolean hasActiveFull(String projectionType);
+
+  boolean hasCompletedFull(String projectionType);
+
+  boolean hasFailedFull(String projectionType);
+
+  List<RecoveryJob> findWaitingBefore(Instant cutoff, int limit);
 
   /** Latest FULL job is COMPLETED or no FULL job exists. */
   boolean isProjectionTrusted(String projectionType);

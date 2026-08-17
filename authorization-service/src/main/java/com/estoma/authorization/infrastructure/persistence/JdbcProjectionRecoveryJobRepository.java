@@ -1,6 +1,8 @@
 package com.estoma.authorization.infrastructure.persistence;
 
 import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -62,6 +64,43 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
         .param("projectionType", projectionType)
         .query(Boolean.class)
         .single();
+  }
+
+  @Override
+  public boolean hasCompletedFull(String projectionType) {
+    return jdbc.sql(
+            "SELECT EXISTS (SELECT 1 FROM projection_recovery_jobs "
+                + "WHERE projection_type = :projectionType AND scope = 'FULL' "
+                + "AND status = 'COMPLETED')")
+        .param("projectionType", projectionType)
+        .query(Boolean.class)
+        .single();
+  }
+
+  @Override
+  public boolean hasFailedFull(String projectionType) {
+    return jdbc.sql(
+            "SELECT EXISTS (SELECT 1 FROM projection_recovery_jobs "
+                + "WHERE projection_type = :projectionType AND scope = 'FULL' "
+                + "AND status = 'FAILED')")
+        .param("projectionType", projectionType)
+        .query(Boolean.class)
+        .single();
+  }
+
+  @Override
+  public List<RecoveryJob> findWaitingBefore(Instant cutoff, int limit) {
+    if (limit <= 0) {
+      throw new IllegalArgumentException("recovery job limit must be positive");
+    }
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM projection_recovery_jobs "
+                + "WHERE status = 'WAITING_RESULT' AND updated_at < :cutoff "
+                + "ORDER BY updated_at, recovery_job_id LIMIT :limit")
+        .param("cutoff", Timestamps.toTimestamp(cutoff))
+        .param("limit", limit)
+        .query(RecoveryJobRowMapper.INSTANCE)
+        .list();
   }
 
   @Override

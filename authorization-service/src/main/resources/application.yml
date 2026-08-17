@@ -79,7 +79,7 @@ management:
       show-components: never
       group:
         readiness:
-          include: db,schemaVersion,rabbit,outboxRelay,commandConsumer,externalEventConsumer,queryConsumer,recoveryResultConsumer
+          include: db,schemaVersion,rabbit,outboxRelay,projectionRecovery,commandConsumer,externalEventConsumer,queryConsumer,recoveryResultConsumer
         liveness:
           include: livenessState
     prometheus:
