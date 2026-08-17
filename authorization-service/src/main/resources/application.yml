@@ -52,7 +52,7 @@ estoma:
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     listeners-enabled: ${ESTOMA_MESSAGING_LISTENERS_ENABLED:true}
     publisher-confirm-timeout: ${ESTOMA_PUBLISHER_CONFIRM_TIMEOUT:5s}
-    outbox-claim-batch-size: ${ESTOMA_OUTBOX_CLAIM_BATCH_SIZE:50}
+    outbox-claim-batch-size: ${ESTOMA_OUTBOX_CLAIM_BATCH_SIZE:10}
     outbox-lease: ${ESTOMA_OUTBOX_LEASE:2m}
     outbox-poll-interval: ${ESTOMA_OUTBOX_POLL_INTERVAL:1s}
     outbox-relay-enabled: ${ESTOMA_OUTBOX_RELAY_ENABLED:true}

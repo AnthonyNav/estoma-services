@@ -18,6 +18,9 @@ import tools.jackson.databind.JsonNode;
 final class RecoveryResultMessageMapper {
 
   ProjectionRecoveryResult map(MessageEnvelope envelope) {
+    if (envelope.idempotencyKey() != null) {
+      throw new InvalidMessageException("idempotencyKey is not applicable to recovery Results");
+    }
     JsonNode payload = envelope.payload();
     Set<String> fields = Set.of("status", "data", "error");
     WireValues.fields(payload, Set.of("status"), fields);

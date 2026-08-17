@@ -20,8 +20,12 @@ public record MessagingProperties(
 
   public MessagingProperties {
     publisherConfirmTimeout = positive(publisherConfirmTimeout, Duration.ofSeconds(5));
-    outboxClaimBatchSize = outboxClaimBatchSize > 0 ? outboxClaimBatchSize : 50;
+    outboxClaimBatchSize = outboxClaimBatchSize > 0 ? outboxClaimBatchSize : 10;
     outboxLease = positive(outboxLease, Duration.ofMinutes(2));
+    Duration minimumLease = publisherConfirmTimeout.multipliedBy(outboxClaimBatchSize + 1L);
+    if (outboxLease.compareTo(minimumLease) < 0) {
+      throw new IllegalArgumentException("outboxLease must cover the claimed batch and one confirmation margin");
+    }
     outboxPollInterval = positive(outboxPollInterval, Duration.ofSeconds(1));
     recoveryPollInterval = positive(recoveryPollInterval, Duration.ofSeconds(1));
     recoveryResultTimeout = positive(recoveryResultTimeout, Duration.ofSeconds(30));
