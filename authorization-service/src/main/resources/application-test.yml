@@ -12,6 +12,9 @@ spring:
         auto-startup: false
 
 management:
+  health:
+    rabbit:
+      enabled: false
   endpoint:
     health:
       group:
