@@ -56,6 +56,15 @@ final class ExternalEventListener {
 
   @RabbitListener(id = "externalEventConsumer", queues = MessagingNames.EVENT_QUEUE, containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
+    long started = System.nanoTime();
+    try {
+      handle(message, channel);
+    } finally {
+      metrics.processingDuration(CONSUMER, System.nanoTime() - started);
+    }
+  }
+
+  private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     try {
       var event = mapper.map(validator.validate(codec.readTree(message.getBody()), MessageKind.EVENT, TYPES));
