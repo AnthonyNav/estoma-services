@@ -182,18 +182,18 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     Instant now = clock.instant();
     String payloadJson = CommandPayloads.write(command);
     String fingerprint = CommandPayloads.fingerprint(metadata, command);
-    ensureInbox(metadata, command, payloadJson, now);
+    boolean newDelivery = ensureInbox(metadata, command, payloadJson, now);
 
     Optional<IdempotencyRecord> existing = idempotency.find(
         metadata.producer(), command.operationType(), metadata.idempotencyKey());
     if (existing.isPresent()) {
-      return handleExistingIdempotency(metadata, command, fingerprint, existing.get(), now);
+      return handleExistingIdempotency(metadata, command, fingerprint, existing.get(), now, newDelivery);
     }
 
     IdempotencyRecord initial = initialIdempotencyRecord(metadata, command, fingerprint, now);
     if (!idempotency.insertIfAbsent(initial)) {
       return idempotency.find(metadata.producer(), command.operationType(), metadata.idempotencyKey())
-          .map(record -> handleExistingIdempotency(metadata, command, fingerprint, record, now))
+          .map(record -> handleExistingIdempotency(metadata, command, fingerprint, record, now, newDelivery))
           .orElseThrow(() -> new IllegalStateException("idempotency reservation disappeared"));
     }
 
@@ -269,9 +269,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
     }
   }
 
-  private void ensureInbox(
+  private boolean ensureInbox(
       CommandMetadata metadata, AuthorizationCommand command, String payloadJson, Instant now) {
-    inbox.insertIfAbsent(new ProcessedMessageRepository.ProcessedMessage(
+    return inbox.insertIfAbsent(new ProcessedMessageRepository.ProcessedMessage(
         COMMAND_CONSUMER,
         metadata.messageId(),
         "DEFERRED",
@@ -323,7 +323,8 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       AuthorizationCommand command,
       String fingerprint,
       IdempotencyRecord existing,
-      Instant now) {
+      Instant now,
+      boolean newDelivery) {
     if (!existing.requestFingerprint().equals(fingerprint)) {
       return finalizeStandaloneRejection(
           metadata,
@@ -346,6 +347,9 @@ public final class AuthorizationCommandDispatcher implements CommandDispatcher {
       }
       inbox.markDeferred(COMMAND_CONSUMER, metadata.messageId(), existing.pendingReason(), now);
       return CommandOutcome.deferred(existing.pendingReason());
+    }
+    if (!newDelivery) {
+      return CommandOutcome.duplicate();
     }
     inbox.markApplied(COMMAND_CONSUMER, metadata.messageId(), now, now);
     ApplicationResult result = new ApplicationResult(
