@@ -3,9 +3,11 @@ package com.estoma.authorization.infrastructure.messaging.inbound;
 import com.estoma.authorization.application.command.CommandOutcome;
 import com.estoma.authorization.application.port.CommandDispatcher;
 import com.estoma.authorization.application.port.TerminalCommandFailureRecorder;
+import com.estoma.authorization.contracts.MessageEnvelope;
 import com.estoma.authorization.contracts.MessageKind;
 import com.estoma.authorization.contracts.MessagingNames;
 import com.estoma.authorization.infrastructure.messaging.EnvelopeJsonCodec;
+import com.estoma.authorization.infrastructure.messaging.MessagingLog;
 import com.estoma.authorization.infrastructure.messaging.MessagingMetrics;
 import com.estoma.authorization.infrastructure.messaging.outbound.RabbitPublishException;
 import com.rabbitmq.client.Channel;
@@ -38,6 +40,7 @@ final class CommandListener {
   private final TransientFailureClassifier classifier;
   private final FailureRouter failures;
   private final MessagingMetrics metrics;
+  private final MessagingLog log;
 
   CommandListener(
       EnvelopeJsonCodec codec,
@@ -47,7 +50,8 @@ final class CommandListener {
       TerminalCommandFailureRecorder terminalFailures,
       TransientFailureClassifier classifier,
       FailureRouter failures,
-      MessagingMetrics metrics) {
+      MessagingMetrics metrics,
+      MessagingLog log) {
     this.codec = codec;
     this.validator = validator;
     this.mapper = mapper;
@@ -56,6 +60,7 @@ final class CommandListener {
     this.classifier = classifier;
     this.failures = failures;
     this.metrics = metrics;
+    this.log = log;
   }
 
   @RabbitListener(id = "commandConsumer", queues = MessagingNames.COMMAND_QUEUE, containerFactory = "manualAckContainerFactory")
@@ -70,10 +75,13 @@ final class CommandListener {
 
   private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
+    MessageEnvelope envelope;
     CommandMessageMapper.MappedCommand mapped;
     try {
-      mapped = mapper.map(validator.validate(codec.readTree(message.getBody()), MessageKind.COMMAND, TYPES));
+      envelope = validator.validate(codec.readTree(message.getBody()), MessageKind.COMMAND, TYPES);
+      mapped = mapper.map(envelope);
     } catch (RuntimeException exception) {
+      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
       routeInvalid(message, channel, deliveryTag);
       return;
     }
@@ -86,10 +94,20 @@ final class CommandListener {
       if (outcome.duplicateDelivery()) {
         metrics.duplicate(CONSUMER);
       }
+      String processingResult = outcome.deferred()
+          ? "DEFERRED"
+          : outcome.result().map(result -> result.status().name())
+              .orElse(outcome.duplicateDelivery() ? "DUPLICATE" : "APPLIED");
+      String errorCode = outcome.result()
+          .filter(result -> result.error() != null)
+          .map(result -> result.error().code())
+          .orElse(null);
+      log.processed(envelope, message, CONSUMER, processingResult, errorCode);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException failure) {
+      log.transportFailure(envelope, message, CONSUMER, "TECHNICAL_FAILURE", failure);
       if (classifier.isTransient(failure) && failures.isFinalAttempt(message, FailureRouter.COMMANDS)) {
-        recordTerminalFailureOrDlq(message, channel, deliveryTag, mapped);
+        recordTerminalFailureOrDlq(message, channel, deliveryTag, envelope, mapped);
         return;
       }
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(failure));
@@ -100,12 +118,16 @@ final class CommandListener {
       Message message,
       Channel channel,
       long deliveryTag,
+      MessageEnvelope envelope,
       CommandMessageMapper.MappedCommand mapped) throws IOException {
     try {
       CommandOutcome outcome = terminalFailures.recordTerminalFailure(mapped.metadata(), mapped.command());
       metrics.commandOutcome(outcome);
+      log.processed(envelope, message, CONSUMER, "FAILED", "TECHNICAL_FAILURE");
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException terminalPersistenceFailure) {
+      log.transportFailure(
+          envelope, message, CONSUMER, "TERMINAL_PERSISTENCE_FAILED", terminalPersistenceFailure);
       routeInvalid(message, channel, deliveryTag);
     }
   }
