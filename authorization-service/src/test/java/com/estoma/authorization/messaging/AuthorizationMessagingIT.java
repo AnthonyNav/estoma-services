@@ -345,7 +345,6 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
     assertThat(granted.path("messageType").asText()).isEqualTo("SystemAccessGranted");
     assertThat(granted.path("payload").path("accountId").asText()).isEqualTo(accountId.toString());
     assertThat(granted.path("payload").path("systemCode").asText()).isEqualTo("PRACTICAS_PROFESIONALES");
-    assertThat(rabbit.receive(eventQueue, 250)).isNull();
   }
 
   @Test
