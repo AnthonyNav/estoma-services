@@ -1,5 +1,6 @@
 package com.estoma.authorization.infrastructure.messaging.outbound;
 
+import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator.ProjectionType;
@@ -17,16 +18,19 @@ final class ProjectionRecoveryWorker {
 
   private final ProjectionRecoveryCoordinator coordinator;
   private final ProjectionRecoveryJobRepository jobs;
+  private final OutboxRepository outbox;
   private final MessagingProperties properties;
   private final Clock clock;
 
   ProjectionRecoveryWorker(
       ProjectionRecoveryCoordinator coordinator,
       ProjectionRecoveryJobRepository jobs,
+      OutboxRepository outbox,
       MessagingProperties properties,
       Clock authorizationClock) {
     this.coordinator = coordinator;
     this.jobs = jobs;
+    this.outbox = outbox;
     this.properties = properties;
     this.clock = authorizationClock;
   }
@@ -55,11 +59,21 @@ final class ProjectionRecoveryWorker {
     Instant cutoff = clock.instant().minus(properties.recoveryResultTimeout());
     for (ProjectionRecoveryJobRepository.RecoveryJob waiting :
         jobs.findWaitingBefore(cutoff, RETRY_BATCH_SIZE)) {
+      if (!currentQueryWasPublished(waiting)) {
+        continue;
+      }
       try {
         coordinator.retry(waiting.recoveryJobId());
       } catch (IllegalStateException ignored) {
         // Another replica advanced the durable state machine first.
       }
     }
+  }
+
+  private boolean currentQueryWasPublished(ProjectionRecoveryJobRepository.RecoveryJob waiting) {
+    return waiting.currentQueryMessageId() != null
+        && outbox.findById(waiting.currentQueryMessageId())
+            .map(message -> "PUBLISHED".equals(message.status()))
+            .orElse(false);
   }
 }
