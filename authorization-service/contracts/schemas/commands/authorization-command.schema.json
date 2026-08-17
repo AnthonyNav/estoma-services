@@ -30,7 +30,6 @@
         "causalDependency": { "$ref": "#/$defs/causalDependency" },
         "causalDependencies": {
           "type": "array",
-          "minItems": 1,
           "items": { "$ref": "#/$defs/causalDependency" }
         },
         "authoritativeEvidence": {
@@ -66,7 +65,6 @@
         "sourceService",
         "sourceOperation",
         "sourceResultStatus",
-        "sourceResultMessageId",
         "entityType",
         "entityId"
       ],
