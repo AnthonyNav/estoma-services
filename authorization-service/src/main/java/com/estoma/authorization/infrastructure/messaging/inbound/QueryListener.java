@@ -1,9 +1,11 @@
 package com.estoma.authorization.infrastructure.messaging.inbound;
 
 import com.estoma.authorization.application.query.AuthorizationSnapshotQueryResponder;
+import com.estoma.authorization.contracts.MessageEnvelope;
 import com.estoma.authorization.contracts.MessageKind;
 import com.estoma.authorization.contracts.MessagingNames;
 import com.estoma.authorization.infrastructure.messaging.EnvelopeJsonCodec;
+import com.estoma.authorization.infrastructure.messaging.MessagingLog;
 import com.estoma.authorization.infrastructure.messaging.MessagingMetrics;
 import com.estoma.authorization.infrastructure.messaging.outbound.RabbitPublishException;
 import com.rabbitmq.client.Channel;
@@ -30,6 +32,7 @@ final class QueryListener {
   private final TransientFailureClassifier classifier;
   private final FailureRouter failures;
   private final MessagingMetrics metrics;
+  private final MessagingLog log;
 
   QueryListener(
       EnvelopeJsonCodec codec,
@@ -38,7 +41,8 @@ final class QueryListener {
       AuthorizationSnapshotQueryResponder responder,
       TransientFailureClassifier classifier,
       FailureRouter failures,
-      MessagingMetrics metrics) {
+      MessagingMetrics metrics,
+      MessagingLog log) {
     this.codec = codec;
     this.validator = validator;
     this.mapper = mapper;
@@ -46,6 +50,7 @@ final class QueryListener {
     this.classifier = classifier;
     this.failures = failures;
     this.metrics = metrics;
+    this.log = log;
   }
 
   @RabbitListener(id = "queryConsumer", queues = MessagingNames.QUERY_QUEUE, containerFactory = "manualAckContainerFactory")
@@ -60,14 +65,17 @@ final class QueryListener {
 
   private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
+    MessageEnvelope envelope;
     QueryMessageMapper.MappedQuery mapped;
     try {
-      mapped = mapper.map(
-          validator.validate(codec.readTree(message.getBody()), MessageKind.QUERY, TYPES));
+      envelope = validator.validate(codec.readTree(message.getBody()), MessageKind.QUERY, TYPES);
+      mapped = mapper.map(envelope);
     } catch (InvalidMessageException exception) {
+      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
       routeInvalid(message, channel, deliveryTag);
       return;
     } catch (RuntimeException exception) {
+      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception);
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
       return;
     }
@@ -75,11 +83,13 @@ final class QueryListener {
     try {
       responder.respond(mapped.metadata(), mapped.query());
       metrics.consumed(CONSUMER);
+      log.processed(envelope, message, CONSUMER, "RESULT_DURABLE", null);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException exception) {
+      log.transportFailure(envelope, message, CONSUMER, "TECHNICAL_FAILURE", exception);
       boolean transientFailure = classifier.isTransient(exception);
       if (!transientFailure || failures.isFinalAttempt(message, FailureRouter.QUERIES)) {
-        recordTerminalFailureOrDlq(message, channel, deliveryTag, mapped);
+        recordTerminalFailureOrDlq(message, channel, deliveryTag, envelope, mapped);
         return;
       }
       routeTechnical(message, channel, deliveryTag, true);
@@ -90,12 +100,16 @@ final class QueryListener {
       Message message,
       Channel channel,
       long deliveryTag,
+      MessageEnvelope envelope,
       QueryMessageMapper.MappedQuery mapped) throws IOException {
     try {
       responder.respondFailed(mapped.metadata(), "TECHNICAL_FAILURE");
       metrics.consumed(CONSUMER);
+      log.processed(envelope, message, CONSUMER, "FAILED", "TECHNICAL_FAILURE");
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException terminalPersistenceFailure) {
+      log.transportFailure(
+          envelope, message, CONSUMER, "TERMINAL_PERSISTENCE_FAILED", terminalPersistenceFailure);
       routeInvalid(message, channel, deliveryTag);
     }
   }
