@@ -1,9 +1,11 @@
 package com.estoma.authorization.infrastructure.messaging.inbound;
 
 import com.estoma.authorization.application.projection.ProjectionEventProcessor;
+import com.estoma.authorization.contracts.MessageEnvelope;
 import com.estoma.authorization.contracts.MessageKind;
 import com.estoma.authorization.contracts.MessagingNames;
 import com.estoma.authorization.infrastructure.messaging.EnvelopeJsonCodec;
+import com.estoma.authorization.infrastructure.messaging.MessagingLog;
 import com.estoma.authorization.infrastructure.messaging.MessagingMetrics;
 import com.estoma.authorization.infrastructure.messaging.outbound.RabbitPublishException;
 import com.rabbitmq.client.Channel;
@@ -36,6 +38,7 @@ final class ExternalEventListener {
   private final TransientFailureClassifier classifier;
   private final FailureRouter failures;
   private final MessagingMetrics metrics;
+  private final MessagingLog log;
 
   ExternalEventListener(
       EnvelopeJsonCodec codec,
@@ -44,7 +47,8 @@ final class ExternalEventListener {
       ProjectionEventProcessor processor,
       TransientFailureClassifier classifier,
       FailureRouter failures,
-      MessagingMetrics metrics) {
+      MessagingMetrics metrics,
+      MessagingLog log) {
     this.codec = codec;
     this.validator = validator;
     this.mapper = mapper;
@@ -52,6 +56,7 @@ final class ExternalEventListener {
     this.classifier = classifier;
     this.failures = failures;
     this.metrics = metrics;
+    this.log = log;
   }
 
   @RabbitListener(id = "externalEventConsumer", queues = MessagingNames.EVENT_QUEUE, containerFactory = "manualAckContainerFactory")
@@ -66,17 +71,22 @@ final class ExternalEventListener {
 
   private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
+    MessageEnvelope envelope;
     try {
-      var event = mapper.map(validator.validate(codec.readTree(message.getBody()), MessageKind.EVENT, TYPES));
+      envelope = validator.validate(codec.readTree(message.getBody()), MessageKind.EVENT, TYPES);
+      var event = mapper.map(envelope);
       var result = processor.process(event);
       metrics.consumed(CONSUMER);
       if (result.status() == ProjectionEventProcessor.Status.DEFERRED) {
         metrics.deferred();
       }
+      log.processed(envelope, message, CONSUMER, result.status().name(), null);
       channel.basicAck(deliveryTag, false);
     } catch (InvalidMessageException exception) {
+      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
       routeInvalid(message, channel, deliveryTag);
     } catch (RuntimeException exception) {
+      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception);
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
     }
   }
