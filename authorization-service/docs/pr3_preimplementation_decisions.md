@@ -2,144 +2,70 @@
 
 ## Status
 
-`PENDING_CANONICAL_DECISIONS`
+`RESOLVED_FOR_IMPLEMENTATION`
 
 - Service baseline: `estoma-services/develop` at `314240c359bbbf3b6b4ea6a849abc0a9f98c9287`.
-- Canonical documentation reviewed: `estomatologia-platform-docs/main` at `42281c5fd1050cbab40a4e0536cc54e694e1fa30`.
+- Canonical documentation reviewed: `estomatologia-platform-docs/main` at `1578db7976433c099ab77d032e70544ad4aa2ec3`.
 - Related canonical gate: `03-services/shared/authorization-service/pr3-contract-gate.md`.
+- Final canonical resolution: `03-services/shared/authorization-service/pr3-final-contract-resolution.md`.
 
 ## Purpose
 
-PR3 may materialize only the already completed PR2 behavior through executable
-wire contracts and RabbitMQ adapters. This record identifies the decisions that
-would otherwise make the public V1 contract or terminal-delivery behavior
-ambiguous. It does not change Domain or Application behavior and it does not
-replace canonical platform documentation.
+PR3 materializes only the already completed PR2 behavior through executable
+wire contracts and RabbitMQ adapters. This record preserves the decisions that
+were required before implementation and their canonical resolution. It does not
+change Domain or Application behavior and it does not replace canonical
+platform documentation.
 
-No PR3 implementation code that freezes a schema or terminal consumer outcome
-may begin for an open decision below. Once resolved, the canonical owner must
-update `estomatologia-platform-docs`; this record can then be marked resolved
-with the canonical commit.
+The canonical owner resolved D-01 through D-03 in `1578db7`. PR3 may freeze
+schemas and terminal consumer behavior only as specified by that resolution.
 
-## Decisions Required
+## Resolved Decisions
 
 ### D-01 - Strict V1 schema profile
 
-**Status:** `OPEN`
+**Status:** `RESOLVED`
 
-The canonical gate requires `additionalProperties: false` for the common
-envelope, `actor`, and every Authorization payload. It does not fully define
-the executable requiredness, nullability, lexical formats, or bounds that JSON
-Schemas must enforce.
+`pr3-final-contract-resolution.md` section 1 defines JSON Schema Draft
+2020-12, `messageVersion = 1`, closed envelope/actor/payload schemas, required
+properties by `messageKind`, UUID and RFC 3339 timestamp formats, and
+version/pagination bounds.
 
-The decision must define all of the following for V1:
-
-| Area | Decision required |
-| --- | --- |
-| Common envelope | Exact `required` properties by `messageKind`, including whether `causationId`, `operationId`, `idempotencyKey`, `aggregateId`, and `aggregateVersion` are omitted or encoded as `null` when inapplicable. |
-| Actor and identifiers | UUID and timestamp lexical formats, identifier nullability, and the valid `ACCOUNT`/`SYSTEM` discriminator shapes. |
-| Result payload | Whether optional `data` and `error` are omitted or `null`; legal `status`/`data`/`error` combinations; the schema of `error.details`. |
-| Command, Event, and Query payloads | Required fields, nullable fields, minimum versions, and closed enum values for every V1 message. |
-| Snapshot pagination | Cursor representation, `limit` minimum/maximum, and `hasMore`/`nextCursor` consistency. |
-
-**Evidence:**
-
-- `02-architecture/messaging-architecture.md` section 8 describes fields as
-  applicable but does not define all schema-level combinations.
-- `03-services/shared/authorization-service/pr3-contract-gate.md` section 6
-  requires strict schemas but leaves the exact profile open.
-- `03-services/shared/authorization-service/events.md` section 2.1 includes
-  optional envelope metadata in an example, while the executable null/omission
-  policy is not stated.
-
-**Recommended resolution:** Canonical documentation should define one V1 JSON
-Schema profile before Authorization publishes artifacts. Optional properties
-should have one consistent representation across all contracts, and every
-schema-level bound must be explicit rather than inferred by a listener.
-
-**Why this blocks coding:** Choosing these rules locally would create an
-externally visible compatibility policy before the platform has selected one.
-Contract tests cannot establish interoperability until this profile is fixed.
+V1 represents absence by omitting a property, not by serializing `null`.
+`error.details` is the sole explicitly extensible object. The implementation
+must reject an unsupported version, unknown/prohibited field, invalid format,
+unknown enum, or failed conditional shape before invoking Application.
 
 ### D-02 - Direct BFF grant for PRACTICAS_PROFESIONALES
 
-**Status:** `OPEN`
+**Status:** `RESOLVED`
 
-PR2 currently rejects a BFF `GrantSystemAccess(PRACTICAS_PROFESIONALES)` unless
-the target has a present, trusted, eligible Academic projection with a supported
-policy version. This was intentionally closed in local audit finding G-10.
-The canonical `GrantSystemAccess` description currently lists normal account,
-role, system, compatibility, scope, and uniqueness validation, but does not
-explicitly state this extra predicate or its rejection code.
+The canonical resolution section 2 preserves the behavior closed by PR2 G-10.
+A BFF/SUPERADMIN direct `GrantSystemAccess(PRACTICAS_PROFESIONALES)` requires a
+present, trusted, eligible Academic projection with a supported policy version.
+The failure is terminal `REJECTED` with `TARGET_SCOPE_NOT_ALLOWED`.
 
-The decision must select one behavior:
-
-| Option | Behavior |
-| --- | --- |
-| A | Canonicalize the existing PR2 behavior: BFF/SUPERADMIN direct Practices grants require an eligible, trusted, supported Academic eligibility projection. Define the documented rejection as `TARGET_SCOPE_NOT_ALLOWED`. |
-| B | Remove that predicate from Authorization and update PR2 behavior, tests, and the audit record before PR3 begins. |
-
-**Recommended resolution:** Select option A. It preserves the already merged
-PR2 fail-closed behavior and prevents an administrative Command from bypassing
-the Academic eligibility boundary. PR3 should map and test the chosen behavior;
-it must not change it silently.
-
-**Evidence:**
-
-- `docs/implementation_gaps.md` G-10 records the requirement and its PR2
-  regression coverage.
-- `AuthorizationCommandDispatcher.validatePracticesGrantEligibility` enforces
-  the predicate with `TARGET_SCOPE_NOT_ALLOWED`.
-- `03-services/shared/authorization-service/commands.md` section 5.2 does not
-  state the predicate explicitly.
-
-**Why this blocks coding:** The predicate and rejection code are observable in
-Command Result contracts. Freezing a schema and E2E behavior without a canonical
-decision would let the service and the platform documentation drift.
+PR3 maps and tests this behavior; it does not change the eligibility boundary
+or the derived provisioning flow.
 
 ### D-03 - Exhausted transient Command failure
 
-**Status:** `OPEN`
+**Status:** `RESOLVED`
 
-The platform Result model says an exhausted retryable Command failure becomes a
-terminal `FAILED` Result. Authorization-specific documentation instead permits
-DLQ isolation when the failure cannot be durably persisted. PR2 deliberately
-rethrows retryable failures so PR3 transport owns the final retry decision, but
-it does not define the exhausted-retry path.
+The canonical resolution section 3 fixes the hybrid terminal path. A valid
+Command receives at most three consumer deliveries. On exhaustion, the adapter
+persists a `FAILED` Result only when a new transaction atomically commits the
+Inbox/idempotency/audit/Result Outbox obligation; it then ACKs.
 
-The decision must define the final disposition of a valid Command after its
-third consumer delivery fails transiently:
+When that terminal obligation cannot commit, the adapter must not fabricate a
+Result. It isolates the delivery in `commands.authorization.dlq`, retaining
+message, correlation, attempt, and audit traceability for controlled replay.
+Outbox Relay publication failures remain independent and retry with their own
+lease/fencing/backoff policy.
 
-| Option | Behavior |
-| --- | --- |
-| A | Require a durable `FAILED` Result for every valid exhausted Command. Define how the terminal Result obligation is persisted when the original failure is retryable. |
-| B | Permit a valid Command whose terminal Result cannot be committed to enter the DLQ without a Result, with manual audited replay and requester reconciliation. |
-| C | Define a hybrid: persist `FAILED` when a fresh terminal transaction commits; otherwise isolate the unpersistible delivery in the DLQ without fabricating a Result. |
+## Adapter-Owned Choices
 
-**Recommended resolution:** Select option C and state it in the canonical
-platform and Authorization contracts. A `FAILED` Result must only be emitted
-after its Inbox/idempotency/audit/Outbox obligation commits. If that transaction
-cannot commit, the adapter must not falsely report a terminal outcome; it must
-isolate the delivery with enough traceability for controlled recovery.
-
-**Evidence:**
-
-- `02-architecture/messaging-architecture.md` section 3 describes exhausted
-  retryable failures as `FAILED`.
-- `03-services/shared/authorization-service/commands.md` section 9 sends an
-  invalid or unpersistible exhausted failure to the DLQ.
-- `docs/implementation_gaps.md` G-12 and
-  `AuthorizationCommandProcessor` deliberately expose retryable failures to
-  PR3 transport policy.
-
-**Why this blocks coding:** The listener's final ACK, retry, DLQ, and Result
-publication behavior depends on this decision. Choosing one path locally can
-either lose the requester terminal result or fabricate a result without a
-durable transaction.
-
-## Decisions Already Delegated To The Adapter
-
-The following are implementation choices, not additional platform decisions:
+The following remain implementation choices within the fixed contract:
 
 | Area | Fixed constraint |
 | --- | --- |
@@ -149,16 +75,19 @@ The following are implementation choices, not additional platform decisions:
 | Outbox retry | Relay retry remains claim/lease/fencing plus internal backoff and does not inherit the consumer three-attempt limit. |
 
 These constraints are defined by
-`02-architecture/rabbitmq-topology-naming.md` sections 5 through 8 and
-`03-services/shared/authorization-service/pr3-contract-gate.md` sections 2,
-5, and 9.
+`02-architecture/rabbitmq-topology-naming.md`,
+`03-services/shared/authorization-service/pr3-contract-gate.md`, and
+`03-services/shared/authorization-service/pr3-final-contract-resolution.md`.
 
-## Resolution Checklist
+## Implementation Baseline
 
-Before implementation starts:
+PR3 must use this record with:
 
-1. Resolve D-01 through D-03 in canonical platform documentation.
-2. Record the canonical commit and selected outcomes in this file.
-3. Recheck `estoma-services/develop` and canonical documents for drift.
-4. Create the implementation branch using the selected contract as its fixed
-   baseline.
+1. `02-architecture/messaging-architecture.md`.
+2. `02-architecture/rabbitmq-topology-naming.md`.
+3. `03-services/shared/authorization-service/pr3-contract-gate.md`.
+4. `03-services/shared/authorization-service/pr3-final-contract-resolution.md`.
+
+The implementation branch is based on `estoma-services/develop` at
+`314240c359bbbf3b6b4ea6a849abc0a9f98c9287` and must stop if a later canonical
+contract conflicts with the wire behavior under construction.
