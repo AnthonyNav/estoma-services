@@ -37,6 +37,10 @@ All recorded `BLOCKER` and `HIGH` findings are resolved and covered by regressio
 - Outbox Relay publisher confirms, consumer retry/DLQ and broker integration tests.
 - Mapping the already implemented Application Commands/Events/Queries/Results to the platform messaging contracts.
 
+Before implementation begins, the decisions that must be resolved in canonical
+documentation are recorded in
+[`docs/pr3_preimplementation_decisions.md`](docs/pr3_preimplementation_decisions.md).
+
 ## Operational Endpoints
 
 - `GET /actuator/health`
