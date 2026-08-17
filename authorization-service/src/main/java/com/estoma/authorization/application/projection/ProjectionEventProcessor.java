@@ -8,11 +8,14 @@ import com.estoma.authorization.application.port.PersonStatusProjectionRepositor
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.recovery.DeferredCommandRecoveryService;
+import com.estoma.authorization.application.support.CanonicalJson;
 import com.estoma.authorization.domain.model.ProjectedStatus;
 import com.estoma.authorization.domain.model.SystemCode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -128,7 +131,7 @@ public final class ProjectionEventProcessor {
           metadata.aggregateId(),
           metadata.aggregateVersion(),
           metadata.actor(),
-          event.payloadJson(),
+          retainedInboxPayload(event),
           now,
           metadata.occurredAt(),
           null,
@@ -332,6 +335,35 @@ public final class ProjectionEventProcessor {
         || !SystemCode.PRACTICAS_PROFESIONALES.name().equals(academic.systemCode())) {
       throw new IllegalArgumentException("invalid Academic eligibility event contract");
     }
+  }
+
+  private static String retainedInboxPayload(ProjectionEvent event) {
+    if (event instanceof PersonProjectionEvent person) {
+      return CanonicalJson.write(Map.of(
+          "personId", person.personId(),
+          "status", person.status()));
+    }
+    if (event instanceof AccountProjectionEvent account) {
+      Map<String, Object> values = new LinkedHashMap<>();
+      values.put("accountId", account.accountId());
+      values.put("personId", account.personId());
+      values.put("status", account.status());
+      if (account.loginType() != null) {
+        values.put("loginType", account.loginType());
+      }
+      return CanonicalJson.write(values);
+    }
+    AcademicEligibilityProjectionEvent academic = (AcademicEligibilityProjectionEvent) event;
+    return CanonicalJson.write(Map.of(
+        "eligibilityId", academic.eligibilityId(),
+        "studentAcademicProfileId", academic.studentAcademicProfileId(),
+        "accountId", academic.accountId(),
+        "systemCode", academic.systemCode(),
+        "eligible", academic.eligible(),
+        "policyVersion", academic.policyVersion(),
+        "eligibilityVersion", academic.eligibilityVersion(),
+        "academicProfileVersion", academic.academicProfileVersion(),
+        "evaluatedAt", academic.evaluatedAt()));
   }
 
   private static String eventAggregateType(ProjectionEvent event) {
