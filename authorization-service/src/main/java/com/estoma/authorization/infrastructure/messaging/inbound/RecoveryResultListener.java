@@ -55,6 +55,15 @@ final class RecoveryResultListener {
 
   @RabbitListener(id = "recoveryResultConsumer", queues = MessagingNames.RESULT_QUEUE, containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
+    long started = System.nanoTime();
+    try {
+      handle(message, channel);
+    } finally {
+      metrics.processingDuration(CONSUMER, System.nanoTime() - started);
+    }
+  }
+
+  private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     try {
       var result = mapper.map(validator.validate(codec.readTree(message.getBody()), MessageKind.RESULT, TYPES));
