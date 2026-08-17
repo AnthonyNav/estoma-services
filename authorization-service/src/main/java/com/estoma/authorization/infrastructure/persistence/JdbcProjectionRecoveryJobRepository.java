@@ -68,24 +68,16 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
 
   @Override
   public boolean hasCompletedFull(String projectionType) {
-    return jdbc.sql(
-            "SELECT EXISTS (SELECT 1 FROM projection_recovery_jobs "
-                + "WHERE projection_type = :projectionType AND scope = 'FULL' "
-                + "AND status = 'COMPLETED')")
-        .param("projectionType", projectionType)
-        .query(Boolean.class)
-        .single();
+    return latestStatus(projectionType, "FULL", null)
+        .map("COMPLETED"::equals)
+        .orElse(false);
   }
 
   @Override
   public boolean hasFailedFull(String projectionType) {
-    return jdbc.sql(
-            "SELECT EXISTS (SELECT 1 FROM projection_recovery_jobs "
-                + "WHERE projection_type = :projectionType AND scope = 'FULL' "
-                + "AND status = 'FAILED')")
-        .param("projectionType", projectionType)
-        .query(Boolean.class)
-        .single();
+    return latestStatus(projectionType, "FULL", null)
+        .map("FAILED"::equals)
+        .orElse(false);
   }
 
   @Override
