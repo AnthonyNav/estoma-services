@@ -31,7 +31,7 @@ class AcademicQueryEnvelopeValidatorTest {
         .put("studentAcademicProfileId", UUID.randomUUID().toString())
         .put("systemCode", "PRACTICAS_PROFESIONALES");
     assertThatThrownBy(() -> validator.validate(query("GetStudentAcademicEligibilitySnapshot", payload)))
-        .isInstanceOf(IllegalArgumentException.class)
+        .isInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
         .hasMessage("INVALID_ELIGIBILITY_TARGET");
   }
 
@@ -43,14 +43,14 @@ class AcademicQueryEnvelopeValidatorTest {
         query.messageKind(), "academic", query.occurredAt(), query.correlationId(), query.causationId(),
         query.operationId(), null, null, null, query.actor(), query.payload());
     assertThatThrownBy(() -> validator.validate(wrongProducer))
-        .isInstanceOf(IllegalArgumentException.class)
+        .isInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
         .hasMessage("QUERY_PRODUCER_NOT_ALLOWED");
 
     MessageEnvelope wrongActor = new MessageEnvelope(query.messageId(), query.messageType(), query.messageVersion(),
         query.messageKind(), query.producer(), query.occurredAt(), query.correlationId(), query.causationId(),
         query.operationId(), null, null, null, new Actor("SYSTEM", null, "academic"), query.payload());
     assertThatThrownBy(() -> validator.validate(wrongActor))
-        .isInstanceOf(IllegalArgumentException.class)
+        .isInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
         .hasMessage("QUERY_ACTOR_NOT_ALLOWED");
   }
 
@@ -63,12 +63,20 @@ class AcademicQueryEnvelopeValidatorTest {
         .doesNotThrowAnyException();
     assertThatThrownBy(() -> validator.validate(query("ListStudentAcademicEligibilitySnapshotsPage",
         mapper.createObjectNode().put("limit", 0))))
-        .isInstanceOf(IllegalArgumentException.class)
+        .isInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
         .hasMessage("INVALID_LIMIT");
     assertThatThrownBy(() -> validator.validate(query("ListStudentAcademicEligibilitySnapshotsPage",
         mapper.createObjectNode().put("limit", 10).put("cursor", "not-a-uuid"))))
-        .isInstanceOf(IllegalArgumentException.class)
+        .isInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
         .hasMessage("INVALID_CURSOR");
+  }
+
+  @Test
+  void isolatesUnknownQueryTypesAsContractInvalid() {
+    assertThatThrownBy(() -> validator.validate(query("UnknownAcademicQuery", mapper.createObjectNode())))
+        .isInstanceOf(IllegalArgumentException.class)
+        .isNotInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
+        .hasMessage("unknown Academic Query");
   }
 
   private MessageEnvelope query(String type, tools.jackson.databind.JsonNode payload) {

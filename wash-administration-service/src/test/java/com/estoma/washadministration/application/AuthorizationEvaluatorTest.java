@@ -6,6 +6,7 @@ import com.estoma.washadministration.application.authorization.AuthorizationEval
 import com.estoma.washadministration.application.command.ActorContext;
 import com.estoma.washadministration.application.port.AuthorizationAccessProjectionRepository;
 import com.estoma.washadministration.application.port.AuthorizationRoleProjectionRepository;
+import com.estoma.washadministration.application.port.ProjectionRecoveryJobRepository;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,7 +34,87 @@ class AuthorizationEvaluatorTest {
         .isAuthorized(ActorContext.account(ACCOUNT_ID), "CreateServiceCalendar")).isFalse();
   }
 
+  @Test
+  void recoveryForTheAccountOrFullProjectionFailsClosed() {
+    ProjectionRecoveryJobRepository recovery = new ProjectionRecoveryJobRepository() {
+      @Override
+      public Optional<RecoveryJob> claimNextPending(UUID claimToken, Instant leaseUntil) {
+        return Optional.empty();
+      }
+
+      @Override
+      public RecoveryJob createEntity(UUID accountId, Instant now) {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public RecoveryJob createFull(Instant now) {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public Optional<RecoveryJob> findWaitingByQueryMessageIdForUpdate(UUID queryMessageId) {
+        return Optional.empty();
+      }
+
+      @Override
+      public boolean markWaiting(
+          UUID recoveryJobId,
+          UUID claimToken,
+          String queryType,
+          UUID queryMessageId,
+          UUID operationId,
+          UUID correlationId,
+          int queryAttempt) {
+        return false;
+      }
+
+      @Override
+      public boolean markPendingAfterPage(UUID recoveryJobId, UUID queryMessageId, String cursor) {
+        return false;
+      }
+
+      @Override
+      public boolean markCompleted(UUID recoveryJobId, UUID queryMessageId) {
+        return false;
+      }
+
+      @Override
+      public boolean markFailed(UUID recoveryJobId, UUID queryMessageId, String errorCode) {
+        return false;
+      }
+
+      @Override
+      public void clearAuthorizationProjection() {}
+
+      @Override
+      public boolean hasActiveEntityRecovery(UUID accountId) {
+        return ACCOUNT_ID.equals(accountId);
+      }
+
+      @Override
+      public boolean hasActiveFullRecovery() {
+        return false;
+      }
+
+      @Override
+      public boolean hasFailedFullRecovery() {
+        return false;
+      }
+    };
+
+    AuthorizationEvaluator evaluator = evaluator("ADMINISTRADOR_LAVADO", "ACTIVE", recovery);
+
+    assertThat(evaluator.isAuthorized(ActorContext.account(ACCOUNT_ID), "CreateServiceCalendar"))
+        .isFalse();
+  }
+
   private static AuthorizationEvaluator evaluator(String role, String access) {
+    return evaluator(role, access, null);
+  }
+
+  private static AuthorizationEvaluator evaluator(
+      String role, String access, ProjectionRecoveryJobRepository recovery) {
     AuthorizationRoleProjectionRepository roles = new AuthorizationRoleProjectionRepository() {
       @Override
       public Optional<RoleProjection> findByAccountId(UUID accountId) {
@@ -58,6 +139,6 @@ class AuthorizationEvaluatorTest {
         return 0;
       }
     };
-    return new AuthorizationEvaluator(roles, accesses);
+    return new AuthorizationEvaluator(roles, accesses, recovery);
   }
 }

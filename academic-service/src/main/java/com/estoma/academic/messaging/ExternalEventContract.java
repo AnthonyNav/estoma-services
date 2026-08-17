@@ -7,10 +7,10 @@ import java.util.Set;
 /** Closed allow-list for the external events that Academic is allowed to project. */
 public final class ExternalEventContract {
   private static final Map<String, Set<String>> PRODUCERS = Map.ofEntries(
-      Map.entry("PersonCreated", Set.of("users", "users-service")),
-      Map.entry("PersonUpdated", Set.of("users", "users-service")),
-      Map.entry("PersonActivated", Set.of("users", "users-service")),
-      Map.entry("PersonDeactivated", Set.of("users", "users-service")),
+      Map.entry("PersonCreated", Set.of("users")),
+      Map.entry("PersonUpdated", Set.of("users")),
+      Map.entry("PersonActivated", Set.of("users")),
+      Map.entry("PersonDeactivated", Set.of("users")),
       Map.entry("AccountCreated", Set.of("authentication")),
       Map.entry("AccountActivated", Set.of("authentication")),
       Map.entry("AccountDeactivated", Set.of("authentication")),
@@ -24,8 +24,11 @@ public final class ExternalEventContract {
   private ExternalEventContract() {}
 
   public static void validate(MessageEnvelope envelope) {
-     if (envelope == null || envelope.messageId() == null || envelope.occurredAt() == null || envelope.messageVersion() != 1
-        || !"EVENT".equals(envelope.messageKind()) || envelope.messageType() == null) {
+    if (envelope == null || envelope.messageId() == null || envelope.occurredAt() == null
+        || envelope.correlationId() == null || envelope.messageVersion() != 1
+        || !"EVENT".equals(envelope.messageKind()) || envelope.messageType() == null
+        || envelope.aggregateId() == null || envelope.aggregateVersion() == null
+        || envelope.aggregateVersion() < 1) {
       throw new IllegalArgumentException("invalid external event envelope");
     }
     Set<String> expectedProducers = PRODUCERS.get(envelope.messageType());

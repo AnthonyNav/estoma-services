@@ -44,15 +44,24 @@ public class AcademicQueryListener {
     MessageEnvelope query;
     try {
       query = codec.decode(message.getBody());
-      validator.validate(query);
     } catch (RuntimeException ex) {
-      log.warn("invalid academic query messageId={} error={}",
-          message.getMessageProperties().getMessageId(), ex.toString());
-      if (retryPublisher.deadLetter(message, "academic.queries")) {
+      isolateInvalid(message, channel, tag, ex);
+      return;
+    }
+
+    try {
+      validator.validate(query);
+    } catch (AcademicQueryEnvelopeValidator.RejectedException rejected) {
+      try {
+        dispatcher.reject(query, rejected.code());
+        metrics.query();
         channel.basicAck(tag, false);
-      } else {
-        channel.basicNack(tag, false, true);
+      } catch (RuntimeException persistenceFailure) {
+        retryTechnical(message, channel, tag, query, persistenceFailure);
       }
+      return;
+    } catch (IllegalArgumentException invalid) {
+      isolateInvalid(message, channel, tag, invalid);
       return;
     }
 
@@ -61,15 +70,30 @@ public class AcademicQueryListener {
       metrics.query();
       channel.basicAck(tag, false);
     } catch (RuntimeException ex) {
-      log.warn("academic query failed messageId={} error={}", query.messageId(), ex.toString());
-      RetryPublisher.RetryOutcome outcome = retryPublisher.retry(message, "academic.queries.retry");
-      if (outcome == RetryPublisher.RetryOutcome.PUBLISHED) {
-        channel.basicAck(tag, false);
-      } else if (outcome == RetryPublisher.RetryOutcome.EXHAUSTED) {
-        channel.basicNack(tag, false, false);
-      } else {
-        channel.basicNack(tag, false, true);
-      }
+      retryTechnical(message, channel, tag, query, ex);
+    }
+  }
+
+  private void isolateInvalid(Message message, Channel channel, long tag, RuntimeException ex) throws IOException {
+    log.warn("invalid academic query messageId={} error={}",
+        message.getMessageProperties().getMessageId(), ex.toString());
+    if (retryPublisher.deadLetter(message, "academic.queries")) {
+      channel.basicAck(tag, false);
+    } else {
+      channel.basicNack(tag, false, true);
+    }
+  }
+
+  private void retryTechnical(
+      Message message, Channel channel, long tag, MessageEnvelope query, RuntimeException ex) throws IOException {
+    log.warn("academic query failed messageId={} error={}", query.messageId(), ex.toString());
+    RetryPublisher.RetryOutcome outcome = retryPublisher.retry(message, "academic.queries.retry");
+    if (outcome == RetryPublisher.RetryOutcome.PUBLISHED) {
+      channel.basicAck(tag, false);
+    } else if (outcome == RetryPublisher.RetryOutcome.EXHAUSTED) {
+      channel.basicNack(tag, false, false);
+    } else {
+      channel.basicNack(tag, false, true);
     }
   }
 }

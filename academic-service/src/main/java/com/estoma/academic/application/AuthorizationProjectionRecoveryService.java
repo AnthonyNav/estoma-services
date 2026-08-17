@@ -3,13 +3,14 @@ package com.estoma.academic.application;
 import com.estoma.academic.contract.Actor;
 import com.estoma.academic.contract.MessageEnvelope;
 import com.estoma.academic.messaging.EnvelopeCodec;
+import com.estoma.academic.observability.AcademicMessagingMetrics;
 import com.estoma.academic.persistence.OutboxRepository;
 import com.estoma.academic.persistence.ProjectionRecoveryJobRepository;
-import com.estoma.academic.observability.AcademicMessagingMetrics;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,18 +27,24 @@ public class AuthorizationProjectionRecoveryService {
   private final OutboxRepository outbox;
   private final ProjectionRecoveryJobRepository jobs;
   private final AcademicMessagingMetrics metrics;
+  private final int maxAttempts;
 
   public AuthorizationProjectionRecoveryService(
       JdbcClient jdbc,
       EnvelopeCodec codec,
       OutboxRepository outbox,
       ProjectionRecoveryJobRepository jobs,
-      AcademicMessagingMetrics metrics) {
+      AcademicMessagingMetrics metrics,
+      @Value("${estoma.authorization-recovery.max-attempts:3}") int maxAttempts) {
     this.jdbc = jdbc;
     this.codec = codec;
     this.outbox = outbox;
     this.jobs = jobs;
     this.metrics = metrics;
+    if (maxAttempts < 1) {
+      throw new IllegalArgumentException("authorization-recovery.max-attempts must be positive");
+    }
+    this.maxAttempts = maxAttempts;
   }
 
   @Transactional
@@ -48,10 +55,29 @@ public class AuthorizationProjectionRecoveryService {
     return jobs.requestEntity(accountId, Instant.now());
   }
 
+  /**
+   * Starts a FULL rebuild atomically with the empty-target initialization.
+   * Once this transaction commits, every later Authorization Event is applied to the target that
+   * will survive the rebuild; the worker never clears an already-active target afterward.
+   */
   @Transactional
   public UUID requestFull() {
-    UUID job = jobs.requestFull(Instant.now());
-    jobs.markRebuilding(job, Instant.now());
+    Instant now = Instant.now();
+    UUID job = jobs.requestFull(now);
+    boolean alreadyInitialized = jdbc.sql("""
+        SELECT status='REBUILDING' AND active_job_id=:job
+        FROM academic_projection_recovery_state
+        WHERE projection_type='AUTHORIZATION'
+        FOR UPDATE
+        """)
+        .param("job", job)
+        .query(Boolean.class)
+        .optional()
+        .orElse(false);
+    if (!alreadyInitialized) {
+      jobs.markRebuilding(job, now);
+      clearAuthorizationProjection();
+    }
     return job;
   }
 
@@ -59,11 +85,6 @@ public class AuthorizationProjectionRecoveryService {
   @Transactional
   public void publishNext(ProjectionRecoveryJobRepository.Job job) {
     Instant now = Instant.now();
-    if (job.full() && job.queryAttempt() == 0 && job.cursor() == null) {
-      clearAuthorizationProjection();
-      jobs.markRebuilding(job.recoveryJobId(), now);
-    }
-
     UUID messageId = UUID.randomUUID();
     UUID operationId = UUID.randomUUID();
     UUID correlationId = job.recoveryJobId();
@@ -104,7 +125,8 @@ public class AuthorizationProjectionRecoveryService {
   public ResultOutcome applyResult(MessageEnvelope result) {
     validateResult(result);
     Instant now = Instant.now();
-    ProjectionRecoveryJobRepository.Job job = jobs.findWaiting(result.correlationId(), result.operationId()).orElse(null);
+    ProjectionRecoveryJobRepository.Job job =
+        jobs.findWaiting(result.correlationId(), result.operationId()).orElse(null);
     if (job == null || !result.causationId().equals(job.currentQueryMessageId())) {
       if (!recordInbox(result, now)) {
         return ResultOutcome.DUPLICATE;
@@ -118,6 +140,12 @@ public class AuthorizationProjectionRecoveryService {
     }
     if (!recordInbox(result, now)) {
       return ResultOutcome.DUPLICATE;
+    }
+
+    String status = result.payload().path("status").asString();
+    if ("REJECTED".equals(status) || "FAILED".equals(status)) {
+      handleTerminalFailure(job, result, status, now);
+      return ResultOutcome.APPLIED;
     }
 
     if ((QUERY_GET + "Result").equals(result.messageType())) {
@@ -136,10 +164,28 @@ public class AuthorizationProjectionRecoveryService {
     return jobs.authorizationProjectionRebuilding();
   }
 
+  /**
+   * A NOT_FOUND conflict is not a permanent dead-end: fail closed and request a new ENTITY recovery.
+   * ROLE_ABSENT, by contrast, is an authoritative negative snapshot and waits for a newer Event.
+   */
   public boolean accountTrustworthy(UUID accountId) {
-    return accountId != null && jdbc.sql(
-        "SELECT NOT EXISTS (SELECT 1 FROM authorization_projection_degraded_accounts WHERE account_id=:id)")
-        .param("id", accountId).query(Boolean.class).single();
+    if (accountId == null) {
+      return false;
+    }
+    String degradedReason = jdbc.sql("""
+        SELECT reason FROM authorization_projection_degraded_accounts WHERE account_id=:id
+        """)
+        .param("id", accountId)
+        .query(String.class)
+        .optional()
+        .orElse(null);
+    if (degradedReason == null) {
+      return true;
+    }
+    if ("NOT_FOUND_CONFLICT".equals(degradedReason)) {
+      jobs.requestEntity(accountId, Instant.now());
+    }
+    return false;
   }
 
   public boolean hasAuthorizationProjectionRows() {
@@ -149,7 +195,24 @@ public class AuthorizationProjectionRecoveryService {
         """).query(Boolean.class).single();
   }
 
-  private void applyEntityResult(ProjectionRecoveryJobRepository.Job job, MessageEnvelope result, Instant now) {
+  private void handleTerminalFailure(
+      ProjectionRecoveryJobRepository.Job job,
+      MessageEnvelope result,
+      String status,
+      Instant now) {
+    String code = text(result.payload().path("error"), "code");
+    if (code == null) {
+      throw new IllegalArgumentException("terminal recovery Result requires error.code");
+    }
+    ProjectionRecoveryJobRepository.ResultFailureTransition transition =
+        jobs.recordTerminalResultFailure(job, "RECOVERY_" + status + "_" + code, maxAttempts, now);
+    if (transition.failed() && job.full()) {
+      jobs.markFailed(job.recoveryJobId(), now);
+    }
+  }
+
+  private void applyEntityResult(
+      ProjectionRecoveryJobRepository.Job job, MessageEnvelope result, Instant now) {
     String status = result.payload().path("status").asString();
     if ("FOUND".equals(status)) {
       JsonNode data = result.payload().path("data");
@@ -169,15 +232,20 @@ public class AuthorizationProjectionRecoveryService {
             (conflict_id,recovery_job_id,account_id,component,result_message_id,created_at)
           VALUES (:id,:job,:account,'AUTHORIZATION',:message,:now)
           """)
-          .param("id", UUID.randomUUID()).param("job", job.recoveryJobId())
-          .param("account", accountId(job.entityKey())).param("message", result.messageId())
-          .param("now", java.sql.Timestamp.from(now)).update();
+          .param("id", UUID.randomUUID())
+          .param("job", job.recoveryJobId())
+          .param("account", accountId(job.entityKey()))
+          .param("message", result.messageId())
+          .param("now", java.sql.Timestamp.from(now))
+          .update();
       jdbc.sql("""
           INSERT INTO authorization_projection_degraded_accounts (account_id,reason,updated_at)
           VALUES (:account,'NOT_FOUND_CONFLICT',:now)
           ON CONFLICT (account_id) DO UPDATE SET reason=excluded.reason,updated_at=excluded.updated_at
-          """).param("account", accountId(job.entityKey()))
-          .param("now", java.sql.Timestamp.from(now)).update();
+          """)
+          .param("account", accountId(job.entityKey()))
+          .param("now", java.sql.Timestamp.from(now))
+          .update();
       metrics.recoveryConflict();
     }
     if (jobs.complete(job, now) != 1) {
@@ -185,7 +253,8 @@ public class AuthorizationProjectionRecoveryService {
     }
   }
 
-  private void applyPageResult(ProjectionRecoveryJobRepository.Job job, MessageEnvelope result, Instant now) {
+  private void applyPageResult(
+      ProjectionRecoveryJobRepository.Job job, MessageEnvelope result, Instant now) {
     if (!"SUCCEEDED".equals(result.payload().path("status").asString())) {
       throw new IllegalArgumentException("page recovery Result must be SUCCEEDED");
     }
@@ -194,9 +263,10 @@ public class AuthorizationProjectionRecoveryService {
         || !data.has("hasMore") || !data.path("hasMore").isBoolean()) {
       throw new IllegalArgumentException("page recovery Result requires items");
     }
+    // snapshotGeneratedAt is observability only. Per-component sourceVersion provides ordering.
     Instant snapshotGeneratedAt = instant(data, "snapshotGeneratedAt");
     if (jobs.markSnapshotGenerated(job.recoveryJobId(), snapshotGeneratedAt, now) != 1) {
-      throw new IllegalArgumentException("snapshotGeneratedAt changed during recovery");
+      throw new IllegalStateException("recovery state changed while recording snapshot metadata");
     }
     for (JsonNode item : data.path("items")) {
       if (!item.isObject() || !item.hasNonNull("accountId")) {
@@ -242,15 +312,20 @@ public class AuthorizationProjectionRecoveryService {
             status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at
           WHERE authorization_context_projection.source_version < excluded.source_version
           """)
-          .param("account", accountId).param("role", role.path("roleCode").asString())
-          .param("version", role.path("roleVersion").asInt()).update();
+          .param("account", accountId)
+          .param("role", role.path("roleCode").asString())
+          .param("version", role.path("roleVersion").asInt())
+          .update();
       jdbc.sql("""
           UPDATE authorization_context_projection
           SET status='INACTIVE',updated_at=now()
           WHERE account_id=:account AND role_code<>:role AND status='ACTIVE'
             AND source_version <= :version
-          """).param("account", accountId).param("role", role.path("roleCode").asString())
-          .param("version", role.path("roleVersion").asInt()).update();
+          """)
+          .param("account", accountId)
+          .param("role", role.path("roleCode").asString())
+          .param("version", role.path("roleVersion").asInt())
+          .update();
     }
 
     JsonNode accesses = data.path("systemAccesses");
@@ -277,19 +352,26 @@ public class AuthorizationProjectionRecoveryService {
             status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at
           WHERE system_access_context_projection.source_version < excluded.source_version
           """)
-          .param("account", accountId).param("systemAccessId", systemAccessId).param("systemId", systemId)
+          .param("account", accountId)
+          .param("systemAccessId", systemAccessId)
+          .param("systemId", systemId)
           .param("system", systemCode)
-          .param("status", status).param("version", version).update();
+          .param("status", status)
+          .param("version", version)
+          .update();
     }
     if (rolePresent) {
       jdbc.sql("DELETE FROM authorization_projection_degraded_accounts WHERE account_id=:account")
-          .param("account", accountId).update();
+          .param("account", accountId)
+          .update();
     } else if (markRoleAbsent) {
       jdbc.sql("""
           INSERT INTO authorization_projection_degraded_accounts (account_id,reason,updated_at)
           VALUES (:account,'ROLE_ABSENT',now())
           ON CONFLICT (account_id) DO UPDATE SET reason=excluded.reason,updated_at=excluded.updated_at
-          """).param("account", accountId).update();
+          """)
+          .param("account", accountId)
+          .update();
     }
   }
 
@@ -303,17 +385,24 @@ public class AuthorizationProjectionRecoveryService {
           :producer,:aggregate,:version,CAST(:envelope AS jsonb),'APPLIED',NULL,:now,:now,:now)
         ON CONFLICT DO NOTHING
         """)
-        .param("id", result.messageId()).param("correlation", result.correlationId())
-        .param("causation", result.causationId()).param("operation", result.operationId())
-        .param("type", result.messageType()).param("kind", result.messageKind())
-        .param("producer", result.producer()).param("aggregate", result.aggregateId())
-        .param("version", result.aggregateVersion()).param("envelope", codec.json(result))
-        .param("now", java.sql.Timestamp.from(now)).update() == 1;
+        .param("id", result.messageId())
+        .param("correlation", result.correlationId())
+        .param("causation", result.causationId())
+        .param("operation", result.operationId())
+        .param("type", result.messageType())
+        .param("kind", result.messageKind())
+        .param("producer", result.producer())
+        .param("aggregate", result.aggregateId())
+        .param("version", result.aggregateVersion())
+        .param("envelope", codec.json(result))
+        .param("now", java.sql.Timestamp.from(now))
+        .update() == 1;
   }
 
   private void clearAuthorizationProjection() {
     jdbc.sql("DELETE FROM system_access_context_projection").update();
     jdbc.sql("DELETE FROM authorization_context_projection").update();
+    jdbc.sql("DELETE FROM authorization_projection_degraded_accounts").update();
   }
 
   private boolean hasAuthorizationProjection(UUID accountId) {
@@ -328,12 +417,11 @@ public class AuthorizationProjectionRecoveryService {
 
   private static void validateResult(MessageEnvelope result) {
     if (result == null || result.messageId() == null || result.messageVersion() != 1
-        || result.correlationId() == null
-        || result.causationId() == null || result.operationId() == null
+        || result.correlationId() == null || result.causationId() == null || result.operationId() == null
         || !"RESULT".equals(result.messageKind()) || !"authorization".equals(result.producer())
         || result.actor() == null || !"SYSTEM".equals(result.actor().type())
-        || !"academic".equals(result.actor().service()) || result.payload() == null
-        || !result.payload().isObject()) {
+        || result.actor().accountId() != null || !"academic".equals(result.actor().service())
+        || result.payload() == null || !result.payload().isObject()) {
       throw new IllegalArgumentException("invalid authorization recovery Result envelope");
     }
     if (!(result.messageType().equals(QUERY_GET + "Result")

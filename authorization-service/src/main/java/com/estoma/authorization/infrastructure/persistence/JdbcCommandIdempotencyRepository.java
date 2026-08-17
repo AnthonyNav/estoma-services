@@ -101,4 +101,32 @@ class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepository {
         .param("updatedAt", Timestamps.toTimestamp(record.updatedAt()))
         .update();
   }
+
+  @Override
+  public int updateDeferred(IdempotencyRecord record) {
+    return jdbc.sql(
+            "UPDATE command_idempotency_records SET pending_reason = :pendingReason, updated_at = :updatedAt "
+                + "WHERE producer = :producer AND operation_type = :operationType AND idempotency_key = :idempotencyKey "
+                + "AND request_fingerprint = :requestFingerprint AND status = CAST('DEFERRED' AS idempotency_status)")
+        .param("producer", record.producer())
+        .param("operationType", record.operationType())
+        .param("idempotencyKey", record.idempotencyKey())
+        .param("requestFingerprint", record.requestFingerprint())
+        .param("pendingReason", record.pendingReason())
+        .param("updatedAt", Timestamps.toTimestamp(record.updatedAt()))
+        .update();
+  }
+
+  @Override
+  public Optional<Integer> findLatestExecutionGeneration(
+      String producer, java.util.UUID importId, java.util.UUID planItemId) {
+    return jdbc.sql(
+            "SELECT max(execution_generation) FROM command_idempotency_records "
+                + "WHERE producer = :producer AND import_id = :importId AND plan_item_id = :planItemId")
+        .param("producer", producer)
+        .param("importId", importId)
+        .param("planItemId", planItemId)
+        .query(Integer.class)
+        .optional();
+  }
 }

@@ -11,5 +11,7 @@ public interface PersonStatusProjectionRepository {
 
   int upsertIfNewer(PersonStatusProjection projection);
 
+  int clearAll();
+
   record PersonStatusProjection(UUID personId, ProjectedStatus status, int sourceVersion, Instant updatedAt) {}
 }

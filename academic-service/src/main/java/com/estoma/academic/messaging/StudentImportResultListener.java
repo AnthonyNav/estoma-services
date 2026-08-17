@@ -50,6 +50,8 @@ public class StudentImportResultListener {
       if (outcome == StudentImportResultDispatcher.Outcome.STALE) {
         metrics.staleResult();
         log.info("ignored stale academic result messageId={} type={}", result.messageId(), result.messageType());
+      } else if (outcome == StudentImportResultDispatcher.Outcome.DUPLICATE) {
+        metrics.duplicate();
       }
       channel.basicAck(tag, false);
     } catch (RuntimeException ex) {

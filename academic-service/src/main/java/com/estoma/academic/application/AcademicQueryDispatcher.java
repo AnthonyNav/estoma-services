@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
 
 /** Reads persisted eligibility snapshots and emits the correlated durable Result. */
@@ -28,6 +29,7 @@ public class AcademicQueryDispatcher {
     this.codec = codec;
   }
 
+  @Transactional
   public void dispatch(MessageEnvelope query) {
     if ("GetStudentAcademicEligibilitySnapshot".equals(query.messageType())) {
       get(query);
@@ -36,6 +38,23 @@ public class AcademicQueryDispatcher {
     } else {
       throw new IllegalArgumentException("unsupported Academic Query");
     }
+  }
+
+  @Transactional
+  public void reject(MessageEnvelope query, String errorCode) {
+    appendTerminalResult(query, "REJECTED", errorCode);
+  }
+
+  @Transactional
+  public void fail(MessageEnvelope query, String errorCode) {
+    appendTerminalResult(query, "FAILED", errorCode);
+  }
+
+  private void appendTerminalResult(MessageEnvelope query, String status, String errorCode) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("status", status);
+    payload.put("error", Map.of("code", errorCode));
+    appendResult(query, query.messageType() + "Result", null, payload);
   }
 
   private void get(MessageEnvelope query) {

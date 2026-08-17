@@ -41,4 +41,9 @@ class JdbcPersonStatusProjectionRepository implements PersonStatusProjectionRepo
         .param("updatedAt", Timestamps.toTimestamp(projection.updatedAt()))
         .update();
   }
+
+  @Override
+  public int clearAll() {
+    return jdbc.sql("DELETE FROM person_status_projection").update();
+  }
 }

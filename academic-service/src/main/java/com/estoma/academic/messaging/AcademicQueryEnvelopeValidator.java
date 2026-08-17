@@ -30,20 +30,21 @@ public class AcademicQueryEnvelopeValidator {
     if (envelope.messageVersion() != 1) {
       throw invalid("unsupported messageVersion");
     }
-    if (!"authorization".equals(envelope.producer())) {
-      throw invalid("QUERY_PRODUCER_NOT_ALLOWED");
-    }
-    if (!(envelope.actor() instanceof Actor actor)
-        || !"SYSTEM".equals(actor.type())
-        || !"authorization".equals(actor.service())
-        || actor.accountId() != null) {
-      throw invalid("QUERY_ACTOR_NOT_ALLOWED");
-    }
     if (!QUERY_TYPES.contains(envelope.messageType())) {
       throw invalid("unknown Academic Query");
     }
     if (!envelope.payload().isObject()) {
       throw invalid("payload must be an object");
+    }
+
+    if (!"authorization".equals(envelope.producer())) {
+      throw rejected("QUERY_PRODUCER_NOT_ALLOWED");
+    }
+    if (!(envelope.actor() instanceof Actor actor)
+        || !"SYSTEM".equals(actor.type())
+        || !"authorization".equals(actor.service())
+        || actor.accountId() != null) {
+      throw rejected("QUERY_ACTOR_NOT_ALLOWED");
     }
 
     if ("GetStudentAcademicEligibilitySnapshot".equals(envelope.messageType())) {
@@ -57,7 +58,7 @@ public class AcademicQueryEnvelopeValidator {
     boolean hasProfile = uuid(payload, "studentAcademicProfileId", "INVALID_ELIGIBILITY_TARGET") != null;
     boolean hasAccount = uuid(payload, "accountId", "INVALID_ELIGIBILITY_TARGET") != null;
     if (hasProfile == hasAccount) {
-      throw invalid("INVALID_ELIGIBILITY_TARGET");
+      throw rejected("INVALID_ELIGIBILITY_TARGET");
     }
     requireSystem(payload);
   }
@@ -68,16 +69,16 @@ public class AcademicQueryEnvelopeValidator {
     }
     int limit = payload.path("limit").asInt(-1);
     if (limit < 1 || limit > 500) {
-      throw invalid("INVALID_LIMIT");
+      throw rejected("INVALID_LIMIT");
     }
     if (payload.hasNonNull("systemCode") && !PRACTICAS.equals(payload.path("systemCode").asString())) {
-      throw invalid("INVALID_SYSTEM_CODE");
+      throw rejected("INVALID_SYSTEM_CODE");
     }
   }
 
   private static void requireSystem(JsonNode payload) {
     if (!PRACTICAS.equals(payload.path("systemCode").asString())) {
-      throw invalid("INVALID_SYSTEM_CODE");
+      throw rejected("INVALID_SYSTEM_CODE");
     }
   }
 
@@ -88,7 +89,7 @@ public class AcademicQueryEnvelopeValidator {
     try {
       return java.util.UUID.fromString(payload.path(field).asString());
     } catch (IllegalArgumentException ex) {
-      throw invalid(errorCode);
+      throw rejected(errorCode);
     }
   }
 
@@ -106,5 +107,22 @@ public class AcademicQueryEnvelopeValidator {
 
   private static IllegalArgumentException invalid(String message) {
     return new IllegalArgumentException(message);
+  }
+
+  private static RejectedException rejected(String code) {
+    return new RejectedException(code);
+  }
+
+  public static final class RejectedException extends RuntimeException {
+    private final String code;
+
+    public RejectedException(String code) {
+      super(code);
+      this.code = code;
+    }
+
+    public String code() {
+      return code;
+    }
   }
 }

@@ -38,6 +38,7 @@ estoma:
   authorization-recovery:
     result-timeout: ${ESTOMA_AUTHORIZATION_RECOVERY_RESULT_TIMEOUT:30m}
     failed-retry-delay: ${ESTOMA_AUTHORIZATION_RECOVERY_FAILED_RETRY_DELAY:15m}
+    max-attempts: ${ESTOMA_AUTHORIZATION_RECOVERY_MAX_ATTEMPTS:3}
 server:
   port: 8080
 management:

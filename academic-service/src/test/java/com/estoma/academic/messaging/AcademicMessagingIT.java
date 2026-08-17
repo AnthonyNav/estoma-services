@@ -3,9 +3,9 @@ package com.estoma.academic.messaging;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.estoma.academic.application.AuthorizationProjectionRecoveryService;
 import com.estoma.academic.contract.Actor;
 import com.estoma.academic.contract.MessageEnvelope;
-import com.estoma.academic.application.AuthorizationProjectionRecoveryService;
 import com.estoma.academic.persistence.OutboxRepository;
 import com.estoma.academic.persistence.ProjectionRecoveryJobRepository;
 import java.time.Duration;
@@ -24,6 +24,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.RabbitMQContainer;
@@ -31,9 +32,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
-/** Exercises real topology, technical retry routing and confirmed relay publication without timing assertions. */
+/** Exercises real topology, durable Results and projection recovery invariants. */
 @SpringBootTest(properties = {
-    "spring.task.scheduling.enabled=false",
     "estoma.messaging.topology-declare=true"
 })
 @Testcontainers
@@ -72,12 +72,21 @@ class AcademicMessagingIT {
   @Autowired ExternalProjectionListener externalEvents;
   @Autowired JdbcClient jdbc;
   @Autowired ObjectMapper mapper;
+  @Autowired ScheduledAnnotationBeanPostProcessor scheduledTasks;
 
   UUID administratorAccount = UUID.randomUUID();
   UUID administratorPerson = UUID.randomUUID();
+  boolean scheduledTasksStopped;
 
   @BeforeEach
   void reset() {
+    // Production intentionally enables @Scheduled workers. These tests exercise each worker explicitly,
+    // so background scheduling would race database TRUNCATE and make the suite nondeterministic.
+    if (!scheduledTasksStopped) {
+      scheduledTasks.destroy();
+      scheduledTasksStopped = true;
+    }
+
     jdbc.sql("TRUNCATE TABLE authorization_projection_degraded_accounts,projection_recovery_not_found_conflicts,projection_recovery_jobs,outbox_messages,processed_messages,idempotency_records,student_import_validation_work,student_import_validation_rows,student_import_validation_errors,student_import_plan_item_rebases,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
     jdbc.sql("""
         INSERT INTO academic_projection_recovery_state (projection_type,status,active_job_id,updated_at)
@@ -92,24 +101,34 @@ class AcademicMessagingIT {
         .param("id", administratorAccount)
         .param("person", administratorPerson)
         .update();
-    admin.purgeQueue(AcademicTopology.COMMAND_QUEUE);
-    admin.purgeQueue(AcademicTopology.QUERY_QUEUE);
-    admin.purgeQueue(AcademicTopology.EVENT_QUEUE);
-    admin.purgeQueue(AcademicTopology.RESULT_QUEUE);
-    admin.purgeQueue("commands.academic.retry.5s");
-    admin.purgeQueue("queries.academic.retry.5s");
-    admin.purgeQueue("commands.academic.dlq");
-    admin.purgeQueue("queries.academic.dlq");
-    admin.purgeQueue("results.academic.dlq");
+
+    for (String queue : new String[] {
+        AcademicTopology.COMMAND_QUEUE,
+        AcademicTopology.QUERY_QUEUE,
+        AcademicTopology.EVENT_QUEUE,
+        AcademicTopology.RESULT_QUEUE,
+        "commands.academic.retry.1", "commands.academic.retry.2", "commands.academic.dlq",
+        "queries.academic.retry.1", "queries.academic.retry.2", "queries.academic.dlq",
+        "results.academic.retry.1", "results.academic.retry.2", "results.academic.dlq",
+        "events.academic.retry.1", "events.academic.retry.2", "events.academic.dlq"
+    }) {
+      admin.purgeQueue(queue);
+    }
   }
 
   @Test
-  void declaresTopologyAndRetriesOnlyTechnicalCommandFailures() {
+  void declaresCanonicalRetryTopologyAndInvalidCommandsGoStraightToDlq() {
     assertThat(admin.getQueueProperties(AcademicTopology.COMMAND_QUEUE)).isNotNull();
     assertThat(admin.getQueueProperties(AcademicTopology.EVENT_QUEUE)).isNotNull();
-    assertThat(admin.getQueueProperties("commands.academic.retry.5s")).isNotNull();
+    assertThat(admin.getQueueProperties("commands.academic.retry.1")).isNotNull();
+    assertThat(admin.getQueueProperties("commands.academic.retry.2")).isNotNull();
+
     rabbit.send(AcademicTopology.COMMANDS, "academic", new Message("not-json".getBytes()));
-    assertThat(rabbit.receive("commands.academic.retry.5s", 5_000)).isNotNull();
+
+    Message isolated = rabbit.receive("commands.academic.dlq", 5_000);
+    assertThat(isolated).isNotNull();
+    assertThat(rabbit.receive("commands.academic.retry.1", 250)).isNull();
+    assertThat(rabbit.receive("commands.academic.retry.2", 250)).isNull();
   }
 
   @Test
@@ -170,7 +189,8 @@ class AcademicMessagingIT {
   @Test
   void declaresAcademicQueryTopologyAndRoutesRecoveryQueriesByDestination() {
     assertThat(admin.getQueueProperties(AcademicTopology.QUERY_QUEUE)).isNotNull();
-    assertThat(admin.getQueueProperties("queries.academic.retry.5s")).isNotNull();
+    assertThat(admin.getQueueProperties("queries.academic.retry.1")).isNotNull();
+    assertThat(admin.getQueueProperties("queries.academic.retry.2")).isNotNull();
     Queue queue = new Queue("queries.authorization.messaging-it", false, true, true);
     admin.declareQueue(queue);
     admin.declareBinding(BindingBuilder.bind(queue)
@@ -219,6 +239,28 @@ class AcademicMessagingIT {
         .param("id", queryId).query(String.class).single()).isEqualTo("FOUND");
     assertThat(jdbc.sql("SELECT metadata->>'destination' FROM outbox_messages WHERE causation_id=:id")
         .param("id", queryId).query(String.class).single()).isEqualTo("authorization");
+    assertThat(jdbc.sql("SELECT metadata->'actor'->>'service' FROM outbox_messages WHERE causation_id=:id")
+        .param("id", queryId).query(String.class).single()).isEqualTo("authorization");
+  }
+
+  @Test
+  void invalidEligibilityQueryProducesRejectedResultWithoutRetryOrDlq() {
+    UUID queryId = UUID.randomUUID();
+    MessageEnvelope query = new MessageEnvelope(queryId, "ListStudentAcademicEligibilitySnapshotsPage", 1, "QUERY",
+        "authorization", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(), null, null, null,
+        new Actor("SYSTEM", null, "authorization"), mapper.createObjectNode().put("limit", 0));
+
+    rabbit.send(AcademicTopology.QUERIES, "academic", new Message(codec.encode(query)));
+
+    await().atMost(Duration.ofSeconds(10)).until(() -> count(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='ListStudentAcademicEligibilitySnapshotsPageResult'"
+            + " AND causation_id=:id", queryId) == 1);
+    assertThat(jdbc.sql("SELECT payload->>'status' FROM outbox_messages WHERE causation_id=:id")
+        .param("id", queryId).query(String.class).single()).isEqualTo("REJECTED");
+    assertThat(jdbc.sql("SELECT payload->'error'->>'code' FROM outbox_messages WHERE causation_id=:id")
+        .param("id", queryId).query(String.class).single()).isEqualTo("INVALID_LIMIT");
+    assertThat(rabbit.receive("queries.academic.retry.1", 250)).isNull();
+    assertThat(rabbit.receive("queries.academic.dlq", 250)).isNull();
   }
 
   @Test
@@ -254,6 +296,25 @@ class AcademicMessagingIT {
   }
 
   @Test
+  void notFoundConflictFailsClosedAndSchedulesARepairOnNextTrustCheck() {
+    UUID account = UUID.randomUUID();
+    jdbc.sql("INSERT INTO authorization_context_projection (account_id,role_code,status,source_version,updated_at) VALUES (:id,'ALUMNO','ACTIVE',3,now())")
+        .param("id", account).update();
+    UUID jobId = recovery.requestEntity(account);
+    recovery.publishNext(recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst());
+    ProjectionRecoveryJobRepository.Job waiting = recoveryJobs.find(jobId).orElseThrow();
+    var payload = mapper.createObjectNode().put("status", "NOT_FOUND");
+    MessageEnvelope result = new MessageEnvelope(UUID.randomUUID(), "GetAccountAuthorizationSnapshotResult", 1,
+        "RESULT", "authorization", Instant.now(), jobId, waiting.currentQueryMessageId(), waiting.currentOperationId(), null,
+        null, null, new Actor("SYSTEM", null, "academic"), payload);
+
+    assertThat(recovery.applyResult(result)).isEqualTo(AuthorizationProjectionRecoveryService.ResultOutcome.APPLIED);
+    assertThat(recovery.accountTrustworthy(account)).isFalse();
+    assertThat(jdbc.sql("SELECT count(*) FROM projection_recovery_jobs WHERE scope='ENTITY' AND entity_key=:key AND status='PENDING'")
+        .param("key", "account:" + account).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
   void failedFullRecoveryCanBeRestartedAfterItsRetryDelay() {
     UUID failedJob = recovery.requestFull();
     ProjectionRecoveryJobRepository.Job claimed = recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst();
@@ -269,37 +330,42 @@ class AcademicMessagingIT {
   }
 
   @Test
-  void fullAuthorizationRecoveryAdvancesItsCursorOnlyAfterApplyingTheCurrentPage() {
+  void fullAuthorizationRecoveryUsesSourceVersionsAndAllowsDifferentPageTimestamps() {
     UUID jobId = recovery.requestFull();
     recovery.publishNext(recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst());
     ProjectionRecoveryJobRepository.Job first = recoveryJobs.find(jobId).orElseThrow();
     var firstData = mapper.createObjectNode();
     UUID firstAccount = UUID.randomUUID();
-    Instant snapshotGeneratedAt = Instant.now();
+    Instant firstSnapshotGeneratedAt = Instant.now();
     var firstItem = mapper.createObjectNode().put("accountId", firstAccount.toString());
     firstItem.putArray("systemAccesses");
     firstData.putArray("items").add(firstItem);
     firstData.put("nextCursor", UUID.randomUUID().toString()).put("hasMore", true)
-        .put("snapshotGeneratedAt", snapshotGeneratedAt.toString());
+        .put("snapshotGeneratedAt", firstSnapshotGeneratedAt.toString());
     MessageEnvelope firstPage = new MessageEnvelope(UUID.randomUUID(), "ListAccountAuthorizationSnapshotsPageResult", 1,
         "RESULT", "authorization", Instant.now(), jobId, first.currentQueryMessageId(), first.currentOperationId(), null,
         null, null, new Actor("SYSTEM", null, "academic"), mapper.createObjectNode()
             .put("status", "SUCCEEDED").set("data", firstData));
     assertThat(recovery.applyResult(firstPage)).isEqualTo(AuthorizationProjectionRecoveryService.ResultOutcome.APPLIED);
-    MessageEnvelope staleEvent = new MessageEnvelope(UUID.randomUUID(), "AccountRoleAssigned", 1, "EVENT",
-        "authorization", snapshotGeneratedAt.minusSeconds(1), UUID.randomUUID(), null, null, null,
+    assertThat(jdbc.sql("SELECT attempts FROM projection_recovery_jobs WHERE recovery_job_id=:id")
+        .param("id", jobId).query(Integer.class).single()).isZero();
+
+    MessageEnvelope concurrentNewerEvent = new MessageEnvelope(UUID.randomUUID(), "AccountRoleAssigned", 1, "EVENT",
+        "authorization", firstSnapshotGeneratedAt.minusSeconds(1), UUID.randomUUID(), null, null, null,
         firstAccount, 3, null, mapper.createObjectNode().put("accountId", firstAccount.toString())
-            .put("roleCode", "SUPERADMIN"));
-    assertThat(externalEvents.apply(staleEvent)).isTrue();
-    assertThat(jdbc.sql("SELECT count(*) FROM authorization_context_projection WHERE account_id=:id")
-        .param("id", firstAccount).query(Long.class).single()).isZero();
+            .put("roleId", UUID.randomUUID().toString()).put("roleCode", "SUPERADMIN"));
+    assertThat(externalEvents.apply(concurrentNewerEvent)).isTrue();
+    assertThat(jdbc.sql("SELECT source_version FROM authorization_context_projection WHERE account_id=:id AND role_code='SUPERADMIN'")
+        .param("id", firstAccount).query(Integer.class).single()).isEqualTo(3);
+
     assertThat(jdbc.sql("SELECT status::text FROM projection_recovery_jobs WHERE recovery_job_id=:id")
         .param("id", jobId).query(String.class).single()).isEqualTo("PENDING");
     recovery.publishNext(recoveryJobs.claimPending(1, Duration.ofMinutes(1)).getFirst());
     ProjectionRecoveryJobRepository.Job second = recoveryJobs.find(jobId).orElseThrow();
     var lastData = mapper.createObjectNode();
     lastData.putArray("items");
-    lastData.put("hasMore", false).put("snapshotGeneratedAt", snapshotGeneratedAt.toString());
+    lastData.put("hasMore", false)
+        .put("snapshotGeneratedAt", firstSnapshotGeneratedAt.plusSeconds(1).toString());
     MessageEnvelope lastPage = new MessageEnvelope(UUID.randomUUID(), "ListAccountAuthorizationSnapshotsPageResult", 1,
         "RESULT", "authorization", Instant.now(), jobId, second.currentQueryMessageId(), second.currentOperationId(), null,
         null, null, new Actor("SYSTEM", null, "academic"), mapper.createObjectNode()
@@ -309,6 +375,8 @@ class AcademicMessagingIT {
         .param("id", jobId).query(String.class).single()).isEqualTo("COMPLETED");
     assertThat(jdbc.sql("SELECT status::text FROM academic_projection_recovery_state WHERE projection_type='AUTHORIZATION'")
         .query(String.class).single()).isEqualTo("READY");
+    assertThat(jdbc.sql("SELECT source_version FROM authorization_context_projection WHERE account_id=:id AND role_code='SUPERADMIN'")
+        .param("id", firstAccount).query(Integer.class).single()).isEqualTo(3);
   }
 
   @Test
@@ -319,15 +387,16 @@ class AcademicMessagingIT {
     var resultPayload = mapper.createObjectNode().put("status", "SUCCEEDED");
     resultPayload.set("data", resultData);
     MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users",
-        Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null, new Actor("SYSTEM", null, "academic"),
-        resultPayload);
+        Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null,
+        new Actor("SYSTEM", null, "academic"), resultPayload);
     Message message = new Message(codec.encode(result));
     rabbit.send(AcademicTopology.RESULTS, "academic", message);
     rabbit.send(AcademicTopology.RESULTS, "academic", message);
 
     await().atMost(Duration.ofSeconds(10)).until(() ->
         count("SELECT count(*) FROM processed_messages WHERE consumer_name='academic.results' AND message_id=:id", resultId) == 1
-            && "VALIDATED".equals(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id").param("id", pending.importId).query(String.class).single()));
+            && "VALIDATED".equals(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id")
+                .param("id", pending.importId).query(String.class).single()));
     assertThat(jdbc.sql("SELECT result->>'outcome' FROM student_import_validation_work WHERE import_id=:id AND work_type='AUTHORITATIVE_PERSON_RESOLUTION'")
         .param("id", pending.importId).query(String.class).single()).isEqualTo("NOT_FOUND");
   }
@@ -336,16 +405,20 @@ class AcademicMessagingIT {
   void inactivePersonResolutionResultRejectsTheImport() {
     PendingResolution pending = pendingResolution("inactive@estoma.mx");
     UUID resultId = UUID.randomUUID();
-    var data = mapper.createObjectNode().put("outcome", "INACTIVE_MATCH").put("personId", UUID.randomUUID().toString()).put("status", "INACTIVE");
+    var data = mapper.createObjectNode().put("outcome", "INACTIVE_MATCH")
+        .put("personId", UUID.randomUUID().toString()).put("status", "INACTIVE");
     var payload = mapper.createObjectNode().put("status", "SUCCEEDED");
     payload.set("data", data);
     MessageEnvelope result = new MessageEnvelope(resultId, "ResolvePersonByInstitutionalEmailResult", 1, "RESULT", "users",
-        Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null, new Actor("SYSTEM", null, "academic"), payload);
+        Instant.now(), pending.importId, pending.queryId, pending.operationId, null, null, null,
+        new Actor("SYSTEM", null, "academic"), payload);
     rabbit.send(AcademicTopology.RESULTS, "academic", new Message(codec.encode(result)));
 
-    await().atMost(Duration.ofSeconds(10)).until(() -> "REJECTED".equals(jdbc.sql("SELECT status::text FROM student_import_processes WHERE import_id=:id")
+    await().atMost(Duration.ofSeconds(10)).until(() -> "REJECTED".equals(jdbc.sql(
+        "SELECT status::text FROM student_import_processes WHERE import_id=:id")
         .param("id", pending.importId).query(String.class).single()));
-    assertThat(value("SELECT failure_code FROM student_import_processes WHERE import_id=:id", pending.importId)).isEqualTo("IDENTITY_CONFLICT");
+    assertThat(value("SELECT failure_code FROM student_import_processes WHERE import_id=:id", pending.importId))
+        .isEqualTo("IDENTITY_CONFLICT");
     assertThat(jdbc.sql("SELECT academic_data_status::text FROM academic_periods WHERE academic_period_id=(SELECT academic_period_id FROM student_import_processes WHERE import_id=:id)")
         .param("id", pending.importId).query(String.class).single()).isEqualTo("IMPORT_FAILED");
   }
@@ -420,8 +493,9 @@ class AcademicMessagingIT {
       assertThat(result.payload().path("status").asString()).isEqualTo("REJECTED");
       assertThat(result.payload().path("error").path("code").asString()).isEqualTo("ACADEMIC_PERIOD_NOT_READY");
       assertThat(count("SELECT count(*) FROM course_sections")).isZero();
-      assertThat(rabbit.receive("commands.academic.retry.5s", 1_500)).isNull();
-      assertThat(rabbit.receive("commands.academic.dlq", 1_500)).isNull();
+      assertThat(rabbit.receive("commands.academic.retry.1", 250)).isNull();
+      assertThat(rabbit.receive("commands.academic.retry.2", 250)).isNull();
+      assertThat(rabbit.receive("commands.academic.dlq", 250)).isNull();
     } finally {
       admin.deleteQueue(results.getName());
     }
@@ -477,11 +551,13 @@ class AcademicMessagingIT {
     jdbc.sql("INSERT INTO academic_periods (academic_period_id,code,name,start_date,end_date,status,academic_data_status,version,created_at,updated_at) VALUES (:id,:code,'Spring',current_date,current_date,'ACTIVE','PENDING_IMPORT',1,now(),now())")
         .param("id", period).param("code", "2026-result-" + importId).update();
     jdbc.sql("INSERT INTO student_import_processes (import_id,academic_period_id,academic_period_code,academic_period_version,import_mode,file_reference,file_checksum,status,started_by_account_id,authorized_by_account_id,process_version,execution_generation,started_at,created_at,updated_at) VALUES (:id,:period,:code,1,'FULL',:reference,'0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef','VALIDATING',:actor,:actor,1,0,now(),now(),now())")
-        .param("id", importId).param("period", period).param("code", "2026-result-" + importId).param("reference", UUID.randomUUID().toString()).param("actor", administratorAccount).update();
+        .param("id", importId).param("period", period).param("code", "2026-result-" + importId)
+        .param("reference", UUID.randomUUID().toString()).param("actor", administratorAccount).update();
     jdbc.sql("INSERT INTO student_import_validation_rows (import_id,row_type,sequence,sheet_name,row_number,row_data,created_at) VALUES (:id,'STUDENT',1,'ALUMNOS',2,CAST(:row AS jsonb),now())")
         .param("id", importId).param("row", "{\"studentNumber\":\"ST-1\",\"firstName\":\"Ada\",\"paternalSurname\":\"Lovelace\",\"maternalSurname\":\"\",\"institutionalEmail\":\"" + email + "\",\"semester\":1}").update();
     jdbc.sql("INSERT INTO student_import_validation_work (import_id,work_id,work_type,work_key,status,current_message_id,current_operation_id,created_at,updated_at) VALUES (:id,:work,'LOCAL_FILE_ACCESS','file','SUCCEEDED',NULL,NULL,now(),now()),(:id,:resolution,'AUTHORITATIVE_PERSON_RESOLUTION',:email,'WAITING_RESULT',:message,:operation,now(),now())")
-        .param("id", importId).param("work", UUID.randomUUID()).param("resolution", UUID.randomUUID()).param("email", email).param("message", queryId).param("operation", operationId).update();
+        .param("id", importId).param("work", UUID.randomUUID()).param("resolution", UUID.randomUUID())
+        .param("email", email).param("message", queryId).param("operation", operationId).update();
     jdbc.sql("""
         INSERT INTO outbox_messages (
           message_id,message_type,message_version,message_kind,aggregate_id,aggregate_version,

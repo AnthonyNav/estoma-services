@@ -10,5 +10,7 @@ public interface AuthorizationRoleProjectionRepository {
 
   int upsert(UUID accountId, String roleCode, int sourceVersion, Instant updatedAt);
 
+  default void lockProjection() {}
+
   record RoleProjection(UUID accountId, String roleCode, int sourceVersion, Instant updatedAt) {}
 }

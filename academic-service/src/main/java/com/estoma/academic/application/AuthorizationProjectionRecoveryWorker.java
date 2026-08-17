@@ -21,6 +21,7 @@ public class AuthorizationProjectionRecoveryWorker {
   private final AcademicOutboxProperties properties;
   private final java.time.Duration resultTimeout;
   private final java.time.Duration failedRetryDelay;
+  private final int maxAttempts;
   private final boolean listenersEnabled;
 
   public AuthorizationProjectionRecoveryWorker(
@@ -29,12 +30,17 @@ public class AuthorizationProjectionRecoveryWorker {
       AcademicOutboxProperties properties,
       @Value("${estoma.authorization-recovery.result-timeout:30m}") java.time.Duration resultTimeout,
       @Value("${estoma.authorization-recovery.failed-retry-delay:15m}") java.time.Duration failedRetryDelay,
+      @Value("${estoma.authorization-recovery.max-attempts:3}") int maxAttempts,
       @Value("${estoma.messaging.listeners-enabled:true}") boolean listenersEnabled) {
     this.jobs = jobs;
     this.recovery = recovery;
     this.properties = properties;
     this.resultTimeout = resultTimeout;
     this.failedRetryDelay = failedRetryDelay;
+    if (maxAttempts < 1) {
+      throw new IllegalArgumentException("authorization-recovery.max-attempts must be positive");
+    }
+    this.maxAttempts = maxAttempts;
     this.listenersEnabled = listenersEnabled;
   }
 
@@ -48,7 +54,7 @@ public class AuthorizationProjectionRecoveryWorker {
   @Scheduled(fixedDelayString = "${estoma.authorization-recovery.delay:5s}")
   public void run() {
     for (ProjectionRecoveryJobRepository.ExpiredJob expired
-        : jobs.requeueExpiredWaiting(resultTimeout, properties.maxAttempts())) {
+        : jobs.requeueExpiredWaiting(resultTimeout, maxAttempts)) {
       if (expired.full() && "FAILED".equals(expired.status())) {
         jobs.markFailed(expired.recoveryJobId(), Instant.now());
       }
@@ -61,7 +67,7 @@ public class AuthorizationProjectionRecoveryWorker {
         recovery.publishNext(job);
       } catch (RuntimeException ex) {
         Instant now = Instant.now();
-        if (job.attempts() >= properties.maxAttempts()) {
+        if (job.attempts() + 1 >= maxAttempts) {
           if (jobs.fail(job, "RECOVERY_QUERY_PUBLISH_FAILED", now) == 1 && job.full()) {
             jobs.markFailed(job.recoveryJobId(), now);
           }

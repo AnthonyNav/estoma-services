@@ -10,7 +10,7 @@ Si este archivo entra en conflicto con la documentación canónica de plataforma
 
 ## Fuente De Verdad
 
-Fuente canónica: `AnthonyNav/estomatologia-platform-docs`, `main` observado en `af603c80ebb1259b155209e81a0fd3a0469a6fba`.
+Fuente canónica: `AnthonyNav/estomatologia-platform-docs`, `main` observado en `459fdd4`.
 
 Documentos principales:
 
@@ -1149,33 +1149,20 @@ La implementación no debe:
 
 ## Gate De Contratos Para PR3
 
-Existe actualmente una inconsistencia documental que **no debe resolverse dentro del código**:
-
-El contrato específico del servicio documenta:
-
-```text
-commands.wash-administration-service
-queries.wash-administration-service
-```
-
-Mientras `messaging-architecture.md` define:
+El gate de nomenclatura fue resuelto en `estomatologia-platform-docs` mediante
+la convención transversal V1. PR3 debe usar exclusivamente:
 
 ```text
 logicalComponentId = wash-administration
-commands.<logicalComponentId>
-queries.<logicalComponentId>
-```
-
-lo que implicaría:
-
-```text
 commands.wash-administration
 queries.wash-administration
+events.wash-administration
+results.wash-administration
 ```
 
-Antes de PR3 debe corregirse la fuente canónica para que exista una sola convención. PR3 no puede introducir aliases permanentes ni cablear ambos nombres para ocultar la contradicción.
-
-Hasta ese gate, PR1 y PR2 permanecen broker-agnostic y no dependen del nombre físico de cola.
+No se declaran aliases ni topologías paralelas con sufijo `-service`. La
+resolución completa y los requesters autorizados están documentados en
+`pr3-contract-gate.md` y en la fuente canónica de plataforma.
 
 ## Reglas De Entrega
 

@@ -88,11 +88,15 @@ class ExternalProjectionListenerIT {
 
   @Test
   void roleChangeDeactivatesPreviousRoleAndActivatesNewRole() {
+    UUID studentRoleId = UUID.randomUUID();
+    UUID adminRoleId = UUID.randomUUID();
     listener.apply(event("AccountRoleAssigned", "authorization", 1,
-        mapper.createObjectNode().put("accountId", account.toString()).put("roleCode", "ALUMNO")));
+        mapper.createObjectNode().put("accountId", account.toString())
+            .put("roleId", studentRoleId.toString()).put("roleCode", "ALUMNO")));
     listener.apply(event("AccountRoleChanged", "authorization", 2,
-        mapper.createObjectNode().put("accountId", account.toString()).put("previousRoleCode", "ALUMNO")
-            .put("newRoleCode", "SUPERADMIN")));
+        mapper.createObjectNode().put("accountId", account.toString())
+            .put("previousRoleId", studentRoleId.toString()).put("previousRoleCode", "ALUMNO")
+            .put("newRoleId", adminRoleId.toString()).put("newRoleCode", "SUPERADMIN")));
 
     assertThat(jdbc.sql("SELECT status FROM authorization_context_projection WHERE account_id=:id AND role_code='ALUMNO'")
         .param("id", account).query(String.class).single()).isEqualTo("INACTIVE");

@@ -12,6 +12,15 @@ public interface CommandIdempotencyRepository {
 
   int update(IdempotencyRecord record);
 
+  default int updateDeferred(IdempotencyRecord record) {
+    return 0;
+  }
+
+  default Optional<Integer> findLatestExecutionGeneration(
+      String producer, UUID importId, UUID planItemId) {
+    return Optional.empty();
+  }
+
   record IdempotencyRecord(
       String producer,
       String operationType,

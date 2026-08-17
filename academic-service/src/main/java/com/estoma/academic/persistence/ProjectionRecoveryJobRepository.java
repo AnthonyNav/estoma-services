@@ -53,6 +53,7 @@ public class ProjectionRecoveryJobRepository {
     return activeFull().orElse(id);
   }
 
+  /** Claims work without counting a successful page as a retry/failure attempt. */
   public List<Job> claimPending(int limit, Duration lease) {
     UUID token = UUID.randomUUID();
     Instant now = Instant.now();
@@ -67,7 +68,7 @@ public class ProjectionRecoveryJobRepository {
           LIMIT :limit
         )
         UPDATE projection_recovery_jobs j
-        SET claim_token=:token,lease_until=:lease,attempts=j.attempts+1,updated_at=:now
+        SET claim_token=:token,lease_until=:lease,updated_at=:now
         FROM candidates c
         WHERE j.recovery_job_id=c.recovery_job_id
         RETURNING j.recovery_job_id,j.scope::text,j.entity_key,j.status::text,j.cursor,
@@ -95,12 +96,13 @@ public class ProjectionRecoveryJobRepository {
         .param("id", job.recoveryJobId()).param("token", job.claimToken()).update();
   }
 
+  /** A successfully applied page resets the consecutive technical failure counter. */
   public int markPending(Job job, String cursor, Instant now) {
     return jdbc.sql("""
         UPDATE projection_recovery_jobs
         SET status='PENDING',cursor=:cursor,current_query_type=NULL,current_query_message_id=NULL,
             current_operation_id=NULL,current_correlation_id=NULL,claim_token=NULL,lease_until=NULL,
-            updated_at=:now
+            attempts=0,last_error_code=NULL,last_error_at=NULL,updated_at=:now
         WHERE recovery_job_id=:id AND status='WAITING_RESULT'
           AND current_query_message_id=:message AND current_operation_id=:operation
         """)
@@ -109,10 +111,11 @@ public class ProjectionRecoveryJobRepository {
         .param("operation", job.currentOperationId()).update();
   }
 
+  /** Records one failed local publish attempt and releases the claim for retry. */
   public int release(Job job, String error, Instant now) {
     return jdbc.sql("""
         UPDATE projection_recovery_jobs
-        SET status='PENDING',last_error_code=:error,last_error_at=:now,
+        SET status='PENDING',attempts=attempts+1,last_error_code=:error,last_error_at=:now,
             claim_token=NULL,lease_until=NULL,updated_at=:now
         WHERE recovery_job_id=:id AND status='PENDING' AND claim_token=:token
         """)
@@ -120,21 +123,55 @@ public class ProjectionRecoveryJobRepository {
         .param("id", job.recoveryJobId()).param("token", job.claimToken()).update();
   }
 
+  /** A waiting-result timeout is one technical failure, independent from page count. */
   public List<ExpiredJob> requeueExpiredWaiting(Duration timeout, int maxAttempts) {
     Instant cutoff = Instant.now().minus(timeout);
     return jdbc.sql("""
         UPDATE projection_recovery_jobs
-        SET status=CASE WHEN attempts >= :max THEN 'FAILED'::projection_recovery_status
+        SET attempts=attempts+1,
+            status=CASE WHEN attempts+1 >= :max THEN 'FAILED'::projection_recovery_status
                         ELSE 'PENDING'::projection_recovery_status END,
             last_error_code='RECOVERY_RESULT_TIMEOUT',last_error_at=now(),
             current_query_type=NULL,current_query_message_id=NULL,current_operation_id=NULL,
             current_correlation_id=NULL,claim_token=NULL,lease_until=NULL,
-            completed_at=CASE WHEN attempts >= :max THEN now() ELSE NULL END,updated_at=now()
+            completed_at=CASE WHEN attempts+1 >= :max THEN now() ELSE NULL END,updated_at=now()
         WHERE status='WAITING_RESULT' AND updated_at < :cutoff
         RETURNING recovery_job_id,scope::text,status::text
         """)
         .param("max", maxAttempts).param("cutoff", java.sql.Timestamp.from(cutoff))
         .query((rs, n) -> new ExpiredJob(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3))).list();
+  }
+
+  /**
+   * Consumes a terminal REJECTED/FAILED Result for the current Query attempt.
+   * The Result itself is acknowledged/deduplicated, while the side-effect-free Query work is
+   * retried with a new messageId until the consecutive-failure budget is exhausted.
+   */
+  public ResultFailureTransition recordTerminalResultFailure(
+      Job job, String error, int maxAttempts, Instant now) {
+    return jdbc.sql("""
+        UPDATE projection_recovery_jobs
+        SET attempts=attempts+1,
+            status=CASE WHEN attempts+1 >= :max THEN 'FAILED'::projection_recovery_status
+                        ELSE 'PENDING'::projection_recovery_status END,
+            last_error_code=:error,last_error_at=:now,
+            current_query_type=NULL,current_query_message_id=NULL,current_operation_id=NULL,
+            current_correlation_id=NULL,claim_token=NULL,lease_until=NULL,
+            completed_at=CASE WHEN attempts+1 >= :max THEN :now ELSE NULL END,
+            updated_at=:now
+        WHERE recovery_job_id=:id AND status='WAITING_RESULT'
+          AND current_query_message_id=:message AND current_operation_id=:operation
+        RETURNING status::text,attempts
+        """)
+        .param("max", maxAttempts)
+        .param("error", error)
+        .param("now", java.sql.Timestamp.from(now))
+        .param("id", job.recoveryJobId())
+        .param("message", job.currentQueryMessageId())
+        .param("operation", job.currentOperationId())
+        .query((rs, n) -> new ResultFailureTransition(rs.getString(1), rs.getInt(2)))
+        .optional()
+        .orElseThrow(() -> new IllegalStateException("recovery job changed while recording terminal Result failure"));
   }
 
   public Optional<Job> findWaiting(UUID correlationId, UUID operationId) {
@@ -167,7 +204,7 @@ public class ProjectionRecoveryJobRepository {
         UPDATE projection_recovery_jobs
         SET status='COMPLETED',current_query_type=NULL,current_query_message_id=NULL,
             current_operation_id=NULL,current_correlation_id=NULL,claim_token=NULL,lease_until=NULL,
-            completed_at=:now,updated_at=:now
+            attempts=0,last_error_code=NULL,last_error_at=NULL,completed_at=:now,updated_at=:now
         WHERE recovery_job_id=:id AND status='WAITING_RESULT'
           AND current_query_message_id=:message AND current_operation_id=:operation
         """)
@@ -178,7 +215,7 @@ public class ProjectionRecoveryJobRepository {
   public int fail(Job job, String error, Instant now) {
     return jdbc.sql("""
         UPDATE projection_recovery_jobs
-        SET status='FAILED',last_error_code=:error,last_error_at=:now,
+        SET status='FAILED',attempts=attempts+1,last_error_code=:error,last_error_at=:now,
             current_query_type=NULL,current_query_message_id=NULL,current_operation_id=NULL,
             current_correlation_id=NULL,claim_token=NULL,lease_until=NULL,completed_at=:now,updated_at=:now
         WHERE recovery_job_id=:id AND status='PENDING' AND claim_token=:token
@@ -200,12 +237,12 @@ public class ProjectionRecoveryJobRepository {
         """).param("job", jobId).param("now", java.sql.Timestamp.from(now)).update();
   }
 
+  /** Records the first observed page timestamp for observability only; it is not a consistency fence. */
   public int markSnapshotGenerated(UUID jobId, Instant snapshotGeneratedAt, Instant now) {
     return jdbc.sql("""
         UPDATE academic_projection_recovery_state
         SET snapshot_generated_at=COALESCE(snapshot_generated_at,:snapshot),updated_at=:now
         WHERE projection_type='AUTHORIZATION' AND active_job_id=:job
-          AND (snapshot_generated_at IS NULL OR snapshot_generated_at=:snapshot)
         """)
         .param("job", jobId).param("snapshot", java.sql.Timestamp.from(snapshotGeneratedAt))
         .param("now", java.sql.Timestamp.from(now)).update();
@@ -301,5 +338,9 @@ public class ProjectionRecoveryJobRepository {
 
   public record ExpiredJob(UUID recoveryJobId, String scope, String status) {
     public boolean full() { return "FULL".equals(scope); }
+  }
+
+  public record ResultFailureTransition(String status, int attempts) {
+    public boolean failed() { return "FAILED".equals(status); }
   }
 }
