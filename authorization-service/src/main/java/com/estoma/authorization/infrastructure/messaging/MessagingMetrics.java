@@ -1,6 +1,5 @@
 package com.estoma.authorization.infrastructure.messaging;
 
-import com.estoma.authorization.application.command.ApplicationResult;
 import com.estoma.authorization.application.command.CommandOutcome;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -41,9 +40,6 @@ public final class MessagingMetrics {
           }
         }
         case FAILED -> registry.counter("authorization.commands.failed").increment();
-        case EXPIRED -> {
-          // Authorization V1 does not currently produce EXPIRED Commands.
-        }
       }
     });
   }
