@@ -50,6 +50,15 @@ final class QueryListener {
 
   @RabbitListener(id = "queryConsumer", queues = MessagingNames.QUERY_QUEUE, containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
+    long started = System.nanoTime();
+    try {
+      handle(message, channel);
+    } finally {
+      metrics.processingDuration(CONSUMER, System.nanoTime() - started);
+    }
+  }
+
+  private void handle(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     QueryMessageMapper.MappedQuery mapped;
     try {
