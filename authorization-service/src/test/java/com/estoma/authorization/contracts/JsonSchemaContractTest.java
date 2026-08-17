@@ -48,6 +48,77 @@ class JsonSchemaContractTest {
   }
 
   @Test
+  void externalEventSchemaAcceptsCanonicalOwnerOptionalShapes() {
+    UUID personId = UUID.randomUUID();
+    ObjectNode personCreated = envelope("PersonCreated", "EVENT", "users", "SYSTEM", null);
+    personCreated.put("causationId", UUID.randomUUID().toString());
+    personCreated.put("aggregateId", personId.toString());
+    personCreated.put("aggregateVersion", 1);
+    ObjectNode personPayload = (ObjectNode) personCreated.get("payload");
+    personPayload.put("personId", personId.toString());
+    personPayload.put("firstName", "Ada");
+    personPayload.put("paternalSurname", "Lovelace");
+    personPayload.put("institutionalEmail", "ada@estoma.mx");
+    personPayload.put("status", "ACTIVE");
+    personPayload.put("version", 1);
+    personPayload.put("createdAt", Instant.parse("2026-08-16T00:00:00Z").toString());
+    assertValid("events/external-projection-event.schema.json", personCreated);
+
+    UUID accountId = UUID.randomUUID();
+    ObjectNode accountDeactivated = envelope(
+        "AccountDeactivated", "EVENT", "authentication", "SYSTEM", null);
+    accountDeactivated.put("causationId", UUID.randomUUID().toString());
+    accountDeactivated.put("aggregateId", accountId.toString());
+    accountDeactivated.put("aggregateVersion", 2);
+    ObjectNode accountPayload = (ObjectNode) accountDeactivated.get("payload");
+    accountPayload.put("accountId", accountId.toString());
+    accountPayload.put("personId", UUID.randomUUID().toString());
+    accountPayload.put("previousStatus", "ACTIVE");
+    accountPayload.put("status", "INACTIVE");
+    accountPayload.put("reasonCode", "ADMINISTRATIVE");
+    accountPayload.put("reasonDetail", "administrative closure");
+    accountPayload.put("deactivatedAt", Instant.parse("2026-08-16T00:00:00Z").toString());
+    assertValid("events/external-projection-event.schema.json", accountDeactivated);
+  }
+
+  @Test
+  void academicCommandSchemaAcceptsEmptyArraysAndEvidenceWithoutResultMessageId() {
+    ObjectNode message = envelope("AssignAccountRole", "COMMAND", "academic", "SYSTEM", null);
+    message.put("operationId", UUID.randomUUID().toString());
+    message.put("idempotencyKey", UUID.randomUUID().toString());
+    ObjectNode payload = (ObjectNode) message.get("payload");
+    payload.put("accountId", UUID.randomUUID().toString());
+    payload.put("roleCode", "ALUMNO");
+    ObjectNode execution = payload.putObject("importExecution");
+    execution.put("importId", UUID.randomUUID().toString());
+    execution.put("planItemId", UUID.randomUUID().toString());
+    execution.put("executionGeneration", 1);
+    execution.put("authorizedByAccountId", UUID.randomUUID().toString());
+    execution.put("scope", "ASSIGN_STUDENT_ROLE");
+    execution.putArray("causalDependencies");
+    ObjectNode evidence = execution.putArray("authoritativeEvidence").addObject();
+    evidence.put("sourceService", "authentication");
+    evidence.put("sourceOperation", "CreateAccount");
+    evidence.put("sourceResultStatus", "SUCCEEDED");
+    evidence.put("entityType", "Account");
+    evidence.put("entityId", UUID.randomUUID().toString());
+
+    assertValid("commands/authorization-command.schema.json", message);
+  }
+
+  @Test
+  void snapshotPageSchemaRejectsNonUuidCursor() {
+    ObjectNode query = envelope(
+        "ListAccountAuthorizationSnapshotsPage", "QUERY", "bff", "SYSTEM", null);
+    query.put("operationId", UUID.randomUUID().toString());
+    ObjectNode payload = (ObjectNode) query.get("payload");
+    payload.put("cursor", "not-a-uuid");
+    payload.put("limit", 100);
+
+    assertThat(validate("queries/authorization-query.schema.json", query)).isNotEmpty();
+  }
+
+  @Test
   void asyncApiDocumentsEveryImplementedMessage() throws IOException {
     JsonNode document = new YAMLMapper().readTree(Files.readString(CONTRACTS.resolve("asyncapi.yaml")));
 
