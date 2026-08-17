@@ -47,8 +47,9 @@ final class QueryMessageMapper {
     if (limit > 1000) {
       throw new InvalidMessageException("limit must be at most 1000");
     }
+    String cursor = payload.has("cursor") ? WireValues.uuid(payload, "cursor").toString() : null;
     return new ListAccountAuthorizationSnapshotsPage(
-        WireValues.optionalText(payload, "cursor"), limit, optionalSystemCode(payload));
+        cursor, limit, optionalSystemCode(payload));
   }
 
   private static SystemCode optionalSystemCode(JsonNode payload) {
