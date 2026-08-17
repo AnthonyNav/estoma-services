@@ -51,16 +51,43 @@ final class QueryListener {
   @RabbitListener(id = "queryConsumer", queues = MessagingNames.QUERY_QUEUE, containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
+    QueryMessageMapper.MappedQuery mapped;
     try {
-      QueryMessageMapper.MappedQuery mapped = mapper.map(
+      mapped = mapper.map(
           validator.validate(codec.readTree(message.getBody()), MessageKind.QUERY, TYPES));
+    } catch (InvalidMessageException exception) {
+      routeInvalid(message, channel, deliveryTag);
+      return;
+    } catch (RuntimeException exception) {
+      routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
+      return;
+    }
+
+    try {
       responder.respond(mapped.metadata(), mapped.query());
       metrics.consumed(CONSUMER);
       channel.basicAck(deliveryTag, false);
-    } catch (InvalidMessageException exception) {
-      routeInvalid(message, channel, deliveryTag);
     } catch (RuntimeException exception) {
-      routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
+      boolean transientFailure = classifier.isTransient(exception);
+      if (!transientFailure || failures.isFinalAttempt(message, FailureRouter.QUERIES)) {
+        recordTerminalFailureOrDlq(message, channel, deliveryTag, mapped);
+        return;
+      }
+      routeTechnical(message, channel, deliveryTag, true);
+    }
+  }
+
+  private void recordTerminalFailureOrDlq(
+      Message message,
+      Channel channel,
+      long deliveryTag,
+      QueryMessageMapper.MappedQuery mapped) throws IOException {
+    try {
+      responder.respondFailed(mapped.metadata(), "TECHNICAL_FAILURE");
+      metrics.consumed(CONSUMER);
+      channel.basicAck(deliveryTag, false);
+    } catch (RuntimeException terminalPersistenceFailure) {
+      routeInvalid(message, channel, deliveryTag);
     }
   }
 
