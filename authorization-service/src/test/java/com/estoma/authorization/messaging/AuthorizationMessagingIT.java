@@ -8,6 +8,7 @@ import com.estoma.authorization.application.port.AccountStatusProjectionReposito
 import com.estoma.authorization.application.port.PersonStatusProjectionRepository;
 import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
+import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator.ProjectionType;
 import com.estoma.authorization.contracts.MessageEnvelope;
 import com.estoma.authorization.contracts.MessageKind;
 import com.estoma.authorization.contracts.MessagingNames;
@@ -20,9 +21,9 @@ import com.estoma.authorization.domain.model.RoleCode;
 import com.estoma.authorization.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.authorization.infrastructure.messaging.outbound.OutboxRelay;
 import com.estoma.authorization.testsupport.AbstractMessagingIT;
-import java.util.ArrayList;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -216,8 +217,9 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
   @Test
   void externalEventAndCorrelatedRecoveryResultApplyThroughBroker() {
     UUID personId = UUID.randomUUID();
+    UUID personEventId = UUID.randomUUID();
     send(new MessageEnvelope(
-        UUID.randomUUID(),
+        personEventId,
         "PersonCreated",
         1,
         MessageKind.EVENT,
@@ -243,6 +245,16 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
         MessagingNames.EVENTS_EXCHANGE,
         "users.person.created");
     await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(persons.findByPersonId(personId)).isPresent());
+
+    String retainedPayload = jdbc.sql(
+            "SELECT payload::text FROM processed_messages "
+                + "WHERE consumer_name = 'authorization-events' AND message_id = :messageId")
+        .param("messageId", personEventId)
+        .query(String.class)
+        .single();
+    assertThat(retainedPayload)
+        .contains("personId", "status")
+        .doesNotContain("Ada", "Lovelace", "Byron", "ada@estoma.mx", "5550000000");
 
     UUID accountId = UUID.randomUUID();
     String ownerQueue = declareDirectQueue(MessagingNames.QUERIES_EXCHANGE, "authentication");
@@ -282,6 +294,111 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
       assertThat(recoveryJobs.findById(job.recoveryJobId())).get()
           .extracting(ProjectionRecoveryJobRepository.RecoveryJob::status)
           .isEqualTo("COMPLETED");
+    });
+  }
+
+  @Test
+  void staleExternalEventDoesNotRollbackProjection() {
+    UUID personId = UUID.randomUUID();
+    persons.upsertIfNewer(new PersonStatusProjectionRepository.PersonStatusProjection(
+        personId, ProjectedStatus.ACTIVE, 2, NOW));
+    UUID messageId = UUID.randomUUID();
+
+    send(personDeactivated(messageId, personId, 1),
+        MessagingNames.EVENTS_EXCHANGE,
+        "users.person.deactivated");
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT status FROM processed_messages "
+                + "WHERE consumer_name = 'authorization-events' AND message_id = :messageId")
+            .param("messageId", messageId)
+            .query(String.class)
+            .single()).isEqualTo("APPLIED"));
+
+    assertThat(persons.findByPersonId(personId)).get().satisfies(projection -> {
+      assertThat(projection.status()).isEqualTo(ProjectedStatus.ACTIVE);
+      assertThat(projection.sourceVersion()).isEqualTo(2);
+    });
+  }
+
+  @Test
+  void causalExternalEventDefersThenAppliesAfterPredecessor() {
+    UUID personId = UUID.randomUUID();
+    UUID activatedMessageId = UUID.randomUUID();
+    send(personActivated(activatedMessageId, personId, 2),
+        MessagingNames.EVENTS_EXCHANGE,
+        "users.person.activated");
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT status FROM processed_messages "
+                + "WHERE consumer_name = 'authorization-events' AND message_id = :messageId")
+            .param("messageId", activatedMessageId)
+            .query(String.class)
+            .single()).isEqualTo("DEFERRED"));
+
+    send(personCreated(UUID.randomUUID(), personId, 1),
+        MessagingNames.EVENTS_EXCHANGE,
+        "users.person.created");
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+      assertThat(persons.findByPersonId(personId)).get()
+          .extracting(PersonStatusProjectionRepository.PersonStatusProjection::sourceVersion)
+          .isEqualTo(2);
+      assertThat(jdbc.sql("SELECT status FROM processed_messages "
+              + "WHERE consumer_name = 'authorization-events' AND message_id = :messageId")
+          .param("messageId", activatedMessageId)
+          .query(String.class)
+          .single()).isEqualTo("APPLIED");
+    });
+  }
+
+  @Test
+  void requiredRecoveryRouteUnavailableKeepsOutboxRetryable() {
+    var job = recovery.requestPerson(UUID.randomUUID());
+
+    relay.relay();
+
+    assertThat(jdbc.sql("SELECT status FROM outbox_messages WHERE message_id = :messageId")
+        .param("messageId", job.currentQueryMessageId())
+        .query(String.class)
+        .single()).isEqualTo("PENDING");
+    assertThat(jdbc.sql("SELECT attempts FROM outbox_messages WHERE message_id = :messageId")
+        .param("messageId", job.currentQueryMessageId())
+        .query(Integer.class)
+        .single()).isEqualTo(1);
+    assertThat(jdbc.sql("SELECT last_error_code FROM outbox_messages WHERE message_id = :messageId")
+        .param("messageId", job.currentQueryMessageId())
+        .query(String.class)
+        .single()).isEqualTo("PUBLISH_RETURNED");
+  }
+
+  @Test
+  void fullRecoveryKeepsNewerConcurrentEvent() {
+    String ownerQueue = declareDirectQueue(MessagingNames.QUERIES_EXCHANGE, "users");
+    var job = recovery.requestFull(ProjectionType.PERSON_STATUS);
+    relay.relay();
+    JsonNode request = receive(ownerQueue);
+    UUID personId = UUID.randomUUID();
+
+    send(personCreated(UUID.randomUUID(), personId, 3),
+        MessagingNames.EVENTS_EXCHANGE,
+        "users.person.created");
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        persons.findByPersonId(personId)).get()
+        .extracting(PersonStatusProjectionRepository.PersonStatusProjection::sourceVersion)
+        .isEqualTo(3));
+
+    send(personPageResult(request, personId, 2),
+        MessagingNames.RESULTS_EXCHANGE,
+        MessagingNames.LOGICAL_COMPONENT_ID);
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+      assertThat(recoveryJobs.findById(job.recoveryJobId())).get()
+          .extracting(ProjectionRecoveryJobRepository.RecoveryJob::status)
+          .isEqualTo("COMPLETED");
+      assertThat(persons.findByPersonId(personId)).get()
+          .extracting(PersonStatusProjectionRepository.PersonStatusProjection::sourceVersion)
+          .isEqualTo(3);
     });
   }
 
@@ -436,6 +553,101 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
         mapper.createObjectNode()
             .put("accountId", accountId.toString())
             .put("roleCode", "ADMINISTRADOR_PRACTICAS"));
+  }
+
+  private MessageEnvelope personCreated(UUID messageId, UUID personId, int version) {
+    return new MessageEnvelope(
+        messageId,
+        "PersonCreated",
+        1,
+        MessageKind.EVENT,
+        "users",
+        NOW,
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        null,
+        null,
+        personId,
+        version,
+        new WireActor("SYSTEM", null, "users"),
+        mapper.createObjectNode()
+            .put("personId", personId.toString())
+            .put("firstName", "Ada")
+            .put("paternalSurname", "Lovelace")
+            .put("institutionalEmail", "ada@estoma.mx")
+            .put("status", "ACTIVE")
+            .put("version", version)
+            .put("createdAt", NOW.toString()));
+  }
+
+  private MessageEnvelope personActivated(UUID messageId, UUID personId, int version) {
+    return new MessageEnvelope(
+        messageId,
+        "PersonActivated",
+        1,
+        MessageKind.EVENT,
+        "users",
+        NOW,
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        null,
+        null,
+        personId,
+        version,
+        new WireActor("SYSTEM", null, "users"),
+        mapper.createObjectNode()
+            .put("personId", personId.toString())
+            .put("status", "ACTIVE")
+            .put("version", version)
+            .put("activatedAt", NOW.toString()));
+  }
+
+  private MessageEnvelope personDeactivated(UUID messageId, UUID personId, int version) {
+    return new MessageEnvelope(
+        messageId,
+        "PersonDeactivated",
+        1,
+        MessageKind.EVENT,
+        "users",
+        NOW,
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        null,
+        null,
+        personId,
+        version,
+        new WireActor("SYSTEM", null, "users"),
+        mapper.createObjectNode()
+            .put("personId", personId.toString())
+            .put("status", "INACTIVE")
+            .put("version", version)
+            .put("deactivatedAt", NOW.toString())
+            .put("reasonCode", "DUPLICATE"));
+  }
+
+  private MessageEnvelope personPageResult(JsonNode request, UUID personId, int sourceVersion) {
+    var data = mapper.createObjectNode();
+    data.putArray("items").addObject()
+        .put("personId", personId.toString())
+        .put("status", "ACTIVE")
+        .put("sourceVersion", sourceVersion)
+        .put("updatedAt", NOW.toString());
+    data.put("hasMore", false);
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        "ListPersonStatusSnapshotsPageResult",
+        1,
+        MessageKind.RESULT,
+        "users",
+        NOW,
+        UUID.fromString(request.path("correlationId").asText()),
+        UUID.fromString(request.path("messageId").asText()),
+        UUID.fromString(request.path("operationId").asText()),
+        null,
+        null,
+        null,
+        new WireActor("SYSTEM", null, "users"),
+        mapper.createObjectNode().put("status", "SUCCEEDED").set("data", data));
   }
 
   private MessageEnvelope accountSnapshotFound(JsonNode request, UUID accountId, UUID personId) {
