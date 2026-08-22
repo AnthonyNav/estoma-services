@@ -6,11 +6,11 @@
 
 ## 1. Objetivo
 
-Implementar `appointments-service` de forma incremental, manteniendo arquitectura hexagonal, dominio explícito, persistencia PostgreSQL/JdbcClient/Flyway, idempotencia durable, Transactional Outbox, Consumer Inbox, RabbitMQ, proyecciones locales, recovery y pruebas de concurrencia.
+Implementar `appointments-service` incrementalmente con arquitectura hexagonal, dominio explícito, PostgreSQL/JdbcClient/Flyway, concurrencia race-safe, Inbox/Outbox, RabbitMQ, proyecciones locales, recovery y pruebas E2E.
 
-Este PR documental no implementa comportamiento de producción y no cuenta como uno de los PRs de implementación.
+Este PR documental no implementa comportamiento y no cuenta como PR de implementación.
 
-La secuencia recomendada es:
+Orden obligatorio:
 
 ```text
 PR1 → Domain + Persistence + Concurrency Foundation
@@ -19,58 +19,80 @@ PR3 → Wire Contracts + RabbitMQ + Projection Recovery
 PR4 → Bounded-context E2E + Failure Hardening
 ```
 
-No adelantar mensajería mientras las invariantes de dominio/persistencia no estén protegidas.
+No adelantar transporte antes de asegurar dominio/persistencia.
 
 ---
 
-## 2. Política de branches y PRs
+## 2. Fuente de verdad y regla de drift
 
-- todos los PRs apuntan a `develop`;
-- no hacer commits directos a `develop`;
-- PR2 parte del `develop` posterior al merge de PR1;
-- PR3 parte del `develop` posterior al merge de PR2;
-- PR4 parte del `develop` posterior al merge de PR3;
-- cada PR debe compilar y pasar `./mvnw clean verify` por sí mismo;
-- cada PR incluye pruebas suficientes para su alcance;
-- no introducir secretos;
-- no modificar reglas canónicas desde este repo;
-- si aparece contradicción BLOCKER/HIGH, se corrige primero `estomatologia-platform-docs`;
-- no mezclar cambios funcionales de Wash Administration o Wash Execution en PRs de Appointments.
+Antes de iniciar cada PR:
+
+1. revisar `AnthonyNav/estomatologia-platform-docs/main`;
+2. comparar Appointments + Wash Execution + Wash Administration + Academic + Authorization;
+3. si aparece contradicción BLOCKER/HIGH, corregir primero documentación canónica;
+4. no inventar reglas desde este repo.
+
+El cierre canónico incluye el hardening posterior de evidencia de llegada/entrada y reutilización de autorización excepcional.
+
+No copiar drift histórico como:
+
+```text
+*-service como logicalComponentId RabbitMQ
+Cabin.configuredCapacity
+AcademicPeriodRegistered
+StudentAcademicProfileUpdated
+StudentAcademicStatusChanged
+rescheduling
+PointBalance persistido
+completedAt NULL como bloqueo indefinido de CleaningPeriod
+```
+
+---
+
+## 3. Política de branches/PRs
+
+- todos apuntan a `develop`;
+- PRs secuenciales;
+- cada PR parte del `develop` posterior al anterior;
+- cada PR debe pasar `./mvnw clean verify`;
+- pruebas automatizadas suficientes para su alcance;
+- cero secretos;
+- no mezclar cambios funcionales de otros servicios.
 
 Nombres sugeridos:
 
 ```text
-PR1: feat/appointments-domain-persistence
-PR2: feat/appointments-application
-PR3: feat/appointments-messaging-recovery
-PR4: feat/appointments-e2e-hardening
+feat/appointments-domain-persistence
+feat/appointments-application
+feat/appointments-messaging-recovery
+feat/appointments-e2e-hardening
 ```
 
 ---
 
 # PR1 — Domain, Persistence And Concurrency Foundation
 
-## 3. Propósito
+## 4. Objetivo PR1
 
-Construir una foundation sólida antes de escribir handlers completos o RabbitMQ:
+Construir foundation técnicamente sólida sin AMQP real:
 
-- dominio puro;
-- arquitectura hexagonal;
-- PostgreSQL/Flyway;
-- repositories JDBC;
-- constraints;
-- optimistic/conditional locking;
-- primitives de Inbox/Outbox/idempotencia;
-- proyecciones persistibles;
-- pruebas concurrentes fundamentales.
+```text
+dominio puro
+arquitectura hexagonal
+Flyway/PostgreSQL
+JdbcClient/JDBC repositories
+constraints/locks
+Inbox/Outbox/idempotency primitives
+proyecciones persistibles
+evidencia persistible de Execution
+pruebas concurrentes base
+```
 
-Al terminar PR1 todavía no existe transporte AMQP real ni handlers completos de negocio.
+Al finalizar PR1 todavía no hay listeners RabbitMQ ni handlers funcionales completos.
 
 ---
 
-## 4. Dependencias PR1
-
-Agregar como mínimo:
+## 5. Dependencias PR1
 
 Producción:
 
@@ -80,11 +102,6 @@ spring-boot-starter-flyway
 flyway-database-postgresql
 postgresql
 spring-boot-starter-security
-```
-
-Mantener:
-
-```text
 spring-boot-starter-actuator
 micrometer-registry-prometheus
 ```
@@ -98,46 +115,37 @@ testcontainers-postgresql
 ArchUnit
 ```
 
-No agregar AMQP en PR1.
+Prohibido en PR1:
 
-No agregar JPA/Hibernate.
+```text
+spring-amqp
+JPA/Hibernate
+REST de negocio
+```
 
 ---
 
-## 5. Arquitectura hexagonal PR1
+## 6. Arquitectura hexagonal PR1
 
-Crear la estructura objetivo:
+Estructura:
 
 ```text
 com.estoma.appointments
 ├── domain
+│   ├── model
+│   ├── service
+│   └── error
 ├── application
+│   ├── port/in
+│   ├── port/out
+│   ├── usecase
+│   └── model
 ├── infrastructure
+│   ├── persistence
+│   ├── config
+│   ├── security
+│   └── observability
 └── contracts
-```
-
-Detalle esperado:
-
-```text
-domain/
-├── model/
-├── service/
-└── error/
-
-application/
-├── port/in/
-├── port/out/
-├── usecase/
-└── model/
-
-infrastructure/
-├── persistence/
-├── config/
-├── security/
-└── observability/
-
-contracts/
-└── package-info.java o vacío en PR1
 ```
 
 ArchUnit obligatorio:
@@ -145,20 +153,21 @@ ArchUnit obligatorio:
 ```text
 domain !-> Spring/JDBC/AMQP/Jackson/infrastructure/contracts
 application !-> infrastructure
-contracts !-> domain implementation
-infrastructure puede depender de application/domain
+contracts !-> business implementation
+infrastructure → puede implementar application ports
 ```
 
-Criterio de rechazo del PR:
+Rechazar PR si:
 
-- un listener/controller llama SQL directamente;
-- un repository concreto se usa desde domain;
-- entidades de dominio tienen annotations Spring/JPA;
-- DTOs externos se convierten en modelo de dominio compartido.
+- domain contiene annotations Spring/JPA;
+- input adapter ejecuta SQL;
+- repository concreto aparece en domain;
+- wire DTO se usa como agregado;
+- una clase mezcla domain + SQL + mapping + transporte.
 
 ---
 
-## 6. Dominio PR1
+## 7. Dominio PR1
 
 Implementar:
 
@@ -168,7 +177,7 @@ Appointment
 ExceptionalAppointmentAuthorization
 ```
 
-Value objects/enums mínimos:
+Enums/value objects mínimos:
 
 ```text
 AppointmentStatus
@@ -177,39 +186,36 @@ AppointmentType
 PieceType
 CancellationType
 CancellationSubreason
-ServiceDate / temporal value objects cuando aporten invariantes
 ```
 
-Servicios de dominio puros cuando la lógica no pertenezca a una sola entidad:
+Servicios/policies puros según convenga:
 
 ```text
 AppointmentCapacityMatcher
 ImmunocompromisedReservationPolicy
 DailyPenaltyPolicy
+ExceptionalAuthorizationConsumptionPolicy
 ```
 
-No forzar exactamente esos nombres si la separación semántica equivalente queda clara.
+Invariantes:
 
-Invariantes puras obligatorias:
-
-- estados/transiciones válidas;
-- estados finales no reabren cita;
-- `instrumentCount` por tipo;
-- `pieceType` válido;
-- cancelación clínica requiere subreason;
-- cancelación student no se transforma en clinic;
+- state machine correcta;
+- finales no reabren;
 - no `INTERRUPTED`;
-- restauración excepcional solo por clinic según contrato;
-- ventana IMMUNO derivada correctamente;
-- puntos derivados correctamente.
+- instrumentCount por tipo;
+- cancelación CLINIC requiere subreason;
+- puntos derivados;
+- IMMUNO `[slot.start, slot.end + 3h)` simétrica;
+- autorización solo se restaura por `CANCELLED + CLINIC`;
+- STUDENT/MISSED/ENTRY_REJECTED siguen consumiéndola.
 
 ---
 
-## 7. Persistencia PR1
+## 8. Persistencia PR1
 
-Flyway debe crear desde DB vacía al menos:
+Flyway desde DB vacía debe crear como mínimo:
 
-Funcional:
+### Dominio
 
 ```text
 appointment_time_slots
@@ -218,7 +224,7 @@ exceptional_appointment_authorizations
 appointment_capacity_projections
 ```
 
-Proyecciones:
+### Proyecciones
 
 ```text
 academic_period_projection
@@ -234,122 +240,132 @@ tank_projection
 resource_priority_projection
 resource_unavailability_projection
 cleaning_period_projection
-wash_execution_state_projection
-pending_capacity_evaluation
+wash_execution_evidence_projection
+wash_execution_transition_projection
 projection_recovery_state
 ```
 
-Infraestructura:
+Los nombres físicos pueden variar si conservan la semántica.
+
+### Procesamiento durable
 
 ```text
+pending_wash_execution_events
+pending_capacity_evaluation
 processed_messages
 command_idempotency_records
 outbox_messages
 ```
 
+`wash_execution_evidence_projection` debe poder guardar al menos:
+
+```text
+washExecutionId
+appointmentId
+arrivedAt?
+arrivalExecutionVersion?
+entryAuthorizedAt?
+entryAuthorizedExecutionVersion?
+updatedAt
+```
+
 No FKs cross-service.
 
-No copiar campos obsoletos del `data-model.md` histórico cuando contradigan el `v1-contract-gate.md`.
+---
 
-Ejemplos explícitos:
+## 9. Constraints PR1
+
+Obligatorios/equivalentes:
 
 ```text
-Cabin projection
-→ NO configured_capacity propio
-
-Academic
-→ NO AcademicPeriodRegistered
-→ NO StudentAcademicProfileUpdated
-→ NO StudentAcademicStatusChanged
+slot equivalente único
+slot.ends_at > slot.starts_at
+version > 0
+instrument_count > 0
+máximo una cita activa por alumno
+consistencia cancellation_type/subreason
+una autorización por alumno/fecha según contrato
+Inbox messageId único
+idempotency scope/key único
+projection source identity única
+pending rows claimables una sola vez
 ```
+
+### Autorización excepcional reutilizable
+
+Debe preservarse historia y a la vez impedir doble consumo.
+
+Garantía:
+
+```text
+por exceptional_authorization_id
+→ máximo 1 Appointment que actualmente consume la autorización
+```
+
+Una Appointment `CANCELLED + CLINIC` deja de participar como consumidora, pero puede conservar la referencia histórica.
+
+Preferencia: partial unique index PostgreSQL o mecanismo equivalente probado bajo carrera.
+
+No imponer `UNIQUE(exceptional_authorization_id)` absoluto porque impediría reutilización clínica conservando historia.
 
 ---
 
-## 8. Constraints PR1
+## 10. Repositories PR1
 
-Como mínimo:
-
-```text
-UNIQUE slot equivalente por origen/fecha/intervalo
-CHECK slot.ends_at > slot.starts_at
-CHECK version > 0
-CHECK appointments.instrument_count > 0
-constraint/partial unique para una cita activa por alumno
-consistencia cancellation_type / cancellation_subreason
-unicidad lógica de ExceptionalAppointmentAuthorization por alumno/fecha según contrato
-UNIQUE processed_messages(message_id)
-UNIQUE idempotency scope/key
-UNIQUE projection source identity
-```
-
-La garantía de una cita activa por alumno debe ser race-safe en PostgreSQL; no se acepta únicamente un pre-check Java.
-
----
-
-## 9. Repositories PR1
-
-Ports + adapters JDBC para:
+Ports/adapters JDBC para:
 
 ```text
 AppointmentTimeSlotRepository
 AppointmentRepository
 ExceptionalAppointmentAuthorizationRepository
 AppointmentCapacityProjectionRepository
-
-AcademicProjectionRepository/ports necesarios
-AuthorizationProjectionRepository/ports necesarios
-WashAdministrationProjectionRepository/ports necesarios
-WashExecutionProjectionRepository/ports necesarios
-
+AcademicProjection ports
+AuthorizationProjection ports
+WashAdministrationProjection ports
+WashExecutionEvidenceRepository
+WashExecutionTransitionRepository
 ProcessedMessageRepository
 CommandIdempotencyRepository
 OutboxRepository
 ProjectionRecoveryRepository
+PendingWashExecutionEventRepository
 PendingCapacityEvaluationRepository
 ```
 
-Usar `JdbcClient`/Spring JDBC.
+Optimistic/conditional locking en updates existentes.
 
-Optimistic locking o conditional updates:
-
-```text
-UPDATE ...
-WHERE id = :id
-  AND version = :expectedVersion
-```
-
-Para handlers derivados de Events, usar estado/versión causal local y locks/conditional updates; no inventar `expectedVersion` enviado por otro servicio.
+Events externos no reciben `Appointment.expectedVersion`; su protección es local por Inbox + versión causal + estado/lock.
 
 ---
 
-## 10. Concurrencia PR1
+## 11. Concurrencia PR1
 
-Antes de considerar PR1 terminado deben existir pruebas reales contra PostgreSQL para:
+Pruebas PostgreSQL reales:
 
-1. dos alumnos intentando el último cupo;
-2. mismo alumno intentando dos citas activas concurrentes;
-3. dos claims/modificaciones de la misma autorización excepcional;
-4. dos recálculos del mismo `AppointmentTimeSlot`;
-5. uniqueness de Inbox bajo delivery concurrente;
-6. optimistic version conflict;
-7. claim concurrente de `pending_capacity_evaluation`.
+1. dos alumnos último cupo;
+2. mismo alumno dos citas activas;
+3. dos claims de misma autorización;
+4. reutilización de autorización tras CLINIC sin perder historia;
+5. dos recálculos mismo slot;
+6. Inbox concurrente;
+7. optimistic version conflict;
+8. pending evaluation claim;
+9. evidencia Execution concurrente con MISSED foundation;
+10. dos Events distintos con mismo `executionVersion` pueden coexistir/aplicarse por messageId.
 
-La estrategia de lock debe documentarse en código/test.
-
-Criterio:
+Resultado requerido:
 
 ```text
 no oversell
 no double-active appointment
 no double-consume authorization
 no lost update
+no event lost only because same executionVersion
 ```
 
 ---
 
-## 11. HTTP/operación PR1
-
-El `SystemController` puede retirarse cuando Actuator cubra la operación.
+## 12. Operación PR1
 
 Objetivo:
 
@@ -360,56 +376,53 @@ Objetivo:
 /actuator/prometheus
 ```
 
-Spring Security niega cualquier ruta HTTP no explícitamente operativa.
+Spring Security niega demás HTTP.
 
 Readiness PR1:
 
 ```text
-PostgreSQL
-Flyway/schema
+PostgreSQL reachable
+Flyway/schema compatible
 ```
 
-No REST de negocio.
+`SystemController` temporal puede retirarse.
 
 ---
 
-## 12. Acceptance Criteria PR1
+## 13. Acceptance Criteria PR1
 
-PR1 solo se aprueba si:
-
-- `./mvnw clean verify` pasa;
-- Java 25/Spring Boot actual compilan;
-- Flyway levanta DB vacía en Testcontainers;
-- no existe JPA/Hibernate;
-- domain no depende de framework;
-- ArchUnit protege las fronteras;
-- repositories JDBC tienen integration tests;
-- último cupo es seguro bajo carrera;
-- misma persona no obtiene dos citas activas concurrentes;
-- constraints e optimistic locking están probados;
-- `Cabin` projection no posee capacidad configurada propia;
-- IMMUNO policy pura tiene tests simétricos;
-- primitives de Inbox/Outbox/idempotencia persisten correctamente;
-- no existe RabbitMQ ni listeners reales;
-- no existen endpoints HTTP de negocio.
+- `./mvnw clean verify` verde;
+- Java 25/Spring Boot compilan;
+- Flyway DB vacía Testcontainers;
+- no JPA/Hibernate;
+- domain framework-free;
+- ArchUnit verde;
+- repositories integration-tested;
+- último cupo race-safe;
+- una cita activa por alumno race-safe;
+- autorización consumer uniqueness permite historia CLINIC;
+- evidence projection existe;
+- same-version distinct Events representables;
+- IMMUNO policy simétrica testeada;
+- primitives Inbox/Outbox/idempotency persistibles;
+- sin AMQP;
+- sin HTTP negocio.
 
 ---
 
 # PR2 — Complete Application Behavior Without RabbitMQ
 
-## 13. Propósito
+## 14. Objetivo PR2
 
-Completar comportamiento de aplicación llamando directamente a input ports/use cases, manteniendo el servicio broker-agnostic.
+Completar toda Application llamando directamente input ports, con PostgreSQL real y sin broker.
 
-Al finalizar PR2, toda regla funcional de Appointments debe poder probarse contra PostgreSQL real sin RabbitMQ.
-
-PR3 solo adaptará wire contracts y transporte a comportamiento ya probado.
+PR3 solo adaptará transporte/contratos externos.
 
 ---
 
-## 14. Casos de uso PR2
+## 15. Casos de uso PR2
 
-### Iniciados por actor/cliente
+### Cliente/actor
 
 ```text
 ScheduleAppointment
@@ -418,7 +431,7 @@ GrantExceptionalAppointmentAuthorization
 CancelExceptionalAppointmentAuthorization
 ```
 
-### Internos de agenda/capacidad
+### Agenda/capacidad internos
 
 ```text
 CreateAppointmentTimeSlot
@@ -429,7 +442,14 @@ CancelScheduledAppointmentsForCapacityLoss
 MarkAppointmentAsMissed
 ```
 
-### Handlers internos de Wash Execution
+### Evidencia Execution
+
+```text
+HandleWashArrivalRegistered
+HandleWashEntryAuthorized
+```
+
+### Transiciones Execution
 
 ```text
 HandleWashEntryRejected
@@ -438,380 +458,325 @@ HandleWashExecutionCompleted
 HandleWashExecutionCancelled
 ```
 
-Todos deben entrar por application input ports, nunca directamente a repositories desde adapters.
+Todos entran por application input ports.
 
 ---
 
-## 15. Pipeline de Command PR2
+## 16. Pipeline transaccional PR2
 
-Para Commands mutantes iniciados por cliente:
+Para Command mutante:
 
 ```text
-validate envelope-independent application model
-→ Inbox/idempotency orchestration
-→ validate local projections/authorization
-→ acquire locks
-→ load state
-→ evaluate domain/application rules
-→ mutate
-→ persist audit/result/event Outbox intents
+application model validado
+→ Inbox/idempotency
+→ authorization/projections
+→ locks
+→ load
+→ domain/application rules
+→ mutation
+→ Outbox Result/Event intents
 → commit
 ```
 
-Una única transacción local cubre los efectos que deben ser atómicos.
+Rechazo funcional → Result REJECTED, sin retry.
 
-Rechazo funcional:
-
-```text
-→ Result REJECTED
-→ no retry técnico
-```
-
-Fallo técnico:
-
-```text
-→ rollback
-→ PR3 decidirá retry/DLQ del delivery
-```
+Fallo técnico → rollback completo.
 
 ---
 
-## 16. `ScheduleAppointment` PR2
+## 17. `ScheduleAppointment` PR2
 
-Debe probar:
+Validar:
 
-- actor autorizado;
-- acceso a Lavado activo;
-- proyección académica confiable;
-- NRC/inscripción vigente;
-- fecha de servicio válida;
-- slot `ACTIVE`;
-- dentro de booking deadline;
-- tipo/instrumentos/pieceType válidos;
-- no cita activa concurrente;
+- actor y acceso;
+- Academic confiable/NRC vigente;
+- fecha actual permitida;
+- slot ACTIVE/deadline;
+- tipo/instrumentCount/pieceType;
+- no active appointment;
 - puntos < 3;
-- límite diario de `COMPLETED`;
-- autorización excepcional cuando aplique;
-- IMMUNO preventive reservation;
-- capacidad final revalidada bajo lock;
-- consumo atómico de autorización excepcional;
+- límite COMPLETED;
+- autorización excepcional;
+- IMMUNO;
+- matching/capacidad final bajo lock;
+- consumo atómico de autorización;
 - Appointment + Outbox intents atómicos.
 
-Escenarios obligatorios:
+Pruebas:
 
 ```text
-último cupo: 2 requests concurrentes → exactamente 1 éxito
-mismo alumno: 2 requests concurrentes → máximo 1 activa
-IMMUNO simétrica → slots anteriores/posteriores bloqueados correctamente
+último cupo: 2 requests → exactamente 1 éxito
+mismo alumno concurrente → máximo 1 activa
+IMMUNO anterior/posterior → conflicto simétrico
 ```
 
 ---
 
-## 17. `CancelAppointment` PR2
+## 18. Cancelación/MISSED PR2
 
-Debe validar:
+### Student cancel
 
 ```text
 SCHEDULED
-student owns appointment
+owns appointment
 now <= cancellationDeadlineAt
+→ CANCELLED + STUDENT
+→ 1 punto
+→ autorización consumida NO se restaura
 ```
 
-Resultado:
+### MISSED
+
+Solo si:
 
 ```text
-CANCELLED + STUDENT
-points derivados = 1
-autorización excepcional consumida NO se restaura
+SCHEDULED
+now > arrivalToleranceUntil
+entryAuthorizedAt == null
+NO valid WashArrivalRegistered
+NO start/entry evidence
+Execution evidence confiable
 ```
 
-No se acepta cancelación tardía como Command del alumno.
+`MarkAppointmentAsMissed` debe bloquear/releer Appointment + evidence.
+
+Si evidence/recovery está `REBUILDING`, `DEGRADED`, no confiable o causalmente pendiente:
+
+```text
+NO MISSED
+→ defer/retry
+```
+
+Gracia técnica configurable permitida para ejecutar el worker después del deadline; no cambia el +10m funcional.
+
+Escenario obligatorio:
+
+```text
+arrivedAt = +9m
+Supervisor decide = +12m
+→ no MISSED
+```
 
 ---
 
-## 18. `MarkAppointmentAsMissed` PR2
+## 19. Evidence handlers PR2
 
-Aplicable cuando:
+### `HandleWashArrivalRegistered`
+
+- dedupe por sourceEventId/messageId;
+- validar `arrivedAt` respecto al slot local;
+- persistir evidencia;
+- no cambiar Appointment.status;
+- impedir posterior MISSED si llegada fue válida.
+
+### `HandleWashEntryAuthorized`
+
+- dedupe exacto;
+- persistir `Appointment.entryAuthorizedAt = decidedAt`;
+- no cambiar status por sí solo;
+- funciona si Appointment sigue SCHEDULED/PENDING_REASSIGNMENT;
+- si STARTED ya llegó, completa metadata sin retroceder IN_PROGRESS.
+
+### Same-version rule
+
+`WashEntryAuthorized` y `WashExecutionStarted` pueden tener el mismo `executionVersion`.
+
+No se puede usar:
 
 ```text
-Appointment = SCHEDULED
-entryAuthorizedAt = null
-arrivalToleranceUntil ya terminó
-no existe evidencia local de llegada/inicio que la proteja
+if executionVersion <= globalSourceVersion then discard
 ```
 
-Debe ser race-safe con:
+para Events de tipos distintos.
 
-```text
-arrival / WashExecutionStarted / entry authorization
-```
-
-DoD específico:
-
-```text
-si una llegada válida gana la carrera
-→ MISSED no puede sobrescribirla
-```
+Exact dedupe por messageId; evidencia y transition versioning separados o equivalente.
 
 ---
 
-## 19. Exceptional authorization PR2
+## 20. Exceptional authorization PR2
 
-`GrantExceptionalAppointmentAuthorization`:
+Grant/Cancel según autorización local y reglas canónicas.
 
-- Supervisor autorizado;
-- alumno/fecha válidos;
-- no permite superar máximo de dos `COMPLETED`;
-- idempotencia funcional;
-- motivo/auditoría requeridos por contrato.
-
-`CancelExceptionalAppointmentAuthorization`:
-
-- no produce estados contradictorios con una cita que ya la consumió;
-- idempotente.
-
-Restauración por clínica:
+Consumo/restauración:
 
 ```text
-Appointment CANCELLED + CLINIC
-+
-appointment.exceptionalAuthorizationId != null
-→ cancel Appointment + restore authorization en misma tx
+Schedule additional appointment → consume
+CLINIC cancellation → deja de consumir, preserva history
+STUDENT/MISSED/ENTRY_REJECTED → continúa consumiendo
 ```
 
-Pruebas obligatorias:
+Pruebas:
 
-- redelivery del mismo evento clínico;
-- dos workers intentando restaurar;
-- cancelación student nunca restaura;
-- `MISSED`/`ENTRY_REJECTED` nunca restauran.
+- redelivery CLINIC;
+- dos workers restore;
+- reusar autorización después de CLINIC;
+- historia conserva primera Appointment cancelada;
+- no dos consumers simultáneos;
+- STUDENT/MISSED/ENTRY_REJECTED nunca habilitan reuse.
 
 ---
 
-## 20. Capacidad y cambio administrativo PR2
+## 21. Capacidad/cambios administrativos PR2
 
-`HandleResourceCapacityEvent` registra el cambio local y genera recálculos internos para slots afectados.
+`HandleResourceCapacityEvent` actualiza proyección y crea recálculos internos.
 
 `RecalculateAppointmentCapacityForTimeSlot`:
 
-- bloquea/reclama el slot/projection con estrategia race-safe;
-- calcula capacidad física/proyectada;
-- corre matching completo;
-- decide si requiere cancelaciones;
-- genera evento de capacidad correspondiente.
+- claim/lock race-safe;
+- capacidad física + restricciones;
+- matching completo;
+- decide cancelaciones;
+- persiste capacity projection/event intent.
 
-`CancelScheduledAppointmentsForCapacityLoss`:
+`CancelScheduledAppointmentsForCapacityLoss` solo:
 
 ```text
-solo SCHEDULED
-entryAuthorizedAt = null
+SCHEDULED
+entryAuthorizedAt == null
 ```
 
-Orden de sacrificio:
+Orden:
 
 ```text
 createdAt DESC
 appointmentId DESC
 ```
 
-Cancelación:
+Resultado:
 
 ```text
 CLINIC / CAPACITY_LOSS
 0 puntos
 ```
 
-Si consumió autorización excepcional:
+Si usó autorización excepcional → deja de consumirla en misma tx, preservando referencia histórica.
 
-```text
-restore en misma tx
-```
+Nunca auto-reschedule.
 
-No mover citas automáticamente.
-
-Pruebas:
-
-- cierre completo de slot;
-- reducción parcial;
-- NORMAL/JOURNEY compartiendo fallback;
-- IMMUNO;
-- entrada autorizada concurrente;
-- IN_PROGRESS protegido.
+Cleaning real usa `[startsAt, expectedEndsAt)` y no `completedAt NULL` indefinido.
 
 ---
 
-## 21. Eventos de Execution PR2
-
-Handlers deben estar implementados sin RabbitMQ real; tests llaman directamente al input port con event application model.
-
-### `HandleWashEntryRejected`
+## 22. Transition handlers PR2
 
 ```text
-SCHEDULED → ENTRY_REJECTED
+WashEntryRejected
+→ SCHEDULED → ENTRY_REJECTED
+
+WashExecutionStarted
+→ SCHEDULED → IN_PROGRESS
+
+WashExecutionCompleted
+→ IN_PROGRESS → COMPLETED
+
+WashExecutionCancelled
+→ SCHEDULED|IN_PROGRESS → CANCELLED + CLINIC
 ```
 
-No puntos.
-
-No restaura autorización excepcional en V1.
-
-### `HandleWashExecutionStarted`
-
-```text
-SCHEDULED → IN_PROGRESS
-```
-
-Debe proteger contra `MISSED`/cancelación concurrente.
-
-### `HandleWashExecutionCompleted`
-
-```text
-IN_PROGRESS → COMPLETED
-```
-
-Solo aquí la cita pasa a contar como completada.
-
-Debe resolver evaluaciones de capacidad pendientes causales después de aplicar el estado terminal, en la misma transacción donde corresponda.
-
-### `HandleWashExecutionCancelled`
-
-```text
-SCHEDULED|IN_PROGRESS → CANCELLED + CLINIC
-```
-
-Propaga metadata clínica canónica.
-
-Si existe autorización excepcional consumida:
-
-```text
-restore atómico
-```
+- no expectedVersion remoto;
+- Inbox;
+- conditional transitions;
+- versioning causal;
+- Appointment.version incrementa localmente;
+- CLINIC restore/reuse de authorization atómico.
 
 ---
 
-## 22. Out-of-order PR2
+## 23. Out-of-order PR2
 
-Implementar persistencia/dispatcher interno para:
-
-```text
-DEFERRED
-APPLIED
-```
-
-Caso mínimo:
+Persistencia:
 
 ```text
-WashExecutionCompleted llega antes que WashExecutionStarted
+processed_messages: DEFERRED | APPLIED
+pending_wash_execution_events
+pending_capacity_evaluation
 ```
 
-Esperado:
-
-- no saltar directamente de SCHEDULED a COMPLETED;
-- no descartar definitivamente;
-- persistir DEFERRED;
-- aplicar STARTED cuando llegue;
-- reprocesar COMPLETED;
-- terminar COMPLETED exactamente una vez.
-
-Caso capacidad:
+Caso:
 
 ```text
-CleaningPeriodStarted antes del evento terminal causal
+COMPLETED antes de STARTED
+→ no saltar SCHEDULED→COMPLETED
+→ DEFERRED
+→ STARTED
+→ reprocesar COMPLETED
 ```
 
-Esperado:
+Caso cleaning causal:
 
-- `pending_capacity_evaluation` durable;
-- no cancelar sobrecapacidad fantasma;
-- estado terminal local se aplica antes de resolver matching pendiente.
+```text
+CleaningPeriodStarted antes de terminal Appointment
+→ pending_capacity_evaluation
+→ terminal aplica primero
+→ matching pendiente después
+```
+
+No filas huérfanas ni doble processing.
 
 ---
 
-## 23. Authorization PR2
+## 24. Authorization + atomicidad PR2
 
-Implementar evaluator local puro:
+Evaluator local:
 
 ```text
 ActorContext
-+
-AccountRole projection
-+
-SystemAccess projection
-+
-matriz estática V1 de permisos
++ role projection
++ SystemAccess projection
++ static permission matrix
 ```
 
-No invocar Authorization remotamente.
+No llamada remota.
 
-Proyección ausente/no confiable:
-
-```text
-ACTOR_NOT_AUTHORIZED o código canónico equivalente
-```
-
-No retry técnico por rechazo funcional.
-
----
-
-## 24. Outbox/Inbox PR2
-
-Aunque no exista RabbitMQ real, PR2 debe producir modelos internos de mensaje/Outbox para Result/Event.
-
-Atómico:
+Transacción según aplique:
 
 ```text
+Inbox
+idempotency
+locks
 mutation
-+
-Inbox/idempotency
-+
+authorization consume/release semantics
 Outbox Result
-+
 Outbox Event(s)
 ```
 
-Pruebas de rollback forzado:
-
-```text
-Outbox insert falla
-→ Appointment/cancelación/autorización/InBox no quedan committeados parcialmente
-```
+Forced Outbox failure → rollback total.
 
 ---
 
 ## 25. Acceptance Criteria PR2
 
-PR2 solo se aprueba si:
-
-- todos los casos de uso V1 tienen happy path y rechazo funcional;
-- `ScheduleAppointment` es race-safe;
-- puntos y bloqueo diario son derivados correctamente;
-- una cita no se reprograma;
-- `ENTRY_REJECTED` no cuenta ni da punto;
-- solo `COMPLETED` consume el límite diario;
-- autorización excepcional se consume/restaura exactamente según contrato;
-- cambio administrativo cancela solo SCHEDULED elegibles;
-- entrada autorizada/IN_PROGRESS quedan protegidos;
-- IMMUNO preventive reservation es simétrica;
-- eventos Execution fuera de orden convergen;
-- `MISSED` pierde contra llegada válida;
-- Inbox/idempotency/Outbox son atómicos;
-- no existe dependencia AMQP;
-- `./mvnw clean verify` pasa.
+- todos use cases happy + rejected;
+- Schedule race-safe;
+- points derivados;
+- solo COMPLETED límite diario;
+- no rescheduling;
+- arrival evidence protege MISSED;
+- entryAuthorizedAt se persiste aun sin recurso;
+- same-version EntryAuthorized/Started no se pierden;
+- authorization reuse CLINIC conserva historia;
+- STUDENT/MISSED/ENTRY_REJECTED no restore;
+- admin change cancela solo elegibles;
+- entry-authorized/IN_PROGRESS protegidos;
+- IMMUNO simétrica;
+- out-of-order converge;
+- atomic Inbox/idempotency/mutation/Outbox;
+- sin AMQP;
+- `./mvnw clean verify` verde.
 
 ---
 
 # PR3 — Wire Contracts, RabbitMQ And Projection Recovery
 
-## 26. Propósito
+## 26. Objetivo PR3
 
-Conectar el comportamiento ya probado a la arquitectura de mensajería de plataforma y completar bootstrap/recovery de proyecciones.
+Conectar comportamiento probado a RabbitMQ y completar recovery/projection readiness.
 
-PR3 no debe rediseñar reglas de dominio.
+No rediseñar dominio.
 
 ---
 
-## 27. RabbitMQ PR3
-
-Agregar dependencias AMQP y topología canónica:
+## 27. Topología PR3
 
 ```text
 logicalComponentId = appointments
@@ -828,37 +793,26 @@ platform.events
 platform.dlx
 ```
 
-Nunca usar aliases:
-
-```text
-appointments-service
-commands.appointments-service
-results.appointments-service
-```
+Nunca aliases `appointments-service`.
 
 Agregar:
 
-- durable queues;
-- bindings;
-- retry queues;
-- DLQ;
+- queues/bindings;
+- retry/DLQ;
 - manual ACK;
-- publisher confirms;
-- connection/readiness indicators.
+- confirms;
+- readiness de broker/topology.
 
 ---
 
 ## 28. Wire contracts PR3
 
-Crear DTOs/contracts versionados separados del dominio.
-
-Como mínimo:
+Separados de domain:
 
 ```text
-CommandEnvelope / platform envelope mapping
 Command payload DTOs
 Result DTOs
-Appointments-produced Event DTOs
+produced Event DTOs
 consumed Academic Events
 consumed Authorization Events/Results
 consumed Wash Administration Events/Results
@@ -866,54 +820,44 @@ consumed Wash Execution Events/Results
 Query DTOs ofrecidos a Wash Execution
 ```
 
-Idealmente incluir:
+Seguir JSON Schema/AsyncAPI si es convención vigente del repo.
+
+Wire validation antes de mapping:
 
 ```text
-JSON Schema
-AsyncAPI
+required fields
+enums
+UUID
+timestamps
+versions
+ActorContext
+types/nullability
 ```
 
-si esa es la convención ya adoptada por servicios maduros del repo.
-
-Validación wire antes de mapear a Application:
-
-- campos obligatorios;
-- enums;
-- UUIDs;
-- timestamps;
-- versiones;
-- actor/envelope;
-- no permitir primitives missing que se conviertan silenciosamente a `0`/false.
+No primitives missing → `0/false` silencioso.
 
 ---
 
-## 29. Commands listener PR3
+## 29. Adapters PR3
 
 Listener:
 
 ```text
-Rabbit wire
-→ validate
-→ map to application input model
-→ application use case
+wire validate
+→ map
+→ application input port
 → commit
 → ACK
 ```
 
-Listener no contiene reglas de negocio.
+Sin business logic.
 
-Fallos:
+Errores:
 
 ```text
-functional rejection
-→ Result REJECTED durable
-→ ACK
-
-transient technical
-→ retry
-
-permanent invalid wire
-→ DLQ/quarantine according to contract
+functional → Result REJECTED + ACK
+transient technical → retry
+permanent invalid wire → DLQ/quarantine
 ```
 
 ---
@@ -922,23 +866,13 @@ permanent invalid wire
 
 ### Academic
 
-Consumir exclusivamente eventos V1 actuales.
-
-Pruebas explícitas para rechazar/no bindear contratos obsoletos:
-
-```text
-AcademicPeriodRegistered
-StudentAcademicProfileUpdated
-StudentAcademicStatusChanged
-```
+Solo V1 actual. No bindear contratos obsoletos.
 
 ### Authorization
 
-Mantener role/access projection monotónica.
+Role/SystemAccess monotónicos + recovery.
 
 ### Wash Administration
-
-Mantener:
 
 ```text
 ServiceCalendar
@@ -951,22 +885,38 @@ ResourcePriority
 
 ### Wash Execution
 
-Mantener:
+Evidencia:
 
 ```text
-ResourceUnavailability
-CleaningPeriod
-WashExecution state
+WashArrivalRegistered
+WashEntryAuthorized
 ```
 
-más los cuatro eventos propietarios de transición de Appointment.
+Transición:
 
-Todos:
+```text
+WashEntryRejected
+WashExecutionStarted
+WashExecutionCompleted
+WashExecutionCancelled
+```
 
-- Inbox;
-- source version monotonicity;
-- stale/duplicate safe;
-- out-of-order durable cuando causalmente necesario.
+Capacidad:
+
+```text
+OperationalResourceDisabled
+OperationalResourceRestored
+CleaningPeriodStarted
+CleaningPeriodCompleted
+```
+
+Prueba obligatoria:
+
+```text
+WashEntryAuthorized.executionVersion = N
+WashExecutionStarted.executionVersion = N
+→ ambos aplican exactamente una vez
+```
 
 ---
 
@@ -974,24 +924,11 @@ Todos:
 
 ### Academic
 
-Implementar los Queries/Results autoritativos vigentes necesarios para reconstruir:
-
-```text
-academic period
-student academic profile
-course sections/enrollments
-```
-
-No inventar nombres: revisar contrato Academic en `main` al comenzar PR3.
+Usar Queries/Results autoritativos vigentes para period/profile/enrollments. No inventar nombres.
 
 ### Authorization
 
-Implementar projection recovery canónico de:
-
-```text
-AccountRole
-SystemAccess
-```
+Recovery canónico AccountRole/SystemAccess.
 
 ### Wash Administration
 
@@ -1001,18 +938,16 @@ GetWashAdministrationConfiguration
 
 ### Wash Execution
 
-Implementar los snapshots/queries vigentes definidos por su contrato canónico para reconstruir estado operativo/capacidad.
+Recovery debe reconstruir evidencia de llegada/entrada y estado operativo necesario para decisiones seguras. Si el contrato canónico vigente no ofrece evidencia suficiente para reconstruir un caso, el PR3 debe detener ese comportamiento y corregir primero docs/contratos productores; no asumir ausencia.
 
-### Appointments como owner de Query
-
-Implementar:
+### Appointments como Query owner
 
 ```text
 GetAppointmentExecutionContext
 ListAppointmentExecutionContextsPage
 ```
 
-con requester allowlist:
+Requester allowlist:
 
 ```text
 wash-execution
@@ -1020,9 +955,9 @@ wash-execution
 
 ---
 
-## 32. Recovery state machine PR3
+## 32. Recovery state/readiness PR3
 
-Cada familia de proyección crítica debe tener estado durable, por ejemplo:
+Por familia crítica:
 
 ```text
 UNINITIALIZED
@@ -1031,114 +966,97 @@ READY
 DEGRADED
 ```
 
-El nombre exacto puede seguir la convención común del repo.
+(o convención equivalente).
 
 Reglas:
 
-- startup con proyección vacía dispara bootstrap;
-- Events continúan llegando durante rebuild;
-- snapshot/event race converge por source version;
-- no marcar READY antes de terminar reconciliación;
-- fallo persistente marca estado no confiable;
-- Commands dependientes fallan cerrado.
+- empty projection → bootstrap;
+- Events pueden llegar durante rebuild;
+- snapshot/Event race converge por versión/identidad;
+- READY solo después de reconciliar;
+- fallo persistente → no confiable;
+- Commands irreversibles dependientes fallan cerrado o se difieren.
 
-RabbitMQ no es Event Store.
+En particular `MISSED` no se ejecuta con evidencia Execution no confiable.
 
 ---
 
 ## 33. Outbox Relay PR3
 
-Implementar relay real:
+Obligatorio:
 
 - multi-replica safe;
-- claim/fencing;
-- publisher confirm;
-- retry/backoff;
-- no finite transient-to-FAILED automático;
-- permanent invalid contract puede quedar FAILED/quarantine;
+- claim/fencing/lease;
+- publisher confirms;
+- transient retry/backoff sin finite→FAILED automático;
+- permanent invalid contract → quarantine/FAILED;
 - restart safe;
-- métricas.
-
-Pruebas:
-
-```text
-broker caído después del commit
-→ Outbox permanece pendiente
-→ broker vuelve
-→ publica exactamente el desenlace lógico esperado
-```
+- metrics.
 
 ---
 
 ## 34. QR PR3
 
-Implementar protección criptográfica elegida.
+Implementar protección tamper-resistant:
 
-Requisitos:
-
-- tamper detection;
-- secret/key por configuración segura;
-- no secreto en repo;
-- test de token manipulado;
-- test de appointmentId distinto;
-- test de QR criptográficamente válido pero Appointment final/no utilizable;
-- no usar QR como autorización de entrada.
+- key/secret externo;
+- token alterado inválido;
+- appointmentId alterado inválido;
+- QR válido pero Appointment final → funcionalmente no utilizable;
+- firma no autoriza entrada.
 
 ---
 
 ## 35. Testing PR3
 
-RabbitMQ Testcontainers obligatorio.
+RabbitMQ Testcontainers:
 
-Cubrir:
-
-- Command → Result + Event;
-- duplicate Command delivery;
+- Command→Result/Event;
+- duplicate delivery;
 - idempotency conflict;
-- functional rejection no retry;
-- transient failure retry;
-- DLQ;
-- publisher confirms;
-- Outbox recovery/restart;
-- duplicate/stale Event;
-- out-of-order Execution Events;
-- projection FULL/ENTITY recovery;
-- snapshot + concurrent Event;
-- requester allowlist de Queries;
-- readiness down durante rebuild.
+- functional no retry;
+- technical retry/DLQ;
+- confirms/relay restart;
+- stale/duplicate Events;
+- arrival/entry evidence;
+- same-version distinct Events;
+- out-of-order transitions;
+- FULL/ENTITY recovery;
+- snapshot+Event race;
+- Query requester allowlist;
+- readiness down during rebuild.
 
 ---
 
 ## 36. Acceptance Criteria PR3
 
-PR3 solo se aprueba si:
-
-- topología usa exclusivamente `appointments`;
-- listeners son adapters delgados;
-- DTO wire no contaminan domain;
-- Commands funcionan E2E con RabbitMQ real de Testcontainers;
-- Result/Event salen por Outbox Relay confirmado;
-- retry/DLQ están probados;
-- proyecciones convergen por versión;
-- recovery no usa Event Store;
-- Appointments puede responder Queries a Execution;
-- QR es tamper-resistant;
-- readiness refleja rebuild/degraded;
-- `./mvnw clean verify` pasa.
+- topology solo `appointments`;
+- thin adapters;
+- wire/domain separados;
+- RabbitMQ Testcontainers E2E;
+- Result/Event via confirmed Outbox;
+- retry/DLQ probado;
+- evidence/transitions convergen;
+- same-version distinct Events seguros;
+- recovery sin Event Store;
+- Query responses a Execution;
+- QR secure;
+- readiness real;
+- `./mvnw clean verify` verde.
 
 ---
 
 # PR4 — Bounded-context E2E And Failure Hardening
 
-## 37. Propósito
+## 37. Objetivo PR4
 
-Demostrar que Appointments funciona dentro del bounded context real de Lavado y que las garantías sobreviven fallos distribuidos.
+Demostrar comportamiento real de Appointments integrado con Lavado y bajo fallos distribuidos.
 
-No agregar nuevas reglas de negocio salvo corrección de bug/contradicción previamente documentada.
+No agregar reglas nuevas.
 
 ---
 
-## 38. Entorno mínimo PR4
+## 38. Entorno mínimo
 
 ```text
 appointments-service
@@ -1148,128 +1066,125 @@ RabbitMQ
 PostgreSQL aislado por servicio
 ```
 
-Agregar Academic/Authorization reales al E2E cuando sea viable; como mínimo sus contratos/proyecciones deben estar representados de forma contractual fiel.
+Academic/Authorization reales cuando sea viable; si no, productores contractualmente fieles para el E2E del bounded context.
 
 ---
 
-## 39. Escenarios funcionales E2E obligatorios
+## 39. Escenarios funcionales obligatorios
 
-1. configuración semanal → materialización de slots → disponibilidad;
-2. registrar NORMAL con capacidad preferida;
-3. NORMAL usando JOURNEY como alternativa;
-4. JOURNEY usando fallback NORMAL;
-5. IMMUNO con reserva preventiva simétrica;
-6. cancelación STUDENT → punto + sin restauración excepcional;
-7. MISSED → punto;
-8. ENTRY_REJECTED → sin punto y libera reserva IMMUNO si aplica;
-9. COMPLETED → cuenta para límite diario;
-10. segunda cita con autorización excepcional;
-11. cancelación clínica de segunda cita → autorización restaurada;
-12. cambio de horario semanal en curso → slots/capacidad recalculados;
-13. reducción de capacidad → cancelación de citas más recientes;
-14. cita con entrada autorizada protegida de cancelación automática;
-15. cita IN_PROGRESS protegida de cambio administrativo;
-16. CleaningPeriod real cambia capacidad futura;
-17. CleaningPeriodStarted fuera de orden respecto al terminal causal;
-18. WashExecutionCompleted fuera de orden respecto a Started;
-19. última capacidad bajo carrera;
-20. MISSED vs llegada válida bajo carrera.
+1. semana administrativa → materialización slots;
+2. NORMAL preferred;
+3. NORMAL fallback JOURNEY;
+4. JOURNEY fallback NORMAL;
+5. IMMUNO reserva simétrica;
+6. STUDENT cancel → 1 punto;
+7. MISSED → 1 punto;
+8. ENTRY_REJECTED → 0 punto + libera IMMUNO;
+9. COMPLETED → límite diario;
+10. segunda cita con autorización;
+11. CLINIC cancel segunda cita → autorización reutilizable;
+12. nueva cita posterior reutiliza misma autorización manteniendo historia;
+13. cambio horario semanal → recálculo/cancelación;
+14. reducción capacidad → últimas citas canceladas;
+15. entry-authorized SCHEDULED protegido;
+16. IN_PROGRESS protegido;
+17. CleaningPeriod real afecta intervalo real;
+18. CleaningStarted fuera de orden vs terminal;
+19. COMPLETED antes de STARTED converge;
+20. último cupo race;
+21. MISSED vs llegada válida race;
+22. llegada +9m y decisión +12m → no MISSED;
+23. WashEntryAuthorized + Started misma executionVersion → ambos efectos presentes.
 
 ---
 
-## 40. Escenarios de recovery/fallo PR4
+## 40. Failure/recovery obligatorios
 
-Probar al menos:
-
-- restart de Appointments con Outbox pendiente;
-- RabbitMQ temporalmente caído;
-- duplicate redelivery después de restart;
-- perder/recrear projection Academic;
-- perder/recrear projection Authorization;
-- perder/recrear projection Wash Administration;
-- perder/recrear projection Wash Execution;
-- Events llegando durante FULL rebuild;
+- restart con Outbox pendiente;
+- RabbitMQ down/up;
+- duplicate redelivery post-restart;
+- rebuild Academic;
+- rebuild Authorization;
+- rebuild Administration;
+- rebuild Execution evidence/operation;
+- Events durante FULL rebuild;
 - stale snapshot/result;
-- DLQ de mensaje permanentemente inválido;
-- múltiples réplicas reclamando Outbox;
-- múltiples réplicas recalculando el mismo slot.
+- permanent invalid DLQ;
+- replicas reclamando Outbox;
+- replicas recalculando mismo slot;
+- evidence delayed sin producir MISSED incorrecto.
 
 ---
 
-## 41. Escenario semanal administrativo
-
-Validar explícitamente:
+## 41. Escenario administrativo semanal
 
 ```text
-ServiceCalendar W35
-TUE 08:00-17:00
-→ Appointments materializa slots
-→ alumnos reservan
+W35 TUE 08:00-17:00
+→ slots
+→ reservas
 
-Admin cambia TUE a 10:00-14:00
+Admin cambia TUE 10:00-14:00
 → ServiceScheduleUpdated
-→ Appointments recalcula
-→ slots fuera de rango dejan de ser reservables
-→ SCHEDULED afectados se cancelan CLINIC/CAPACITY_LOSS
-→ no auto-reschedule
-→ autorizaciones excepcionales clínicas se restauran
-→ entrada autorizada/IN_PROGRESS no se cancelan
+→ recalc
+→ slots fuera dejan de ser reservables
+→ SCHEDULED elegibles CLINIC/CAPACITY_LOSS
+→ no reschedule
+→ authorization CLINIC reusable
+→ entry-authorized/IN_PROGRESS no cancelados
 ```
 
-La UI preview no es precondición autoritativa; backend recalcula estado real.
+Preview UI no es precondición; backend revalida.
 
 ---
 
-## 42. Definition of Done PR4
+## 42. Acceptance Criteria PR4
 
-PR4 solo se aprueba si:
-
-- escenarios funcionales críticos pasan;
-- recovery de cada proyección crítica converge;
-- no existe sobrecupo bajo pruebas concurrentes;
-- no existe doble cita activa del mismo alumno;
-- no existe doble consumo/restauración de autorización;
-- no se pierde Result/Event tras fallo del broker;
-- no se requiere HTTP/gRPC interno de negocio;
-- Appointments + Administration + Execution convergen tras out-of-order/redelivery;
-- observabilidad permite identificar backlog, retries, recovery y capacidad perdida;
-- `./mvnw clean verify` pasa.
+- todos escenarios críticos verdes;
+- recovery de proyecciones/evidence converge;
+- sin oversell;
+- sin doble active appointment;
+- sin doble consume authorization;
+- historia de authorization reuse preservada;
+- ningún MISSED incorrecto por delivery lag de llegada válida;
+- no se pierde same-version distinct Event;
+- no Result/Event perdido por broker failure;
+- no HTTP/gRPC negocio;
+- Admin/Appointments/Execution convergen tras redelivery/out-of-order;
+- observabilidad útil;
+- `./mvnw clean verify` verde.
 
 ---
 
-# 43. Checklist global de arquitectura hexagonal
-
-Antes de mergear cualquiera de los PRs:
+# 43. Checklist global de arquitectura
 
 ```text
-[ ] domain no importa Spring
-[ ] domain no importa JDBC
-[ ] domain no importa AMQP
-[ ] domain no conoce wire DTOs
-[ ] application no importa infrastructure adapters
-[ ] input adapters solo mapean + llaman ports
+[ ] domain no Spring/JDBC/AMQP/Jackson
+[ ] application no infrastructure adapters
+[ ] input adapters solo map + call ports
 [ ] output adapters implementan ports
-[ ] SQL vive en infrastructure.persistence
-[ ] RabbitMQ vive en infrastructure.messaging
-[ ] contratos wire viven separados del dominio
-[ ] tests ArchUnit siguen verdes
+[ ] SQL solo infrastructure.persistence
+[ ] RabbitMQ solo infrastructure.messaging
+[ ] wire contracts separados
+[ ] ArchUnit verde
 ```
 
 ---
 
-# 44. Checklist global de datos/consistencia
+# 44. Checklist global de consistencia
 
 ```text
 [ ] sin FK cross-service
-[ ] Flyway desde DB vacía
+[ ] Flyway DB vacía
 [ ] constraints race-safe
-[ ] optimistic/conditional locking probado
+[ ] optimistic/conditional locking
 [ ] Inbox durable
 [ ] idempotency durable
 [ ] Outbox atómico
-[ ] Outbox relay restart-safe
-[ ] source versions monotónicas
-[ ] deferred event processing durable
+[ ] relay restart-safe
+[ ] source versions con semántica correcta por stream/tipo
+[ ] same-version distinct Events no se pierden
+[ ] arrival/entry evidence durable
+[ ] deferred processing durable
 [ ] recovery state durable
 [ ] readiness fail-closed
 ```
@@ -1280,41 +1195,44 @@ Antes de mergear cualquiera de los PRs:
 
 ```text
 [ ] no rescheduling
-[ ] no point balance persistido independiente
-[ ] solo COMPLETED cuenta para límite diario
-[ ] cancel STUDENT = 1 punto
+[ ] no point balance independiente
+[ ] solo COMPLETED cuenta diario
+[ ] STUDENT = 1 punto
 [ ] MISSED = 1 punto
 [ ] CLINIC = 0 puntos
 [ ] ENTRY_REJECTED = 0 puntos
-[ ] authorization CLINIC restores
-[ ] authorization STUDENT/MISSED/ENTRY_REJECTED does not restore
-[ ] Tank.configuredCapacity es fuente física
-[ ] Cabin no tiene capacidad propia
-[ ] NORMAL/JOURNEY matching compartido
-[ ] IMMUNO reservation simétrica +3h
-[ ] admin change puede cancelar SCHEDULED
-[ ] entry-authorized/IN_PROGRESS protegidos
-[ ] Execution events no saltan estados por out-of-order
+[ ] valid arrival protects MISSED
+[ ] WashEntryAuthorized sets entryAuthorizedAt
+[ ] CLINIC authorization restore/reuse preserves history
+[ ] STUDENT/MISSED/ENTRY_REJECTED do not restore
+[ ] Tank.configuredCapacity source
+[ ] Cabin no capacity
+[ ] NORMAL/JOURNEY matching
+[ ] IMMUNO symmetric +3h
+[ ] cleaning interval uses expectedEndsAt
+[ ] admin change can cancel SCHEDULED
+[ ] entry-authorized/IN_PROGRESS protected
+[ ] out-of-order transition cannot skip state
 ```
 
 ---
 
 # 46. Definition of Done V1
 
-`appointments-service` se considera implementado V1 únicamente cuando se cumplen conjuntamente:
+`appointments-service` V1 solo está implementado cuando:
 
 ```text
-PR1 domain/persistence/concurrency ✅
-PR2 application behavior ✅
+PR1 foundation ✅
+PR2 application ✅
 PR3 messaging/recovery ✅
-PR4 bounded-context E2E ✅
+PR4 E2E/failure hardening ✅
 ```
 
-Y además:
+Además:
 
-- no quedan contradicciones BLOCKER/HIGH frente a la documentación canónica;
-- todos los gates arquitectónicos tienen tests automatizados donde sea razonable;
-- los escenarios de concurrencia y recovery no dependen de pruebas manuales solamente;
-- no existen shortcuts de comunicación síncrona no documentados;
-- no existen aliases RabbitMQ `*-service`;
-- no se inventaron decisiones diferidas fuera de V1.
+- cero contradicciones BLOCKER/HIGH conocidas;
+- gates arquitectónicos automatizados;
+- concurrencia/recovery automatizados, no solo manuales;
+- no shortcuts síncronos;
+- no aliases RabbitMQ `*-service`;
+- no reglas diferidas inventadas.
