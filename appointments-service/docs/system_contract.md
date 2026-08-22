@@ -4,11 +4,11 @@
 **Estado:** contrato local de implementación V1  
 **Logical Component ID:** `appointments`
 
-## 1. Propósito
+## 1. Propósito y fuente de verdad
 
 Este documento traduce la documentación canónica de plataforma a un contrato directamente implementable para `appointments-service`.
 
-No sustituye la documentación canónica. Si existe drift, prevalece `AnthonyNav/estomatologia-platform-docs/main`, en particular el commit canónico que cerró Appointments V1 (`dedd907a6f289737f2ed2668cc2a4d2fc8cf641f`) o cualquier versión posterior de `main`.
+No sustituye la documentación canónica. Si existe drift, prevalece `AnthonyNav/estomatologia-platform-docs/main`. La referencia canónica mínima usada para este contrato es el cierre de Appointments V1 mergeado en `dedd907a6f289737f2ed2668cc2a4d2fc8cf641f` o cualquier commit posterior de `main`.
 
 Fuentes principales:
 
@@ -24,41 +24,60 @@ Fuentes principales:
 - `03-services/domains/lavado-ultrasonico/appointments-service/interfaces.md`;
 - `03-services/domains/lavado-ultrasonico/appointments-service/queries.md`;
 - `03-services/domains/lavado-ultrasonico/appointments-service/wash-execution-integration.md`;
-- `03-services/domains/lavado-ultrasonico/wash-administration-service/scheduling-model.md`;
 - contratos vigentes de `academic-service`, `authorization-service`, `wash-administration-service` y `wash-execution-service`.
 
-El documento canónico `v1-contract-gate.md` prevalece ante fragmentos históricos todavía presentes en documentos de Appointments. No se debe copiar al código nomenclatura o reglas marcadas como obsoletas por ese gate.
+### 1.1 Drift histórico que NO debe copiarse al código
 
-Antes de iniciar cada PR de implementación se debe verificar si la documentación canónica cambió desde la referencia anterior. Si aparece una contradicción que cambia comportamiento V1, se corrige primero la documentación canónica.
+El gate V1 y las reglas de negocio posteriores prevalecen sobre fragmentos históricos. En particular, no implementar:
+
+```text
+commands.appointments-service / results.appointments-service
+AcademicPeriodRegistered
+StudentAcademicProfileUpdated
+StudentAcademicStatusChanged
+Cabin.configuredCapacity
+rescheduling de Appointment
+PointBalance / PenaltyPoint como fuente persistida independiente
+CleaningPeriod que bloquea indefinidamente solo porque completedAt sea null
+```
+
+También se consideran incompletas las listas históricas de handlers de Appointments que omiten dos Events ya canónicos de `wash-execution-service`:
+
+```text
+WashArrivalRegistered
+WashEntryAuthorized
+```
+
+Su consumo es obligatorio porque:
+
+- una llegada válida debe impedir que `MarkAppointmentAsMissed` marque una inasistencia incorrecta;
+- `WashEntryAuthorized` es la evidencia que permite persistir `entryAuthorizedAt` cuando Execution queda `PENDING_REASSIGNMENT` y Appointment todavía permanece `SCHEDULED`.
+
+Antes de iniciar cada PR de implementación se debe revisar si la documentación canónica evolucionó. Si aparece una contradicción BLOCKER/HIGH que cambia comportamiento, se corrige primero la fuente canónica.
 
 ---
 
 ## 2. Estado actual del scaffold
 
-En `develop`, `appointments-service` es todavía un scaffold:
+En `develop`, antes de los PRs implementadores, el servicio es solamente un scaffold:
 
 - Spring Boot `4.1.0`;
 - Java `25`;
 - Maven Wrapper;
 - Actuator, WebMVC y Prometheus;
 - `SystemController` temporal;
-- sin PostgreSQL funcional;
-- sin Flyway;
-- sin Spring JDBC/JdbcClient;
+- sin PostgreSQL/Flyway/JdbcClient funcional;
 - sin RabbitMQ;
-- sin dominio implementado;
-- sin persistencia funcional;
+- sin dominio ni persistencia de negocio;
 - sin proyecciones externas reales;
 - sin Authorization local;
 - sin Consumer Inbox / Transactional Outbox reales.
 
-El `README.md` actual contiene ownership histórico incorrecto —por ejemplo rescheduling, QR como estado propio y balance persistido de puntos— y debe quedar reemplazado por el contrato V1 de este documento y la documentación canónica.
+El README se alinea en este PR documental y deja de ser fuente independiente de reglas.
 
 ---
 
-## 3. Arquitectura obligatoria
-
-La implementación V1 usa arquitectura hexagonal.
+## 3. Arquitectura hexagonal obligatoria
 
 Package root objetivo:
 
@@ -92,37 +111,38 @@ Reglas de dependencia:
 
 ```text
 domain
-→ no depende de Spring, JDBC, RabbitMQ, Jackson ni infrastructure
+→ no depende de Spring, JDBC, RabbitMQ, Jackson, contracts ni infrastructure
 
 application
-→ depende de domain y de ports
-→ no depende de adapters concretos de infrastructure
+→ depende de domain y ports
+→ no depende de adapters concretos
 
 infrastructure
-→ implementa ports de application
+→ implementa ports
 → puede depender de Spring/JDBC/RabbitMQ/Jackson
 
 contracts
-→ contiene modelos wire/versionados
-→ no contiene lógica de negocio
+→ modelos wire/versionados
+→ sin lógica de negocio
 ```
 
-Se debe proteger esta dirección mediante ArchUnit.
+ArchUnit debe impedir regresiones.
 
 No se acepta:
 
-- lógica de dominio dentro de listeners RabbitMQ;
-- repositorios Spring/JDBC dentro de `domain`;
+- lógica de negocio dentro de listeners RabbitMQ;
+- repositorios/adapters dentro de `domain`;
 - DTOs wire usados como entidades de dominio;
-- acceso directo a bases de otros servicios;
-- HTTP/gRPC de negocio para saltarse RabbitMQ;
-- un service class central que concentre dominio, SQL, transporte y mapping.
+- SQL desde input adapters;
+- acceso a DB de otro servicio;
+- REST/gRPC de negocio para saltarse RabbitMQ;
+- una clase central que concentre dominio, SQL, transporte y mapping.
 
 ---
 
 ## 4. Ownership V1
 
-`appointments-service` es fuente oficial de:
+Fuente oficial de:
 
 ```text
 AppointmentTimeSlot
@@ -130,18 +150,18 @@ Appointment
 ExceptionalAppointmentAuthorization
 ```
 
-También mantiene estado técnico local:
+Estado técnico local:
 
 ```text
 Consumer Inbox
 functional idempotency
 Transactional Outbox
 projection recovery state
-deferred/out-of-order event processing
+pending/deferred event processing
 pending_capacity_evaluation
 ```
 
-Y proyecciones locales mínimas de:
+Proyecciones locales mínimas de:
 
 ```text
 Academic
@@ -150,34 +170,25 @@ Wash Administration
 Wash Execution
 ```
 
-No es propietario de:
+No posee:
 
 ```text
-ServiceCalendar
-ServiceSchedule
-AdministrativeClosure
-Cabin
-Tank
-ResourcePriority
-WashExecution
-ResourceAssignment
-ResourceUnavailability
-CleaningPeriod
-AcademicPeriod
-CourseSection
-AccountRole
-SystemAccess
+ServiceCalendar / ServiceSchedule / AdministrativeClosure
+Cabin / Tank / ResourcePriority
+WashExecution / ResourceAssignment / ResourceUnavailability / CleaningPeriod
+AcademicPeriod / CourseSection
+AccountRole / SystemAccess
 Persona / Account / Session
 communications
 ```
 
-No existen FKs hacia bases externas.
+No existen FKs cross-database.
 
 ---
 
 ## 5. Aggregate roots y modelo funcional
 
-Para V1 se tratarán como agregados funcionales versionados independientes:
+Agregados funcionales versionados:
 
 ```text
 AppointmentTimeSlot
@@ -185,20 +196,13 @@ Appointment
 ExceptionalAppointmentAuthorization
 ```
 
-Las invariantes que involucran varios agregados se coordinan desde Application dentro de una transacción local y con locks/constraints explícitos cuando exista carrera.
+Invariantes multi-agregado se coordinan desde Application dentro de una transacción local con locks/constraints explícitos.
 
 ### 5.1 `AppointmentTimeSlot`
 
-Representa un bloque concreto reservable.
+Bloque concreto reservable, no horario recurrente ni recurso físico.
 
-No representa:
-
-- cabina;
-- tina;
-- capacidad persistida disponible;
-- horario recurrente.
-
-Debe conservar al menos:
+Campos mínimos:
 
 ```text
 appointmentTimeSlotId
@@ -214,20 +218,18 @@ status
 version
 ```
 
-Estados V1:
+Estados:
 
 ```text
 ACTIVE
 CANCELLED
 ```
 
-La capacidad utilizable se calcula/proyecta aparte.
-
-Un bloque materializado no es un snapshot intocable. Cambios administrativos confirmados pueden provocar recálculo/cancelación futura, pero nunca escrituras cross-service desde Administration.
+La capacidad utilizable se proyecta aparte. Un bloque ya materializado puede quedar invalidado por un cambio administrativo posterior; Administration nunca lo modifica directamente.
 
 ### 5.2 `Appointment`
 
-Estados V1:
+Estados:
 
 ```text
 SCHEDULED
@@ -238,7 +240,7 @@ IN_PROGRESS
 COMPLETED
 ```
 
-Estados finales:
+Finales:
 
 ```text
 CANCELLED
@@ -252,12 +254,12 @@ No existe `INTERRUPTED`.
 Una cita no se edita ni se reprograma:
 
 ```text
-cambiar datos/horario
+cambiar datos u horario
 → cancelar
 → registrar nueva cita
 ```
 
-Debe conservar como mínimo:
+Campos mínimos:
 
 ```text
 appointmentId
@@ -279,31 +281,41 @@ version
 
 ### 5.3 `ExceptionalAppointmentAuthorization`
 
-Aplica a alumno + fecha de servicio y permite una cita adicional cuando la regla normal ya fue consumida.
+Aplica a alumno + fecha de servicio y permite una cita adicional cuando corresponde.
 
-No requiere `status` persistido si su condición puede derivarse de sus campos y asociación con la cita.
+No requiere `status` persistido si su disponibilidad se deriva de:
 
-Regla cerrada:
+- vigencia/fecha;
+- cancelación explícita de la autorización;
+- Appointment(s) que la han utilizado.
+
+Semántica V1:
 
 ```text
-cita adicional registrada
-→ autorización consumida
+cita adicional SCHEDULED/IN_PROGRESS/COMPLETED
+→ consume autorización
 
-esa cita CANCELLED + CLINIC
-→ autorización restaurada
+CANCELLED + STUDENT
+MISSED
+ENTRY_REJECTED
+→ siguen consumiendo autorización
 
-esa cita CANCELLED + STUDENT
-→ autorización NO restaurada
-
-MISSED / ENTRY_REJECTED
-→ autorización NO restaurada en V1
+CANCELLED + CLINIC
+→ deja de consumir autorización
+→ la autorización vuelve a ser utilizable ese día
 ```
 
-La restauración por clínica debe ser atómica con la cancelación y resistente a redelivery/concurrencia.
+Para conservar trazabilidad, una autorización **puede quedar referenciada por varias Appointment históricas** si las anteriores terminaron `CANCELLED + CLINIC`. Esto sustituye la cardinalidad histórica uno-a-uno como restricción física.
+
+Debe existir como máximo **una Appointment consumidora** por autorización al mismo tiempo. Una forma válida es una restricción/índice parcial sobre `appointments.exceptional_authorization_id` que excluya únicamente `CANCELLED + CLINIC`, o una garantía transaccional equivalente demostrada con pruebas concurrentes.
+
+No borrar la relación histórica solo para “restaurar” la autorización salvo que se documente una estrategia de auditoría equivalente. La disponibilidad se deriva de si existe una Appointment consumidora, no de que jamás haya existido una referencia histórica.
+
+La restauración por clínica debe ser atómica con la cancelación.
 
 ---
 
-## 6. Tipos de cita y reglas de registro
+## 6. Registro, tipos y límites
 
 Tipos:
 
@@ -313,7 +325,7 @@ JOURNEY
 IMMUNOCOMPROMISED
 ```
 
-`instrumentCount`:
+Instrumentos:
 
 ```text
 NORMAL             → 1..40
@@ -329,24 +341,28 @@ LOW_SPEED
 CONTRA_ANGLE
 ```
 
-Reglas obligatorias:
+`ScheduleAppointment` debe demostrar localmente:
 
-- solo se agenda para la fecha de servicio permitida por el contrato V1;
-- un alumno no puede tener dos citas activas simultáneamente;
-- solo `COMPLETED` consume el límite diario normal de citas finalizadas;
-- con una cita `COMPLETED`, una cita adicional requiere autorización excepcional;
-- máximo confirmado: dos citas `COMPLETED` por alumno/fecha;
-- 3 o más puntos derivados durante la fecha bloquean un nuevo registro;
-- el NRC/`CourseSection` debe estar respaldado por proyección académica utilizable;
-- rol/acceso requerido debe demostrarse localmente; ante proyección no confiable se falla cerrado.
+- actor/acceso autorizados;
+- proyección académica confiable;
+- NRC/inscripción vigente;
+- fecha de servicio válida;
+- slot ACTIVE y booking deadline vigente;
+- datos/tipo válidos;
+- ausencia de otra cita activa del alumno;
+- puntos < 3;
+- límite diario de COMPLETED;
+- autorización excepcional cuando aplique;
+- capacidad final revalidada bajo lock;
+- regla IMMUNO cuando aplique.
+
+Solo `COMPLETED` consume el límite diario normal. Máximo confirmado: dos `COMPLETED` por alumno/fecha.
 
 ---
 
 ## 7. Puntos y bloqueo
 
-No existe una entidad `PointBalance`, `PenaltyPoint` ni contador diario persistido como fuente independiente.
-
-Los puntos se derivan de citas:
+No existe balance persistido independiente.
 
 ```text
 MISSED               → 1
@@ -356,16 +372,7 @@ ENTRY_REJECTED       → 0
 resto                → 0
 ```
 
-Con `>= 3` puntos durante la fecha de servicio:
-
-```text
-ScheduleAppointment
-→ rechazado
-```
-
-El conteo vuelve a cero de forma derivada en la siguiente fecha de servicio.
-
-Historial/corrección manual de puntos no bloquea V1.
+Con `>= 3` puntos en la fecha de servicio, `ScheduleAppointment` se rechaza. El reinicio al día siguiente es derivado.
 
 ---
 
@@ -377,24 +384,15 @@ Fuente física configurada:
 Tank.configuredCapacity
 ```
 
-No existe:
+Nunca `Cabin.configuredCapacity`.
+
+Cada Appointment activa consume una unidad, independientemente de `instrumentCount`.
+
+Por bloque:
 
 ```text
-Cabin.configuredCapacity
-```
-
-Cada Appointment activa consume una unidad de demanda independientemente de `instrumentCount`.
-
-Por bloque se derivan:
-
-```text
-C_NORMAL
-C_JOURNEY
-C_IMMUNOCOMPROMISED
-
-D_NORMAL
-D_JOURNEY
-D_IMMUNOCOMPROMISED
+C_NORMAL / C_JOURNEY / C_IMMUNOCOMPROMISED
+D_NORMAL / D_JOURNEY / D_IMMUNOCOMPROMISED
 ```
 
 Estados que reservan demanda:
@@ -404,61 +402,61 @@ SCHEDULED
 IN_PROGRESS
 ```
 
-La capacidad utilizable considera proyecciones de:
+Capacidad utilizable considera:
 
-- Cabin/Tank y estado administrativo;
+- Cabin/Tank + estado administrativo;
 - `Tank.configuredCapacity`;
 - `AdministrativeClosure`;
 - `ResourceUnavailability`;
 - `CleaningPeriod`;
 - reserva preventiva IMMUNO;
-- `ResourcePriority`/compatibilidad.
+- `ResourcePriority`.
 
 Compatibilidad:
 
 ```text
-NORMAL
-1. NORMAL preferida
-2. JOURNEY alternativa
-
-JOURNEY
-1. JOURNEY preferida
-2. NORMAL alternativa
-
-IMMUNOCOMPROMISED
-1. IMMUNOCOMPROMISED exclusiva
+NORMAL  → NORMAL preferida, JOURNEY alternativa
+JOURNEY → JOURNEY preferida, NORMAL alternativa
+IMMUNO  → IMMUNOCOMPROMISED exclusiva
 ```
 
-`NORMAL` y `JOURNEY` comparten capacidad alternativa; no se modelan como depósitos sumables independientes. La disponibilidad se decide mediante matching determinista.
+NORMAL/JOURNEY se resuelven con matching, no con depósitos independientes sumables.
+
+### 8.1 Limpieza física real
+
+La restricción efectiva de un `CleaningPeriod` V1 es:
+
+```text
+[startsAt, expectedEndsAt)
+```
+
+`expectedEndsAt = startsAt + 3h` y V1 finaliza automáticamente ahí. Una demora técnica en `CleaningPeriodCompleted` no prolonga por sí sola el bloqueo más allá de `expectedEndsAt`.
+
+No copiar la regla histórica “`completedAt IS NULL` bloquea indefinidamente”.
 
 ---
 
-## 9. Reserva preventiva IMMUNOCOMPROMISED
+## 9. Reserva preventiva `IMMUNOCOMPROMISED`
 
-Una cita `IMMUNOCOMPROMISED` activa reserva preventivamente:
+Una IMMUNO activa reserva:
 
 ```text
 [slot.startsAt, slot.endsAt + 3h)
 ```
 
-La validación debe ser simétrica:
+La validación es simétrica: bloquea citas posteriores dentro de la limpieza prevista y citas anteriores cuya propia limpieza prevista invadiría la cita existente.
 
-- impedir una cita posterior dentro de la limpieza esperada;
-- impedir una cita anterior cuya propia limpieza esperada alcance a una IMMUNO ya registrada.
+No es un `CleaningPeriod` físico. Desaparece si la cita no ocurre sin uso físico:
 
-La reserva preventiva:
-
-- pertenece a Appointments;
-- no es un `CleaningPeriod` físico;
-- se deriva de las citas activas;
-- desaparece si la cita termina antes de uso físico en `CANCELLED`, `MISSED` o `ENTRY_REJECTED`;
-- debe participar en recálculos de capacidad.
+```text
+CANCELLED
+MISSED
+ENTRY_REJECTED
+```
 
 ---
 
 ## 10. Cambios administrativos y pérdida de capacidad
-
-Wash Administration publica hechos; Appointments aplica consecuencias locales.
 
 Flujo:
 
@@ -467,44 +465,76 @@ Administration confirma cambio
 → Event
 → Appointments actualiza proyección
 → identifica slots futuros afectados
-→ recalcula capacidad/existencia
-→ cancela SCHEDULED si hace falta
+→ recalcula existencia/capacidad
+→ cancela SCHEDULED elegibles si hace falta
 ```
 
-Cancelación por pérdida de capacidad:
+Cancelación automática:
 
 ```text
-status = CANCELLED
+CANCELLED
 cancellationType = CLINIC
 cancellationSubreason = CAPACITY_LOSS
 points = 0
 ```
 
-Si solo debe reducirse demanda, se cancelan primero las citas más recientes:
+Orden cuando debe sacrificarse demanda:
 
 ```text
 createdAt DESC
 appointmentId DESC
 ```
 
-Nunca se reprograma automáticamente.
+Nunca auto-reschedule.
 
-No participan en cancelación automática:
+Protegidas:
 
 ```text
 SCHEDULED con entryAuthorizedAt != null
 IN_PROGRESS
 ```
 
-Una ejecución física ya activa se resuelve en `wash-execution-service`.
-
-Si la cita cancelada por clínica consumió una autorización excepcional, la restauración se realiza en la misma transacción local.
+Si una cita cancelada por clínica usó autorización excepcional, esa referencia histórica deja de consumir la autorización dentro de la misma transacción.
 
 ---
 
 ## 11. Integración con Wash Execution
 
-Eventos físicos consumidos y transición local propietaria:
+Appointments consume dos clases de Events: **evidencia operacional** y **transiciones de Appointment**.
+
+### 11.1 Evidencia operacional obligatoria
+
+#### `WashArrivalRegistered` → `HandleWashArrivalRegistered`
+
+No cambia `Appointment.status`.
+
+Debe registrar localmente como mínimo:
+
+```text
+washExecutionId
+appointmentId
+arrivedAt
+arrivalExecutionVersion
+sourceEventId/messageId
+```
+
+Efecto: una llegada válida conocida impide `MarkAppointmentAsMissed`.
+
+#### `WashEntryAuthorized` → `HandleWashEntryAuthorized`
+
+No cambia por sí solo `Appointment.status`.
+
+Debe persistir:
+
+```text
+Appointment.entryAuthorizedAt = decidedAt
+```
+
+cuando corresponda, incluso si Execution terminó esa misma transacción en `PENDING_REASSIGNMENT`. Esto protege contra MISSED y cancelación administrativa automática.
+
+Si `WashExecutionStarted` ya llegó primero, `WashEntryAuthorized` puede completar la metadata sin retroceder el estado.
+
+### 11.2 Transiciones propietarias
 
 ```text
 WashEntryRejected
@@ -524,33 +554,82 @@ WashExecutionCancelled
 → SCHEDULED|IN_PROGRESS → CANCELLED + CLINIC
 ```
 
-Cada evento debe tener un único handler propietario dentro del servicio.
+Cada Event tiene un único handler propietario.
 
-Los handlers de Execution:
+### 11.3 Versionado de evidencia vs transición
 
-- no reciben `Appointment.expectedVersion` del productor;
-- deduplican por `sourceEventId`/`messageId` según contrato wire;
-- comparan `executionVersion` con `wash_execution_state_projection.source_version`;
-- usan transición condicional/locking local;
-- incrementan `Appointment.version` como efecto local;
-- difieren de forma durable un evento cuya transición causal todavía no sea aplicable.
+`DecideWashEntry` puede publicar `WashEntryAuthorized` y `WashExecutionStarted` en la misma transacción de Execution; por tanto ambos pueden representar el mismo `executionVersion` con **messageId distintos**.
 
-Mientras Execution esté `PENDING_REASSIGNMENT` después de entrada autorizada:
+Consecuencia obligatoria:
 
 ```text
-Appointment.status = SCHEDULED
-entryAuthorizedAt != null
+NO deduplicar Events distintos únicamente porque executionVersion sea igual
 ```
 
-Esto protege contra `MISSED` y cancelación automática por cambios administrativos.
+La deduplicación exacta es por `messageId/sourceEventId`. La monotonía de versión protege contra información vieja, pero debe permitir múltiples hechos distintos de la misma versión resultante.
+
+Implementación recomendada:
+
+- evidencia (`arrival`, `entry authorized`) con campos/versiones propios o aplicación idempotente por Event;
+- `transition_source_version` separado para la state machine de Appointment, o esquema equivalente;
+- nunca usar un único `source_version` para descartar ciegamente otro tipo de Event válido con la misma versión.
 
 ---
 
-## 12. Eventos fuera de orden y evaluación diferida
+## 12. `MISSED` y carrera con llegada
+
+Regla de negocio:
+
+```text
+MISSED solo si terminó arrivalToleranceUntil
+Y no existe llegada válida que proteja la cita
+Y no existe entry authorization/start
+```
+
+`MarkAppointmentAsMissed` debe bloquear/releer la Appointment y la evidencia local de Execution en la misma decisión transaccional.
+
+Además:
+
+- si la proyección/consumer de Execution está `REBUILDING`, `DEGRADED`, no confiable o con procesamiento causal pendiente para esa Appointment, **no marcar MISSED**; diferir/reintentar;
+- el job no debe depender de ejecutar exactamente en el milisegundo de `arrivalToleranceUntil`; puede usar una pequeña gracia técnica configurable para permitir convergencia de Events sin cambiar la hora funcional de tolerancia;
+- una `WashArrivalRegistered` válida recibida antes de que MISSED haga commit debe ganar mediante el mismo lock/conditional update;
+- una llegada con `arrivedAt > arrivalToleranceUntil` nunca protege.
+
+Escenario obligatorio:
+
+```text
+arrivedAt = +9 min
+Supervisor decide entrada = +12 min
+→ Appointment NO puede terminar MISSED
+```
+
+Un Event tardío que demuestre que una Appointment ya marcada MISSED tenía llegada válida dentro de tolerancia es una inconsistencia técnica crítica: debe activar reconciliación/alerta y nunca descartarse silenciosamente como stale.
+
+---
+
+## 13. Eventos fuera de orden y evaluación diferida
 
 RabbitMQ no garantiza orden global.
 
-Caso crítico:
+Handlers de transición:
+
+- Inbox por `sourceEventId`;
+- versión de Execution para monotonía, no contigüidad;
+- conditional update/lock por estado local;
+- evento causalmente no aplicable → persistir `DEFERRED`, ACK durable y reprocesar después;
+- no saltar estados.
+
+Caso mínimo:
+
+```text
+WashExecutionCompleted llega antes que WashExecutionStarted
+→ no SCHEDULED → COMPLETED
+→ COMPLETED queda DEFERRED
+→ STARTED aplica
+→ COMPLETED se reprocesa exactamente una vez
+```
+
+Caso de capacidad:
 
 ```text
 CleaningPeriodStarted
@@ -558,31 +637,13 @@ puede llegar antes de
 WashExecutionCompleted / WashExecutionCancelled
 ```
 
-No se debe cancelar una cita adicional de más mientras la Appointment causal todavía figure activa localmente.
-
-`pending_capacity_evaluation` debe permitir:
-
-- registrar evaluación pendiente de manera durable;
-- vincularla al evento/ejecución causal;
-- resolverla cuando la transición terminal de Appointment se confirme;
-- sobrevivir reinicios;
-- ser idempotente;
-- no dejar filas huérfanas bajo carrera.
-
-Consumer Inbox para eventos diferibles debe distinguir al menos:
-
-```text
-DEFERRED
-APPLIED
-```
-
-Registrar delivery no equivale a haber aplicado el efecto.
+`pending_capacity_evaluation` debe sobrevivir reinicios y resolverse solo después de aplicar el estado terminal local causal.
 
 ---
 
-## 13. Academic projection
+## 14. Academic projection
 
-Contratos V1 relevantes:
+Consumir solo Events V1 vigentes:
 
 ```text
 StudentAcademicProfileCreated
@@ -599,49 +660,36 @@ StudentEnrollmentReactivated
 StudentRemovedFromCourseSection
 ```
 
-No implementar como vigentes:
+No implementar:
 
 ```text
+AcademicPeriodRegistered
 StudentAcademicProfileUpdated
 StudentAcademicStatusChanged
-AcademicPeriodRegistered
 ```
 
-Proyecciones mínimas deben separar versiones por identidad/stream propietario; no inventar una versión global del estudiante.
+Versiones por identidad/stream propietario. No inventar versión global del estudiante.
 
-Recovery/bootstrap debe usar los contratos autoritativos vigentes publicados por `academic-service`.
-
-Ante proyección necesaria ausente/no confiable:
-
-```text
-ScheduleAppointment
-→ fail closed
-```
-
-No fallback HTTP/gRPC.
+Ante proyección requerida no confiable: `ScheduleAppointment` falla cerrado. Sin fallback HTTP/gRPC.
 
 ---
 
-## 14. Authorization projection
+## 15. Authorization projection
 
-Mantener localmente lo mínimo para demostrar:
+Mantener mínimo:
 
 ```text
 AccountRole
 SystemAccess(LAVADO_ULTRASONICO)
 ```
 
-Eventos y recovery deben seguir el contrato canónico vigente de Authorization.
-
-No existe `ValidateAccess` remoto en la ruta del Command.
-
-Un actor no demostrado como autorizado produce rechazo funcional, no retry técnico.
+Authorization se evalúa localmente con ActorContext + proyecciones + matriz estática V1. Proyección no demostrable → rechazo funcional fail-closed.
 
 ---
 
-## 15. Wash Administration projection y recovery
+## 16. Wash Administration projection y recovery
 
-Appointments mantiene proyecciones mínimas de:
+Proyecciones mínimas:
 
 ```text
 ServiceCalendar
@@ -652,40 +700,42 @@ Tank
 ResourcePriority
 ```
 
-Recovery autoritativo disponible:
+Recovery:
 
 ```text
 GetWashAdministrationConfiguration
 ```
 
-Uso:
-
-- bootstrap de DB/proyección vacía;
-- rebuild;
-- reconciliación explícita;
-- reparación tras gap/corrupción.
-
-Events siguen siendo el canal incremental normal.
+Events son el canal incremental; Query solo para bootstrap/rebuild/reconciliación.
 
 ---
 
-## 16. Wash Execution projection y recovery
+## 17. Wash Execution projection y recovery
 
-Appointments mantiene el mínimo necesario para:
+Persistir como mínimo:
 
 ```text
+arrival evidence
+entry authorization evidence
 ResourceUnavailability
 CleaningPeriod
-wash_execution_state_projection
+WashExecution transition state
 ```
 
-Debe implementar el recovery/reconciliation definido por los contratos canónicos de Execution y no depender de RabbitMQ como Event Store.
+El modelo físico puede usar una o varias tablas, pero debe poder contestar de forma race-safe:
 
-Cuando no exista evidencia confiable para una decisión que requiere estado operativo, la operación debe fallar o diferirse de forma segura; nunca asumir disponibilidad.
+```text
+¿hubo llegada válida?
+¿la entrada fue autorizada?
+¿qué transición de Execution fue aplicada?
+¿qué restricciones operativas afectan el slot?
+```
+
+Recovery/reconciliación no puede tratar RabbitMQ como Event Store. Cuando evidencia operativa crítica no sea confiable, diferir decisiones irreversibles como `MISSED`.
 
 ---
 
-## 17. Queries autoritativas ofrecidas a Execution
+## 18. Queries autoritativas ofrecidas a Execution
 
 Appointments expone por RabbitMQ:
 
@@ -694,50 +744,35 @@ GetAppointmentExecutionContext
 ListAppointmentExecutionContextsPage
 ```
 
-Requester V1 permitido:
+Requester V1:
 
 ```text
 wash-execution
 ```
 
-Uso:
-
-- ENTITY recovery;
-- FULL/rebuild operativo por `serviceDate`.
-
-No son endpoints para cliente ni mecanismo normal de lectura UI.
-
-Queries son side-effect-free y responden mediante `platform.results` hacia `results.wash-execution`.
+Son side-effect-free, service-to-service y responden por `platform.results` hacia `results.wash-execution`.
 
 ---
 
-## 18. QR V1
+## 19. QR V1
 
-El QR es una representación protegida de `appointmentId`.
+QR = representación protegida de `appointmentId`.
 
-No es:
+No es entidad, autoridad de entrada ni validación de identidad.
 
-- entidad;
-- tabla;
-- autoridad de entrada;
-- validación de identidad;
-- lifecycle independiente.
+Requisitos:
 
-La protección técnica debe impedir que un cliente modifique libremente el identificador y produzca una referencia válida a otra cita.
-
-La elección concreta —por ejemplo firma/HMAC o token firmado equivalente— se define en implementación, con estas restricciones:
-
-- integridad criptográfica;
-- sin datos sensibles innecesarios;
-- rotación/configuración de secreto o clave fuera del repo;
-- validación funcional siempre contra el estado actual de Appointment;
-- una firma válida no autoriza entrada por sí sola.
+- integridad criptográfica/tamper detection;
+- secreto/clave fuera del repo;
+- mínimo de datos;
+- validación funcional siempre contra estado actual;
+- firma válida no autoriza entrada.
 
 ---
 
-## 19. Commands y casos de uso V1
+## 20. Casos de uso V1
 
-Casos iniciados por cliente/actor según contrato canónico:
+Actor/cliente:
 
 ```text
 ScheduleAppointment
@@ -746,7 +781,7 @@ GrantExceptionalAppointmentAuthorization
 CancelExceptionalAppointmentAuthorization
 ```
 
-Casos internos de agenda/capacidad:
+Internos agenda/capacidad:
 
 ```text
 CreateAppointmentTimeSlot
@@ -757,7 +792,14 @@ CancelScheduledAppointmentsForCapacityLoss
 MarkAppointmentAsMissed
 ```
 
-Handlers de eventos de Execution:
+Evidencia Execution:
+
+```text
+HandleWashArrivalRegistered
+HandleWashEntryAuthorized
+```
+
+Transiciones Execution:
 
 ```text
 HandleWashEntryRejected
@@ -766,16 +808,16 @@ HandleWashExecutionCompleted
 HandleWashExecutionCancelled
 ```
 
-La implementación debe revisar `commands.md` canónico antes de codificar payload exacto de cada operación. Ante nombres de cola `*-service` o eventos Academic obsoletos presentes en secciones históricas, usar las correcciones de `v1-contract-gate.md`.
+Todos entran por application input ports.
 
 ---
 
-## 20. Mensajería V1
+## 21. Mensajería V1
 
-Identidad lógica:
+Identidad:
 
 ```text
-appointments
+logicalComponentId = appointments
 ```
 
 Topología:
@@ -793,45 +835,24 @@ queries.appointments
 results.appointments
 ```
 
-No usar:
-
-```text
-commands.appointments-service
-events.appointments-service
-queries.appointments-service
-results.appointments-service
-```
-
-Commands de cliente:
-
-```text
-Client
-→ BFF
-→ platform.commands
-→ commands.appointments
-→ application input port
-→ local transaction
-→ Outbox Result/Event
-```
+No aliases `*-service`.
 
 Reglas:
 
-- manual ACK después de commit local exitoso;
-- retry/DLQ para fallo técnico;
-- rechazo funcional genera Result terminal y ACK, no retry;
+- manual ACK después de commit local/durable;
+- rechazo funcional → Result terminal + ACK, sin retry;
+- fallo técnico → retry/DLQ según clasificación;
 - publisher confirms en Outbox Relay;
-- no marcar Outbox publicado antes del confirm;
-- Consumer Inbox por `messageId` para Commands/Events mutantes;
-- `idempotencyKey` para intención funcional de Commands;
-- `operationId` para seguimiento de Commands/Queries cuando aplique;
-- no loggear payloads completos con datos innecesarios;
+- Outbox no se marca publicado antes del confirm;
+- Inbox por messageId/sourceEventId;
+- idempotencyKey para intención funcional de Commands;
 - RabbitMQ no es Event Store.
 
 ---
 
-## 21. Persistencia V1
+## 22. Persistencia V1
 
-Tecnología esperada:
+Tecnología:
 
 ```text
 PostgreSQL
@@ -839,9 +860,9 @@ Flyway
 Spring JDBC / JdbcClient
 ```
 
-No JPA/Hibernate salvo decisión explícita futura y consistente con el resto del bounded context.
+No JPA/Hibernate.
 
-Tablas funcionales mínimas:
+Tablas funcionales:
 
 ```text
 appointment_time_slots
@@ -850,7 +871,7 @@ exceptional_appointment_authorizations
 appointment_capacity_projections
 ```
 
-Proyecciones mínimas — nombres físicos pueden variar si conservan semántica:
+Proyecciones/estado técnico mínimo:
 
 ```text
 academic_period_projection
@@ -866,135 +887,129 @@ tank_projection
 resource_priority_projection
 resource_unavailability_projection
 cleaning_period_projection
-wash_execution_state_projection
+wash_execution_evidence_projection
+wash_execution_transition_projection   // o esquema equivalente separado por semántica
+pending_wash_execution_events
 pending_capacity_evaluation
 projection_recovery_state
-```
-
-Infraestructura durable:
-
-```text
 processed_messages
 command_idempotency_records
 outbox_messages
 ```
 
-No FKs cross-database.
+`wash_execution_evidence_projection` debe conservar como mínimo:
+
+```text
+washExecutionId
+appointmentId
+arrivedAt?
+arrivalExecutionVersion?
+entryAuthorizedAt?
+entryAuthorizedExecutionVersion?
+updatedAt
+```
+
+No es obligatorio usar exactamente estos nombres de tabla si la semántica y pruebas quedan demostradas.
 
 ---
 
-## 22. Constraints e índices obligatorios
+## 23. Constraints e índices obligatorios
 
-El diseño físico debe proteger como mínimo:
+Garantizar como mínimo:
 
-- unicidad de `AppointmentTimeSlot` equivalente para schedule/fecha/intervalo;
+- slot equivalente único;
 - una cita activa simultánea por alumno;
-- asociación válida de Appointment con slot;
+- asociación Appointment→slot válida;
 - `version > 0`;
 - `instrumentCount > 0`;
-- consistencia de cancelación `cancellationType/cancellationSubreason`;
-- una autorización excepcional compatible por alumno/fecha según reglas canónicas;
-- idempotencia/uniqueness de Inbox;
-- uniqueness/fingerprint de idempotency records;
-- Outbox polling eficiente;
-- uniqueness de proyecciones por source identity;
-- uniqueness/claim seguro de `pending_capacity_evaluation`.
+- consistencia cancelación type/subreason;
+- una autorización excepcional por alumno/fecha según contrato;
+- **máximo una Appointment consumidora por `exceptional_authorization_id`**, permitiendo referencias históricas `CANCELLED + CLINIC`;
+- Inbox unique por messageId;
+- idempotency scope/key + fingerprint;
+- proyecciones unique por source identity;
+- claim seguro de pending/deferred rows.
 
-Índices mínimos:
+Índices:
 
 ```text
 appointments(student_account_id, status)
 appointments(appointment_time_slot_id, status)
-appointments(student_account_id, service_date derivable/index strategy)
-appointments(appointment_time_slot_id, created_at desc, appointment_id desc)
-exceptional_authorizations(student_account_id, service_date)
+appointments(slot, created_at desc, appointment_id desc)
+appointments(exceptional_authorization_id)
+exceptional_authorizations(student_account_id, authorization_date)
 outbox(status, next_attempt_at, created_at)
 processed_messages(message_id)
-projection tables(source id/version)
-pending_capacity_evaluation(status / causal execution)
+wash_execution evidence por appointmentId/washExecutionId
+pending evaluations por status/causal execution
 ```
 
-No se exige un nombre SQL exacto si el constraint demuestra la misma garantía.
-
 ---
 
-## 23. Concurrencia obligatoria
+## 24. Concurrencia obligatoria
 
-No se acepta `read → validate → write` sin protección transaccional equivalente.
+Probar al menos:
 
-Debe existir estrategia explícita de locks/constraints/conditional updates para:
-
-1. dos alumnos intentando el último cupo;
-2. dos citas concurrentes del mismo alumno;
-3. `ScheduleAppointment` concurrente con cambio/pérdida de capacidad;
+1. dos alumnos último cupo;
+2. mismo alumno dos citas activas;
+3. Schedule vs pérdida de capacidad;
 4. dos recálculos del mismo slot;
-5. cancelación automática concurrente con entrada autorizada;
-6. `MarkAppointmentAsMissed` concurrente con llegada/inicio;
-7. evento terminal de Execution concurrente con evaluación pendiente;
-8. consumo/restauración de autorización excepcional;
-9. redelivery del mismo Command/Event;
-10. snapshot/recovery concurrente con Events incrementales.
+5. capacidad cancel vs entry authorization;
+6. MISSED vs `WashArrivalRegistered`;
+7. MISSED vs EntryAuthorized/Started;
+8. terminal Execution vs pending capacity evaluation;
+9. consumo/restauración/reutilización de autorización;
+10. redelivery del mismo Event/Command;
+11. snapshot/recovery vs Events incrementales;
+12. dos Events distintos con mismo `executionVersion` (`WashEntryAuthorized` + `WashExecutionStarted`).
 
-El orden de locks debe ser estable y documentado para evitar deadlocks.
+No se acepta `read → validate → write` sin protección transaccional equivalente. Orden de locks estable y documentado.
 
 ---
 
-## 24. Idempotencia y atomicidad
+## 25. Idempotencia y atomicidad
 
-Para Command iniciado por cliente, una única transacción local debe cubrir según aplique:
+Command mutante iniciado por cliente, en una transacción local:
 
 ```text
 Inbox
 functional idempotency
-locks/read model local
+locks/read models locales
 mutation
-restauración/consumo de autorización
+consumo/restauración derivada de autorización
 Outbox Result
 Outbox Event(s)
 ```
 
-Mismo `messageId`:
+Mismo messageId → no repite efecto.
 
-```text
-→ no repite efecto
-```
+Misma idempotencyKey + mismo fingerprint → mismo desenlace lógico sin repetir mutación/evento.
 
-Misma `idempotencyKey` + misma intención/fingerprint:
+Misma key + fingerprint distinto → conflicto funcional estable.
 
-```text
-→ no repite mutación/evento
-→ devuelve/reconstruye el mismo desenlace lógico
-```
-
-Misma `idempotencyKey` + fingerprint distinto:
-
-```text
-→ rechazo de conflicto de idempotencia
-```
-
-Un fallo al persistir Outbox debe hacer rollback del cambio funcional correspondiente.
+Falló Outbox insert → rollback del cambio funcional.
 
 ---
 
-## 25. Outbox Relay
+## 26. Outbox Relay
 
-Debe soportar:
+Debe ser:
 
-- múltiples réplicas sin doble claim inseguro;
-- fencing/lease o estrategia equivalente;
-- publisher confirms;
-- backoff para fallos transitorios;
-- cuarentena/FAILED únicamente para contrato permanentemente inválido;
-- recovery tras restart;
-- métricas de pending, oldest age, retries y permanent failures.
+- multi-replica safe;
+- claim/fencing/lease o equivalente;
+- publisher-confirmed;
+- retry/backoff para transitorios;
+- `FAILED`/quarantine solo para contrato permanentemente inválido;
+- restart safe;
+- observable.
 
-No se pierde un Event/Result porque el broker esté temporalmente caído después del commit local.
+Broker caído después del commit no pierde Result/Event.
 
 ---
 
-## 26. Readiness y observabilidad
+## 27. Readiness y observabilidad
 
-Endpoints técnicos objetivo:
+Endpoints:
 
 ```text
 /actuator/health
@@ -1003,101 +1018,98 @@ Endpoints técnicos objetivo:
 /actuator/prometheus
 ```
 
-Los endpoints scaffold `/health` y `/version` pueden retirarse cuando Actuator cubra su responsabilidad.
-
-Readiness completa V1 considera:
+Readiness completa:
 
 ```text
 PostgreSQL reachable
 Flyway/schema compatible
 RabbitMQ/topology disponible
 Outbox publisher operativo
-consumidores necesarios levantados
+consumidores levantados
 proyecciones críticas READY/confiables
 ```
-
-Una instancia no debe declararse lista para procesar Commands dependientes de una proyección que esté `REBUILDING`, `DEGRADED` o no confiable.
 
 Métricas mínimas:
 
 ```text
 command/result latency
-functional rejections by code
-outbox pending/oldest age/retries
+functional rejection by code
+outbox pending/oldest/retry
 consumer retry/dlq
-deferred event count/age
+deferred events count/age
 projection readiness/recovery
+execution evidence lag
 capacity recalculation latency
-appointments cancelled by capacity loss
-missed marking failures
+capacity-loss cancellations
+missed evaluation deferred/failures
 idempotency conflicts
 ```
 
 ---
 
-## 27. Testing mínimo contractual
+## 28. Testing mínimo contractual
 
-La suite debe incluir:
+Unit/domain:
 
-### Unit/domain
+- state machine;
+- puntos;
+- tipos/instrumentos;
+- autorización excepcional y reutilización clínica;
+- IMMUNO simétrica;
+- matching;
+- temporales.
 
-- estados/transiciones de Appointment;
-- reglas de puntos;
-- límites de tipos/instrumentos;
-- autorización excepcional;
-- IMMUNO preventive reservation;
-- matching/capacity pure logic;
-- invariantes de tiempo.
+PostgreSQL/Testcontainers:
 
-### PostgreSQL/Testcontainers
-
-- migraciones desde DB vacía;
-- repositories JDBC;
-- optimistic/conditional locking;
-- constraints;
-- transacciones y rollback con Outbox;
+- Flyway desde DB vacía;
+- repositories;
+- locking/constraints;
+- partial/equivalent authorization-consumer uniqueness;
+- rollback Outbox;
 - carreras críticas.
 
-### RabbitMQ/Testcontainers
+RabbitMQ/Testcontainers:
 
-- Command → Result/Event;
+- Command→Result/Event;
 - duplicate delivery;
 - retry/DLQ;
-- publisher confirm;
-- Outbox Relay restart;
-- stale/out-of-order events;
-- recovery snapshot + Events concurrentes.
+- confirms;
+- restart;
+- arrival/authorization evidence;
+- same-version distinct Events;
+- stale/out-of-order transition Events;
+- recovery snapshot + concurrent Events.
 
-### E2E bounded context
+E2E:
 
 - Appointments + Wash Administration + Wash Execution;
-- Academic/Authorization projections o productores reales cuando el entorno E2E lo permita;
 - RabbitMQ;
-- PostgreSQL aislado por servicio.
+- PostgreSQL aislado por servicio;
+- Academic/Authorization reales o productores contractualmente fieles.
 
 ---
 
-## 28. Seguridad
+## 29. Seguridad
 
-- no secretos en repo;
-- QR signing secret/key mediante configuración segura;
-- no JWT/credentials persistidos en Inbox/Outbox;
+- sin secretos en repo;
+- QR key/secret por configuración segura;
+- no JWT/credentials en Inbox/Outbox;
 - no PII innecesaria en Events;
-- actors no se aceptan como IDs arbitrarios en payload cuando el envelope canónico provea `ActorContext`;
-- Authorization se demuestra localmente mediante proyecciones;
-- Queries service-to-service solo aceptan requesters allowlisted;
-- endpoints HTTP de negocio no se exponen.
+- ActorContext del envelope, no IDs humanos libres cuando el contrato lo provee;
+- Authorization local por proyección;
+- Queries service-to-service allowlisted;
+- no endpoints HTTP de negocio.
 
 ---
 
-## 29. Decisiones diferidas que no bloquean V1
+## 30. Decisiones diferidas no bloqueantes
 
-No inventar durante implementación:
+No inventar:
 
 - ownership/versionado futuro del reglamento;
 - mecanismo físico exacto de validación de identidad;
 - UX exacta de búsqueda manual;
-- umbral futuro `instrumentCount` vs materiales de salida;
+- umbral `instrumentCount` vs materiales de salida;
 - comunicaciones adicionales;
 - historial/corrección manual de puntos;
 - submotivos clínicos adicionales;
@@ -1105,27 +1117,31 @@ No inventar durante implementación:
 
 ---
 
-## 30. Definition of Done del servicio V1
+## 31. Definition of Done V1
 
-Appointments V1 no se considera completo hasta demostrar:
+Appointments V1 no está completo hasta demostrar:
 
-- arquitectura hexagonal protegida por ArchUnit;
-- dominio sin dependencias de framework;
-- PostgreSQL/Flyway/JdbcClient funcional;
+- arquitectura hexagonal + ArchUnit;
+- dominio sin framework;
+- PostgreSQL/Flyway/JdbcClient;
 - cero JPA/Hibernate;
 - Commands idempotentes;
 - Inbox/Outbox atómicos;
-- último cupo seguro bajo concurrencia;
-- no dos citas activas concurrentes del mismo alumno;
-- pérdida de capacidad cancela exactamente las citas necesarias y nunca una atención ya autorizada;
-- restauración de autorización excepcional correcta y atómica por `CLINIC`;
-- IMMUNO preventive reservation simétrica;
-- Events de Execution fuera de orden convergen sin saltos inválidos;
-- `MISSED` no gana una carrera contra llegada válida;
-- proyecciones pueden reconstruirse sin usar RabbitMQ como Event Store;
-- Queries de recovery para Execution funcionan;
-- RabbitMQ usa `logicalComponentId = appointments` sin aliases `*-service`;
-- readiness refleja estado real de dependencias/proyecciones;
-- escenarios E2E críticos pasan;
-- `./mvnw clean verify` verde en cada PR implementador;
-- no quedan contradicciones BLOCKER/HIGH conocidas frente a documentación canónica.
+- último cupo race-safe;
+- no dos citas activas concurrentes;
+- cambios administrativos cancelan exactamente SCHEDULED elegibles;
+- entry-authorized/IN_PROGRESS protegidos;
+- llegada válida protege contra MISSED;
+- `WashEntryAuthorized` persiste `entryAuthorizedAt` aunque no haya recurso;
+- Events distintos con mismo executionVersion no se pierden;
+- autorización excepcional se restaura/reutiliza solo por CLINIC preservando historia;
+- IMMUNO simétrica;
+- cleaning real usa `[startsAt, expectedEndsAt)`;
+- out-of-order converge sin saltos;
+- proyecciones reconstruibles sin Event Store;
+- Queries de Execution funcionan;
+- RabbitMQ usa `appointments` sin aliases;
+- readiness refleja dependencias/proyecciones;
+- E2E crítico verde;
+- `./mvnw clean verify` verde en cada PR;
+- no quedan contradicciones BLOCKER/HIGH conocidas.
