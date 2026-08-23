@@ -54,6 +54,13 @@ public class JdbcClientOperationRepository implements ClientOperationRepository 
   }
 
   @Override
+  public void deletePending(UUID operationId) {
+    jdbc.sql("DELETE FROM client_operations WHERE operation_id = :operationId AND status = 'PENDING'")
+        .param("operationId", operationId)
+        .update();
+  }
+
+  @Override
   public Optional<ClientOperation> findById(UUID operationId) {
     return jdbc.sql("SELECT * FROM client_operations WHERE operation_id = :operationId")
         .param("operationId", operationId)

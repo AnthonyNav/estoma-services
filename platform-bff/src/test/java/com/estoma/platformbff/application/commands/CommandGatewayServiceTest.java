@@ -1,0 +1,153 @@
+package com.estoma.platformbff.application.commands;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.estoma.platformbff.application.port.ClientOperationRepository;
+import com.estoma.platformbff.application.port.IdempotencyRepository;
+import com.estoma.platformbff.application.port.MessageSerializer;
+import com.estoma.platformbff.application.port.OutboxRepository;
+import com.estoma.platformbff.application.port.RequestFingerprintPort;
+import com.estoma.platformbff.contracts.messaging.ActorContext;
+import com.estoma.platformbff.contracts.messaging.CommandSubmission;
+import com.estoma.platformbff.domain.idempotency.IdempotencyRecord;
+import com.estoma.platformbff.domain.messaging.OutboxMessage;
+import com.estoma.platformbff.domain.operation.ClientOperation;
+import java.time.Instant;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class CommandGatewayServiceTest {
+  @Mock ClientOperationRepository operations;
+  @Mock IdempotencyRepository idempotency;
+  @Mock OutboxRepository outbox;
+  @Mock MessageSerializer serializer;
+  @Mock RequestFingerprintPort fingerprints;
+
+  private CommandGatewayService gateway;
+
+  @BeforeEach
+  void setUp() {
+    gateway = new CommandGatewayService(
+        new CommandRegistry(), operations, idempotency, outbox, serializer, fingerprints);
+    when(fingerprints.normalize(any(), any(), any(), any(), any(), any()))
+        .thenReturn(new RequestFingerprintPort.NormalizedRequest("{\"firstName\":\"Ada\"}", "fingerprint"));
+  }
+
+  @Test
+  void createsPendingOperationAndUnexpiredIdempotencyRecord() {
+    UUID accountId = UUID.randomUUID();
+    when(idempotency.findByLogicalScope(any(), any(), any())).thenReturn(Optional.empty());
+    when(idempotency.insertIfAbsent(any())).thenReturn(true);
+    when(serializer.write(any())).thenReturn("{}");
+
+    var result = gateway.submit(new CommandSubmission(
+        "create-person", "CreatePerson", "{\"firstName\":\"Ada\"}", "key-1",
+        accountId, ActorContext.account(accountId, "GLOBAL", null), UUID.randomUUID(), null));
+
+    assertThat(result.status()).isEqualTo("PENDING");
+    var operation = ArgumentCaptor.forClass(ClientOperation.class);
+    verify(operations).insert(operation.capture());
+    assertThat(operation.getValue().expiresAt()).isNull();
+
+    var record = ArgumentCaptor.forClass(IdempotencyRecord.class);
+    verify(idempotency).insertIfAbsent(record.capture());
+    assertThat(record.getValue().expiresAt()).isNull();
+
+    verify(outbox).insert(any(OutboxMessage.class));
+  }
+
+  @Test
+  void passwordRecoveryAllowsOnlyCanonicalAnonymousActor() {
+    when(idempotency.findByLogicalScope(any(), any(), any())).thenReturn(Optional.empty());
+    when(idempotency.insertIfAbsent(any())).thenReturn(true);
+    when(serializer.write(any())).thenReturn("{}");
+
+    gateway.submit(new CommandSubmission(
+        "request-password-recovery", "RequestPasswordRecovery", "{\"loginType\":\"MATRICULA\"}",
+        "public-key", null, ActorContext.anonymous(), null, null));
+
+    verify(outbox).insert(any());
+
+    assertThatThrownBy(() -> gateway.submit(new CommandSubmission(
+        "create-person", "CreatePerson", "{}", "bad-key", null,
+        ActorContext.anonymous(), UUID.randomUUID(), null)))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  void reusesExistingOperationForSameLogicalScopeAndFingerprint() {
+    UUID accountId = UUID.randomUUID();
+    UUID operationId = UUID.randomUUID();
+    var existing = new IdempotencyRecord(
+        "scope", accountId, "create-person", "key-1", "fingerprint",
+        operationId, Instant.now(), null);
+    var operation = new ClientOperation(
+        operationId, accountId, "create-person", "CreatePerson", "users", "users",
+        UUID.randomUUID(), "key-1", com.estoma.platformbff.domain.operation.OperationStatus.PENDING,
+        null, null, null, Instant.now(), Instant.now(), null, null);
+    when(idempotency.findByLogicalScope(accountId, "create-person", "key-1"))
+        .thenReturn(Optional.of(existing));
+    when(operations.findById(operationId)).thenReturn(Optional.of(operation));
+
+    var result = gateway.submit(new CommandSubmission(
+        "create-person", "CreatePerson", "{}", "key-1", accountId,
+        ActorContext.account(accountId, "GLOBAL", null), UUID.randomUUID(), null));
+
+    assertThat(result.operationId()).isEqualTo(operationId);
+    assertThat(result.reused()).isTrue();
+    verify(operations, never()).insert(any());
+    verify(outbox, never()).insert(any());
+  }
+
+  @Test
+  void logicalScopeWithDifferentFingerprintIsConflict() {
+    UUID accountId = UUID.randomUUID();
+    var existing = new IdempotencyRecord(
+        "scope", accountId, "create-person", "key-1", "different",
+        UUID.randomUUID(), Instant.now(), null);
+    when(idempotency.findByLogicalScope(accountId, "create-person", "key-1"))
+        .thenReturn(Optional.of(existing));
+
+    assertThatThrownBy(() -> gateway.submit(new CommandSubmission(
+        "create-person", "CreatePerson", "{}", "key-1", accountId,
+        ActorContext.account(accountId, "GLOBAL", null), UUID.randomUUID(), null)))
+        .isInstanceOf(CommandGatewayService.IdempotencyConflictException.class);
+  }
+
+  @Test
+  void losingInsertRaceDeletesItsPendingOperationAndUsesWinner() {
+    UUID accountId = UUID.randomUUID();
+    UUID winnerOperationId = UUID.randomUUID();
+    var winner = new IdempotencyRecord(
+        "winner", accountId, "create-person", "key-1", "fingerprint",
+        winnerOperationId, Instant.now(), null);
+    var winnerOperation = new ClientOperation(
+        winnerOperationId, accountId, "create-person", "CreatePerson", "users", "users",
+        UUID.randomUUID(), "key-1", com.estoma.platformbff.domain.operation.OperationStatus.PENDING,
+        null, null, null, Instant.now(), Instant.now(), null, null);
+    when(idempotency.findByLogicalScope(accountId, "create-person", "key-1"))
+        .thenReturn(Optional.empty(), Optional.of(winner));
+    when(idempotency.insertIfAbsent(any())).thenReturn(false);
+    when(operations.findById(winnerOperationId)).thenReturn(Optional.of(winnerOperation));
+
+    var result = gateway.submit(new CommandSubmission(
+        "create-person", "CreatePerson", "{}", "key-1", accountId,
+        ActorContext.account(accountId, "GLOBAL", null), UUID.randomUUID(), null));
+
+    assertThat(result.operationId()).isEqualTo(winnerOperationId);
+    verify(operations).deletePending(any());
+    verify(outbox, never()).insert(any());
+  }
+}

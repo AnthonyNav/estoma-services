@@ -8,6 +8,7 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -60,6 +61,14 @@ public class JdbcOutboxRepository implements OutboxRepository {
         .param("createdAt", message.createdAt())
         .param("updatedAt", message.updatedAt())
         .update();
+  }
+
+  @Override
+  public Optional<UUID> findMessageIdByOperationId(UUID operationId) {
+    return jdbc.sql("SELECT message_id FROM outbox_messages WHERE operation_id = :operationId")
+        .param("operationId", operationId)
+        .query((rs, rowNum) -> rs.getObject("message_id", UUID.class))
+        .optional();
   }
 
   @Override

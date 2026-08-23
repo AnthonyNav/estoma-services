@@ -14,6 +14,11 @@ spring:
     addresses: ${BFF_RABBITMQ_ADDRESSES:amqp://localhost:5672}
     username: ${BFF_RABBITMQ_USERNAME:guest}
     password: ${BFF_RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        auto-startup: ${BFF_RABBITMQ_LISTENERS_ENABLED:true}
 server:
   port: 8080
 management:
@@ -35,6 +40,15 @@ info:
     version: 0.1.0
 platform:
   component-id: ${BFF_LOGICAL_COMPONENT_ID:bff}
+  messaging:
+    topology-declare: ${BFF_RABBITMQ_TOPOLOGY_DECLARE:true}
+    listeners-enabled: ${BFF_RABBITMQ_LISTENERS_ENABLED:true}
+  outbox:
+    enabled: ${BFF_OUTBOX_ENABLED:true}
+    poll-interval: ${BFF_OUTBOX_POLL_INTERVAL:250ms}
+    batch-size: ${BFF_OUTBOX_BATCH_SIZE:50}
+    confirm-timeout: ${BFF_OUTBOX_CONFIRM_TIMEOUT:8s}
+    max-attempts: ${BFF_OUTBOX_MAX_ATTEMPTS:10}
   security-rpc:
     request-ttl: ${BFF_SECURITY_RPC_TTL:10s}
     timeout: ${BFF_SECURITY_RPC_TIMEOUT:8s}
