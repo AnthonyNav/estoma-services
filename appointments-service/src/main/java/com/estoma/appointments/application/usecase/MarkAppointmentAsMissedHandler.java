@@ -6,6 +6,7 @@ import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.AppointmentTimeSlotRepository;
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
+import com.estoma.appointments.application.port.out.PendingWashExecutionEventRepository;
 import com.estoma.appointments.application.port.out.ProjectionRecoveryRepository;
 import com.estoma.appointments.application.port.out.WashExecutionEvidenceRepository;
 import java.time.Instant;
@@ -18,17 +19,19 @@ public final class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMi
   private final AppointmentRepository appointments;
   private final AppointmentTimeSlotRepository slots;
   private final WashExecutionEvidenceRepository evidence;
+  private final PendingWashExecutionEventRepository pending;
   private final ProjectionRecoveryRepository recovery;
   private final CommandIdempotencyRepository idempotency;
   private final OutboxRepository outbox;
 
   public MarkAppointmentAsMissedHandler(AppointmentRepository appointments,
       AppointmentTimeSlotRepository slots, WashExecutionEvidenceRepository evidence,
-      ProjectionRecoveryRepository recovery, CommandIdempotencyRepository idempotency,
-      OutboxRepository outbox) {
+      PendingWashExecutionEventRepository pending, ProjectionRecoveryRepository recovery,
+      CommandIdempotencyRepository idempotency, OutboxRepository outbox) {
     this.appointments = appointments;
     this.slots = slots;
     this.evidence = evidence;
+    this.pending = pending;
     this.recovery = recovery;
     this.idempotency = idempotency;
     this.outbox = outbox;
@@ -39,8 +42,7 @@ public final class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMi
   public ApplicationResult mark(Command command) {
     Instant now = command.now();
     Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
-        "MarkAppointmentAsMissed", ApplicationSupport.fingerprint(
-            command.appointmentId(), command.expectedVersion()), now);
+        "MarkAppointmentAsMissed", ApplicationSupport.fingerprint(command.appointmentId(), command.expectedVersion()), now);
     if (gate.isPresent()) return gate.get();
 
     var appointment = appointments.findByIdForUpdate(command.appointmentId()).orElse(null);
@@ -57,9 +59,9 @@ public final class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMi
         result = ApplicationResult.rejected("ARRIVAL_TOLERANCE_ACTIVE", "arrival tolerance has not ended");
       } else if (appointment.entryAuthorizedAt() != null) {
         result = ApplicationResult.rejected("ENTRY_AUTHORIZED", "entry-authorized appointment cannot be missed");
-      } else if (!executionProjectionReady()) {
+      } else if (!executionProjectionReady() || pending.hasOpenForAppointment(appointment.appointmentId())) {
         result = ApplicationResult.deferred("EXECUTION_PROJECTION_UNRELIABLE",
-            "execution evidence is not reliable yet", appointment.appointmentId());
+            "execution evidence is not yet causally settled", appointment.appointmentId());
       } else if (evidence.hasValidArrival(appointment.appointmentId(), slot.arrivalToleranceUntil())) {
         result = ApplicationResult.rejected("VALID_ARRIVAL_PRESENT", "valid arrival evidence protects the appointment");
       } else {
