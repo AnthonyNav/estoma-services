@@ -10,8 +10,28 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        auto-startup: ${ESTOMA_MESSAGING_LISTENERS_ENABLED:false}
 server:
   port: 8080
+estoma:
+  messaging:
+    topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:false}
+    listeners-enabled: ${ESTOMA_MESSAGING_LISTENERS_ENABLED:false}
+    publisher-confirm-timeout: ${ESTOMA_MESSAGING_CONFIRM_TIMEOUT:5s}
+    outbox-claim-batch-size: ${ESTOMA_MESSAGING_OUTBOX_BATCH:10}
+    outbox-lease: ${ESTOMA_MESSAGING_OUTBOX_LEASE:2m}
+    outbox-poll-interval: ${ESTOMA_MESSAGING_OUTBOX_POLL:1s}
+    outbox-relay-enabled: ${ESTOMA_MESSAGING_OUTBOX_RELAY_ENABLED:false}
+    recovery-worker-enabled: ${ESTOMA_MESSAGING_RECOVERY_WORKER_ENABLED:false}
+    retry1-ttl: ${ESTOMA_MESSAGING_RETRY1_TTL:5s}
+    retry2-ttl: ${ESTOMA_MESSAGING_RETRY2_TTL:30s}
+  qr:
+    secret: ${ESTOMA_QR_SECRET:}
 management:
   endpoint:
     health:
@@ -36,7 +56,7 @@ management:
       enabled: true
     group:
       readiness:
-        include: readinessState,db,flyway,schemaVersion
+        include: readinessState,db,flyway,schemaVersion,rabbitMessaging,projectionReadiness
       liveness:
         include: livenessState
   info:

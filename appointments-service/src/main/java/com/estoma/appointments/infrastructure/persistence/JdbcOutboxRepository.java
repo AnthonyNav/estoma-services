@@ -31,4 +31,8 @@ public class JdbcOutboxRepository implements OutboxRepository {
   @Override public boolean markFailed(UUID id, String worker, String error, Instant next) {
     return jdbc.sql("UPDATE outbox_messages SET status='PENDING',available_at=:next,last_error=:error,claimed_by=NULL,lease_until=NULL WHERE message_id=:id AND status='PROCESSING' AND claimed_by=:worker").param("id",id).param("worker",worker).param("error",error).param("next",Timestamps.toTimestamp(next)).update()==1;
   }
+  @Override public boolean quarantine(UUID id, String worker, String error, Instant at) {
+    return jdbc.sql("UPDATE outbox_messages SET status='FAILED',last_error=:error,claimed_by=NULL,lease_until=NULL WHERE message_id=:id AND status='PROCESSING' AND claimed_by=:worker")
+        .param("id", id).param("worker", worker).param("error", error).update() == 1;
+  }
 }
