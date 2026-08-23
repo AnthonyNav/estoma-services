@@ -51,6 +51,17 @@ public class PersonQueryDispatcher {
     }
   }
 
+  /** Persists the terminal technical outcome for a valid Query after retry exhaustion. */
+  public void fail(MessageEnvelope envelope, String errorCode) {
+    Map<String, Object> payload = Map.of(
+        "status", "FAILED",
+        "error", Map.of("code", errorCode));
+    Actor resultActor = MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL.equals(envelope.messageType())
+        ? envelope.actor()
+        : new Actor.System("users");
+    appendResult(envelope, envelope.messageType() + "Result", payload, null, resultActor);
+  }
+
   private void resolveEmail(MessageEnvelope envelope) {
     ResolvePersonByInstitutionalEmailQuery query = codec.convertPayload(envelope, ResolvePersonByInstitutionalEmailQuery.class);
     InstitutionalEmail email;
