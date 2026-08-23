@@ -1,0 +1,38 @@
+package com.estoma.appointments.application.port.out;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.util.UUID;
+
+public interface WashAdministrationProjectionRepository {
+  void upsertServiceCalendar(ServiceCalendarProjection projection);
+  void upsertServiceSchedule(ServiceScheduleProjection projection);
+  void upsertAdministrativeClosure(AdministrativeClosureProjection projection);
+  void upsertCabin(CabinProjection projection);
+  void upsertTank(TankProjection projection);
+  void upsertResourcePriority(ResourcePriorityProjection projection);
+  boolean reliable();
+
+  record ServiceCalendarProjection(UUID calendarId, String code, String timezone,
+      LocalDate effectiveFrom, LocalDate effectiveUntil, String status,
+      long sourceVersion, Instant updatedAt) {}
+
+  record ServiceScheduleProjection(UUID scheduleId, UUID calendarId, int dayOfWeek,
+      LocalTime openingTime, LocalTime closingTime, int slotDurationMinutes, String status,
+      long sourceVersion, Instant updatedAt) {}
+
+  record AdministrativeClosureProjection(UUID closureId, UUID calendarId, String scope,
+      UUID cabinId, UUID tankId, Instant startsAt, Instant endsAt, String status,
+      long sourceVersion, Instant updatedAt) {}
+
+  record CabinProjection(UUID cabinId, String cabinType, String administrativeStatus,
+      long sourceVersion, Instant updatedAt) {}
+
+  record TankProjection(UUID tankId, UUID cabinId, int configuredCapacity,
+      String administrativeStatus, long sourceVersion, Instant updatedAt) {}
+
+  record ResourcePriorityProjection(UUID resourcePriorityId, String appointmentType,
+      String cabinType, String usageMode, int priorityOrder, String status,
+      long sourceVersion, Instant updatedAt) {}
+}

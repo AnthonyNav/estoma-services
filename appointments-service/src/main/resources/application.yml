@@ -1,18 +1,44 @@
 spring:
   application:
     name: appointments-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:appointments}}
+    username: ${DB_USERNAME:appointments}
+    password: ${DB_PASSWORD:appointments}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
 server:
   port: 8080
 management:
   endpoint:
     health:
+      access: read-only
       probes:
         enabled: true
       show-details: never
+    prometheus:
+      access: read-only
+    info:
+      access: read-only
   endpoints:
+    access:
+      default: none
     web:
       exposure:
         include: health,info,prometheus
+  health:
+    readinessstate:
+      enabled: true
+    livenessstate:
+      enabled: true
+    group:
+      readiness:
+        include: readinessState,db,flyway,schemaVersion
+      liveness:
+        include: livenessState
   info:
     env:
       enabled: true
