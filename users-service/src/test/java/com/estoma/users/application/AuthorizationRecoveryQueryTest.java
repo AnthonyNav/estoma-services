@@ -81,6 +81,22 @@ class AuthorizationRecoveryQueryTest {
     assertThat(payload.path("data").has("nextCursor")).isFalse();
   }
 
+  @Test
+  void terminalTechnicalFailureProducesFailedRecoveryResult() {
+    MessageEnvelope query = query(
+        MessageTypes.GET_PERSON_STATUS_SNAPSHOT,
+        java.util.Map.of("personId", UUID.randomUUID().toString()));
+
+    dispatcher.fail(query, "TECHNICAL_FAILURE");
+
+    OutboxAppendRequest result = captured();
+    assertThat(result.messageType()).isEqualTo(MessageTypes.GET_PERSON_STATUS_SNAPSHOT_RESULT);
+    JsonNode payload = codec.parseJson(result.payloadJson());
+    assertThat(payload.path("status").asString()).isEqualTo("FAILED");
+    assertThat(payload.path("error").path("code").asString()).isEqualTo("TECHNICAL_FAILURE");
+    assertThat(payload.has("data")).isFalse();
+  }
+
   private MessageEnvelope query(String type, Object payload) {
     return new MessageEnvelope(
         UUID.randomUUID(), type, 1, MessageKind.QUERY, "authorization", Instant.now(),
