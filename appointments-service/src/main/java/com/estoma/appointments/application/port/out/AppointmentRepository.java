@@ -21,6 +21,7 @@ public interface AppointmentRepository {
   List<Appointment> findByExceptionalAuthorization(UUID authorizationId);
   List<Appointment> findByStatus(AppointmentStatus status);
   List<Appointment> findMissedCandidates(Instant toleranceEndedBefore, int limit);
+  List<Appointment> findForServiceDatePage(LocalDate serviceDate, UUID afterAppointmentId, int limit);
 
   /** Active appointments across slots on a service date, used by symmetric IMMUNO checks. */
   default List<Appointment> findActiveOnDate(LocalDate serviceDate) { return List.of(); }
