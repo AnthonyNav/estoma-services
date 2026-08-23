@@ -44,15 +44,11 @@ public final class RecoveryResultListener {
       processor.process(result);
       channel.basicAck(tag, false);
     } catch (InvalidMessageException | IllegalArgumentException invalid) {
-      failures.route(message, MessagingNames.RESULT_QUEUE, false);
-      channel.basicAck(tag, false);
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.RESULT_QUEUE, false, channel, tag);
     } catch (RuntimeException technical) {
-      try {
-        failures.route(message, MessagingNames.RESULT_QUEUE, true);
-        channel.basicAck(tag, false);
-      } catch (RuntimeException routingFailure) {
-        channel.basicNack(tag, false, true);
-      }
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.RESULT_QUEUE, true, channel, tag);
     }
   }
 
