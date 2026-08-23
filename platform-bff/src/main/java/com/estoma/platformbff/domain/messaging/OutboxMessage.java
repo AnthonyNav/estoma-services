@@ -13,6 +13,8 @@ public record OutboxMessage(
     UUID operationId,
     UUID correlationId,
     UUID causationId,
+    UUID aggregateId,
+    Integer aggregateVersion,
     String idempotencyKey,
     String actorJson,
     String payloadJson,

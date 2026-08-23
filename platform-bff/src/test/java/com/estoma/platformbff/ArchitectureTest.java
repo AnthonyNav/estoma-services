@@ -26,9 +26,23 @@ class ArchitectureTest {
       .should().dependOnClassesThat().resideInAnyPackage("com.estoma.platformbff.infrastructure..");
 
   @ArchTest
+  static final ArchRule application_does_not_depend_on_transport_or_serialization = noClasses()
+      .that().resideInAnyPackage("com.estoma.platformbff.application..")
+      .should().dependOnClassesThat().resideInAnyPackage(
+          "org.springframework.amqp..",
+          "org.springframework.jdbc..",
+          "com.fasterxml.jackson..",
+          "tools.jackson..");
+
+  @ArchTest
   static final ArchRule controllers_do_not_access_repositories = noClasses()
       .that().areAnnotatedWith(RestController.class)
       .should().dependOnClassesThat().haveSimpleNameEndingWith("Repository");
+
+  @ArchTest
+  static final ArchRule controllers_do_not_depend_on_infrastructure = noClasses()
+      .that().areAnnotatedWith(RestController.class)
+      .should().dependOnClassesThat().resideInAnyPackage("com.estoma.platformbff.infrastructure..");
 
   @ArchTest
   static final ArchRule listeners_do_not_access_repositories_directly = noClasses()

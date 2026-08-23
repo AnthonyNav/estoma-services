@@ -26,14 +26,15 @@ public class JdbcOutboxRepository implements OutboxRepository {
     jdbc.sql("""
         INSERT INTO outbox_messages (
           message_id, message_kind, message_type, message_version, exchange_name,
-          routing_key, operation_id, correlation_id, causation_id, idempotency_key,
-          actor, payload, status, claim_token, claim_until, attempt_count,
-          next_attempt_at, published_at, last_error_code, created_at, updated_at
+          routing_key, operation_id, correlation_id, causation_id, aggregate_id,
+          aggregate_version, idempotency_key, actor, payload, status, claim_token,
+          claim_until, attempt_count, next_attempt_at, published_at, last_error_code,
+          created_at, updated_at
         ) VALUES (:messageId, :messageKind, :messageType, :messageVersion, :exchangeName,
-          :routingKey, :operationId, :correlationId, :causationId, :idempotencyKey,
-          CAST(:actorJson AS jsonb), CAST(:payloadJson AS jsonb), :status, :claimToken,
-          :claimUntil, :attemptCount, :nextAttemptAt, :publishedAt, :lastErrorCode,
-          :createdAt, :updatedAt)
+          :routingKey, :operationId, :correlationId, :causationId, :aggregateId,
+          :aggregateVersion, :idempotencyKey, CAST(:actorJson AS jsonb),
+          CAST(:payloadJson AS jsonb), :status, :claimToken, :claimUntil, :attemptCount,
+          :nextAttemptAt, :publishedAt, :lastErrorCode, :createdAt, :updatedAt)
         """)
         .param("messageId", message.messageId())
         .param("messageKind", message.messageKind())
@@ -44,6 +45,8 @@ public class JdbcOutboxRepository implements OutboxRepository {
         .param("operationId", message.operationId())
         .param("correlationId", message.correlationId())
         .param("causationId", message.causationId())
+        .param("aggregateId", message.aggregateId())
+        .param("aggregateVersion", message.aggregateVersion())
         .param("idempotencyKey", message.idempotencyKey())
         .param("actorJson", message.actorJson())
         .param("payloadJson", message.payloadJson())
@@ -137,6 +140,8 @@ public class JdbcOutboxRepository implements OutboxRepository {
         rs.getObject("operation_id", UUID.class),
         rs.getObject("correlation_id", UUID.class),
         rs.getObject("causation_id", UUID.class),
+        rs.getObject("aggregate_id", UUID.class),
+        rs.getObject("aggregate_version", Integer.class),
         rs.getString("idempotency_key"),
         rs.getString("actor"),
         rs.getString("payload"),

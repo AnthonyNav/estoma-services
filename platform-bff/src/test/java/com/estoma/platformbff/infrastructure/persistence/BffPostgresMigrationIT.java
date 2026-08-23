@@ -170,6 +170,19 @@ class BffPostgresMigrationIT {
   }
 
   @Test
+  void outboxPersistsAggregateMetadataNeededForDeterministicEnvelopeReconstruction() {
+    Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+    var operation = pendingOperation(UUID.randomUUID(), now);
+    operations.insert(operation);
+    var message = pendingOutbox(operation, UUID.randomUUID(), now);
+    outbox.insert(message);
+
+    var claimed = outbox.claimBatch("worker-a", now, 1).get(0);
+    assertThat(claimed.aggregateId()).isEqualTo(message.aggregateId());
+    assertThat(claimed.aggregateVersion()).isEqualTo(message.aggregateVersion());
+  }
+
+  @Test
   void failedOutboxMessageIsRetryableWhenNextAttemptIsDue() {
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     var operation = pendingOperation(UUID.randomUUID(), now);
@@ -190,6 +203,8 @@ class BffPostgresMigrationIT {
     assertThat(retryClaim).hasSize(1);
     assertThat(retryClaim.get(0).messageId()).isEqualTo(message.messageId());
     assertThat(retryClaim.get(0).attemptCount()).isEqualTo(2);
+    assertThat(retryClaim.get(0).aggregateId()).isEqualTo(message.aggregateId());
+    assertThat(retryClaim.get(0).aggregateVersion()).isEqualTo(message.aggregateVersion());
   }
 
   @Test
@@ -267,8 +282,8 @@ class BffPostgresMigrationIT {
 
     var wrongExchange = new OutboxMessage(UUID.randomUUID(), "COMMAND", "TestCommand", 1,
         "wrong.exchange", "users", operation.operationId(), operation.correlationId(), null,
-        operation.idempotencyKey(), "{}", "{}", OutboxStatus.PENDING, null, null, 0,
-        null, null, null, now, now);
+        UUID.randomUUID(), 1, operation.idempotencyKey(), "{}", "{}", OutboxStatus.PENDING,
+        null, null, 0, null, null, null, now, now);
     assertThatThrownBy(() -> outbox.insert(wrongExchange)).isInstanceOf(DataIntegrityViolationException.class);
 
     assertThatThrownBy(() -> jdbc.sql("""
@@ -332,6 +347,8 @@ class BffPostgresMigrationIT {
         operation.operationId(),
         operation.correlationId(),
         null,
+        UUID.randomUUID(),
+        7,
         operation.idempotencyKey(),
         "{}",
         "{\"test\":true}",

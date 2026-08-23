@@ -43,6 +43,8 @@ CREATE TABLE outbox_messages (
     operation_id UUID NOT NULL REFERENCES client_operations(operation_id),
     correlation_id UUID NOT NULL,
     causation_id UUID,
+    aggregate_id UUID,
+    aggregate_version INTEGER,
     idempotency_key VARCHAR(200) NOT NULL,
     actor JSONB,
     payload JSONB NOT NULL,
