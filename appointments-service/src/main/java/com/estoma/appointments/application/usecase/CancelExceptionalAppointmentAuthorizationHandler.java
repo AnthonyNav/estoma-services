@@ -36,9 +36,9 @@ public final class CancelExceptionalAppointmentAuthorizationHandler
   @Transactional
   public ApplicationResult cancel(Command command) {
     Instant now = command.now();
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
-        "CancelExceptionalAppointmentAuthorization", ApplicationSupport.fingerprint(
-            command.authorizationId(), command.reason()), now);
+    Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox,
+        command.metadata(), "CancelExceptionalAppointmentAuthorization",
+        ApplicationSupport.fingerprint(command.authorizationId(), command.reason()), now);
     if (gate.isPresent()) return gate.get();
 
     ApplicationResult result;
