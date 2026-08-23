@@ -8,5 +8,5 @@ import java.util.UUID;
 public interface MarkAppointmentAsMissedUseCase {
   ApplicationResult mark(Command command);
 
-  record Command(CommandMetadata metadata, UUID appointmentId, Instant now) {}
+  record Command(CommandMetadata metadata, UUID appointmentId, long expectedVersion, Instant now) {}
 }
