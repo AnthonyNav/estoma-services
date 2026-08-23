@@ -1,6 +1,19 @@
 spring:
   application:
     name: platform-bff
+  datasource:
+    url: ${BFF_DB_URL:jdbc:postgresql://localhost:5432/bff-db}
+    username: ${BFF_DB_USERNAME:bff}
+    password: ${BFF_DB_PASSWORD:bff}
+    hikari:
+      maximum-pool-size: ${BFF_DB_POOL_SIZE:10}
+  flyway:
+    enabled: ${BFF_FLYWAY_ENABLED:true}
+    baseline-on-migrate: false
+  rabbitmq:
+    addresses: ${BFF_RABBITMQ_ADDRESSES:amqp://localhost:5672}
+    username: ${BFF_RABBITMQ_USERNAME:guest}
+    password: ${BFF_RABBITMQ_PASSWORD:guest}
 server:
   port: 8080
 management:
@@ -20,3 +33,20 @@ info:
   app:
     name: platform-bff
     version: 0.1.0
+platform:
+  component-id: ${BFF_LOGICAL_COMPONENT_ID:bff}
+  security-rpc:
+    request-ttl: ${BFF_SECURITY_RPC_TTL:10s}
+    timeout: ${BFF_SECURITY_RPC_TIMEOUT:8s}
+    retry-attempts: 0
+  jwt:
+    issuer: ${BFF_JWT_ISSUER:estoma-authentication}
+    audience: ${BFF_JWT_AUDIENCE:estoma-platform}
+    jwk-set: ${BFF_JWK_SET:}
+  retention:
+    operation-days: ${BFF_OPERATION_RETENTION_DAYS:7}
+    idempotency-hours: ${BFF_IDEMPOTENCY_RETENTION_HOURS:24}
+    outbox-published-days: ${BFF_OUTBOX_PUBLISHED_RETENTION_DAYS:7}
+    outbox-failed-days: ${BFF_OUTBOX_FAILED_RETENTION_DAYS:30}
+    inbox-days: ${BFF_INBOX_RETENTION_DAYS:30}
+    recovery-job-days: ${BFF_RECOVERY_JOB_RETENTION_DAYS:30}
