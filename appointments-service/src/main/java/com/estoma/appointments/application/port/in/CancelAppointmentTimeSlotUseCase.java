@@ -1,2 +1,12 @@
 package com.estoma.appointments.application.port.in;
-public interface CancelAppointmentTimeSlotUseCase {}
+
+import com.estoma.appointments.application.model.ApplicationResult;
+import com.estoma.appointments.application.model.CommandMetadata;
+import java.time.Instant;
+import java.util.UUID;
+
+public interface CancelAppointmentTimeSlotUseCase {
+  ApplicationResult cancel(Command command);
+
+  record Command(CommandMetadata metadata, UUID slotId, Instant now) {}
+}

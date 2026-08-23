@@ -1,2 +1,8 @@
 package com.estoma.appointments.application.port.in;
-public interface HandleWashEntryAuthorizedUseCase {}
+
+import com.estoma.appointments.application.model.ApplicationResult;
+import com.estoma.appointments.application.model.ExecutionEvent;
+
+public interface HandleWashEntryAuthorizedUseCase {
+  ApplicationResult handle(ExecutionEvent event);
+}

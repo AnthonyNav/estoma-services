@@ -166,4 +166,12 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
     return jdbc.sql("SELECT " + COLUMNS + " FROM appointments WHERE status=:status ORDER BY created_at")
         .param("status", status.name()).query(JdbcAppointmentRepository::map).list();
   }
+
+  @Override public List<Appointment> findActiveOnDate(LocalDate date) {
+    return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s "
+        + "ON s.appointment_time_slot_id=a.appointment_time_slot_id "
+        + "WHERE s.service_date=:date AND a.status IN ('SCHEDULED','IN_PROGRESS') "
+        + "ORDER BY a.created_at,a.appointment_id")
+        .param("date", date).query(JdbcAppointmentRepository::map).list();
+  }
 }
