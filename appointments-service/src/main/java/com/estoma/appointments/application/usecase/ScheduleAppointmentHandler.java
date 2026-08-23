@@ -13,6 +13,7 @@ import com.estoma.appointments.application.port.out.OutboxRepository;
 import com.estoma.appointments.domain.error.DomainViolationException;
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
+import com.estoma.appointments.domain.model.AppointmentType;
 import com.estoma.appointments.domain.service.AppointmentCapacityMatcher;
 import com.estoma.appointments.domain.service.DailyPenaltyPolicy;
 import com.estoma.appointments.domain.service.ImmunocompromisedReservationPolicy;
@@ -23,7 +24,7 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Complete booking workflow. The slot and capacity rows are locked before demand is read. */
+/** Complete booking workflow. Slot/capacity rows are locked before final demand validation. */
 @Service
 public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
   private final AppointmentRepository appointments;
@@ -35,8 +36,8 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
   private final OutboxRepository outbox;
   private final LocalAuthorizationPolicy policy;
 
-  public ScheduleAppointmentHandler(AppointmentRepository appointments, AppointmentTimeSlotRepository slots,
-      AppointmentCapacityProjectionRepository capacity,
+  public ScheduleAppointmentHandler(AppointmentRepository appointments,
+      AppointmentTimeSlotRepository slots, AppointmentCapacityProjectionRepository capacity,
       ExceptionalAppointmentAuthorizationRepository authorizations,
       AcademicProjectionRepository academic, AuthorizationProjectionRepository authorization,
       CommandIdempotencyRepository idempotency, OutboxRepository outbox) {
@@ -77,24 +78,28 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
     if (!policy.canSchedule(command.metadata(), command.studentAccountId())) {
       return ApplicationResult.rejected("FORBIDDEN", "student is not authorized for appointments");
     }
-    if (!academic.reliable()) return ApplicationResult.rejected("ACADEMIC_PROJECTION_UNRELIABLE", "academic projection is not reliable");
+    if (!academic.reliable()) {
+      return ApplicationResult.rejected("ACADEMIC_PROJECTION_UNRELIABLE", "academic projection is not reliable");
+    }
     var period = academic.findActivePeriod()
-        .filter(value -> value.reliable() && "ACTIVE".equals(value.status()))
-        .orElse(null);
+        .filter(value -> value.reliable() && "ACTIVE".equals(value.status())).orElse(null);
     var profile = academic.findStudentProfile(command.studentAccountId())
-        .filter(value -> value.reliable() && "ACTIVE".equals(value.academicStatus()))
-        .orElse(null);
+        .filter(value -> value.reliable() && "ACTIVE".equals(value.academicStatus())).orElse(null);
     var course = academic.findStudentCourse(command.studentAccountId(), command.courseSectionId())
-        .filter(value -> value.reliable() && value.active())
-        .orElse(null);
-    if (period == null || profile == null || course == null || !period.academicPeriodId().equals(course.academicPeriodId())) {
+        .filter(value -> value.reliable() && value.active()).orElse(null);
+    if (period == null || profile == null || course == null
+        || !period.academicPeriodId().equals(course.academicPeriodId())) {
       return ApplicationResult.rejected("ACADEMIC_ENROLLMENT_INVALID", "active academic enrollment is required");
     }
 
-    AppointmentTimeSlot slot = slots.findByIdForUpdate(command.appointmentTimeSlotId())
-        .orElse(null);
+    AppointmentTimeSlot slot = slots.findByIdForUpdate(command.appointmentTimeSlotId()).orElse(null);
     if (slot == null) return ApplicationResult.rejected("SLOT_NOT_FOUND", "appointment time slot was not found");
-    if (!slot.isBookableAt(command.now())) return ApplicationResult.rejected("SLOT_NOT_BOOKABLE", "slot is inactive or past its booking deadline");
+    if (!slot.serviceDate().equals(command.now().atZone(slot.timezone()).toLocalDate())) {
+      return ApplicationResult.rejected("SERVICE_DATE_NOT_CURRENT", "appointments can only be scheduled for the current service date");
+    }
+    if (!slot.isBookableAt(command.now())) {
+      return ApplicationResult.rejected("SLOT_NOT_BOOKABLE", "slot is inactive or past its booking deadline");
+    }
 
     List<Appointment> studentAppointments = appointments.findForStudentAndDate(
         command.studentAccountId(), slot.serviceDate());
@@ -105,39 +110,54 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
       return ApplicationResult.rejected("STUDENT_BLOCKED", "student has reached the daily penalty limit");
     }
 
+    long completed = studentAppointments.stream()
+        .filter(a -> a.status().name().equals("COMPLETED")).count();
     UUID authorizationId = command.exceptionalAuthorizationId();
-    if (studentAppointments.stream().filter(a -> a.status().name().equals("COMPLETED")).count() >= 2
-        && authorizationId == null) {
-      return ApplicationResult.rejected("DAILY_COMPLETED_LIMIT", "student has reached the daily completed limit");
+    if (completed >= 2) {
+      return ApplicationResult.rejected("DAILY_COMPLETED_LIMIT", "student has reached the maximum of two completed appointments");
+    }
+    if (completed == 0 && authorizationId != null) {
+      return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_NOT_REQUIRED", "exceptional authorization is only consumed by the additional appointment");
+    }
+    if (completed == 1 && authorizationId == null) {
+      return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_REQUIRED", "the additional appointment requires exceptional authorization");
     }
     if (authorizationId != null) {
       var authorization = authorizations.findByIdForUpdate(authorizationId).orElse(null);
-      if (authorization == null || !authorization.studentAccountId().equals(command.studentAccountId())
-          || !authorization.isUsableAt(slot.serviceDate(), command.now())) {
-        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_UNAVAILABLE", "exceptional authorization is unavailable");
+      if (authorization == null) {
+        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_NOT_FOUND", "exceptional authorization was not found");
+      }
+      if (!authorization.studentAccountId().equals(command.studentAccountId())) {
+        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_STUDENT_MISMATCH", "authorization belongs to another student");
+      }
+      if (!authorization.isUsableAt(slot.serviceDate(), command.now())) {
+        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_UNAVAILABLE", "exceptional authorization is cancelled or expired");
       }
       if (appointments.findActiveByExceptionalAuthorizationForUpdate(authorizationId).isPresent()) {
-        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_IN_USE", "exceptional authorization is already consumed");
+        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_ALREADY_USED", "exceptional authorization is already consumed");
       }
-    } else if (studentAppointments.stream().filter(a -> a.status().name().equals("COMPLETED")).count() >= 2) {
-      return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_REQUIRED", "an exceptional authorization is required");
     }
 
     var projection = capacity.findBySlotIdForUpdate(slot.appointmentTimeSlotId()).orElse(null);
-    if (projection == null) return ApplicationResult.rejected("CAPACITY_UNAVAILABLE", "slot capacity has not been projected");
+    if (projection == null) {
+      return ApplicationResult.rejected("CAPACITY_UNAVAILABLE", "slot capacity has not been projected");
+    }
     List<Appointment> slotAppointments = appointments.findForSlot(slot.appointmentTimeSlotId(), true);
     if (!AppointmentCapacityMatcher.canFit(slotAppointments, command.appointmentType(),
         projection.normalCapacity(), projection.journeyCapacity(), projection.immunocompromisedCapacity())) {
       return ApplicationResult.rejected("CAPACITY_EXHAUSTED", "slot has no compatible capacity");
     }
-    if (command.appointmentType() == com.estoma.appointments.domain.model.AppointmentType.IMMUNOCOMPROMISED
+
+    if (command.appointmentType() == AppointmentType.IMMUNOCOMPROMISED
         && appointments.findActiveOnDate(slot.serviceDate()).stream().anyMatch(existing -> {
-          if (existing.appointmentType() != com.estoma.appointments.domain.model.AppointmentType.IMMUNOCOMPROMISED) return false;
+          if (existing.appointmentType() != AppointmentType.IMMUNOCOMPROMISED) return false;
           return slots.findById(existing.appointmentTimeSlotId())
-              .map(other -> ImmunocompromisedReservationPolicy.conflicts(slot, command.appointmentType(), other, existing.appointmentType()))
+              .map(other -> ImmunocompromisedReservationPolicy.conflicts(
+                  slot, command.appointmentType(), other, existing.appointmentType()))
               .orElse(true);
         })) {
-      return ApplicationResult.rejected("IMMUNOCOMPROMISED_RESERVATION_CONFLICT", "preventive cleaning reservation overlaps another immunocompromised appointment");
+      return ApplicationResult.rejected("IMMUNOCOMPROMISED_RESERVATION_CONFLICT",
+          "preventive cleaning reservation overlaps another immunocompromised appointment");
     }
 
     Appointment appointment = Appointment.scheduled(UUID.randomUUID(), slot.appointmentTimeSlotId(),
