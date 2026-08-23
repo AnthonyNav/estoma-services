@@ -69,10 +69,16 @@ final class ApplicationSupport {
     }
   }
 
-  static void appendResult(OutboxRepository outbox, CommandMetadata metadata,
+  static void appendResult(OutboxRepository outbox, CommandMetadata metadata, String operation,
       ApplicationResult result, Instant now) {
-    append(outbox, new OutboxIntent("AppointmentCommandResult", "RESULT", result.aggregateId(),
-        result.aggregateVersion(), metadata.correlationId(), metadata.causationId(), resultJson(result), now));
+    if (result.status() == ApplicationResult.Status.DEFERRED) {
+      throw new IllegalArgumentException("DEFERRED is not a terminal wire Result");
+    }
+    boolean succeeded = result.status() == ApplicationResult.Status.APPLIED
+        || result.status() == ApplicationResult.Status.DUPLICATE;
+    String type = operation + (succeeded ? "Succeeded" : "Rejected");
+    append(outbox, new OutboxIntent(type, "RESULT", result.aggregateId(), result.aggregateVersion(),
+        metadata.correlationId(), metadata.messageId(), wireResultJson(result, succeeded), now));
   }
 
   static void appendEvent(OutboxRepository outbox, CommandMetadata metadata, String type,
@@ -101,6 +107,18 @@ final class ApplicationSupport {
         + ",\"aggregateVersion\":" + result.aggregateVersion() + "}";
   }
 
+  private static String wireResultJson(ApplicationResult result, boolean succeeded) {
+    if (succeeded) {
+      return "{\"status\":\"SUCCEEDED\",\"data\":{"
+          + (result.aggregateId() == null ? "" : "\"aggregateId\":\"" + result.aggregateId() + "\",")
+          + "\"aggregateVersion\":" + result.aggregateVersion()
+          + ",\"message\":\"" + escape(result.message()) + "\"}}";
+    }
+    return "{\"status\":\"REJECTED\",\"error\":{\"code\":\""
+        + escape(result.code()) + "\",\"details\":{\"message\":\""
+        + escape(result.message()) + "\"}}}";
+  }
+
   private static ApplicationResult replay(String outcomeJson) {
     if (outcomeJson == null) return ApplicationResult.duplicate();
     Matcher matcher = RESULT_PATTERN.matcher(outcomeJson);
@@ -116,7 +134,7 @@ final class ApplicationSupport {
   }
 
   static String escape(String value) {
-    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
   }
 
   private static String unescape(String value) {
