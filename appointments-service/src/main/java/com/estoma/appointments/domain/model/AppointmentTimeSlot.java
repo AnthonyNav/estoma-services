@@ -11,6 +11,7 @@ import java.util.UUID;
 public final class AppointmentTimeSlot {
   private final UUID appointmentTimeSlotId;
   private final UUID sourceScheduleId;
+  private final UUID calendarId;
   private final LocalDate serviceDate;
   private final Instant startsAt;
   private final Instant endsAt;
@@ -21,11 +22,12 @@ public final class AppointmentTimeSlot {
   private final AppointmentTimeSlotStatus status;
   private final long version;
 
-  private AppointmentTimeSlot(UUID id, UUID sourceScheduleId, LocalDate serviceDate, Instant startsAt,
+  private AppointmentTimeSlot(UUID id, UUID sourceScheduleId, UUID calendarId, LocalDate serviceDate, Instant startsAt,
       Instant endsAt, ZoneId timezone, Instant bookingDeadlineAt, Instant cancellationDeadlineAt,
       Instant arrivalToleranceUntil, AppointmentTimeSlotStatus status, long version) {
     this.appointmentTimeSlotId = Objects.requireNonNull(id, "appointmentTimeSlotId");
     this.sourceScheduleId = Objects.requireNonNull(sourceScheduleId, "sourceScheduleId");
+    this.calendarId = Objects.requireNonNull(calendarId, "calendarId");
     this.serviceDate = Objects.requireNonNull(serviceDate, "serviceDate");
     this.startsAt = Objects.requireNonNull(startsAt, "startsAt");
     this.endsAt = Objects.requireNonNull(endsAt, "endsAt");
@@ -43,31 +45,31 @@ public final class AppointmentTimeSlot {
     this.version = version;
   }
 
-  public static AppointmentTimeSlot create(UUID id, UUID sourceScheduleId, LocalDate serviceDate,
+  public static AppointmentTimeSlot create(UUID id, UUID sourceScheduleId, UUID calendarId, LocalDate serviceDate,
       Instant startsAt, Instant endsAt, ZoneId timezone, Instant bookingDeadlineAt,
       Instant cancellationDeadlineAt, Instant arrivalToleranceUntil) {
-    return new AppointmentTimeSlot(id, sourceScheduleId, serviceDate, startsAt, endsAt, timezone,
+    return new AppointmentTimeSlot(id, sourceScheduleId, calendarId, serviceDate, startsAt, endsAt, timezone,
         bookingDeadlineAt, cancellationDeadlineAt, arrivalToleranceUntil, AppointmentTimeSlotStatus.ACTIVE, 1);
   }
 
   /** Materializes the V1 default deadlines (booking -10m, cancellation -20m, arrival +10m). */
-  public static AppointmentTimeSlot materialize(UUID id, UUID sourceScheduleId, LocalDate serviceDate,
+  public static AppointmentTimeSlot materialize(UUID id, UUID sourceScheduleId, UUID calendarId, LocalDate serviceDate,
       Instant startsAt, Instant endsAt, ZoneId timezone) {
-    return create(id, sourceScheduleId, serviceDate, startsAt, endsAt, timezone,
+    return create(id, sourceScheduleId, calendarId, serviceDate, startsAt, endsAt, timezone,
         startsAt.minusSeconds(10 * 60), startsAt.minusSeconds(20 * 60), startsAt.plusSeconds(10 * 60));
   }
 
-  public static AppointmentTimeSlot reconstitute(UUID id, UUID sourceScheduleId, LocalDate serviceDate,
+  public static AppointmentTimeSlot reconstitute(UUID id, UUID sourceScheduleId, UUID calendarId, LocalDate serviceDate,
       Instant startsAt, Instant endsAt, ZoneId timezone, Instant bookingDeadlineAt,
       Instant cancellationDeadlineAt, Instant arrivalToleranceUntil, AppointmentTimeSlotStatus status,
       long version) {
-    return new AppointmentTimeSlot(id, sourceScheduleId, serviceDate, startsAt, endsAt, timezone,
+    return new AppointmentTimeSlot(id, sourceScheduleId, calendarId, serviceDate, startsAt, endsAt, timezone,
         bookingDeadlineAt, cancellationDeadlineAt, arrivalToleranceUntil, status, version);
   }
 
   public AppointmentTimeSlot cancel() {
     if (status == AppointmentTimeSlotStatus.CANCELLED) return this;
-    return new AppointmentTimeSlot(appointmentTimeSlotId, sourceScheduleId, serviceDate, startsAt, endsAt,
+    return new AppointmentTimeSlot(appointmentTimeSlotId, sourceScheduleId, calendarId, serviceDate, startsAt, endsAt,
         timezone, bookingDeadlineAt, cancellationDeadlineAt, arrivalToleranceUntil,
         AppointmentTimeSlotStatus.CANCELLED, version + 1);
   }
@@ -80,6 +82,7 @@ public final class AppointmentTimeSlot {
   public boolean isCancelled() { return status == AppointmentTimeSlotStatus.CANCELLED; }
   public UUID appointmentTimeSlotId() { return appointmentTimeSlotId; }
   public UUID sourceScheduleId() { return sourceScheduleId; }
+  public UUID calendarId() { return calendarId; }
   public LocalDate serviceDate() { return serviceDate; }
   public Instant startsAt() { return startsAt; }
   public Instant endsAt() { return endsAt; }
