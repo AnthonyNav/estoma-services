@@ -7,11 +7,6 @@ spring:
     username: ${USERS_DB_RUNTIME_USER:users_service}
     password: ${USERS_DB_RUNTIME_PASSWORD:users_service}
     hikari:
-      # Bounds how long a query can hang against a wedged connection (a
-      # network partition, a frozen peer) rather than relying on the OS's
-      # TCP keepalive, which can take minutes to notice. Set at the pool
-      # level (not baked into the JDBC URL) so it applies regardless of
-      # what USERS_DB_URL is provided.
       connection-timeout: 10000
       validation-timeout: 5000
       data-source-properties:
@@ -24,10 +19,6 @@ spring:
     validate-on-migrate: true
     clean-disabled: true
     baseline-on-migrate: false
-    # Separate migration credentials, per
-    # security-observability.md:235. Defaults to the runtime credentials
-    # so a single-user local/dev database still works; estoma-infra
-    # supplies distinct migration credentials in staging/prod.
     url: ${USERS_DB_URL:jdbc:postgresql://localhost:5432/users_db}
     user: ${USERS_DB_MIGRATION_USER:users_service}
     password: ${USERS_DB_MIGRATION_PASSWORD:users_service}
@@ -40,30 +31,17 @@ spring:
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
     virtual-host: ${RABBITMQ_VHOST:/}
-    # Required for RabbitConfig's RabbitTemplate confirm/return callbacks
-    # to actually fire (docs/system-contract.md §7: publisher confirms on
-    # every publish).
     publisher-confirm-type: correlated
     publisher-returns: true
     listener:
       simple:
-        # Broker-side TTL retry tiers handle backoff, not Spring AMQP's
-        # in-process retry (docs/system-contract.md §9) -- it would block
-        # the consumer thread for the whole backoff and lose the attempt
-        # count on pod restart.
         retry:
           enabled: false
         default-requeue-rejected: false
 
 estoma:
-  # The deployment environment name, read by EstomaJsonLogFormatter for
-  # the mandatory "environment" log field (security-observability.md:446-469).
   environment: ${ESTOMA_ENVIRONMENT:local}
   messaging:
-    # Per-operation producer authorization matrix (commands.md §8): a
-    # producer being technically trusted does not imply it may issue every
-    # command. academic (student-import-process) may create/update
-    # Persons but never activate/deactivate them.
     command-producers:
       bff:
         - CreatePerson
@@ -73,25 +51,17 @@ estoma:
       academic:
         - CreatePerson
         - UpdatePerson
-    # Same matrix, for Query (queries.md §2): academic's student-import-
-    # process is the only authorized requester in V1.
     query-producers:
       academic:
         - ResolvePersonByInstitutionalEmail
+      authorization:
+        - GetPersonStatusSnapshot
+        - ListPersonStatusSnapshotsPage
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     command-max-attempts: 3
     query-max-attempts: 3
-    # Bounds ConfirmedRabbitPublisher's wait for a publisher confirm
-    # (docs/system-contract.md §7). Also the input to the Outbox lease
-    # budget below (OutboxLeaseBudgetValidator).
     publisher-confirm-timeout: 5s
   outbox:
-    # The relay publishes one row at a time and waits for its confirm, so
-    # a batch's worst case is claim-batch-size x publisher-confirm-timeout
-    # (10 x 5s = 50s). `lease` must cover that plus a safety margin
-    # (OutboxLeaseBudgetValidator enforces >= 80s at startup) or the
-    # sweeper reclaims rows the relay is still working on
-    # (docs/system-contract.md §8).
     claim-batch-size: 10
     lease: 2m
     max-attempts: 10
@@ -105,14 +75,10 @@ server:
 logging:
   structured:
     format:
-      # Custom formatter, not one of Boot's built-in formats: none of
-      # ECS/GELF/Logstash match the mandatory 9-field snake_case schema
-      # (docs/system-contract.md §11) -- see EstomaJsonLogFormatter.
       console: com.estoma.users.observability.EstomaJsonLogFormatter
 
 management:
   endpoints:
-    # Deny-by-default, then opt in explicitly below (docs/system-contract.md §11).
     access:
       default: none
     web:
@@ -134,10 +100,6 @@ management:
         readiness:
           include: db, commandConsumer, queryConsumer, outboxRelay
         liveness:
-          # Deliberately excludes db/commandConsumer/outboxRelay: liveness
-          # must never run an expensive check, and a temporarily degraded
-          # dependency must not trigger a restart loop
-          # (security-observability.md:683-707, docs/system-contract.md §11).
           include: livenessState
     info:
       access: read-only
