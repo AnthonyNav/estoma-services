@@ -34,7 +34,7 @@ public final class HandleWashEntryAuthorizedHandler implements HandleWashEntryAu
       inbox.markApplied(event.sourceEventId(), now);
       return ApplicationResult.rejected("APPOINTMENT_NOT_FOUND", "entry authorization references an unknown appointment");
     }
-    Instant decidedAt = event.decidedAt() == null ? event.occurredAt() : event.decidedAt();
+    Instant decidedAt = event.effectiveActionAt();
     evidence.recordEntryAuthorization(new WashExecutionEvidenceRepository.EvidenceRecord(UUID.randomUUID(),
         event.washExecutionId(), event.appointmentId(), null, null, decidedAt, event.executionVersion(),
         event.sourceEventId(), "WashEntryAuthorized", now));
