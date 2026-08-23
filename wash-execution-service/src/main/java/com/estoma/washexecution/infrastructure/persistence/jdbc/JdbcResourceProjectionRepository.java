@@ -41,12 +41,13 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
             OR (?='NORMAL' AND c.cabin_type IN ('NORMAL','JOURNEY'))
             OR (?='JOURNEY' AND c.cabin_type IN ('JOURNEY','NORMAL')))
         ORDER BY priority_order,c.code,t.code,c.cabin_id,t.tank_id
-        """, this::map, slotId, type.name(), type.name(), type.name(), type.name(), type.name(),
+        """, this::mapCandidate, slotId, type.name(), type.name(), type.name(), type.name(), type.name(),
         type.name(), type.name(), type.name());
   }
 
   @Override
-  public Optional<ProjectionRepositories.ResourceCandidate> findCandidate(UUID cabinId, UUID tankId, UUID slotId) {
+  public Optional<ProjectionRepositories.ResourceCandidate> findCandidate(
+      UUID cabinId, UUID tankId, UUID slotId) {
     return jdbc.query("""
         SELECT c.cabin_id,t.tank_id,c.code AS cabin_code,t.code AS tank_code,c.cabin_type,
           c.status AS cabin_status,t.status AS tank_status,t.configured_capacity,
@@ -55,7 +56,23 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
           1 AS priority_order
         FROM cabin_projection c JOIN tank_projection t ON t.cabin_id=c.cabin_id
         WHERE c.cabin_id=? AND t.tank_id=?
-        """, this::map, slotId, cabinId, tankId).stream().findFirst();
+        """, this::mapCandidate, slotId, cabinId, tankId).stream().findFirst();
+  }
+
+  @Override
+  public Optional<ProjectionRepositories.CabinProjection> findCabin(UUID cabinId) {
+    return jdbc.query(
+        "SELECT * FROM cabin_projection WHERE cabin_id=?",
+        this::mapCabin,
+        cabinId).stream().findFirst();
+  }
+
+  @Override
+  public Optional<ProjectionRepositories.TankProjection> findTank(UUID tankId) {
+    return jdbc.query(
+        "SELECT * FROM tank_projection WHERE tank_id=?",
+        this::mapTank,
+        tankId).stream().findFirst();
   }
 
   @Override
@@ -97,11 +114,24 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
         p.priorityOrder(), p.status(), p.sourceVersion(), Instant.now());
   }
 
-  private ProjectionRepositories.ResourceCandidate map(ResultSet rs, int row) throws SQLException {
+  private ProjectionRepositories.ResourceCandidate mapCandidate(ResultSet rs, int row) throws SQLException {
     return new ProjectionRepositories.ResourceCandidate(
         rs.getObject("cabin_id", UUID.class), rs.getObject("tank_id", UUID.class),
         rs.getString("cabin_code"), rs.getString("tank_code"), CabinType.valueOf(rs.getString("cabin_type")),
         rs.getString("cabin_status"), rs.getString("tank_status"), rs.getInt("configured_capacity"),
         rs.getInt("active_count"), rs.getInt("priority_order"));
+  }
+
+  private ProjectionRepositories.CabinProjection mapCabin(ResultSet rs, int row) throws SQLException {
+    return new ProjectionRepositories.CabinProjection(
+        rs.getObject("cabin_id", UUID.class), rs.getString("code"), rs.getString("name"),
+        CabinType.valueOf(rs.getString("cabin_type")), rs.getString("status"), rs.getLong("source_version"));
+  }
+
+  private ProjectionRepositories.TankProjection mapTank(ResultSet rs, int row) throws SQLException {
+    return new ProjectionRepositories.TankProjection(
+        rs.getObject("tank_id", UUID.class), rs.getObject("cabin_id", UUID.class), rs.getString("code"),
+        rs.getString("name"), rs.getInt("configured_capacity"), rs.getString("status"),
+        rs.getLong("source_version"));
   }
 }
