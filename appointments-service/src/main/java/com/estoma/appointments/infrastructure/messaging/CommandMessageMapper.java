@@ -29,7 +29,8 @@ public final class CommandMessageMapper {
     }
     CommandMetadata metadata = new CommandMetadata(envelope.messageId(),
         envelope.idempotencyKey() == null ? envelope.messageId().toString() : envelope.idempotencyKey(),
-        envelope.correlationId(), envelope.causationId(), actor(envelope.actor()), envelope.occurredAt());
+        envelope.correlationId(), envelope.causationId(), actor(envelope.actor()), envelope.occurredAt(),
+        envelope.operationId());
     JsonNode p = envelope.payload();
     return switch (envelope.messageType()) {
       case "ScheduleAppointment" -> new MappedCommand(metadata, new ScheduleAppointmentUseCase.Command(metadata,
