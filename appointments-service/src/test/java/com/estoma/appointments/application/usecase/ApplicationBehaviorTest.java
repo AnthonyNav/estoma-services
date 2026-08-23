@@ -16,6 +16,7 @@ import com.estoma.appointments.domain.model.AppointmentType;
 import com.estoma.appointments.domain.model.PieceType;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,28 +28,27 @@ class ApplicationBehaviorTest {
   private static final Instant NOW = Instant.parse("2026-01-01T10:00:00Z");
 
   @Test
-  void completionBeforeStartIsDeferredAndConvergesAfterStart() {
+  void sameDeferredCompletionConvergesAfterEarlierStartArrives() {
     Fixture fixture = new Fixture();
     HandleWashExecutionCompletedHandler completed = fixture.completedHandler();
     HandleWashExecutionStartedHandler started = fixture.startedHandler();
     UUID execution = UUID.randomUUID();
     UUID appointmentId = fixture.createAppointment();
+    UUID completionSource = UUID.randomUUID();
 
-    ApplicationResult deferred = completed.handle(event("WashExecutionCompleted", execution, appointmentId,
-        UUID.randomUUID(), 4, null));
-    assertThat(deferred.status()).isEqualTo(ApplicationResult.Status.DEFERRED);
-    assertThat(fixture.appointments.get(appointmentId).status()).isEqualTo(AppointmentStatus.SCHEDULED);
+    ExecutionEvent completion = event("WashExecutionCompleted", execution, appointmentId,
+        completionSource, 5, NOW.plusSeconds(90), UUID.randomUUID());
+    assertThat(completed.handle(completion).status()).isEqualTo(ApplicationResult.Status.DEFERRED);
     assertThat(fixture.pending.events).hasSize(1);
 
-    ApplicationResult startedResult = started.handle(event("WashExecutionStarted", execution, appointmentId,
-        UUID.randomUUID(), 4, null));
-    assertThat(startedResult.status()).isEqualTo(ApplicationResult.Status.APPLIED);
+    assertThat(started.handle(event("WashExecutionStarted", execution, appointmentId,
+        UUID.randomUUID(), 4, NOW.plusSeconds(30), null)).status())
+        .isEqualTo(ApplicationResult.Status.APPLIED);
     assertThat(fixture.appointments.get(appointmentId).status()).isEqualTo(AppointmentStatus.IN_PROGRESS);
 
-    ApplicationResult completedResult = completed.handle(event("WashExecutionCompleted", execution, appointmentId,
-        UUID.randomUUID(), 4, null));
-    assertThat(completedResult.status()).isEqualTo(ApplicationResult.Status.APPLIED);
+    assertThat(completed.handle(completion).status()).isEqualTo(ApplicationResult.Status.APPLIED);
     assertThat(fixture.appointments.get(appointmentId).status()).isEqualTo(AppointmentStatus.COMPLETED);
+    assertThat(fixture.inbox.states.get(completionSource)).isEqualTo("APPLIED");
   }
 
   @Test
@@ -61,17 +61,35 @@ class ApplicationBehaviorTest {
     HandleWashExecutionStartedHandler started = fixture.startedHandler();
 
     assertThat(authorized.handle(event("WashEntryAuthorized", execution, appointmentId,
-        UUID.randomUUID(), 7, NOW.plusSeconds(30))).status()).isEqualTo(ApplicationResult.Status.APPLIED);
+        UUID.randomUUID(), 7, NOW.plusSeconds(30), UUID.randomUUID())).status())
+        .isEqualTo(ApplicationResult.Status.APPLIED);
     assertThat(started.handle(event("WashExecutionStarted", execution, appointmentId,
-        UUID.randomUUID(), 7, null)).status()).isEqualTo(ApplicationResult.Status.APPLIED);
+        UUID.randomUUID(), 7, NOW.plusSeconds(30), null)).status())
+        .isEqualTo(ApplicationResult.Status.APPLIED);
     assertThat(fixture.appointments.get(appointmentId).entryAuthorizedAt()).isEqualTo(NOW.plusSeconds(30));
     assertThat(fixture.appointments.get(appointmentId).status()).isEqualTo(AppointmentStatus.IN_PROGRESS);
   }
 
+  @Test
+  void olderExecutionTransitionCannotOverwriteNewerState() {
+    Fixture fixture = new Fixture();
+    UUID execution = UUID.randomUUID();
+    UUID appointmentId = fixture.createAppointment();
+    assertThat(fixture.startedHandler().handle(event("WashExecutionStarted", execution, appointmentId,
+        UUID.randomUUID(), 4, NOW.plusSeconds(30), null)).status()).isEqualTo(ApplicationResult.Status.APPLIED);
+    ApplicationResult stale = fixture.rejectedHandler().handle(event("WashEntryRejected", execution,
+        appointmentId, UUID.randomUUID(), 3, NOW.plusSeconds(20), UUID.randomUUID()));
+    assertThat(stale.status()).isEqualTo(ApplicationResult.Status.APPLIED);
+    assertThat(fixture.appointments.get(appointmentId).status()).isEqualTo(AppointmentStatus.IN_PROGRESS);
+  }
+
   private static ExecutionEvent event(String type, UUID execution, UUID appointment, UUID source,
-      long version, Instant decidedAt) {
+      long version, Instant actionAt, UUID actor) {
     return new ExecutionEvent(UUID.randomUUID(), source, execution, appointment, type, version, NOW,
-        null, decidedAt, "execution event", "{}");
+        null, actionAt, actor, type.equals("WashExecutionCancelled") ? NOW.plusSeconds(10) : null,
+        type.equals("WashExecutionCancelled") ? "CLINIC" : null,
+        type.equals("WashExecutionCancelled") ? "CAPACITY_LOSS" : null,
+        "execution event", "{}");
   }
 
   private static final class Fixture {
@@ -92,9 +110,11 @@ class ApplicationBehaviorTest {
     HandleWashExecutionCompletedHandler completedHandler() {
       return new HandleWashExecutionCompletedHandler(appointments, inbox, transitions, pending, outbox);
     }
-
     HandleWashExecutionStartedHandler startedHandler() {
       return new HandleWashExecutionStartedHandler(appointments, inbox, transitions, pending, outbox);
+    }
+    HandleWashEntryRejectedHandler rejectedHandler() {
+      return new HandleWashEntryRejectedHandler(appointments, inbox, transitions, pending, outbox);
     }
   }
 
@@ -107,8 +127,7 @@ class ApplicationBehaviorTest {
     @Override public boolean updateIfVersion(Appointment value, long expectedVersion) {
       Appointment current = values.get(value.appointmentId());
       if (current == null || current.version() != expectedVersion) return false;
-      values.put(value.appointmentId(), value);
-      return true;
+      values.put(value.appointmentId(), value); return true;
     }
     @Override public long countActiveForStudent(UUID student, java.time.LocalDate date) { return 0; }
     @Override public long countCompletedForStudent(UUID student, java.time.LocalDate date) { return 0; }
@@ -121,7 +140,11 @@ class ApplicationBehaviorTest {
 
   private static final class MemoryInbox implements ProcessedMessageRepository {
     final Map<UUID, String> states = new HashMap<>();
-    @Override public boolean tryClaim(UUID id, String type, Instant at) { return states.putIfAbsent(id, "CLAIMED") == null; }
+    @Override public boolean tryClaim(UUID id, String type, Instant at) {
+      String current = states.get(id);
+      if (current == null || "DEFERRED".equals(current)) { states.put(id, "CLAIMED"); return true; }
+      return false;
+    }
     @Override public boolean markApplied(UUID id, Instant at) { states.put(id, "APPLIED"); return true; }
     @Override public boolean markDeferred(UUID id, String reason, Instant at) { states.put(id, "DEFERRED"); return true; }
     @Override public boolean wasProcessed(UUID id) { return "APPLIED".equals(states.get(id)); }
@@ -129,7 +152,9 @@ class ApplicationBehaviorTest {
 
   private static final class MemoryPending implements PendingWashExecutionEventRepository {
     final List<PendingEvent> events = new ArrayList<>();
-    @Override public void defer(PendingEvent event) { events.add(event); }
+    @Override public void defer(PendingEvent event) {
+      if (events.stream().noneMatch(e -> e.sourceEventId().equals(event.sourceEventId()))) events.add(event);
+    }
     @Override public List<PendingEvent> claim(int limit, String worker, Instant now, Instant leaseUntil) { return List.of(); }
     @Override public boolean complete(UUID id, String worker, Instant at) { return true; }
   }
@@ -137,7 +162,14 @@ class ApplicationBehaviorTest {
   private static final class MemoryTransitions implements WashExecutionTransitionRepository {
     final List<TransitionRecord> values = new ArrayList<>();
     @Override public boolean record(TransitionRecord transition) { values.add(transition); return true; }
-    @Override public Optional<TransitionRecord> find(UUID appointment, String type) { return Optional.empty(); }
+    @Override public Optional<TransitionRecord> find(UUID appointment, String type) {
+      return values.stream().filter(v -> v.appointmentId().equals(appointment) && v.eventType().equals(type))
+          .max(Comparator.comparingLong(TransitionRecord::executionVersion));
+    }
+    @Override public Optional<TransitionRecord> findLatestForExecution(UUID execution) {
+      return values.stream().filter(v -> v.washExecutionId().equals(execution))
+          .max(Comparator.comparingLong(TransitionRecord::executionVersion));
+    }
   }
 
   private static final class MemoryEvidence implements WashExecutionEvidenceRepository {
