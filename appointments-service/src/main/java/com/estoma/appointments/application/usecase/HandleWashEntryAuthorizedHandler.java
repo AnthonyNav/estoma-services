@@ -7,6 +7,8 @@ import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.PendingWashExecutionEventRepository;
 import com.estoma.appointments.application.port.out.ProcessedMessageRepository;
 import com.estoma.appointments.application.port.out.WashExecutionEvidenceRepository;
+import com.estoma.appointments.domain.error.DomainViolationException;
+import com.estoma.appointments.domain.service.AppointmentEvidenceMerger;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -43,16 +45,22 @@ public final class HandleWashEntryAuthorizedHandler implements HandleWashEntryAu
     evidence.recordEntryAuthorization(new WashExecutionEvidenceRepository.EvidenceRecord(UUID.randomUUID(),
         event.washExecutionId(), event.appointmentId(), null, null, decidedAt, event.executionVersion(),
         event.sourceEventId(), "WashEntryAuthorized", now));
-    if (!appointment.isTerminal() && appointment.entryAuthorizedAt() == null) {
-      var authorized = appointment.authorizeEntry(decidedAt);
-      if (!appointments.updateIfVersion(authorized, appointment.version())) {
-        pending.defer(new PendingWashExecutionEventRepository.PendingEvent(UUID.randomUUID(),
-            event.sourceEventId(), event.appointmentId(), event.washExecutionId(), event.eventType(),
-            event.executionVersion(), event.payloadOrEmpty(), "PENDING", 0, now, null, null));
-        inbox.markDeferred(event.sourceEventId(), "appointment changed while applying entry authorization", now);
-        return ApplicationResult.deferred("CONCURRENT_MODIFICATION", "entry authorization will be retried", appointment.appointmentId());
+    if (appointment.entryAuthorizedAt() == null) {
+      try {
+        var authorized = AppointmentEvidenceMerger.addEntryAuthorization(appointment, decidedAt);
+        if (!appointments.updateIfVersion(authorized, appointment.version())) {
+          pending.defer(new PendingWashExecutionEventRepository.PendingEvent(UUID.randomUUID(),
+              event.sourceEventId(), event.appointmentId(), event.washExecutionId(), event.eventType(),
+              event.executionVersion(), event.payloadOrEmpty(), "PENDING", 0, now, null, null));
+          inbox.markDeferred(event.sourceEventId(), "appointment changed while applying entry authorization", now);
+          return ApplicationResult.deferred("CONCURRENT_MODIFICATION", "entry authorization will be retried", appointment.appointmentId());
+        }
+        appointment = authorized;
+      } catch (DomainViolationException contradiction) {
+        inbox.markApplied(event.sourceEventId(), now);
+        pending.discardBySourceEventId(event.sourceEventId(), now);
+        return ApplicationResult.rejected("ENTRY_AUTHORIZATION_CONFLICT", contradiction.getMessage());
       }
-      appointment = authorized;
     }
     inbox.markApplied(event.sourceEventId(), now);
     pending.discardBySourceEventId(event.sourceEventId(), now);
