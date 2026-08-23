@@ -59,7 +59,7 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
     String fingerprint = ApplicationSupport.fingerprint(command.studentAccountId(),
         command.appointmentTimeSlotId(), command.courseSectionId(), command.appointmentType(),
         command.instrumentCount(), command.pieceType(), command.exceptionalAuthorizationId());
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, metadata,
+    Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox, metadata,
         "ScheduleAppointment", fingerprint, now);
     if (gate.isPresent()) return gate.get();
 
