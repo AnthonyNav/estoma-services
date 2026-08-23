@@ -8,6 +8,6 @@ import java.util.UUID;
 public interface CancelAppointmentUseCase {
   ApplicationResult cancel(Command command);
 
-  record Command(CommandMetadata metadata, UUID appointmentId, boolean clinicCancellation,
+  record Command(CommandMetadata metadata, UUID appointmentId, long expectedVersion,
       String reason, Instant now) {}
 }
