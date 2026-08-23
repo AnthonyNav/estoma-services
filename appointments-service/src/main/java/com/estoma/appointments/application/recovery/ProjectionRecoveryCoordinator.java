@@ -9,26 +9,53 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ProjectionRecoveryCoordinator {
-  public static final Set<String> CRITICAL_PROJECTIONS = Set.of("academic", "authorization",
-      "wash-administration", "wash-execution");
+  public static final Set<String> CRITICAL_PROJECTIONS = Set.of(
+      "academic", "authorization", "wash-administration", "wash-execution");
   private final ProjectionRecoveryRepository states;
   private final Clock clock;
-  public ProjectionRecoveryCoordinator(ProjectionRecoveryRepository states, Clock clock) { this.states = states; this.clock = clock; }
+
+  public ProjectionRecoveryCoordinator(ProjectionRecoveryRepository states, Clock clock) {
+    this.states = states;
+    this.clock = clock;
+  }
+
+  public ProjectionRecoveryRepository.RecoveryState state(String projection) {
+    return states.get(projection);
+  }
+
+  public boolean isReady(String projection) {
+    return "READY".equals(state(projection).status());
+  }
+
+  public boolean criticalReady() {
+    return CRITICAL_PROJECTIONS.stream().allMatch(this::isReady);
+  }
 
   @Transactional
-  public void rebuilding(String projection) { update(projection, "REBUILDING", null); }
+  public void rebuilding(String projection) {
+    change(projection, "REBUILDING", state(projection).sourceVersion(), null);
+  }
+
   @Transactional
-  public void ready(String projection, long sourceVersion) { update(projection, "READY", sourceVersion); }
+  public void ready(String projection, long sourceVersion) {
+    change(projection, "READY", Math.max(sourceVersion, state(projection).sourceVersion()), null);
+  }
+
   @Transactional
   public void degraded(String projection, String error) {
-    ProjectionRecoveryRepository.RecoveryState current = states.get(projection);
-    update(projection, "DEGRADED", current.sourceVersion(), error);
+    change(projection, "DEGRADED", state(projection).sourceVersion(), error);
   }
-  public boolean criticalReady() { return CRITICAL_PROJECTIONS.stream().allMatch(name -> "READY".equals(states.get(name).status())); }
 
-  private void update(String projection, String status, Long sourceVersion) { update(projection, status, sourceVersion == null ? states.get(projection).sourceVersion() : sourceVersion, null); }
-  private void update(String projection, String status, long sourceVersion, String error) {
-    ProjectionRecoveryRepository.RecoveryState current = states.get(projection);
-    states.update(new ProjectionRecoveryRepository.RecoveryState(projection, status, sourceVersion, Instant.now(clock), error, current.version() + 1), current.version());
+  private void change(String projection, String status, long sourceVersion, String error) {
+    if (!CRITICAL_PROJECTIONS.contains(projection)) {
+      throw new IllegalArgumentException("unknown projection " + projection);
+    }
+    for (int attempt = 0; attempt < 3; attempt++) {
+      ProjectionRecoveryRepository.RecoveryState current = states.get(projection);
+      var next = new ProjectionRecoveryRepository.RecoveryState(projection, status, sourceVersion,
+          Instant.now(clock), error, current.version() + 1);
+      if (states.update(next, current.version())) return;
+    }
+    throw new IllegalStateException("projection recovery state changed concurrently: " + projection);
   }
 }
