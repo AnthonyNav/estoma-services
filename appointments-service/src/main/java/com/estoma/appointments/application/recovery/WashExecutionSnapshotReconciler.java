@@ -5,7 +5,6 @@ import com.estoma.appointments.application.port.out.WashExecutionEvidenceReposit
 import com.estoma.appointments.application.port.out.WashExecutionTransitionRepository;
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentStatus;
-import com.estoma.appointments.domain.model.CancellationSubreason;
 import com.estoma.appointments.domain.model.CancellationType;
 import com.estoma.appointments.domain.service.AppointmentEvidenceMerger;
 import java.nio.charset.StandardCharsets;
@@ -45,19 +44,23 @@ public class WashExecutionSnapshotReconciler {
           synthetic(snapshot,"entry"),snapshot.washExecutionId(),snapshot.appointmentId(),
           null,null,snapshot.entryAuthorizedAt(),snapshot.executionVersion(),synthetic(snapshot,"entry"),
           "SNAPSHOT_ENTRY_AUTHORIZED",snapshotGeneratedAt));
+      if (current.entryAuthorizedAt() == null) {
+        current = update(current, AppointmentEvidenceMerger.addEntryAuthorization(
+            current, snapshot.entryAuthorizedAt()));
+      }
     }
 
+    // State-transition fencing is independent from operational evidence. An equal-version snapshot
+    // may still fill arrival/entry metadata because same executionVersion != same Event.
     var latest = transitions.findLatestForExecution(snapshot.washExecutionId()).orElse(null);
     if (latest != null && latest.executionVersion() >= snapshot.executionVersion()) return;
 
-    if (snapshot.entryAuthorizedAt() != null && current.entryAuthorizedAt() == null) {
-      current = update(current, AppointmentEvidenceMerger.addEntryAuthorization(current,
-          snapshot.entryAuthorizedAt()));
-    }
-
     current = switch (snapshot.status()) {
       case "PENDING_ENTRY" -> requireState(current, AppointmentStatus.SCHEDULED, snapshot);
-      case "PENDING_REASSIGNMENT" -> requireState(current, AppointmentStatus.SCHEDULED, snapshot);
+      case "PENDING_REASSIGNMENT" -> {
+        if (snapshot.entryAuthorizedAt() == null) throw incomplete(snapshot,"entryAuthorizedAt");
+        yield requireState(current, AppointmentStatus.SCHEDULED, snapshot);
+      }
       case "IN_PROGRESS", "EXIT_SUBMITTED" -> ensureStarted(current, snapshot);
       case "COMPLETED" -> ensureCompleted(current, snapshot);
       case "ENTRY_REJECTED" -> ensureRejected(current, snapshot);
@@ -72,37 +75,44 @@ public class WashExecutionSnapshotReconciler {
   }
 
   private Appointment ensureStarted(Appointment current, ExecutionSnapshot snapshot) {
+    if (snapshot.startedAt() == null) throw incomplete(snapshot,"startedAt");
     if (current.status() == AppointmentStatus.IN_PROGRESS) return current;
     if (current.status() != AppointmentStatus.SCHEDULED) return requireState(current,
         AppointmentStatus.IN_PROGRESS,snapshot);
-    if (snapshot.startedAt() == null) throw incomplete(snapshot,"startedAt");
     return update(current,current.start(snapshot.startedAt()));
   }
 
   private Appointment ensureCompleted(Appointment current, ExecutionSnapshot snapshot) {
+    if (snapshot.startedAt() == null) throw incomplete(snapshot,"startedAt");
+    if (snapshot.completedAt() == null) throw incomplete(snapshot,"completedAt");
     if (current.status() == AppointmentStatus.COMPLETED) return current;
     if (current.status() == AppointmentStatus.SCHEDULED) current = ensureStarted(current,snapshot);
     if (current.status() != AppointmentStatus.IN_PROGRESS) return requireState(current,
         AppointmentStatus.COMPLETED,snapshot);
-    if (snapshot.completedAt() == null) throw incomplete(snapshot,"completedAt");
     return update(current,current.complete(snapshot.completedByAccountId(),snapshot.completedAt()));
   }
 
   private Appointment ensureRejected(Appointment current, ExecutionSnapshot snapshot) {
-    if (current.status() == AppointmentStatus.ENTRY_REJECTED) return current;
-    if (current.status() != AppointmentStatus.SCHEDULED) return requireState(current,
-        AppointmentStatus.ENTRY_REJECTED,snapshot);
     if (snapshot.rejectedAt() == null) throw incomplete(snapshot,"rejectedAt");
     if (snapshot.rejectionReason() == null || snapshot.rejectionReason().isBlank()) {
       throw incomplete(snapshot,"rejectionReason");
     }
+    if (current.status() == AppointmentStatus.ENTRY_REJECTED) return current;
+    if (current.status() != AppointmentStatus.SCHEDULED) return requireState(current,
+        AppointmentStatus.ENTRY_REJECTED,snapshot);
     return update(current,current.rejectEntry(snapshot.rejectionReason(),snapshot.rejectedByAccountId(),
         snapshot.rejectedAt()));
   }
 
   private Appointment ensureCancelled(Appointment current, ExecutionSnapshot snapshot) {
+    if (snapshot.cancelledAt() == null) throw incomplete(snapshot,"cancelledAt");
+    if (!"CLINIC".equals(snapshot.cancellationType())) throw incomplete(snapshot,"cancellationType=CLINIC");
+    if (snapshot.cancellationSubreason() == null || snapshot.cancellationSubreason().isBlank()) {
+      throw incomplete(snapshot,"cancellationSubreason");
+    }
     if (current.status() == AppointmentStatus.CANCELLED) {
-      if (current.cancellationType() != CancellationType.CLINIC) {
+      if (current.cancellationType() != CancellationType.CLINIC
+          || !snapshot.cancellationSubreason().equals(current.cancellationSubreason())) {
         throw conflict(current,snapshot);
       }
       return current;
@@ -113,10 +123,7 @@ public class WashExecutionSnapshotReconciler {
     if (current.status() != AppointmentStatus.SCHEDULED
         && current.status() != AppointmentStatus.IN_PROGRESS) return requireState(current,
             AppointmentStatus.CANCELLED,snapshot);
-    if (snapshot.cancelledAt() == null) throw incomplete(snapshot,"cancelledAt");
-    if (!"CLINIC".equals(snapshot.cancellationType())) throw incomplete(snapshot,"cancellationType=CLINIC");
-    if (!"CAPACITY_LOSS".equals(snapshot.cancellationSubreason())) throw incomplete(snapshot,"cancellationSubreason=CAPACITY_LOSS");
-    return update(current,current.cancel(CancellationType.CLINIC,CancellationSubreason.CAPACITY_LOSS,
+    return update(current,current.cancel(CancellationType.CLINIC,snapshot.cancellationSubreason(),
         snapshot.cancellationReason(),snapshot.cancelledByAccountId(),snapshot.cancelledAt()));
   }
 
