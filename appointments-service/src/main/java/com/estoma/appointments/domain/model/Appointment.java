@@ -18,7 +18,8 @@ public final class Appointment {
   private final Instant entryAuthorizedAt;
   private final UUID exceptionalAuthorizationId;
   private final CancellationType cancellationType;
-  private final CancellationSubreason cancellationSubreason;
+  /** Owner-defined audit code. Appointments owns neither this catalog nor its future extensions. */
+  private final String cancellationSubreason;
   private final String cancellationReason;
   private final UUID cancelledByAccountId;
   private final Instant cancelledAt;
@@ -36,7 +37,7 @@ public final class Appointment {
   private Appointment(UUID id, UUID slotId, UUID studentId, UUID courseSectionId, AppointmentType type,
       int instrumentCount, PieceType pieceType, AppointmentStatus status, Instant entryAuthorizedAt,
       UUID exceptionalAuthorizationId, CancellationType cancellationType,
-      CancellationSubreason cancellationSubreason, String cancellationReason, UUID cancelledByAccountId,
+      String cancellationSubreason, String cancellationReason, UUID cancelledByAccountId,
       Instant cancelledAt, String rejectionReason, UUID rejectedByAccountId, Instant rejectedAt,
       Instant missedAt, Instant startedAt, UUID completedByAccountId, Instant completedAt,
       Instant createdAt, Instant updatedAt, long version) {
@@ -52,7 +53,7 @@ public final class Appointment {
     this.entryAuthorizedAt = entryAuthorizedAt;
     this.exceptionalAuthorizationId = exceptionalAuthorizationId;
     this.cancellationType = cancellationType;
-    this.cancellationSubreason = cancellationSubreason;
+    this.cancellationSubreason = normalizeSubreason(cancellationSubreason);
     this.cancellationReason = cancellationReason;
     this.cancelledByAccountId = cancelledByAccountId;
     this.cancelledAt = cancelledAt;
@@ -89,7 +90,7 @@ public final class Appointment {
   public static Appointment reconstitute(UUID id, UUID slotId, UUID studentId, UUID courseSectionId,
       AppointmentType type, int instrumentCount, PieceType pieceType, AppointmentStatus status,
       Instant entryAuthorizedAt, UUID exceptionalAuthorizationId, CancellationType cancellationType,
-      CancellationSubreason cancellationSubreason, String cancellationReason, UUID cancelledByAccountId,
+      String cancellationSubreason, String cancellationReason, UUID cancelledByAccountId,
       Instant cancelledAt, String rejectionReason, UUID rejectedByAccountId, Instant rejectedAt,
       Instant missedAt, Instant startedAt, UUID completedByAccountId, Instant completedAt,
       Instant createdAt, Instant updatedAt, long version) {
@@ -140,7 +141,7 @@ public final class Appointment {
         null, null, null, at, null, null, null, at, version + 1);
   }
 
-  public Appointment cancel(CancellationType type, CancellationSubreason subreason, String reason,
+  public Appointment cancel(CancellationType type, String subreason, String reason,
       UUID cancelledByAccountId, Instant at) {
     Objects.requireNonNull(type, "cancellationType");
     Objects.requireNonNull(at, "cancelledAt");
@@ -148,20 +149,21 @@ public final class Appointment {
     if (type == CancellationType.STUDENT && status != AppointmentStatus.SCHEDULED) {
       throw new DomainViolationException("student cancellation is only valid for SCHEDULED appointments");
     }
-    validateCancellation(type, subreason);
+    String normalizedSubreason = normalizeSubreason(subreason);
+    validateCancellation(type, normalizedSubreason);
     if (type == CancellationType.STUDENT && entryAuthorizedAt != null) {
       throw new DomainViolationException("entry-authorized appointment cannot be cancelled by student");
     }
-    return copy(AppointmentStatus.CANCELLED, entryAuthorizedAt, type, subreason, reason,
+    return copy(AppointmentStatus.CANCELLED, entryAuthorizedAt, type, normalizedSubreason, reason,
         cancelledByAccountId, at, null, null, null, null, startedAt, null, null, at, version + 1);
   }
 
-  public Appointment cancel(CancellationType type, CancellationSubreason subreason, Instant at) {
+  public Appointment cancel(CancellationType type, String subreason, Instant at) {
     return cancel(type, subreason, null, null, at);
   }
 
   public Appointment cancelByStudent(Instant at) { return cancel(CancellationType.STUDENT, null, at); }
-  public Appointment cancelByClinic(CancellationSubreason subreason, Instant at) {
+  public Appointment cancelByClinic(String subreason, Instant at) {
     return cancel(CancellationType.CLINIC, subreason, at);
   }
 
@@ -180,7 +182,7 @@ public final class Appointment {
   public boolean isTerminal() { return status.isTerminal(); }
 
   private Appointment copy(AppointmentStatus next, Instant entryAt, CancellationType cType,
-      CancellationSubreason subreason, String cancelReason, UUID cancelledBy, Instant cancelAt,
+      String subreason, String cancelReason, UUID cancelledBy, Instant cancelAt,
       String rejectReason, UUID rejectedBy, Instant rejectAt, Instant missedAt, Instant startedAt,
       UUID completedBy, Instant completedAt, Instant now, long nextVersion) {
     return new Appointment(appointmentId, appointmentTimeSlotId, studentAccountId, courseSectionId,
@@ -233,8 +235,8 @@ public final class Appointment {
     }
   }
 
-  private static void validateCancellation(CancellationType type, CancellationSubreason subreason) {
-    if (type == CancellationType.CLINIC && subreason == null) {
+  private static void validateCancellation(CancellationType type, String subreason) {
+    if (type == CancellationType.CLINIC && (subreason == null || subreason.isBlank())) {
       throw new DomainViolationException("clinic cancellation requires cancellationSubreason");
     }
     if (type == CancellationType.STUDENT && subreason != null) {
@@ -243,6 +245,12 @@ public final class Appointment {
     if (type == null && subreason != null) {
       throw new DomainViolationException("cancellationSubreason requires cancellationType");
     }
+  }
+
+  private static String normalizeSubreason(String value) {
+    if (value == null) return null;
+    String normalized = value.trim();
+    return normalized.isEmpty() ? null : normalized;
   }
 
   public UUID appointmentId() { return appointmentId; }
@@ -256,7 +264,7 @@ public final class Appointment {
   public Instant entryAuthorizedAt() { return entryAuthorizedAt; }
   public UUID exceptionalAuthorizationId() { return exceptionalAuthorizationId; }
   public CancellationType cancellationType() { return cancellationType; }
-  public CancellationSubreason cancellationSubreason() { return cancellationSubreason; }
+  public String cancellationSubreason() { return cancellationSubreason; }
   public String cancellationReason() { return cancellationReason; }
   public UUID cancelledByAccountId() { return cancelledByAccountId; }
   public Instant cancelledAt() { return cancelledAt; }
