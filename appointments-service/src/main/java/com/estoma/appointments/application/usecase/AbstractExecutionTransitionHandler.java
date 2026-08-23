@@ -105,7 +105,8 @@ abstract class AbstractExecutionTransitionHandler {
   private void defer(ExecutionEvent event, String reason, Instant now) {
     pending.defer(new PendingWashExecutionEventRepository.PendingEvent(UUID.randomUUID(),
         event.sourceEventId(), event.appointmentId(), event.washExecutionId(), event.eventType(),
-        event.executionVersion(), event.payloadOrEmpty(), "PENDING", 0, now, null, null));
+        event.executionVersion(), event.payloadOrEmpty(), "PENDING", 0, now, null, null,
+        event.correlationId()));
     inbox.markDeferred(event.sourceEventId(), reason, now);
   }
 
