@@ -3,6 +3,7 @@ package com.estoma.authentication.infrastructure.messaging.inbound;
 import com.estoma.authentication.application.AccountStatusSnapshotQueryService;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessagingNames;
+import com.estoma.authentication.infrastructure.messaging.AmqpNames;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.authentication.infrastructure.messaging.outbound.RabbitPublishException;
 import com.rabbitmq.client.Channel;
@@ -16,6 +17,8 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(
     prefix = "estoma.messaging", name = "listeners-enabled", havingValue = "true", matchIfMissing = true)
 public class QueryListener {
+
+  private static final int MAX_ATTEMPTS = 3;
 
   private final EnvelopeJsonCodec codec;
   private final QueryEnvelopeValidator validator;
@@ -47,7 +50,7 @@ public class QueryListener {
       envelope = codec.decode(message.getBody());
       validator.validate(envelope);
     } catch (RuntimeException invalid) {
-      route(message, channel, tag, invalid, false);
+      dlqOrRequeue(message, channel, tag, invalid);
       return;
     }
 
@@ -55,18 +58,49 @@ public class QueryListener {
       queries.respond(envelope);
       channel.basicAck(tag, false);
     } catch (RuntimeException failure) {
-      route(message, channel, tag, failure, classifier.isTransient(failure));
+      boolean transientFailure = classifier.isTransient(failure);
+      if (!transientFailure || isFinalAttempt(message)) {
+        terminalizeOrDlq(envelope, message, channel, tag, failure);
+      } else {
+        retryOrRequeue(message, channel, tag, failure);
+      }
     }
   }
 
-  private void route(
-      Message message, Channel channel, long tag, Throwable failure, boolean transientFailure)
+  private void terminalizeOrDlq(
+      MessageEnvelope envelope, Message message, Channel channel, long tag, RuntimeException originalFailure)
       throws IOException {
     try {
-      failures.routeAfterFailure(message, FailureRouter.QUERY_TOPOLOGY, failure, transientFailure);
+      queries.fail(envelope, "TECHNICAL_FAILURE");
+      channel.basicAck(tag, false);
+    } catch (RuntimeException terminalPersistenceFailure) {
+      dlqOrRequeue(message, channel, tag, terminalPersistenceFailure);
+    }
+  }
+
+  private void retryOrRequeue(
+      Message message, Channel channel, long tag, RuntimeException failure) throws IOException {
+    try {
+      failures.routeAfterFailure(message, FailureRouter.QUERY_TOPOLOGY, failure, true);
       channel.basicAck(tag, false);
     } catch (RabbitPublishException publishFailure) {
       channel.basicNack(tag, false, true);
     }
+  }
+
+  private void dlqOrRequeue(Message message, Channel channel, long tag, Throwable failure)
+      throws IOException {
+    try {
+      failures.toDlq(message, FailureRouter.QUERY_TOPOLOGY, failure);
+      channel.basicAck(tag, false);
+    } catch (RabbitPublishException publishFailure) {
+      channel.basicNack(tag, false, true);
+    }
+  }
+
+  private static boolean isFinalAttempt(Message message) {
+    Object value = message.getMessageProperties().getHeaders().get(AmqpNames.HEADER_ATTEMPT);
+    int attempt = value instanceof Number number ? number.intValue() : 0;
+    return attempt >= MAX_ATTEMPTS;
   }
 }
