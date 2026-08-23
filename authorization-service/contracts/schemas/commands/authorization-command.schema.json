@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/commands/authorization-command.schema.json",
+  "title": "Authorization V1 commands",
+  "oneOf": [
+    { "$ref": "#/$defs/assignAccountRole" },
+    { "$ref": "#/$defs/changeAccountRole" },
+    { "$ref": "#/$defs/grantSystemAccess" },
+    { "$ref": "#/$defs/suspendSystemAccess" },
+    { "$ref": "#/$defs/revokeSystemAccess" },
+    { "$ref": "#/$defs/restoreSystemAccess" }
+  ],
+  "$defs": {
+    "importExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["importId", "planItemId", "executionGeneration", "authorizedByAccountId", "scope"],
+      "properties": {
+        "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "authorizedByAccountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "scope": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "causalDependency": { "$ref": "#/$defs/causalDependency" },
+        "causalDependencies": { "type": "array", "items": { "$ref": "#/$defs/causalDependency" } },
+        "authoritativeEvidence": { "type": "array", "items": { "$ref": "#/$defs/authoritativeEvidence" } }
+      },
+      "not": { "required": ["causalDependency", "causalDependencies"] }
+    },
+    "causalDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["priorCommandType", "priorResultMessageId", "priorResultStatus", "expectedEventType", "expectedAggregateId"],
+      "properties": {
+        "priorCommandType": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "priorResultMessageId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "priorResultStatus": { "const": "SUCCEEDED" },
+        "expectedEventType": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "expectedAggregateId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "minimumSourceVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "authoritativeEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceService", "sourceOperation", "sourceResultStatus", "entityType", "entityId"],
+      "properties": {
+        "sourceService": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "sourceOperation": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "sourceResultStatus": { "enum": ["SUCCEEDED", "FOUND"] },
+        "sourceResultMessageId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "entityType": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "entityId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "evidenceVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "assignImportExecution": {
+      "allOf": [
+        { "$ref": "#/$defs/importExecution" },
+        { "properties": { "scope": { "const": "ASSIGN_STUDENT_ROLE" } } }
+      ]
+    },
+    "grantImportExecution": {
+      "allOf": [
+        { "$ref": "#/$defs/importExecution" },
+        { "properties": { "scope": { "const": "GRANT_STUDENT_SYSTEM_ACCESS" } } }
+      ]
+    },
+    "reasonPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "expectedVersion", "reasonCode"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "expectedVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "reasonCode": { "$ref": "../common-envelope.schema.json#/$defs/publicReasonCode" },
+        "reasonDetail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "reasonCode": { "const": "OTHER" } }, "required": ["reasonCode"] },
+          "then": { "required": ["reasonDetail"] },
+          "else": { "not": { "required": ["reasonDetail"] } }
+        }
+      ]
+    },
+    "assignAccountRole": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "AssignAccountRole" },
+            "messageKind": { "const": "COMMAND" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["accountId", "roleCode"],
+              "properties": {
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "roleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+                "importExecution": { "$ref": "#/$defs/assignImportExecution" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "changeAccountRole": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "ChangeAccountRole" },
+            "messageKind": { "const": "COMMAND" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["accountId", "newRoleCode", "expectedVersion"],
+              "properties": {
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "newRoleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+                "expectedVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "grantSystemAccess": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "GrantSystemAccess" },
+            "messageKind": { "const": "COMMAND" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["systemAccessId", "accountId", "systemCode"],
+              "properties": {
+                "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+                "importExecution": { "$ref": "#/$defs/grantImportExecution" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "suspendSystemAccess": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "SuspendSystemAccess" },
+            "messageKind": { "const": "COMMAND" },
+            "payload": { "$ref": "#/$defs/reasonPayload" }
+          }
+        }
+      ]
+    },
+    "revokeSystemAccess": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "RevokeSystemAccess" },
+            "messageKind": { "const": "COMMAND" },
+            "payload": { "$ref": "#/$defs/reasonPayload" }
+          }
+        }
+      ]
+    },
+    "restoreSystemAccess": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "RestoreSystemAccess" },
+            "messageKind": { "const": "COMMAND" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["systemAccessId", "expectedVersion"],
+              "properties": {
+                "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "expectedVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

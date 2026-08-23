@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/actor.schema.json",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "accountId"],
+      "properties": {
+        "type": { "const": "ACCOUNT" },
+        "accountId": { "type": "string", "format": "uuid" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "service"],
+      "properties": {
+        "type": { "const": "SYSTEM" },
+        "service": { "type": "string", "minLength": 1 }
+      }
+    }
+  ]
+}

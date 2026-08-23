@@ -16,7 +16,6 @@ public record AuthoritativeEvidence(
     requireText(sourceService, "sourceService");
     requireText(sourceOperation, "sourceOperation");
     requireText(sourceResultStatus, "sourceResultStatus");
-    Objects.requireNonNull(sourceResultMessageId, "sourceResultMessageId");
     requireText(entityType, "entityType");
     Objects.requireNonNull(entityId, "entityId");
     if (!sourceResultStatus.equals("SUCCEEDED") && !sourceResultStatus.equals("FOUND")) {

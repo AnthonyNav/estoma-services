@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/results/recovery-result.schema.json",
+  "title": "Authorization V1 projection recovery results",
+  "oneOf": [
+    { "$ref": "#/$defs/getPersonStatusSnapshotResult" },
+    { "$ref": "#/$defs/listPersonStatusSnapshotsPageResult" },
+    { "$ref": "#/$defs/getAccountStatusSnapshotResult" },
+    { "$ref": "#/$defs/listAccountStatusSnapshotsPageResult" },
+    { "$ref": "#/$defs/getStudentAcademicEligibilitySnapshotResult" },
+    { "$ref": "#/$defs/listStudentAcademicEligibilitySnapshotsPageResult" }
+  ],
+  "$defs": {
+    "usersActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "service"],
+      "properties": { "type": { "const": "SYSTEM" }, "service": { "const": "users" } }
+    },
+    "authenticationActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "service"],
+      "properties": { "type": { "const": "SYSTEM" }, "service": { "const": "authentication" } }
+    },
+    "academicActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "service"],
+      "properties": { "type": { "const": "SYSTEM" }, "service": { "const": "academic" } }
+    },
+    "resultEnvelope": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId"],
+          "not": { "required": ["idempotencyKey"] },
+          "properties": { "messageKind": { "const": "RESULT" } }
+        }
+      ]
+    },
+    "personSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["personId", "status", "sourceVersion", "updatedAt"],
+      "properties": {
+        "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "status": { "$ref": "../common-envelope.schema.json#/$defs/projectedStatus" },
+        "sourceVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "updatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+      }
+    },
+    "accountSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId", "personId", "loginType", "status", "sourceVersion", "updatedAt"],
+      "properties": {
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "loginType": { "$ref": "../common-envelope.schema.json#/$defs/loginType" },
+        "status": { "$ref": "../common-envelope.schema.json#/$defs/projectedStatus" },
+        "sourceVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "updatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+      }
+    },
+    "eligibilitySnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eligibilityId",
+        "studentAcademicProfileId",
+        "accountId",
+        "systemCode",
+        "eligible",
+        "policyVersion",
+        "eligibilityVersion",
+        "academicProfileVersion",
+        "evaluatedAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "eligibilityId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "studentAcademicProfileId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "systemCode": { "const": "PRACTICAS_PROFESIONALES" },
+        "eligible": { "type": "boolean" },
+        "policyVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "eligibilityVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "academicProfileVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "evaluatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" },
+        "updatedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+      }
+    },
+    "notFoundPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": { "status": { "const": "NOT_FOUND" } }
+    },
+    "failurePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "error"],
+      "properties": {
+        "status": { "enum": ["REJECTED", "FAILED"] },
+        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
+      }
+    },
+    "personFoundPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "FOUND" },
+        "data": { "$ref": "#/$defs/personSnapshot" }
+      }
+    },
+    "accountFoundPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "FOUND" },
+        "data": { "$ref": "#/$defs/accountSnapshot" }
+      }
+    },
+    "eligibilityFoundPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "FOUND" },
+        "data": { "$ref": "#/$defs/eligibilitySnapshot" }
+      }
+    },
+    "personPagePayload": {
+      "allOf": [
+        { "$ref": "#/$defs/pagePayload" },
+        { "properties": { "data": { "properties": { "items": { "items": { "$ref": "#/$defs/personSnapshot" } } } } } }
+      ]
+    },
+    "accountPagePayload": {
+      "allOf": [
+        { "$ref": "#/$defs/pagePayload" },
+        { "properties": { "data": { "properties": { "items": { "items": { "$ref": "#/$defs/accountSnapshot" } } } } } }
+      ]
+    },
+    "eligibilityPagePayload": {
+      "allOf": [
+        { "$ref": "#/$defs/pagePayload" },
+        { "properties": { "data": { "properties": { "items": { "items": { "$ref": "#/$defs/eligibilitySnapshot" } } } } } }
+      ]
+    },
+    "pagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "SUCCEEDED" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["items", "hasMore"],
+          "properties": {
+            "items": { "type": "array", "items": { "type": "object" } },
+            "nextCursor": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+            "hasMore": { "type": "boolean" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "hasMore": { "const": true } }, "required": ["hasMore"] },
+              "then": { "required": ["nextCursor"] },
+              "else": { "not": { "required": ["nextCursor"] } }
+            }
+          ]
+        }
+      }
+    },
+    "getPersonStatusSnapshotResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetPersonStatusSnapshotResult" },
+            "producer": { "const": "users" },
+            "actor": { "$ref": "#/$defs/usersActor" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/personFoundPayload" },
+                { "$ref": "#/$defs/notFoundPayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "listPersonStatusSnapshotsPageResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListPersonStatusSnapshotsPageResult" },
+            "producer": { "const": "users" },
+            "actor": { "$ref": "#/$defs/usersActor" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/personPagePayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "getAccountStatusSnapshotResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetAccountStatusSnapshotResult" },
+            "producer": { "const": "authentication" },
+            "actor": { "$ref": "#/$defs/authenticationActor" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/accountFoundPayload" },
+                { "$ref": "#/$defs/notFoundPayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "listAccountStatusSnapshotsPageResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListAccountStatusSnapshotsPageResult" },
+            "producer": { "const": "authentication" },
+            "actor": { "$ref": "#/$defs/authenticationActor" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/accountPagePayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "getStudentAcademicEligibilitySnapshotResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetStudentAcademicEligibilitySnapshotResult" },
+            "producer": { "const": "academic" },
+            "actor": { "$ref": "#/$defs/academicActor" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/eligibilityFoundPayload" },
+                { "$ref": "#/$defs/notFoundPayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "listStudentAcademicEligibilitySnapshotsPageResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListStudentAcademicEligibilitySnapshotsPageResult" },
+            "producer": { "const": "academic" },
+            "actor": { "$ref": "#/$defs/academicActor" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/eligibilityPagePayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

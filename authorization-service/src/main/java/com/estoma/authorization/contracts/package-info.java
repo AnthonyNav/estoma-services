@@ -1,2 +1,2 @@
-/** Wire contracts are intentionally introduced only in PR3. */
+/** Versioned AMQP wire contracts. They never depend on Domain or Application. */
 package com.estoma.authorization.contracts;

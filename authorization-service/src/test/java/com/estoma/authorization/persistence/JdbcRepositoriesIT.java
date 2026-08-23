@@ -255,6 +255,52 @@ class JdbcRepositoriesIT extends AbstractPostgresIT {
   }
 
   @Test
+  void latestFullRecoveryOutcomeSupersedesAnOlderFailure() {
+    String projectionType = "PERSON_STATUS";
+    recoveryJobs.insert(new ProjectionRecoveryJobRepository.RecoveryJob(
+        UUID.randomUUID(),
+        projectionType,
+        "FULL",
+        null,
+        "FAILED",
+        null,
+        1,
+        null,
+        null,
+        null,
+        null,
+        1,
+        "OWNER_UNAVAILABLE",
+        NOW,
+        NOW,
+        NOW,
+        null,
+        null));
+    recoveryJobs.insert(new ProjectionRecoveryJobRepository.RecoveryJob(
+        UUID.randomUUID(),
+        projectionType,
+        "FULL",
+        null,
+        "COMPLETED",
+        null,
+        1,
+        null,
+        null,
+        null,
+        null,
+        1,
+        null,
+        NOW.plusSeconds(1),
+        NOW.plusSeconds(1),
+        NOW.plusSeconds(1),
+        null,
+        null));
+
+    assertThat(recoveryJobs.hasFailedFull(projectionType)).isFalse();
+    assertThat(recoveryJobs.hasCompletedFull(projectionType)).isTrue();
+  }
+
+  @Test
   void transactionRunnerCommitsAndRollsBackAsOneUnit() {
     UUID accountId = UUID.randomUUID();
     transactions.inTransaction(

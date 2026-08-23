@@ -9,6 +9,7 @@ import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.ProcessedMessageRepository;
 import com.estoma.authorization.application.port.StoredApplicationResultDecoder;
 import com.estoma.authorization.application.port.TechnicalFailureClassifier;
+import com.estoma.authorization.application.port.TerminalCommandFailureRecorder;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.support.CanonicalJson;
@@ -31,7 +32,8 @@ import java.util.UUID;
  * failures escape this boundary so the PR3 transport policy can apply retry/backoff before deciding
  * that a Command has reached a terminal technical failure.
  */
-public final class AuthorizationCommandProcessor implements CommandDispatcher {
+public final class AuthorizationCommandProcessor
+    implements CommandDispatcher, TerminalCommandFailureRecorder {
 
   private static final String CONSUMER = "authorization-commands";
 
@@ -154,7 +156,42 @@ public final class AuthorizationCommandProcessor implements CommandDispatcher {
         && command.targetAccountId() != null) {
       recovery.requestAccount(command.targetAccountId());
     }
+    if (outcome.duplicateDelivery()) {
+      return CommandOutcome.duplicate();
+    }
+    if (outcome.result().isPresent() && outcome.outboundResults().isEmpty()) {
+      return transactions.inTransaction(() -> replayConcurrentTerminalResult(metadata, command));
+    }
     return outcome;
+  }
+
+  private CommandOutcome replayConcurrentTerminalResult(
+      CommandMetadata metadata, AuthorizationCommand command) {
+    CommandIdempotencyRepository.IdempotencyRecord record = idempotency.find(
+            metadata.producer(), command.operationType(), metadata.idempotencyKey())
+        .filter(value -> !"DEFERRED".equals(value.status()))
+        .orElseThrow(() -> new IllegalStateException("terminal idempotency record disappeared"));
+    return replayTerminalResult(metadata, command, record);
+  }
+
+  /**
+   * Records the V1 terminal FAILED Result after the transport exhausts a retryable delivery.
+   * The caller ACKs only after this fresh transaction commits; a persistence failure remains a
+   * transport failure and must be isolated by the adapter instead of fabricating a Result.
+   */
+  @Override
+  public CommandOutcome recordTerminalFailure(CommandMetadata metadata, AuthorizationCommand command) {
+    validateEnvelopeShape(metadata, command);
+    String fingerprint = CommandPayloads.fingerprint(metadata, command);
+    return transactions.inTransaction(() -> recordTerminalWithoutBusinessMutation(
+        metadata,
+        command,
+        ApplicationResult.failed(
+            AuthorizationErrorCode.TECHNICAL_FAILURE.name(),
+            "authorization command exhausted its technical delivery policy"),
+        fingerprint,
+        null,
+        null));
   }
 
   private boolean isStaleAcademicGeneration(

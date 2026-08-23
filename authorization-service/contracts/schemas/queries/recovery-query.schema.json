@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/queries/recovery-query.schema.json",
+  "title": "Authorization V1 projection recovery queries",
+  "oneOf": [
+    { "$ref": "#/$defs/getPersonStatusSnapshot" },
+    { "$ref": "#/$defs/listPersonStatusSnapshotsPage" },
+    { "$ref": "#/$defs/getAccountStatusSnapshot" },
+    { "$ref": "#/$defs/listAccountStatusSnapshotsPage" },
+    { "$ref": "#/$defs/getStudentAcademicEligibilitySnapshot" },
+    { "$ref": "#/$defs/listStudentAcademicEligibilitySnapshotsPage" }
+  ],
+  "$defs": {
+    "systemActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "service"],
+      "properties": {
+        "type": { "const": "SYSTEM" },
+        "service": { "const": "authorization" }
+      }
+    },
+    "queryEnvelope": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId"],
+          "not": { "required": ["idempotencyKey"] },
+          "properties": {
+            "messageKind": { "const": "QUERY" },
+            "producer": { "const": "authorization" },
+            "actor": { "$ref": "#/$defs/systemActor" }
+          }
+        }
+      ]
+    },
+    "pagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limit"],
+      "properties": {
+        "cursor": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "limit": { "const": 200 }
+      }
+    },
+    "academicPagePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limit", "systemCode"],
+      "properties": {
+        "cursor": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "limit": { "const": 200 },
+        "systemCode": { "const": "PRACTICAS_PROFESIONALES" }
+      }
+    },
+    "getPersonStatusSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetPersonStatusSnapshot" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["personId"],
+              "properties": { "personId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" } }
+            }
+          }
+        }
+      ]
+    },
+    "listPersonStatusSnapshotsPage": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListPersonStatusSnapshotsPage" },
+            "payload": { "$ref": "#/$defs/pagePayload" }
+          }
+        }
+      ]
+    },
+    "getAccountStatusSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetAccountStatusSnapshot" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["accountId"],
+              "properties": { "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" } }
+            }
+          }
+        }
+      ]
+    },
+    "listAccountStatusSnapshotsPage": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListAccountStatusSnapshotsPage" },
+            "payload": { "$ref": "#/$defs/pagePayload" }
+          }
+        }
+      ]
+    },
+    "getStudentAcademicEligibilitySnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetStudentAcademicEligibilitySnapshot" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["studentAcademicProfileId", "systemCode"],
+              "properties": {
+                "studentAcademicProfileId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemCode": { "const": "PRACTICAS_PROFESIONALES" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "listStudentAcademicEligibilitySnapshotsPage": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListStudentAcademicEligibilitySnapshotsPage" },
+            "payload": { "$ref": "#/$defs/academicPagePayload" }
+          }
+        }
+      ]
+    }
+  }
+}

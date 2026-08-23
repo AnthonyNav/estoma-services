@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/queries/authorization-query.schema.json",
+  "title": "Authorization V1 snapshot queries",
+  "oneOf": [
+    { "$ref": "#/$defs/getAccountAuthorizationSnapshot" },
+    { "$ref": "#/$defs/listAccountAuthorizationSnapshotsPage" }
+  ],
+  "$defs": {
+    "queryEnvelope": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["operationId"],
+          "not": { "required": ["idempotencyKey"] },
+          "properties": {
+            "messageKind": { "const": "QUERY" },
+            "producer": {
+              "enum": ["bff", "appointments", "wash-administration", "wash-execution", "academic"]
+            }
+          }
+        }
+      ]
+    },
+    "getAccountAuthorizationSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetAccountAuthorizationSnapshot" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["accountId"],
+              "properties": {
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "listAccountAuthorizationSnapshotsPage": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListAccountAuthorizationSnapshotsPage" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["limit"],
+              "properties": {
+                "cursor": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "limit": {
+                  "allOf": [
+                    { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                    { "maximum": 1000 }
+                  ]
+                },
+                "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

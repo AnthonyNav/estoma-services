@@ -70,20 +70,34 @@ public final class ProjectionRecoveryCoordinator {
 
   public RecoveryJob requestFull(ProjectionType projectionType) {
     Objects.requireNonNull(projectionType, "projectionType");
-    return transactions.inTransaction(() -> {
-      var existing = jobs.findActive(projectionType.name(), "FULL", null);
-      if (existing.isPresent()) {
-        return existing.get();
-      }
-      Instant now = clock.instant();
-      RecoveryJob pending = pendingJob(projectionType, "FULL", null, now);
-      if (!jobs.insertIfAbsent(pending)) {
-        return jobs.findActive(projectionType.name(), "FULL", null)
-            .orElseThrow(() -> new IllegalStateException("active FULL recovery disappeared"));
-      }
-      clearProjection(projectionType);
-      return issueInTransaction(pending);
-    });
+    return transactions.inTransaction(() -> requestFullInTransaction(projectionType, false));
+  }
+
+  /**
+   * Operational retry for a terminal FAILED FULL. The failed generation is preserved and a new
+   * recovery job is created from the initial cursor. An active FULL is never duplicated.
+   */
+  public RecoveryJob requestNewFullRecovery(ProjectionType projectionType) {
+    Objects.requireNonNull(projectionType, "projectionType");
+    return transactions.inTransaction(() -> requestFullInTransaction(projectionType, true));
+  }
+
+  private RecoveryJob requestFullInTransaction(ProjectionType projectionType, boolean failedRetry) {
+    var existing = jobs.findActive(projectionType.name(), "FULL", null);
+    if (existing.isPresent()) {
+      return existing.get();
+    }
+    if (failedRetry && !jobs.hasFailedFull(projectionType.name())) {
+      throw new IllegalStateException("new FULL generation requires a previous FAILED FULL");
+    }
+    Instant now = clock.instant();
+    RecoveryJob pending = pendingJob(projectionType, "FULL", null, now);
+    if (!jobs.insertIfAbsent(pending)) {
+      return jobs.findActive(projectionType.name(), "FULL", null)
+          .orElseThrow(() -> new IllegalStateException("active FULL recovery disappeared"));
+    }
+    clearProjection(projectionType);
+    return issueInTransaction(pending);
   }
 
   public RecoveryJob retry(UUID recoveryJobId) {
@@ -251,7 +265,9 @@ public final class ProjectionRecoveryCoordinator {
       default -> throw new IllegalStateException("unsupported projection type");
     }
     if (full) {
-      payload.put("cursor", job.cursor());
+      if (job.cursor() != null) {
+        payload.put("cursor", job.cursor());
+      }
       payload.put("limit", DEFAULT_PAGE_SIZE);
     }
     return new OutboundQueryIntent(
@@ -279,24 +295,8 @@ public final class ProjectionRecoveryCoordinator {
   private static RecoveryJob pendingJob(
       ProjectionType projectionType, String scope, String entityKey, Instant now) {
     return new RecoveryJob(
-        UUID.randomUUID(),
-        projectionType.name(),
-        scope,
-        entityKey,
-        "PENDING",
-        null,
-        0,
-        null,
-        null,
-        null,
-        null,
-        0,
-        null,
-        now,
-        now,
-        null,
-        null,
-        null);
+        UUID.randomUUID(), projectionType.name(), scope, entityKey, "PENDING", null, 0,
+        null, null, null, null, 0, null, now, now, null, null, null);
   }
 
   private static UUID parseEntityUuid(String entityKey, String prefix) {

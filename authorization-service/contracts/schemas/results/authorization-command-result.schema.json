@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/results/authorization-command-result.schema.json",
+  "title": "Authorization V1 command results",
+  "oneOf": [
+    { "$ref": "#/$defs/assignAccountRoleResult" },
+    { "$ref": "#/$defs/changeAccountRoleResult" },
+    { "$ref": "#/$defs/grantSystemAccessResult" },
+    { "$ref": "#/$defs/suspendSystemAccessResult" },
+    { "$ref": "#/$defs/revokeSystemAccessResult" },
+    { "$ref": "#/$defs/restoreSystemAccessResult" }
+  ],
+  "$defs": {
+    "importCorrelationData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["importId", "planItemId", "executionGeneration"],
+      "properties": {
+        "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "genericTerminalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "error"],
+      "properties": {
+        "status": { "enum": ["REJECTED", "FAILED", "EXPIRED"] },
+        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
+      }
+    },
+    "academicTerminalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data", "error"],
+      "properties": {
+        "status": { "enum": ["REJECTED", "FAILED"] },
+        "data": { "$ref": "#/$defs/importCorrelationData" },
+        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
+      }
+    },
+    "assignData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId", "roleCode", "changed", "newVersion"],
+      "properties": {
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "roleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+        "changed": { "type": "boolean" },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "changeData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accountId", "previousRole", "newRole", "changed", "newVersion", "suspendedSystemAccessIds", "suspendedSystemAccessCount"],
+      "properties": {
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "previousRole": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+        "newRole": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "suspendedSystemAccessIds": { "type": "array", "items": { "$ref": "../common-envelope.schema.json#/$defs/uuid" } },
+        "suspendedSystemAccessCount": { "$ref": "../common-envelope.schema.json#/$defs/nonNegativeInteger" }
+      }
+    },
+    "grantData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "systemCode", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+        "status": { "$ref": "../common-envelope.schema.json#/$defs/systemAccessStatus" },
+        "changed": { "type": "boolean" },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "suspendData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "status": { "const": "SUSPENDED" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "revokeData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "status": { "const": "REVOKED" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "restoreData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemAccessId", "accountId", "status", "changed", "newVersion"],
+      "properties": {
+        "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "status": { "const": "ACTIVE" },
+        "changed": { "const": true },
+        "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
+      }
+    },
+    "assignSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/assignData" } }
+    },
+    "changeSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/changeData" } }
+    },
+    "grantSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/grantData" } }
+    },
+    "suspendSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/suspendData" } }
+    },
+    "revokeSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/revokeData" } }
+    },
+    "restoreSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/restoreData" } }
+    },
+    "academicActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "service"],
+      "properties": { "type": { "const": "SYSTEM" }, "service": { "const": "academic" } }
+    },
+    "assignAccountRoleResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "AssignAccountRoleResult" },
+            "messageKind": { "const": "RESULT" },
+            "producer": { "const": "authorization" },
+            "payload": { "oneOf": [ { "$ref": "#/$defs/assignSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" }, { "$ref": "#/$defs/academicTerminalPayload" } ] }
+          }
+        },
+        {
+          "if": { "properties": { "actor": { "$ref": "#/$defs/academicActor" }, "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED"] } }, "required": ["status"] } }, "required": ["actor", "payload"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/academicTerminalPayload" } } },
+          "else": {
+            "if": { "properties": { "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED", "EXPIRED"] } }, "required": ["status"] } }, "required": ["payload"] },
+            "then": { "properties": { "payload": { "$ref": "#/$defs/genericTerminalPayload" } } }
+          }
+        }
+      ]
+    },
+    "changeAccountRoleResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "ChangeAccountRoleResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" },
+            "payload": { "oneOf": [ { "$ref": "#/$defs/changeSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] }
+          }
+        }
+      ]
+    },
+    "grantSystemAccessResult": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "operationId", "idempotencyKey"],
+          "properties": {
+            "messageType": { "const": "GrantSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" },
+            "payload": { "oneOf": [ { "$ref": "#/$defs/grantSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" }, { "$ref": "#/$defs/academicTerminalPayload" } ] }
+          }
+        },
+        {
+          "if": { "properties": { "actor": { "$ref": "#/$defs/academicActor" }, "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED"] } }, "required": ["status"] } }, "required": ["actor", "payload"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/academicTerminalPayload" } } },
+          "else": {
+            "if": { "properties": { "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED", "EXPIRED"] } }, "required": ["status"] } }, "required": ["payload"] },
+            "then": { "properties": { "payload": { "$ref": "#/$defs/genericTerminalPayload" } } }
+          }
+        }
+      ]
+    },
+    "suspendSystemAccessResult": {
+      "allOf": [ { "$ref": "../common-envelope.schema.json" }, { "required": ["causationId", "operationId", "idempotencyKey"], "properties": { "messageType": { "const": "SuspendSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" }, "payload": { "oneOf": [ { "$ref": "#/$defs/suspendSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] } } } ]
+    },
+    "revokeSystemAccessResult": {
+      "allOf": [ { "$ref": "../common-envelope.schema.json" }, { "required": ["causationId", "operationId", "idempotencyKey"], "properties": { "messageType": { "const": "RevokeSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" }, "payload": { "oneOf": [ { "$ref": "#/$defs/revokeSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] } } } ]
+    },
+    "restoreSystemAccessResult": {
+      "allOf": [ { "$ref": "../common-envelope.schema.json" }, { "required": ["causationId", "operationId", "idempotencyKey"], "properties": { "messageType": { "const": "RestoreSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" }, "payload": { "oneOf": [ { "$ref": "#/$defs/restoreSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] } } } ]
+    }
+  }
+}

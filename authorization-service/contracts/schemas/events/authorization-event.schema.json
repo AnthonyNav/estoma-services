@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://estoma.com/contracts/authorization/v1/events/authorization-event.schema.json",
+  "title": "Authorization V1 events",
+  "oneOf": [
+    { "$ref": "#/$defs/accountRoleAssigned" },
+    { "$ref": "#/$defs/accountRoleChanged" },
+    { "$ref": "#/$defs/systemAccessGranted" },
+    { "$ref": "#/$defs/systemAccessSuspended" },
+    { "$ref": "#/$defs/systemAccessRevoked" },
+    { "$ref": "#/$defs/systemAccessRestored" }
+  ],
+  "$defs": {
+    "eventEnvelope": {
+      "allOf": [
+        { "$ref": "../common-envelope.schema.json" },
+        {
+          "required": ["causationId", "aggregateId", "aggregateVersion"],
+          "properties": {
+            "messageKind": { "const": "EVENT" },
+            "producer": { "const": "authorization" }
+          }
+        }
+      ]
+    },
+    "reasonFields": {
+      "type": "object",
+      "properties": {
+        "reasonCode": { "$ref": "../common-envelope.schema.json#/$defs/systemAccessEventReasonCode" },
+        "reasonDetail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "reasonCode": { "const": "OTHER" } }, "required": ["reasonCode"] },
+          "then": { "required": ["reasonDetail"] },
+          "else": { "not": { "required": ["reasonDetail"] } }
+        }
+      ]
+    },
+    "accountRoleAssigned": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "AccountRoleAssigned" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["accountId", "roleId", "roleCode", "assignedAt"],
+              "properties": {
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "roleId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "roleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+                "assignedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "accountRoleChanged": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "AccountRoleChanged" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "accountId",
+                "previousRoleId",
+                "previousRoleCode",
+                "newRoleId",
+                "newRoleCode",
+                "changedAt"
+              ],
+              "properties": {
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "previousRoleId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "previousRoleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+                "newRoleId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "newRoleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+                "changedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "systemAccessGranted": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "SystemAccessGranted" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "systemAccessId",
+                "accountId",
+                "systemId",
+                "systemCode",
+                "roleId",
+                "roleCode",
+                "status",
+                "grantedAt"
+              ],
+              "properties": {
+                "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+                "roleId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "roleCode": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
+                "status": { "const": "ACTIVE" },
+                "grantedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "systemAccessSuspended": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "SystemAccessSuspended" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/reasonFields" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "systemAccessId",
+                    "accountId",
+                    "systemId",
+                    "systemCode",
+                    "previousStatus",
+                    "status",
+                    "reasonCode",
+                    "suspendedAt"
+                  ],
+                  "properties": {
+                    "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "systemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+                    "previousStatus": { "const": "ACTIVE" },
+                    "status": { "const": "SUSPENDED" },
+                    "reasonCode": { "$ref": "../common-envelope.schema.json#/$defs/systemAccessEventReasonCode" },
+                    "reasonDetail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                    "suspendedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "systemAccessRevoked": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "SystemAccessRevoked" },
+            "payload": {
+              "allOf": [
+                { "$ref": "#/$defs/reasonFields" },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "systemAccessId",
+                    "accountId",
+                    "systemId",
+                    "systemCode",
+                    "previousStatus",
+                    "status",
+                    "reasonCode",
+                    "revokedAt"
+                  ],
+                  "properties": {
+                    "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "systemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                    "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+                    "previousStatus": { "enum": ["ACTIVE", "SUSPENDED"] },
+                    "status": { "const": "REVOKED" },
+                    "reasonCode": { "$ref": "../common-envelope.schema.json#/$defs/systemAccessEventReasonCode" },
+                    "reasonDetail": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+                    "revokedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "systemAccessRestored": {
+      "allOf": [
+        { "$ref": "#/$defs/eventEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "SystemAccessRestored" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "systemAccessId",
+                "accountId",
+                "systemId",
+                "systemCode",
+                "previousStatus",
+                "status",
+                "restoredAt"
+              ],
+              "properties": {
+                "systemAccessId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+                "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+                "previousStatus": { "enum": ["SUSPENDED", "REVOKED"] },
+                "status": { "const": "ACTIVE" },
+                "restoredAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

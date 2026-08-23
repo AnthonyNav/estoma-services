@@ -1,6 +1,8 @@
 package com.estoma.authorization.infrastructure.persistence;
 
 import com.estoma.authorization.application.port.ProjectionRecoveryJobRepository;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -45,9 +47,19 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
 
   @Override
   public Optional<RecoveryJob> findWaitingByQueryMessageId(UUID queryMessageId) {
+    return waitingByQueryMessageId(queryMessageId, true);
+  }
+
+  @Override
+  public Optional<RecoveryJob> findWaitingByQueryMessageIdForUpdate(UUID queryMessageId) {
+    return waitingByQueryMessageId(queryMessageId, true);
+  }
+
+  private Optional<RecoveryJob> waitingByQueryMessageId(UUID queryMessageId, boolean lock) {
     return jdbc.sql(
             "SELECT " + COLUMNS + " FROM projection_recovery_jobs "
-                + "WHERE status = 'WAITING_RESULT' AND current_query_message_id = :queryMessageId")
+                + "WHERE status = 'WAITING_RESULT' AND current_query_message_id = :queryMessageId"
+                + (lock ? " FOR UPDATE" : ""))
         .param("queryMessageId", queryMessageId)
         .query(RecoveryJobRowMapper.INSTANCE)
         .optional();
@@ -65,17 +77,38 @@ class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJobReposi
   }
 
   @Override
+  public boolean hasCompletedFull(String projectionType) {
+    return latestStatus(projectionType, "FULL", null).map("COMPLETED"::equals).orElse(false);
+  }
+
+  @Override
+  public boolean hasFailedFull(String projectionType) {
+    return latestStatus(projectionType, "FULL", null).map("FAILED"::equals).orElse(false);
+  }
+
+  @Override
+  public List<RecoveryJob> findWaitingBefore(Instant cutoff, int limit) {
+    if (limit <= 0) {
+      throw new IllegalArgumentException("recovery job limit must be positive");
+    }
+    return jdbc.sql(
+            "SELECT " + COLUMNS + " FROM projection_recovery_jobs "
+                + "WHERE status = 'WAITING_RESULT' AND updated_at < :cutoff "
+                + "ORDER BY updated_at, recovery_job_id LIMIT :limit")
+        .param("cutoff", Timestamps.toTimestamp(cutoff))
+        .param("limit", limit)
+        .query(RecoveryJobRowMapper.INSTANCE)
+        .list();
+  }
+
+  @Override
   public boolean isProjectionTrusted(String projectionType) {
-    return latestStatus(projectionType, "FULL", null)
-        .map("COMPLETED"::equals)
-        .orElse(true);
+    return latestStatus(projectionType, "FULL", null).map("COMPLETED"::equals).orElse(true);
   }
 
   @Override
   public boolean isEntityTrusted(String projectionType, String entityKey) {
-    return latestStatus(projectionType, "ENTITY", entityKey)
-        .map("COMPLETED"::equals)
-        .orElse(true);
+    return latestStatus(projectionType, "ENTITY", entityKey).map("COMPLETED"::equals).orElse(true);
   }
 
   private Optional<String> latestStatus(String projectionType, String scope, String entityKey) {

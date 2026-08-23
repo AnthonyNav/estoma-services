@@ -1,0 +1,22 @@
+estoma:
+  messaging:
+    topology-declare: false
+    listeners-enabled: false
+    outbox-relay-enabled: false
+    recovery-worker-enabled: false
+
+spring:
+  rabbitmq:
+    listener:
+      simple:
+        auto-startup: false
+
+management:
+  health:
+    rabbit:
+      enabled: false
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: db,schemaVersion
