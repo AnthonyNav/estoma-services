@@ -16,16 +16,13 @@ public class JdbcAdministrativeClosureRepository implements ProjectionRepositori
   public JdbcAdministrativeClosureRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
   @Override
-  public List<ProjectionRepositories.AdministrativeClosureProjection> findOverlapping(
-      UUID cabinId, UUID tankId, Instant startsAt, Instant endsAt) {
+  public List<ProjectionRepositories.AdministrativeClosureProjection> findScheduledOverlapping(
+      Instant startsAt, Instant endsAt) {
     return jdbc.query("""
         SELECT * FROM administrative_closure_projection
         WHERE status='SCHEDULED' AND starts_at < ? AND ends_at > ?
-          AND (scope='SERVICE'
-            OR (scope='CABIN' AND cabin_id=?)
-            OR (scope='TANK' AND tank_id=?))
         ORDER BY starts_at,administrative_closure_id
-        """, this::map, endsAt, startsAt, cabinId, tankId);
+        """, this::map, endsAt, startsAt);
   }
 
   @Override
