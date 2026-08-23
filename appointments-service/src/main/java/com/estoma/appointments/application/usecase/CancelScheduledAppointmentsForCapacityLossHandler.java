@@ -2,9 +2,9 @@ package com.estoma.appointments.application.usecase;
 
 import com.estoma.appointments.application.model.ApplicationResult;
 import com.estoma.appointments.application.port.in.CancelScheduledAppointmentsForCapacityLossUseCase;
+import com.estoma.appointments.application.port.out.AppointmentCapacityProjectionRepository;
 import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
-import com.estoma.appointments.application.port.out.ExceptionalAppointmentAuthorizationRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.CancellationSubreason;
@@ -18,15 +18,15 @@ import org.springframework.transaction.annotation.Transactional;
 public final class CancelScheduledAppointmentsForCapacityLossHandler
     implements CancelScheduledAppointmentsForCapacityLossUseCase {
   private final AppointmentRepository appointments;
-  private final ExceptionalAppointmentAuthorizationRepository authorizations;
+  private final AppointmentCapacityProjectionRepository capacity;
   private final CommandIdempotencyRepository idempotency;
   private final OutboxRepository outbox;
 
   public CancelScheduledAppointmentsForCapacityLossHandler(AppointmentRepository appointments,
-      ExceptionalAppointmentAuthorizationRepository authorizations,
-      CommandIdempotencyRepository idempotency, OutboxRepository outbox) {
+      AppointmentCapacityProjectionRepository capacity, CommandIdempotencyRepository idempotency,
+      OutboxRepository outbox) {
     this.appointments = appointments;
-    this.authorizations = authorizations;
+    this.capacity = capacity;
     this.idempotency = idempotency;
     this.outbox = outbox;
   }
@@ -36,32 +36,51 @@ public final class CancelScheduledAppointmentsForCapacityLossHandler
   public ApplicationResult cancel(Command command) {
     Instant now = command.now();
     Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
-        "CancelScheduledAppointmentsForCapacityLoss", ApplicationSupport.fingerprint(command.sourceEventId(),
-            command.slotId(), command.availableCapacity()), now);
+        "CancelScheduledAppointmentsForCapacityLoss", ApplicationSupport.fingerprint(
+            command.sourceEventId(), command.slotId()), now);
     if (gate.isPresent()) return gate.get();
+
+    var projection = capacity.findBySlotIdForUpdate(command.slotId()).orElse(null);
+    if (projection == null) {
+      ApplicationResult deferred = ApplicationResult.deferred("CAPACITY_NOT_READY",
+          "capacity projection is not available", command.slotId());
+      ApplicationSupport.releaseDeferred(idempotency, command.metadata(),
+          "CancelScheduledAppointmentsForCapacityLoss", deferred);
+      return deferred;
+    }
+
     var all = appointments.findForSlot(command.slotId(), true);
-    int activeDemand = (int) all.stream().filter(Appointment::isActive).count();
+    int sharedDemand = (int) all.stream().filter(Appointment::isActive)
+        .filter(a -> a.appointmentType().name().matches("NORMAL|JOURNEY")).count();
+    int immunoDemand = (int) all.stream().filter(Appointment::isActive)
+        .filter(a -> a.appointmentType().name().equals("IMMUNOCOMPROMISED")).count();
+    int sharedCapacity = projection.normalCapacity() + projection.journeyCapacity();
     int cancelled = 0;
+
     for (Appointment candidate : all) {
-      if (activeDemand <= command.availableCapacity()) break;
-      if (!candidate.status().name().equals("SCHEDULED") || candidate.entryAuthorizedAt() != null) continue;
+      boolean sharedOverflow = sharedDemand > sharedCapacity
+          && candidate.appointmentType().name().matches("NORMAL|JOURNEY");
+      boolean immunoOverflow = immunoDemand > projection.immunocompromisedCapacity()
+          && candidate.appointmentType().name().equals("IMMUNOCOMPROMISED");
+      if ((!sharedOverflow && !immunoOverflow) || !candidate.status().name().equals("SCHEDULED")
+          || candidate.entryAuthorizedAt() != null) continue;
       var current = appointments.findByIdForUpdate(candidate.appointmentId()).orElse(candidate);
+      if (!current.status().name().equals("SCHEDULED") || current.entryAuthorizedAt() != null) continue;
       var changed = current.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS,
-          "capacity loss", command.metadata().actor().accountId(), now);
+          "capacity loss", null, now);
       if (!appointments.updateIfVersion(changed, current.version())) continue;
-      activeDemand--;
+      if (sharedOverflow) sharedDemand--; else immunoDemand--;
       cancelled++;
-      if (changed.exceptionalAuthorizationId() != null) {
-        authorizations.findByIdForUpdate(changed.exceptionalAuthorizationId());
-      }
       ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentCancelled",
           changed.appointmentId(), changed.version(), "{\"appointmentId\":\""
-              + changed.appointmentId() + "\",\"cancellationType\":\"CLINIC\",\"subreason\":\"CAPACITY_LOSS\"}", now);
+              + changed.appointmentId() + "\",\"cancellationType\":\"CLINIC\","
+              + "\"cancellationSubreason\":\"CAPACITY_LOSS\"}", now);
     }
-    ApplicationResult result = ApplicationResult.applied(command.slotId(), 0,
+
+    ApplicationResult result = ApplicationResult.applied(command.slotId(), projection.version(),
         "capacity loss cancelled " + cancelled + " scheduled appointments");
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
-    ApplicationSupport.complete(idempotency, command.metadata(), "CancelScheduledAppointmentsForCapacityLoss", result, now);
+    ApplicationSupport.complete(idempotency, command.metadata(),
+        "CancelScheduledAppointmentsForCapacityLoss", result, now);
     return result;
   }
 }
