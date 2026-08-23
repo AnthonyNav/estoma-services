@@ -1,18 +1,10 @@
 package com.estoma.communications.application.port;
 
+import com.estoma.communications.contracts.Actor;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * What a command/projection handler or the email delivery worker passes to
- * append one RESULT or EVENT row to the Transactional Outbox, inside the
- * same transaction as the business change. {@code payloadJson} is
- * pre-serialized JSON -- this port does not depend on a JSON library.
- *
- * <p>{@code status = PENDING}, {@code attempts = 0}, and {@code availableAt
- * = occurredAt} are implicit: every newly-appended row starts immediately
- * eligible for a future relay to claim.
- */
+/** Canonical durable message data persisted before RabbitMQ publication. */
 public record OutboxAppendRequest(
     UUID messageId,
     String messageType,
@@ -23,4 +15,25 @@ public record OutboxAppendRequest(
     UUID correlationId,
     UUID causationId,
     String payloadJson,
-    Instant occurredAt) {}
+    Instant occurredAt,
+    UUID operationId,
+    UUID idempotencyKey,
+    Actor actor,
+    String destination) {
+
+  /** Compatibility constructor for existing event-only producers. */
+  public OutboxAppendRequest(
+      UUID messageId,
+      String messageType,
+      int messageVersion,
+      String messageKind,
+      UUID aggregateId,
+      Integer aggregateVersion,
+      UUID correlationId,
+      UUID causationId,
+      String payloadJson,
+      Instant occurredAt) {
+    this(messageId, messageType, messageVersion, messageKind, aggregateId, aggregateVersion,
+        correlationId, causationId, payloadJson, occurredAt, null, null, null, null);
+  }
+}
