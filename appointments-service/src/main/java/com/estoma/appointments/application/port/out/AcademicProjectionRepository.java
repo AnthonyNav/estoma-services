@@ -7,11 +7,13 @@ import java.util.UUID;
 public interface AcademicProjectionRepository {
   void upsertAcademicPeriod(AcademicPeriodProjection projection);
   void upsertStudentProfile(StudentAcademicProfileProjection projection);
+  void upsertCourseSection(CourseSectionProjection projection);
   void upsertStudentCourse(StudentCourseSectionProjection projection);
 
   Optional<AcademicPeriodProjection> findPeriod(UUID academicPeriodId);
   Optional<AcademicPeriodProjection> findActivePeriod();
   Optional<StudentAcademicProfileProjection> findStudentProfile(UUID studentAccountId);
+  Optional<CourseSectionProjection> findCourseSection(UUID courseSectionId);
   Optional<StudentCourseSectionProjection> findStudentCourse(UUID studentAccountId, UUID courseSectionId);
   boolean reliable();
 
@@ -21,6 +23,9 @@ public interface AcademicProjectionRepository {
   record StudentAcademicProfileProjection(UUID academicProfileId, UUID studentAccountId,
       int currentSemester, String academicStatus, long sourceVersion, Instant updatedAt,
       boolean reliable) {}
+
+  record CourseSectionProjection(UUID courseSectionId, UUID academicPeriodId, String status,
+      long sourceVersion, Instant updatedAt, boolean reliable) {}
 
   record StudentCourseSectionProjection(UUID academicProfileId, UUID studentAccountId,
       UUID courseSectionId, UUID academicPeriodId, Instant enrolledAt, Instant removedAt,
