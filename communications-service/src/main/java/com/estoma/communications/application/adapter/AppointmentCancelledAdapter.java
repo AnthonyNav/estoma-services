@@ -48,13 +48,13 @@ class AppointmentCancelledAdapter implements ProjectionHandler {
       return ProjectionHandlerResult.NONE;
     }
 
-    RequestCommunicationCommand command =
-        new RequestCommunicationCommand(
-            payload.studentAccountId(), SYSTEM_CODE, COMMUNICATION_TYPE, CommunicationPriority.NORMAL, "appointments", "AppointmentCancelled",
-            payload.appointmentId().toString(), null, null,
-            new RequestCommunicationCommand.EmailContent(
-                EmailContentMode.GENERIC, null, "Tu cita fue cancelada",
-                "Tu cita fue cancelada por una falla o reducción de capacidad de la clínica. Te contactaremos para reprogramarla.", null, null, null));
+    RequestCommunicationCommand command = new RequestCommunicationCommand(
+        payload.studentAccountId(), SYSTEM_CODE, COMMUNICATION_TYPE, CommunicationPriority.NORMAL,
+        "appointments", "AppointmentCancelled", payload.appointmentId().toString(), null, null,
+        new RequestCommunicationCommand.EmailContent(
+            EmailContentMode.GENERIC, null, "Tu cita fue cancelada",
+            "Tu cita fue cancelada por una falla o reducción de capacidad de la clínica. Te contactaremos para reprogramarla.",
+            null, null, null));
 
     try {
       MessageEnvelope boundary = new MessageEnvelope(
@@ -64,11 +64,11 @@ class AppointmentCancelledAdapter implements ProjectionHandler {
           envelope.messageId(), envelope.operationId(), payload.appointmentId(),
           envelope.aggregateId(), envelope.aggregateVersion(), envelope.actor(), envelope.payload());
       CommandHandlerResult result = service.create(command, boundary);
-      return new ProjectionHandlerResult(result.events());
+      return new ProjectionHandlerResult(result.events().stream()
+          .map(event -> event.onAggregate(result.aggregateId(), result.aggregateVersion()))
+          .toList());
     } catch (CommunicationsRejectedException rejected) {
-      if (rejected.code() == RejectionCode.COMMUNICATION_ALREADY_EXISTS) {
-        return ProjectionHandlerResult.NONE;
-      }
+      if (rejected.code() == RejectionCode.COMMUNICATION_ALREADY_EXISTS) return ProjectionHandlerResult.NONE;
       throw rejected;
     }
   }
