@@ -15,7 +15,9 @@ import com.estoma.washexecution.application.port.ProjectionRepositories;
 import com.estoma.washexecution.application.port.ResourceAssignmentRepository;
 import com.estoma.washexecution.application.port.ResourceConcurrencyRepository;
 import com.estoma.washexecution.application.port.ResourceUnavailabilityRepository;
+import com.estoma.washexecution.application.port.WashExecutionIntegrationQueryRepository;
 import com.estoma.washexecution.application.port.WashExecutionRepository;
+import com.estoma.washexecution.application.query.WashExecutionIntegrationQueryService;
 import com.estoma.washexecution.application.resource.ResourceAllocator;
 import java.time.Clock;
 import org.springframework.context.annotation.Bean;
@@ -87,5 +89,14 @@ public class WashExecutionApplicationConfig {
       JsonCodec json,
       Clock clock) {
     return new CleaningPeriodCompletionService(periods, executions, outbox, json, clock);
+  }
+
+  @Bean
+  WashExecutionIntegrationQueryService washExecutionIntegrationQueryService(
+      WashExecutionIntegrationQueryRepository repository,
+      OutboxRepository outbox,
+      JsonCodec json,
+      Clock clock) {
+    return new WashExecutionIntegrationQueryService(repository, outbox, json, clock);
   }
 }

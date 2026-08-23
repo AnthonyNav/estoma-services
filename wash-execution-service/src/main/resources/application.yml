@@ -1,6 +1,13 @@
 spring:
   application:
     name: wash-execution-service
+  rabbitmq:
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        default-requeue-rejected: false
 server:
   port: 8080
 management:
@@ -9,6 +16,9 @@ management:
       probes:
         enabled: true
       show-details: never
+      group:
+        readiness:
+          include: readinessState,db,rabbit,projectionReadiness
   endpoints:
     web:
       exposure:
@@ -20,3 +30,17 @@ info:
   app:
     name: wash-execution-service
     version: 0.1.0
+estoma:
+  messaging:
+    publisher-confirm-timeout: 5s
+    outbox-lease: 30s
+    outbox-claim-batch-size: 50
+    outbox-poll-interval: 1000
+    outbox-relay-enabled: true
+    inbox-lease: 30s
+    deferred-replay-poll-interval: 1000
+    deferred-replay-enabled: true
+    recovery-poll-interval: 1000
+    recovery-worker-enabled: true
+    recovery-result-timeout: 30s
+    recovery-zone: America/Mexico_City

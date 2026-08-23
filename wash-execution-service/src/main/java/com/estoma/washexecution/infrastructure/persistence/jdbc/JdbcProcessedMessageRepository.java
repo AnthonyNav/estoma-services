@@ -14,9 +14,7 @@ import org.springframework.stereotype.Repository;
 public class JdbcProcessedMessageRepository implements ProcessedMessageRepository {
   private final JdbcTemplate jdbc;
 
-  public JdbcProcessedMessageRepository(JdbcTemplate jdbc) {
-    this.jdbc = jdbc;
-  }
+  public JdbcProcessedMessageRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
   @Override
   public boolean insertIfAbsent(ProcessedMessage m) {
@@ -40,11 +38,21 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
   }
 
   @Override
+  public boolean claimDeferred(String consumerName, UUID messageId, Instant now, UUID claimToken, Instant leaseUntil) {
+    validateClaim(now, claimToken, leaseUntil);
+    return jdbc.update("""
+        UPDATE processed_messages
+        SET claim_token=?,lease_until=?,updated_at=?
+        WHERE consumer_name=? AND message_id=? AND status='DEFERRED'
+          AND (lease_until IS NULL OR lease_until <= ?)
+        """, claimToken, leaseUntil, now, consumerName, messageId, now) == 1;
+  }
+
+  @Override
   public List<ProcessedMessage> claimDeferred(
       String consumerName, int limit, Instant now, UUID claimToken, Instant leaseUntil) {
-    if (limit < 1 || claimToken == null || leaseUntil == null || !leaseUntil.isAfter(now)) {
-      throw new IllegalArgumentException("INVALID_DEFERRED_CLAIM");
-    }
+    if (limit < 1) throw new IllegalArgumentException("INVALID_DEFERRED_CLAIM");
+    validateClaim(now, claimToken, leaseUntil);
     return jdbc.query("""
         WITH candidates AS (
           SELECT consumer_name,message_id
@@ -71,6 +79,16 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
         """, appliedAt, appliedAt, consumerName, messageId, claimToken) == 1;
   }
 
+  @Override
+  public boolean keepDeferred(String consumerName, UUID messageId, UUID claimToken, String reason, Instant updatedAt) {
+    if (reason == null || reason.isBlank()) throw new IllegalArgumentException("DEFERRED_REASON_REQUIRED");
+    return jdbc.update("""
+        UPDATE processed_messages
+        SET deferred_reason=?,claim_token=NULL,lease_until=NULL,updated_at=?
+        WHERE consumer_name=? AND message_id=? AND status='DEFERRED' AND claim_token=?
+        """, reason, updatedAt, consumerName, messageId, claimToken) == 1;
+  }
+
   private ProcessedMessage map(ResultSet rs, int row) throws SQLException {
     return new ProcessedMessage(
         rs.getString("consumer_name"), rs.getObject("message_id", UUID.class),
@@ -81,6 +99,12 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
         nullableLong(rs, "aggregate_version"), rs.getString("actor_json"), rs.getString("payload_json"),
         rs.getTimestamp("received_at").toInstant(), rs.getTimestamp("occurred_at").toInstant(),
         instant(rs, "applied_at"), rs.getString("deferred_reason"), rs.getTimestamp("updated_at").toInstant());
+  }
+
+  private static void validateClaim(Instant now, UUID claimToken, Instant leaseUntil) {
+    if (now == null || claimToken == null || leaseUntil == null || !leaseUntil.isAfter(now)) {
+      throw new IllegalArgumentException("INVALID_DEFERRED_CLAIM");
+    }
   }
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {
