@@ -73,7 +73,8 @@ public final class CancelExceptionalAppointmentAuthorizationHandler
       result = ApplicationResult.rejected("INVALID_AUTHORIZATION", exception.getMessage());
     }
 
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
+    ApplicationSupport.appendResult(outbox, command.metadata(),
+        "CancelExceptionalAppointmentAuthorization", result, now);
     ApplicationSupport.complete(idempotency, command.metadata(),
         "CancelExceptionalAppointmentAuthorization", result, now);
     return result;
