@@ -40,6 +40,28 @@ final class ApplicationSupport {
       CommandMetadata metadata, String operation, String fingerprint, Instant now) {
     CommandIdempotencyRepository.IdempotencyDecision decision = repository.claim(
         operation, metadata.idempotencyKey(), fingerprint, metadata.messageId(), now);
+    return decisionResult(decision);
+  }
+
+  static Optional<ApplicationResult> claimClient(CommandIdempotencyRepository repository,
+      OutboxRepository outbox, CommandMetadata metadata, String operation, String fingerprint,
+      Instant now) {
+    CommandIdempotencyRepository.IdempotencyDecision decision = repository.claim(
+        operation, metadata.idempotencyKey(), fingerprint, metadata.messageId(), now);
+    Optional<ApplicationResult> gate = decisionResult(decision);
+    if (gate.isEmpty() || gate.get().status() == ApplicationResult.Status.DEFERRED) return gate;
+
+    // Exact broker redelivery of the original message must not create another Result intent. A new
+    // message carrying the same logical idempotency key should receive the stored outcome so its
+    // caller can converge without repeating the mutation.
+    boolean exactRedelivery = decision.replay() && decision.record() != null
+        && metadata.messageId().equals(decision.record().messageId());
+    if (!exactRedelivery) appendResult(outbox, metadata, operation, gate.get(), now);
+    return gate;
+  }
+
+  private static Optional<ApplicationResult> decisionResult(
+      CommandIdempotencyRepository.IdempotencyDecision decision) {
     if (decision.conflict()) {
       return Optional.of(ApplicationResult.rejected(
           "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST", "idempotency key belongs to another request"));
@@ -52,16 +74,6 @@ final class ApplicationSupport {
           "COMMAND_IN_PROGRESS", "the same command is already being processed", null));
     }
     return Optional.empty();
-  }
-
-  static Optional<ApplicationResult> claimClient(CommandIdempotencyRepository repository,
-      OutboxRepository outbox, CommandMetadata metadata, String operation, String fingerprint,
-      Instant now) {
-    Optional<ApplicationResult> gate = claim(repository, metadata, operation, fingerprint, now);
-    if (gate.isPresent() && gate.get().status() != ApplicationResult.Status.DEFERRED) {
-      appendResult(outbox, metadata, operation, gate.get(), now);
-    }
-    return gate;
   }
 
   static void complete(CommandIdempotencyRepository repository, CommandMetadata metadata,
