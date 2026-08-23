@@ -13,8 +13,6 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class AmqpTopologyConfig {
 
-  private static final String EVENT_RETRY_RETURN_KEY = "communications.retry";
-
   @Bean DirectExchange communicationsCommandsExchange() { return new DirectExchange(MessagingNames.COMMANDS_EXCHANGE, true, false); }
   @Bean DirectExchange communicationsResultsExchange() { return new DirectExchange(MessagingNames.RESULTS_EXCHANGE, true, false); }
   @Bean TopicExchange communicationsEventsExchange() { return new TopicExchange(MessagingNames.EVENTS_EXCHANGE, true, false); }
@@ -35,8 +33,8 @@ public class AmqpTopologyConfig {
   @Bean Binding communicationsAppointmentBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
     return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with("appointments.appointment.cancelled");
   }
-  @Bean Binding communicationsRetryReturnBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
-    return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with(EVENT_RETRY_RETURN_KEY);
+  @Bean Binding communicationsEventRetryReturnBinding(Queue communicationsEventQueue, DirectExchange communicationsDlxExchange) {
+    return BindingBuilder.bind(communicationsEventQueue).to(communicationsDlxExchange).with(MessagingNames.EVENT_RETRY_RETURN);
   }
 
   @Bean Queue communicationsCommandRetry5s() { return retry(MessagingNames.COMMAND_RETRY_5S, 5_000, MessagingNames.COMMANDS_EXCHANGE, "communications"); }
@@ -44,9 +42,9 @@ public class AmqpTopologyConfig {
   @Bean Queue communicationsCommandRetry300s() { return retry(MessagingNames.COMMAND_RETRY_300S, 300_000, MessagingNames.COMMANDS_EXCHANGE, "communications"); }
   @Bean Queue communicationsCommandDlq() { return QueueBuilder.durable(MessagingNames.COMMAND_DLQ).build(); }
 
-  @Bean Queue communicationsEventRetry5s() { return retry(MessagingNames.EVENT_RETRY_5S, 5_000, MessagingNames.EVENTS_EXCHANGE, EVENT_RETRY_RETURN_KEY); }
-  @Bean Queue communicationsEventRetry30s() { return retry(MessagingNames.EVENT_RETRY_30S, 30_000, MessagingNames.EVENTS_EXCHANGE, EVENT_RETRY_RETURN_KEY); }
-  @Bean Queue communicationsEventRetry300s() { return retry(MessagingNames.EVENT_RETRY_300S, 300_000, MessagingNames.EVENTS_EXCHANGE, EVENT_RETRY_RETURN_KEY); }
+  @Bean Queue communicationsEventRetry5s() { return retry(MessagingNames.EVENT_RETRY_5S, 5_000, MessagingNames.DLX_EXCHANGE, MessagingNames.EVENT_RETRY_RETURN); }
+  @Bean Queue communicationsEventRetry30s() { return retry(MessagingNames.EVENT_RETRY_30S, 30_000, MessagingNames.DLX_EXCHANGE, MessagingNames.EVENT_RETRY_RETURN); }
+  @Bean Queue communicationsEventRetry300s() { return retry(MessagingNames.EVENT_RETRY_300S, 300_000, MessagingNames.DLX_EXCHANGE, MessagingNames.EVENT_RETRY_RETURN); }
   @Bean Queue communicationsEventDlq() { return QueueBuilder.durable(MessagingNames.EVENT_DLQ).build(); }
 
   @Bean Binding commandRetry5sBinding(Queue communicationsCommandRetry5s, DirectExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsCommandRetry5s).to(communicationsDlxExchange).with(MessagingNames.COMMAND_RETRY_5S); }
