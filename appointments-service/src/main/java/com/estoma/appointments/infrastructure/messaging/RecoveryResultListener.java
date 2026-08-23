@@ -1,6 +1,5 @@
 package com.estoma.appointments.infrastructure.messaging;
 
-import com.estoma.appointments.application.recovery.ProjectionRecoveryResultProcessor;
 import com.estoma.appointments.contracts.MessageKind;
 import com.estoma.appointments.contracts.MessagingNames;
 import com.rabbitmq.client.Channel;
@@ -36,7 +35,7 @@ public final class RecoveryResultListener {
     long tag=message.getMessageProperties().getDeliveryTag();
     try {
       var result=validator.validate(codec.readTree(message.getBody()),MessageKind.RESULT,RESULTS);
-      processor.process(result); // transaction commits before this call returns
+      processor.process(result);
       channel.basicAck(tag,false);
     } catch(InvalidMessageException|IllegalArgumentException invalid) {
       failures.route(message,MessagingNames.RESULT_QUEUE,false);
