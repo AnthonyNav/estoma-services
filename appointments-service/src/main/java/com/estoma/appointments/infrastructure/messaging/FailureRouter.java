@@ -4,15 +4,15 @@ import com.estoma.appointments.contracts.MessagingNames;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.MessagePropertiesBuilder;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
+/** Reroutes a delivery only after the retry/DLQ publish is broker-confirmed. */
 @Component
 public final class FailureRouter {
-  private final RabbitTemplate template;
-  public FailureRouter(@Qualifier("requiredRouteRabbitTemplate") RabbitTemplate template) {
-    this.template = template;
+  private final ConfirmedRabbitPublisher publisher;
+
+  public FailureRouter(ConfirmedRabbitPublisher publisher) {
+    this.publisher = publisher;
   }
 
   public Route route(Message message, String queue, boolean transientFailure) {
@@ -20,17 +20,22 @@ public final class FailureRouter {
     String key;
     Route route;
     if (transientFailure && attempt == 0) {
-      key = retryKey(queue, 1); route = Route.RETRY;
+      key = retryKey(queue, 1);
+      route = Route.RETRY;
     } else if (transientFailure && attempt == 1) {
-      key = retryKey(queue, 2); route = Route.RETRY;
+      key = retryKey(queue, 2);
+      route = Route.RETRY;
     } else {
-      key = dlqKey(queue); route = Route.DLQ;
+      key = dlqKey(queue);
+      route = Route.DLQ;
     }
+
     MessageProperties properties = MessagePropertiesBuilder
         .fromClonedProperties(message.getMessageProperties())
         .setHeader("x-appointments-attempt", attempt + 1)
         .build();
-    template.send(MessagingNames.DLX_EXCHANGE, key, new Message(message.getBody(), properties));
+    publisher.publishRequiredRoute(MessagingNames.DLX_EXCHANGE, key,
+        new Message(message.getBody(), properties));
     return route;
   }
 
