@@ -20,11 +20,6 @@ import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
-/**
- * Handles {@code DeactivateAccount} (commands.md §4.3): deactivates the
- * account and revokes its sessions in one transaction, producing both
- * {@code AccountDeactivated} and {@code AllAccountSessionsRevoked}.
- */
 @Component
 class DeactivateAccountHandler implements CommandHandler {
 
@@ -53,39 +48,40 @@ class DeactivateAccountHandler implements CommandHandler {
   public CommandHandlerResult handle(MessageEnvelope envelope) {
     DeactivateAccountCommand command = codec.convertPayload(envelope, DeactivateAccountCommand.class);
 
-    Account account =
-        accountRepository
-            .findById(command.accountId())
-            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
+    Account account = accountRepository.findById(command.accountId())
+        .orElseThrow(() -> new AuthenticationRejectedException(
+            RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
 
     AccountDeactivationReason reason = parseReason(command.reasonCode());
-    if (isStudentImport(envelope)
+    if (isAcademicImport(envelope)
         && (reason != AccountDeactivationReason.ACADEMIC_ABSENCE
             || account.loginIdentifier().type() != com.estoma.authentication.contracts.LoginType.MATRICULA)) {
-      throw new AuthenticationRejectedException(RejectionCode.ACTOR_NOT_AUTHORIZED,
-          "student import may only deactivate academic-absence matricula accounts");
+      throw new AuthenticationRejectedException(
+          RejectionCode.ACTOR_NOT_AUTHORIZED,
+          "academic import may only deactivate academic-absence matricula accounts");
     }
+
     Instant now = Instant.now();
     Account deactivated = account.deactivated(now, reason);
-
     int rowsAffected = accountRepository.update(deactivated, command.expectedVersion());
     if (rowsAffected == 0) {
       AccountUpdateGuard.rejectForFailedUpdate(accountRepository, command.accountId(), command.expectedVersion());
     }
-    statusHistoryRepository.insert(
-        new AccountStatusChange(
-            UUID.randomUUID(), deactivated.accountId(), account.status(), deactivated.status(), reason.name(), command.reasonDetail(), envelope.actor(),
-            envelope.correlationId(), now, deactivated.version()));
+    statusHistoryRepository.insert(new AccountStatusChange(
+        UUID.randomUUID(), deactivated.accountId(), account.status(), deactivated.status(),
+        reason.name(), command.reasonDetail(), envelope.actor(), envelope.correlationId(), now,
+        deactivated.version()));
 
     sessionRepository.revokeAllActiveForAccount(command.accountId(), "ACCOUNT_DEACTIVATED", now);
 
     AccountDeactivatedPayload accountEvent = new AccountDeactivatedPayload(
-        deactivated.accountId(), deactivated.personId(), account.status().name(), deactivated.status().name(), reason.name(), command.reasonDetail(), now);
-    AllAccountSessionsRevokedPayload sessionsEvent = new AllAccountSessionsRevokedPayload(deactivated.accountId(), "ACCOUNT_DEACTIVATED", now);
+        deactivated.accountId(), deactivated.personId(), account.status().name(),
+        deactivated.status().name(), reason.name(), command.reasonDetail(), now);
+    AllAccountSessionsRevokedPayload sessionsEvent =
+        new AllAccountSessionsRevokedPayload(deactivated.accountId(), "ACCOUNT_DEACTIVATED", now);
 
     return CommandHandlerResult.of(
-        deactivated.accountId(),
-        deactivated.version(),
+        deactivated.accountId(), deactivated.version(),
         new EventToAppend(AuthenticationEvent.ACCOUNT_DEACTIVATED.wireName(), accountEvent),
         new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), sessionsEvent));
   }
@@ -101,10 +97,9 @@ class DeactivateAccountHandler implements CommandHandler {
     }
   }
 
-  private static boolean isStudentImport(MessageEnvelope envelope) {
-    return "student-import-process".equals(envelope.producer())
+  private static boolean isAcademicImport(MessageEnvelope envelope) {
+    return "academic".equals(envelope.producer())
         && envelope.actor() != null
-        && "SYSTEM".equals(envelope.actor().type())
-        && "academic".equals(envelope.actor().service());
+        && envelope.actor().isSystemService("academic");
   }
 }

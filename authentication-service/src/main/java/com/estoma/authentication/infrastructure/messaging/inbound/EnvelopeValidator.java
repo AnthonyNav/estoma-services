@@ -7,52 +7,61 @@ import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import java.util.Arrays;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
-/**
- * Structural and contractual validation of an inbound envelope, run
- * before any business processing. Anything this rejects is a permanent
- * failure and goes straight to the DLQ, never a retry tier. Deliberately
- * NOT domain validation -- that happens inside the transactional
- * dispatcher and produces a functional rejection, not a DLQ'd message.
- *
- * <p>Routing information is not part of the envelope contract.
- */
 @Component
 public class EnvelopeValidator {
 
   private static final int SUPPORTED_MESSAGE_VERSION = 1;
-
-  private static final Set<String> COMMAND_MESSAGE_TYPES =
-      Arrays.stream(AuthenticationCommand.values()).map(AuthenticationCommand::wireName).collect(Collectors.toSet());
+  private static final Set<String> COMMAND_MESSAGE_TYPES = Arrays.stream(AuthenticationCommand.values())
+      .map(AuthenticationCommand::wireName).collect(Collectors.toSet());
+  private static final Set<String> ACADEMIC_TYPES = Set.of(
+      AuthenticationCommand.CREATE_ACCOUNT.wireName(),
+      AuthenticationCommand.ACTIVATE_ACCOUNT.wireName(),
+      AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName());
 
   public void validateCommand(MessageEnvelope envelope) {
     validateCommon(envelope);
     if (envelope.messageKind() != MessageKind.COMMAND) {
       throw new InvalidMessageException(
-           "expected messageKind=COMMAND on commands.authentication, got " + envelope.messageKind());
+          "expected messageKind=COMMAND on commands.authentication, got " + envelope.messageKind());
     }
     if (!COMMAND_MESSAGE_TYPES.contains(envelope.messageType())) {
       throw new InvalidMessageException("unrecognized command messageType " + envelope.messageType());
     }
     requireNonBlank(envelope.idempotencyKey(), "idempotencyKey");
+    if ("academic".equals(envelope.producer())) {
+      validateAcademicCommand(envelope);
+    }
+  }
+
+  private static void validateAcademicCommand(MessageEnvelope envelope) {
+    if (!ACADEMIC_TYPES.contains(envelope.messageType())
+        || envelope.operationId() == null
+        || envelope.aggregateId() == null
+        || envelope.actor() == null
+        || !envelope.actor().isSystemService("academic")
+        || envelope.actor().accountId() != null) {
+      throw new InvalidMessageException("invalid Academic coordinated command envelope");
+    }
+    JsonNode execution = envelope.payload().path("importExecution");
+    requireUuid(execution, "importId");
+    requireUuid(execution, "planItemId");
+    requireUuid(execution, "authorizedByAccountId");
+    if (execution.path("executionGeneration").asInt(-1) < 1) {
+      throw new InvalidMessageException("importExecution.executionGeneration must be positive");
+    }
   }
 
   public void validateEvent(MessageEnvelope envelope) {
     validateCommon(envelope);
     if (envelope.messageKind() != MessageKind.EVENT) {
       throw new InvalidMessageException(
-           "expected messageKind=EVENT on events.authentication, got " + envelope.messageKind());
+          "expected messageKind=EVENT on events.authentication, got " + envelope.messageKind());
     }
-    // messageType is not checked against a closed set here: this queue
-    // deliberately accepts events from producers this service does not
-    // yet fully control (academic-service's not-yet-implemented
-    // StudentNumberCorrected publisher, see AmqpNames) -- an unrecognized
-    // messageType from an unexpected producer becomes
-    // ProjectionDispatcher's "no handler registered" IllegalStateException
-    // instead, which is a technical (retryable-until-DLQ) failure rather
-    // than an immediate DLQ, so an operator has a window to react.
   }
 
   public void validateRpc(MessageEnvelope envelope, String replyTo) {
@@ -61,7 +70,8 @@ public class EnvelopeValidator {
         || envelope.payload() == null || replyTo == null || replyTo.isBlank()) {
       throw new InvalidMessageException("invalid RPC envelope structure");
     }
-    if (Arrays.stream(AuthenticationRpcOperation.values()).noneMatch(operation -> operation.wireName().equals(envelope.messageType()))) {
+    if (Arrays.stream(AuthenticationRpcOperation.values())
+        .noneMatch(operation -> operation.wireName().equals(envelope.messageType()))) {
       throw new InvalidMessageException("unrecognized RPC messageType " + envelope.messageType());
     }
     validateActor(envelope.actor());
@@ -110,15 +120,19 @@ public class EnvelopeValidator {
     }
   }
 
-  private static void requireNonNull(Object value, String fieldName) {
-    if (value == null) {
-      throw new InvalidMessageException(fieldName + " must not be null");
+  private static void requireUuid(JsonNode node, String field) {
+    try {
+      UUID.fromString(node.path(field).asString());
+    } catch (RuntimeException exception) {
+      throw new InvalidMessageException("importExecution." + field + " must be a UUID");
     }
   }
 
+  private static void requireNonNull(Object value, String fieldName) {
+    if (value == null) throw new InvalidMessageException(fieldName + " must not be null");
+  }
+
   private static void requireNonBlank(String value, String fieldName) {
-    if (value == null || value.isBlank()) {
-      throw new InvalidMessageException(fieldName + " must not be blank");
-    }
+    if (value == null || value.isBlank()) throw new InvalidMessageException(fieldName + " must not be blank");
   }
 }
