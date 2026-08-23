@@ -33,7 +33,7 @@ public class JdbcPendingWashExecutionEventRepository implements PendingWashExecu
       WITH candidates AS (
         SELECT pending_event_id FROM pending_wash_execution_events
         WHERE (status='PENDING' OR (status='PROCESSING' AND lease_until < :now)) AND available_at<=:now
-        ORDER BY execution_version, available_at, pending_event_id
+        ORDER BY execution_version,available_at,pending_event_id
         FOR UPDATE SKIP LOCKED LIMIT :limit
       )
       UPDATE pending_wash_execution_events p
@@ -54,6 +54,16 @@ public class JdbcPendingWashExecutionEventRepository implements PendingWashExecu
 
   @Override public boolean complete(UUID id, String worker, Instant at) {
     return jdbc.sql("UPDATE pending_wash_execution_events SET status='COMPLETED',completed_at=:at,claimed_by=NULL,lease_until=NULL WHERE pending_event_id=:id AND status='PROCESSING' AND claimed_by=:worker")
-        .param("id",id).param("worker",worker).param("at",Timestamps.toTimestamp(at)).update()==1;
+      .param("id",id).param("worker",worker).param("at",Timestamps.toTimestamp(at)).update()==1;
+  }
+
+  @Override public boolean discardBySourceEventId(UUID sourceEventId, Instant at) {
+    return jdbc.sql("UPDATE pending_wash_execution_events SET status='COMPLETED',completed_at=:at,claimed_by=NULL,lease_until=NULL WHERE source_event_id=:source AND status IN ('PENDING','PROCESSING')")
+      .param("source",sourceEventId).param("at",Timestamps.toTimestamp(at)).update() >= 1;
+  }
+
+  @Override public boolean hasOpenForAppointment(UUID appointmentId) {
+    return jdbc.sql("SELECT EXISTS(SELECT 1 FROM pending_wash_execution_events WHERE appointment_id=:appointment AND status IN ('PENDING','PROCESSING'))")
+      .param("appointment",appointmentId).query(Boolean.class).single();
   }
 }
