@@ -51,9 +51,6 @@ final class ApplicationSupport {
     Optional<ApplicationResult> gate = decisionResult(decision);
     if (gate.isEmpty() || gate.get().status() == ApplicationResult.Status.DEFERRED) return gate;
 
-    // Exact broker redelivery of the original message must not create another Result intent. A new
-    // message carrying the same logical idempotency key should receive the stored outcome so its
-    // caller can converge without repeating the mutation.
     boolean exactRedelivery = decision.replay() && decision.record() != null
         && metadata.messageId().equals(decision.record().messageId());
     if (!exactRedelivery) appendResult(outbox, metadata, operation, gate.get(), now);
@@ -107,12 +104,12 @@ final class ApplicationSupport {
   static void appendEvent(OutboxRepository outbox, CommandMetadata metadata, String type,
       UUID aggregateId, long aggregateVersion, String payload, Instant now) {
     append(outbox, new OutboxIntent(type, "EVENT", aggregateId, aggregateVersion,
-        metadata.correlationId(), metadata.causationId(), payload, now));
+        metadata.correlationId(), metadata.messageId(), payload, now));
   }
 
   static CommandMetadata inboundMetadata(ExecutionEvent event, Instant now) {
-    return new CommandMetadata(event.messageId(), event.sourceEventId().toString(), event.messageId(),
-        event.sourceEventId(), ActorContext.system("appointments"), now);
+    return new CommandMetadata(event.messageId(), event.sourceEventId().toString(),
+        event.correlationId(), event.sourceEventId(), ActorContext.system("appointments"), now);
   }
 
   static void append(OutboxRepository outbox, OutboxIntent intent) {
