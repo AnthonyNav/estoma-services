@@ -27,18 +27,24 @@ public class ProjectionDispatcher {
     this.inbox = inbox;
     this.outbox = outbox;
     this.codec = codec;
-    this.handlersByMessageType = handlers.stream()
-        .flatMap(handler -> handler.consumedMessageTypes().stream().map(type -> Map.entry(type, handler)))
-        .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    this.handlersByMessageType =
+        handlers.stream()
+            .flatMap(handler -> handler.consumedMessageTypes().stream().map(type -> Map.entry(type, handler)))
+            .collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
   @Transactional
   public ProjectionOutcome dispatch(MessageEnvelope envelope) {
     ProjectionHandler handler = handlersByMessageType.get(envelope.messageType());
-    if (handler == null) throw new IllegalStateException("no projection handler registered for messageType " + envelope.messageType());
-    if (!inbox.tryInsert(handler.consumerName(), envelope.messageId(), envelope.correlationId())) {
+    if (handler == null) {
+      throw new IllegalStateException("no projection handler registered for messageType " + envelope.messageType());
+    }
+
+    boolean inserted = inbox.tryInsert(handler.consumerName(), envelope.messageId(), envelope.correlationId());
+    if (!inserted) {
       return new ProjectionOutcome.Duplicate();
     }
+
     ProjectionHandlerResult result = handler.handle(envelope);
     result.events().forEach(event -> appendEvent(envelope, event));
     return new ProjectionOutcome.Applied();
