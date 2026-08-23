@@ -78,7 +78,8 @@ final class ApplicationSupport {
         || result.status() == ApplicationResult.Status.DUPLICATE;
     String type = operation + (succeeded ? "Succeeded" : "Rejected");
     append(outbox, new OutboxIntent(type, "RESULT", result.aggregateId(), result.aggregateVersion(),
-        metadata.correlationId(), metadata.messageId(), wireResultJson(result, succeeded), now));
+        metadata.correlationId(), metadata.messageId(), wireResultJson(result, succeeded), now,
+        metadata.operationId()));
   }
 
   static void appendEvent(OutboxRepository outbox, CommandMetadata metadata, String type,
@@ -97,7 +98,7 @@ final class ApplicationSupport {
     outbox.append(new OutboxRepository.OutboxMessage(UUID.randomUUID(), intent.messageType(), 1,
         intent.messageKind(), intent.aggregateId(), intent.aggregateVersion(), intent.correlationId(),
         intent.causationId(), intent.payloadJson() == null ? "{}" : intent.payloadJson(), occurred,
-        occurred, "PENDING", 0, null, null));
+        occurred, "PENDING", 0, null, null, intent.operationId()));
   }
 
   static String resultJson(ApplicationResult result) {
