@@ -1,0 +1,38 @@
+name: wash-execution-service
+
+on:
+  pull_request:
+    paths:
+      - "wash-execution-service/**"
+      - ".github/workflows/wash-execution-service.yaml"
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - "wash-execution-service/**"
+      - ".github/workflows/wash-execution-service.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wash-execution-service
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          cache-dependency-path: wash-execution-service/pom.xml
+
+      - name: Run tests
+        run: ./mvnw -B clean verify
