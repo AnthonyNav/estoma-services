@@ -30,8 +30,7 @@ public final class ProjectionRepositories {
   }
 
   public interface AdministrativeClosureRepository {
-    List<AdministrativeClosureProjection> findOverlapping(
-        UUID cabinId, UUID tankId, Instant startsAt, Instant endsAt);
+    List<AdministrativeClosureProjection> findScheduledOverlapping(Instant startsAt, Instant endsAt);
     void upsert(AdministrativeClosureProjection closure);
   }
 
