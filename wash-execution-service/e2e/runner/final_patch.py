@@ -5,6 +5,21 @@ import hardening
 import run
 
 
+def safe_zone():
+    now = run.utcnow()
+    for name in (
+        "America/Mexico_City", "Pacific/Honolulu", "America/Los_Angeles",
+        "UTC", "Europe/London", "Asia/Tokyo", "Pacific/Auckland",
+    ):
+        zone = hardening.entry.ZoneInfo(name)
+        if 8 <= now.astimezone(zone).hour <= 13:
+            return zone
+    return hardening.entry.ZoneInfo("UTC")
+
+
+# Scenario 7/13/P1 create slots up to +8h; keep their one-hour duration before the 23:00 fixture close.
+run.choose_zone = safe_zone
+
 _original_admin_outbox = run.Harness._admin_outbox
 
 
