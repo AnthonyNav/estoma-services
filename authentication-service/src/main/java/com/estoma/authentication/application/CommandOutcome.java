@@ -9,5 +9,7 @@ public sealed interface CommandOutcome {
 
   record Rejected(RejectionCode code) implements CommandOutcome {}
 
+  record Deferred(String pendingReason) implements CommandOutcome {}
+
   record Duplicate() implements CommandOutcome {}
 }
