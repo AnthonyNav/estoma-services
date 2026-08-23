@@ -62,13 +62,13 @@ final class RecoveryResultListener {
   public void onMessage(Message message, Channel channel) throws IOException {
     long started = System.nanoTime();
     try {
-      handle(message, channel);
+      handle(message, channel, started);
     } finally {
       metrics.processingDuration(CONSUMER, System.nanoTime() - started);
     }
   }
 
-  private void handle(Message message, Channel channel) throws IOException {
+  private void handle(Message message, Channel channel, long started) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     MessageEnvelope envelope;
     try {
@@ -81,14 +81,28 @@ final class RecoveryResultListener {
       } else if (handling.status() == ProjectionRecoveryResultHandler.Status.STALE_RESULT) {
         metrics.staleRecoveryResult();
       }
-      String errorCode = result.errorCode();
-      log.processed(envelope, message, CONSUMER, handling.status().name(), errorCode);
+      log.processed(
+          envelope,
+          message,
+          CONSUMER,
+          handling.status().name(),
+          result.errorCode(),
+          System.nanoTime() - started,
+          handling.recoveryJobId());
       channel.basicAck(deliveryTag, false);
     } catch (InvalidMessageException exception) {
-      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
+      log.transportFailure(
+          null, message, CONSUMER, "INVALID", exception, System.nanoTime() - started, null);
       routeInvalid(message, channel, deliveryTag);
     } catch (RuntimeException exception) {
-      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception);
+      log.transportFailure(
+          null,
+          message,
+          CONSUMER,
+          "TECHNICAL_FAILURE",
+          exception,
+          System.nanoTime() - started,
+          null);
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
     }
   }

@@ -25,12 +25,8 @@ final class CommandListener {
 
   private static final String CONSUMER = "commands";
   private static final Set<String> TYPES = Set.of(
-      "AssignAccountRole",
-      "ChangeAccountRole",
-      "GrantSystemAccess",
-      "SuspendSystemAccess",
-      "RevokeSystemAccess",
-      "RestoreSystemAccess");
+      "AssignAccountRole", "ChangeAccountRole", "GrantSystemAccess", "SuspendSystemAccess",
+      "RevokeSystemAccess", "RestoreSystemAccess");
 
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
@@ -67,13 +63,13 @@ final class CommandListener {
   public void onMessage(Message message, Channel channel) throws IOException {
     long started = System.nanoTime();
     try {
-      handle(message, channel);
+      handle(message, channel, started);
     } finally {
       metrics.processingDuration(CONSUMER, System.nanoTime() - started);
     }
   }
 
-  private void handle(Message message, Channel channel) throws IOException {
+  private void handle(Message message, Channel channel, long started) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     MessageEnvelope envelope;
     CommandMessageMapper.MappedCommand mapped;
@@ -81,7 +77,7 @@ final class CommandListener {
       envelope = validator.validate(codec.readTree(message.getBody()), MessageKind.COMMAND, TYPES);
       mapped = mapper.map(envelope);
     } catch (RuntimeException exception) {
-      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
+      log.transportFailure(null, message, CONSUMER, "INVALID", exception, System.nanoTime() - started, null);
       routeInvalid(message, channel, deliveryTag);
       return;
     }
@@ -102,12 +98,12 @@ final class CommandListener {
           .filter(result -> result.error() != null)
           .map(result -> result.error().code())
           .orElse(null);
-      log.processed(envelope, message, CONSUMER, processingResult, errorCode);
+      log.processed(envelope, message, CONSUMER, processingResult, errorCode, System.nanoTime() - started, null);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException failure) {
-      log.transportFailure(envelope, message, CONSUMER, "TECHNICAL_FAILURE", failure);
+      log.transportFailure(envelope, message, CONSUMER, "TECHNICAL_FAILURE", failure, System.nanoTime() - started, null);
       if (classifier.isTransient(failure) && failures.isFinalAttempt(message, FailureRouter.COMMANDS)) {
-        recordTerminalFailureOrDlq(message, channel, deliveryTag, envelope, mapped);
+        recordTerminalFailureOrDlq(message, channel, deliveryTag, envelope, mapped, started);
         return;
       }
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(failure));
@@ -119,15 +115,17 @@ final class CommandListener {
       Channel channel,
       long deliveryTag,
       MessageEnvelope envelope,
-      CommandMessageMapper.MappedCommand mapped) throws IOException {
+      CommandMessageMapper.MappedCommand mapped,
+      long started) throws IOException {
     try {
       CommandOutcome outcome = terminalFailures.recordTerminalFailure(mapped.metadata(), mapped.command());
       metrics.commandOutcome(outcome);
-      log.processed(envelope, message, CONSUMER, "FAILED", "TECHNICAL_FAILURE");
+      log.processed(envelope, message, CONSUMER, "FAILED", "TECHNICAL_FAILURE", System.nanoTime() - started, null);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException terminalPersistenceFailure) {
       log.transportFailure(
-          envelope, message, CONSUMER, "TERMINAL_PERSISTENCE_FAILED", terminalPersistenceFailure);
+          envelope, message, CONSUMER, "TERMINAL_PERSISTENCE_FAILED", terminalPersistenceFailure,
+          System.nanoTime() - started, null);
       routeInvalid(message, channel, deliveryTag);
     }
   }
@@ -142,8 +140,8 @@ final class CommandListener {
     }
   }
 
-  private void routeTechnical(
-      Message message, Channel channel, long deliveryTag, boolean transientFailure) throws IOException {
+  private void routeTechnical(Message message, Channel channel, long deliveryTag, boolean transientFailure)
+      throws IOException {
     try {
       FailureRoute route = failures.routeAfterFailure(message, FailureRouter.COMMANDS, transientFailure);
       if (route == FailureRoute.RETRY) {

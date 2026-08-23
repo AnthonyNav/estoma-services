@@ -23,13 +23,8 @@ final class ExternalEventListener {
 
   private static final String CONSUMER = "events";
   private static final Set<String> TYPES = Set.of(
-      "PersonCreated",
-      "PersonActivated",
-      "PersonDeactivated",
-      "AccountCreated",
-      "AccountActivated",
-      "AccountDeactivated",
-      "StudentAcademicEligibilityChanged");
+      "PersonCreated", "PersonActivated", "PersonDeactivated", "AccountCreated",
+      "AccountActivated", "AccountDeactivated", "StudentAcademicEligibilityChanged");
 
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
@@ -63,13 +58,13 @@ final class ExternalEventListener {
   public void onMessage(Message message, Channel channel) throws IOException {
     long started = System.nanoTime();
     try {
-      handle(message, channel);
+      handle(message, channel, started);
     } finally {
       metrics.processingDuration(CONSUMER, System.nanoTime() - started);
     }
   }
 
-  private void handle(Message message, Channel channel) throws IOException {
+  private void handle(Message message, Channel channel, long started) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     MessageEnvelope envelope;
     try {
@@ -80,13 +75,13 @@ final class ExternalEventListener {
       if (result.status() == ProjectionEventProcessor.Status.DEFERRED) {
         metrics.deferred();
       }
-      log.processed(envelope, message, CONSUMER, result.status().name(), null);
+      log.processed(envelope, message, CONSUMER, result.status().name(), null, System.nanoTime() - started, null);
       channel.basicAck(deliveryTag, false);
     } catch (InvalidMessageException exception) {
-      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
+      log.transportFailure(null, message, CONSUMER, "INVALID", exception, System.nanoTime() - started, null);
       routeInvalid(message, channel, deliveryTag);
     } catch (RuntimeException exception) {
-      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception);
+      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception, System.nanoTime() - started, null);
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
     }
   }
@@ -101,8 +96,8 @@ final class ExternalEventListener {
     }
   }
 
-  private void routeTechnical(
-      Message message, Channel channel, long deliveryTag, boolean transientFailure) throws IOException {
+  private void routeTechnical(Message message, Channel channel, long deliveryTag, boolean transientFailure)
+      throws IOException {
     try {
       FailureRoute route = failures.routeAfterFailure(message, FailureRouter.EVENTS, transientFailure);
       if (route == FailureRoute.RETRY) {

@@ -57,13 +57,13 @@ final class QueryListener {
   public void onMessage(Message message, Channel channel) throws IOException {
     long started = System.nanoTime();
     try {
-      handle(message, channel);
+      handle(message, channel, started);
     } finally {
       metrics.processingDuration(CONSUMER, System.nanoTime() - started);
     }
   }
 
-  private void handle(Message message, Channel channel) throws IOException {
+  private void handle(Message message, Channel channel, long started) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     MessageEnvelope envelope;
     QueryMessageMapper.MappedQuery mapped;
@@ -71,11 +71,11 @@ final class QueryListener {
       envelope = validator.validate(codec.readTree(message.getBody()), MessageKind.QUERY, TYPES);
       mapped = mapper.map(envelope);
     } catch (InvalidMessageException exception) {
-      log.transportFailure(null, message, CONSUMER, "INVALID", exception);
+      log.transportFailure(null, message, CONSUMER, "INVALID", exception, System.nanoTime() - started, null);
       routeInvalid(message, channel, deliveryTag);
       return;
     } catch (RuntimeException exception) {
-      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception);
+      log.transportFailure(null, message, CONSUMER, "TECHNICAL_FAILURE", exception, System.nanoTime() - started, null);
       routeTechnical(message, channel, deliveryTag, classifier.isTransient(exception));
       return;
     }
@@ -83,13 +83,13 @@ final class QueryListener {
     try {
       responder.respond(mapped.metadata(), mapped.query());
       metrics.consumed(CONSUMER);
-      log.processed(envelope, message, CONSUMER, "RESULT_DURABLE", null);
+      log.processed(envelope, message, CONSUMER, "RESULT_DURABLE", null, System.nanoTime() - started, null);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException exception) {
-      log.transportFailure(envelope, message, CONSUMER, "TECHNICAL_FAILURE", exception);
+      log.transportFailure(envelope, message, CONSUMER, "TECHNICAL_FAILURE", exception, System.nanoTime() - started, null);
       boolean transientFailure = classifier.isTransient(exception);
       if (!transientFailure || failures.isFinalAttempt(message, FailureRouter.QUERIES)) {
-        recordTerminalFailureOrDlq(message, channel, deliveryTag, envelope, mapped);
+        recordTerminalFailureOrDlq(message, channel, deliveryTag, envelope, mapped, started);
         return;
       }
       routeTechnical(message, channel, deliveryTag, true);
@@ -101,15 +101,17 @@ final class QueryListener {
       Channel channel,
       long deliveryTag,
       MessageEnvelope envelope,
-      QueryMessageMapper.MappedQuery mapped) throws IOException {
+      QueryMessageMapper.MappedQuery mapped,
+      long started) throws IOException {
     try {
       responder.respondFailed(mapped.metadata(), "TECHNICAL_FAILURE");
       metrics.consumed(CONSUMER);
-      log.processed(envelope, message, CONSUMER, "FAILED", "TECHNICAL_FAILURE");
+      log.processed(envelope, message, CONSUMER, "FAILED", "TECHNICAL_FAILURE", System.nanoTime() - started, null);
       channel.basicAck(deliveryTag, false);
     } catch (RuntimeException terminalPersistenceFailure) {
       log.transportFailure(
-          envelope, message, CONSUMER, "TERMINAL_PERSISTENCE_FAILED", terminalPersistenceFailure);
+          envelope, message, CONSUMER, "TERMINAL_PERSISTENCE_FAILED", terminalPersistenceFailure,
+          System.nanoTime() - started, null);
       routeInvalid(message, channel, deliveryTag);
     }
   }
@@ -124,8 +126,8 @@ final class QueryListener {
     }
   }
 
-  private void routeTechnical(
-      Message message, Channel channel, long deliveryTag, boolean transientFailure) throws IOException {
+  private void routeTechnical(Message message, Channel channel, long deliveryTag, boolean transientFailure)
+      throws IOException {
     try {
       FailureRoute route = failures.routeAfterFailure(message, FailureRouter.QUERIES, transientFailure);
       if (route == FailureRoute.RETRY) {
