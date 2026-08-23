@@ -54,6 +54,16 @@ final class ApplicationSupport {
     return Optional.empty();
   }
 
+  static Optional<ApplicationResult> claimClient(CommandIdempotencyRepository repository,
+      OutboxRepository outbox, CommandMetadata metadata, String operation, String fingerprint,
+      Instant now) {
+    Optional<ApplicationResult> gate = claim(repository, metadata, operation, fingerprint, now);
+    if (gate.isPresent() && gate.get().status() != ApplicationResult.Status.DEFERRED) {
+      appendResult(outbox, metadata, operation, gate.get(), now);
+    }
+    return gate;
+  }
+
   static void complete(CommandIdempotencyRepository repository, CommandMetadata metadata,
       String operation, ApplicationResult result, Instant now) {
     if (!repository.complete(operation, metadata.idempotencyKey(), resultJson(result), now)) {
