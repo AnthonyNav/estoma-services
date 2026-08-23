@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class JdbcWashAdministrationProjectionRepository implements WashAdministrationProjectionRepository {
+  private static final String CLOSURE_COLUMNS = "closure_id,calendar_id,scope,cabin_id,tank_id,starts_at,ends_at,status,source_version,updated_at";
   private final JdbcClient jdbc;
   public JdbcWashAdministrationProjectionRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
@@ -67,10 +68,15 @@ public class JdbcWashAdministrationProjectionRepository implements WashAdministr
       .param("id",id).query((rs,row)->new ServiceScheduleProjection(rs.getObject("schedule_id",UUID.class),rs.getObject("calendar_id",UUID.class),rs.getInt("day_of_week"),rs.getObject("opening_time",LocalTime.class),rs.getObject("closing_time",LocalTime.class),rs.getInt("slot_duration_minutes"),rs.getString("status"),rs.getLong("source_version"),Timestamps.toInstant(rs,"updated_at"))).optional();
   }
 
+  @Override public Optional<AdministrativeClosureProjection> findClosure(UUID id) {
+    return jdbc.sql("SELECT " + CLOSURE_COLUMNS + " FROM administrative_closure_projection WHERE closure_id=:id")
+      .param("id", id).query(JdbcWashAdministrationProjectionRepository::mapClosure).optional();
+  }
+
   @Override public List<AdministrativeClosureProjection> findClosuresOverlapping(UUID calendarId, Instant startsAt, Instant endsAt) {
-    return jdbc.sql("SELECT closure_id,calendar_id,scope,cabin_id,tank_id,starts_at,ends_at,status,source_version,updated_at FROM administrative_closure_projection WHERE calendar_id=:calendar AND status='SCHEDULED' AND starts_at < :ends AND ends_at > :starts")
+    return jdbc.sql("SELECT " + CLOSURE_COLUMNS + " FROM administrative_closure_projection WHERE calendar_id=:calendar AND status='SCHEDULED' AND starts_at < :ends AND ends_at > :starts")
       .param("calendar",calendarId).param("starts",Timestamps.toTimestamp(startsAt)).param("ends",Timestamps.toTimestamp(endsAt))
-      .query((rs,row)->new AdministrativeClosureProjection(rs.getObject("closure_id",UUID.class),rs.getObject("calendar_id",UUID.class),rs.getString("scope"),rs.getObject("cabin_id",UUID.class),rs.getObject("tank_id",UUID.class),Timestamps.toInstant(rs,"starts_at"),Timestamps.toInstant(rs,"ends_at"),rs.getString("status"),rs.getLong("source_version"),Timestamps.toInstant(rs,"updated_at"))).list();
+      .query(JdbcWashAdministrationProjectionRepository::mapClosure).list();
   }
 
   @Override public List<CabinProjection> findCabins() {
@@ -91,5 +97,13 @@ public class JdbcWashAdministrationProjectionRepository implements WashAdministr
   @Override public boolean reliable() {
     return jdbc.sql("SELECT COALESCE(bool_and(reliable),true) FROM (SELECT reliable FROM service_calendar_projection UNION ALL SELECT reliable FROM service_schedule_projection UNION ALL SELECT reliable FROM administrative_closure_projection UNION ALL SELECT reliable FROM cabin_projection UNION ALL SELECT reliable FROM tank_projection UNION ALL SELECT reliable FROM resource_priority_projection) p")
       .query(Boolean.class).single();
+  }
+
+  private static AdministrativeClosureProjection mapClosure(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
+    return new AdministrativeClosureProjection(rs.getObject("closure_id",UUID.class),
+        rs.getObject("calendar_id",UUID.class), rs.getString("scope"), rs.getObject("cabin_id",UUID.class),
+        rs.getObject("tank_id",UUID.class), Timestamps.toInstant(rs,"starts_at"),
+        Timestamps.toInstant(rs,"ends_at"), rs.getString("status"), rs.getLong("source_version"),
+        Timestamps.toInstant(rs,"updated_at"));
   }
 }
