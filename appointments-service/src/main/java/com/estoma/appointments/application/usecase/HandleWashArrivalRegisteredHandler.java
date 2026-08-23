@@ -32,7 +32,9 @@ public final class HandleWashArrivalRegisteredHandler implements HandleWashArriv
   @Transactional
   public ApplicationResult handle(ExecutionEvent event) {
     Instant now = event.occurredAt();
-    if (!inbox.tryClaim(event.sourceEventId(), event.eventType(), now)) return ApplicationResult.duplicate();
+    if (!inbox.tryClaim(event.sourceEventId(), event.eventType(), now)) {
+      return ApplicationResult.duplicate();
+    }
     var appointment = appointments.findByIdForUpdate(event.appointmentId()).orElse(null);
     var slot = appointment == null ? null : slots.findById(appointment.appointmentTimeSlotId()).orElse(null);
     Instant arrivedAt = event.effectiveArrivalAt();
@@ -40,9 +42,10 @@ public final class HandleWashArrivalRegisteredHandler implements HandleWashArriv
       inbox.markApplied(event.sourceEventId(), now);
       return ApplicationResult.rejected("APPOINTMENT_NOT_FOUND", "arrival references an unknown appointment");
     }
-    if (arrivedAt.isBefore(slot.startsAt()) || arrivedAt.isAfter(slot.arrivalToleranceUntil())) {
+    Instant arrivalAllowedFrom = slot.startsAt().minusSeconds(15 * 60L);
+    if (arrivedAt.isBefore(arrivalAllowedFrom) || arrivedAt.isAfter(slot.arrivalToleranceUntil())) {
       inbox.markApplied(event.sourceEventId(), now);
-      return ApplicationResult.rejected("INVALID_ARRIVAL_EVIDENCE", "arrival is outside the slot tolerance window");
+      return ApplicationResult.rejected("INVALID_ARRIVAL_EVIDENCE", "arrival is outside the canonical -15m/+10m window");
     }
     evidence.recordArrival(new WashExecutionEvidenceRepository.EvidenceRecord(UUID.randomUUID(),
         event.washExecutionId(), event.appointmentId(), arrivedAt, event.executionVersion(), null, null,
