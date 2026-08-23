@@ -25,9 +25,12 @@ Read these local implementation contracts in this order:
 
 1. `docs/pr0_contract_resolution.md` — mandatory PR0 resolution that closes pre-implementation ambiguities and unblocks PR1.
 2. `docs/system_contract.md` — V1 implementation boundary and invariants.
-3. `docs/execution_plan.md` — PR1–PR4 implementation sequence and Definition of Done.
+3. `docs/hexagonal_architecture_contract.md` — mandatory dependency rules, ports/adapters boundaries and ArchUnit gates for PR1–PR4.
+4. `docs/execution_plan.md` — PR1–PR4 implementation sequence and Definition of Done.
 
 Canonical platform documentation in `AnthonyNav/estomatologia-platform-docs` always wins if these local implementation notes drift. The PR0 resolution specifically fixes the physical Authorization projection names, durable `DEFERRED/APPLIED` Inbox semantics, the `queries.wash-execution` recovery surface, and same-version Event handling required by Appointments.
+
+The V1 implementation is contractually hexagonal: `domain` remains framework-free, `application` depends only on domain/ports, `contracts` isolates wire DTOs, and `infrastructure` owns JDBC, RabbitMQ, schedulers, Spring configuration and observability. These boundaries must be protected with ArchUnit and cannot be weakened merely to make an implementation compile.
 
 ## Current Scaffold Endpoints
 
@@ -42,4 +45,4 @@ The V1 target keeps Actuator as the operational HTTP surface and does not expose
 
 ## Implementation Gate
 
-PR0 is considered resolved when the canonical documentation PR and this repository PR are merged. After that, PR1 (Domain + Persistence + Concurrency) is unblocked; no Java behavior is implemented by PR0 itself.
+PR0 is merged. PR1 (Domain + Persistence + Concurrency) is unblocked, but its Definition of Done now also requires compliance with `docs/hexagonal_architecture_contract.md`.
