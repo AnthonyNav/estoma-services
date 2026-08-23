@@ -1,15 +1,12 @@
 package com.estoma.authentication.contracts;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.util.UUID;
 
-/**
- * The actor an envelope carries responsibility for. Authorization checks
- * must use this -- never data taken from the payload
- * (security-observability.md:156).
- */
+/** The actor an envelope carries responsibility for. */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record Actor(String type, UUID accountId, String service, String scope, String systemId) {
 
-  /** Keeps existing account-originated envelopes source compatible. */
   public Actor(UUID accountId) {
     this("ACCOUNT", accountId, null, null, null);
   }
