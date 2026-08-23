@@ -365,13 +365,13 @@ public class ProjectionEventDispatcher {
     JsonNode p = e.payload();
     return new ExecutionEvent(e.messageId(),e.messageId(),id(p,"washExecutionId",e.aggregateId()),
         id(p,"appointmentId",null),e.messageType(),version,e.occurredAt(),arrivedAt,actionAt,
-        actorAccountId,startedAt,cancellationType,cancellationSubreason,reason,p.toString());
+        actorAccountId,startedAt,cancellationType,cancellationSubreason,reason,p.toString(),
+        e.correlationId());
   }
 
   private void requestCapacityRecalculation(MessageEnvelope e, Instant from, Instant until) {
     CommandMetadata metadata = new CommandMetadata(e.messageId(), "capacity-event:" + e.messageId(),
-        e.correlationId() == null ? e.messageId() : e.correlationId(), e.messageId(),
-        ActorContext.system("appointments"), e.occurredAt());
+        e.correlationId(), e.messageId(), ActorContext.system("appointments"), e.occurredAt());
     capacityEvents.handle(new HandleResourceCapacityEventUseCase.Command(
         metadata,e.messageId(),from,until,e.occurredAt()));
   }
@@ -423,7 +423,7 @@ public class ProjectionEventDispatcher {
     return value;
   }
   private static String optionalText(JsonNode p, String field) {
-    return !p.has(field) || p.path(field).isNull() || !p.path(field).isTextual() ? null : p.path(field).asText();
+    return !p.has(field) || p.path(field).isNull() || !p.path(field).isTextual() ? null : p.path(field).asString();
   }
   private static int intValue(JsonNode p, String field) {
     if (!p.has(field) || !p.path(field).canConvertToInt()) throw new InvalidMessageException(field + " must be integer");
