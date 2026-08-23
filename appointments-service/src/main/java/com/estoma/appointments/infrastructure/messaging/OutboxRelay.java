@@ -8,6 +8,7 @@ import com.estoma.appointments.contracts.WireActor;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
@@ -20,6 +21,18 @@ import org.springframework.transaction.support.TransactionTemplate;
 /** Claims in a short transaction, publishes with confirm, then fences the claim. */
 @Component
 public final class OutboxRelay {
+  private static final Set<String> BFF_RESULTS = Set.of(
+      "ScheduleAppointmentSucceeded", "ScheduleAppointmentRejected",
+      "CancelAppointmentSucceeded", "CancelAppointmentRejected",
+      "CreateAppointmentTimeSlotSucceeded", "CreateAppointmentTimeSlotRejected",
+      "CancelAppointmentTimeSlotSucceeded", "CancelAppointmentTimeSlotRejected",
+      "GrantExceptionalAppointmentAuthorizationSucceeded",
+      "GrantExceptionalAppointmentAuthorizationRejected",
+      "CancelExceptionalAppointmentAuthorizationSucceeded",
+      "CancelExceptionalAppointmentAuthorizationRejected");
+  private static final Set<String> EXECUTION_QUERY_RESULTS = Set.of(
+      "GetAppointmentExecutionContextResult", "ListAppointmentExecutionContextsPageResult");
+
   private final OutboxRepository outbox;
   private final ConfirmedRabbitPublisher publisher;
   private final EnvelopeJsonCodec codec;
@@ -51,7 +64,8 @@ public final class OutboxRelay {
         transactions.execute(status -> outbox.markFailed(message.messageId(), worker, exception.getMessage(),
             clock.instant().plusSeconds(Math.min(300L, 1L << Math.min(attempts, 8)))));
       } catch (RuntimeException permanent) {
-        transactions.execute(status -> outbox.quarantine(message.messageId(), worker, "INVALID_OUTBOX_CONTRACT: " + permanent.getMessage(), clock.instant()));
+        transactions.execute(status -> outbox.quarantine(message.messageId(), worker,
+            "INVALID_OUTBOX_CONTRACT: " + permanent.getMessage(), clock.instant()));
       }
     }
   }
@@ -59,32 +73,44 @@ public final class OutboxRelay {
   private void publish(OutboxRepository.OutboxMessage message) {
     MessageKind kind = MessageKind.valueOf(message.messageKind());
     String exchange = switch (kind) {
+      case COMMAND -> MessagingNames.COMMANDS_EXCHANGE;
       case EVENT -> MessagingNames.EVENTS_EXCHANGE;
       case RESULT -> MessagingNames.RESULTS_EXCHANGE;
       case QUERY -> MessagingNames.QUERIES_EXCHANGE;
-      case COMMAND -> throw new IllegalArgumentException("appointments does not emit Commands");
     };
-    String route = routingKey(kind, message.messageType(), message.payloadJson());
-    MessageProperties properties = new MessageProperties();
-    properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
-    properties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
-    properties.setMessageId(message.messageId().toString());
-    MessageEnvelope envelope = new MessageEnvelope(message.messageId(), message.messageType(), message.messageVersion(),
-        kind, MessagingNames.LOGICAL_COMPONENT_ID, message.occurredAt(), message.correlationId(), message.causationId(),
-        null, null, message.aggregateId(), message.aggregateVersion() == null ? null : Math.toIntExact(message.aggregateVersion()), new WireActor("SERVICE", new UUID(0, 0), "appointments"),
+    String route = routingKey(kind, message.messageType());
+    MessageProperties wireProperties = new MessageProperties();
+    wireProperties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+    wireProperties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
+    wireProperties.setMessageId(message.messageId().toString());
+
+    String idempotencyKey = kind == MessageKind.COMMAND ? message.messageId().toString() : null;
+    MessageEnvelope envelope = new MessageEnvelope(message.messageId(), message.messageType(),
+        message.messageVersion(), kind, MessagingNames.LOGICAL_COMPONENT_ID, message.occurredAt(),
+        message.correlationId(), message.causationId(), message.operationId(), idempotencyKey,
+        message.aggregateId(), message.aggregateVersion() == null ? null : Math.toIntExact(message.aggregateVersion()),
+        new WireActor("SYSTEM", null, MessagingNames.LOGICAL_COMPONENT_ID),
         codec.readTree(message.payloadJson()));
-    Message wire = new Message(codec.encode(envelope), properties);
+    Message wire = new Message(codec.encode(envelope), wireProperties);
     if (kind == MessageKind.EVENT) publisher.publishEvent(exchange, route, wire);
     else publisher.publishRequiredRoute(exchange, route, wire);
   }
 
-  private static String routingKey(MessageKind kind, String messageType, String payload) {
-    if (kind == MessageKind.RESULT) return MessagingNames.LOGICAL_COMPONENT_ID;
+  static String routingKey(MessageKind kind, String messageType) {
+    if (kind == MessageKind.COMMAND) return MessagingNames.LOGICAL_COMPONENT_ID;
+    if (kind == MessageKind.RESULT) {
+      if (BFF_RESULTS.contains(messageType)) return "bff";
+      if (EXECUTION_QUERY_RESULTS.contains(messageType)) return "wash-execution";
+      throw new IllegalArgumentException("unknown Result destination for " + messageType);
+    }
     if (kind == MessageKind.QUERY) {
-      if (messageType.startsWith("GetWashAdministration")) return "wash-administration";
-      if (messageType.startsWith("GetAccountAuthorization")) return "authorization";
-      if (messageType.startsWith("GetStudentAcademic")) return "academic";
-      return "wash-execution";
+      return switch (messageType) {
+        case "GetAppointmentAcademicConfiguration", "ListStudentAppointmentAcademicSnapshotsPage" -> "academic";
+        case "ListAccountAuthorizationSnapshotsPage" -> "authorization";
+        case "GetWashAdministrationConfiguration" -> "wash-administration";
+        case "ListWashExecutionIntegrationContextsPage" -> "wash-execution";
+        default -> throw new IllegalArgumentException("unknown Query destination for " + messageType);
+      };
     }
     String word = messageType.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
     return "appointments." + word;
