@@ -5,25 +5,17 @@ import com.estoma.users.domain.Person;
 import com.estoma.users.domain.PersonRejectedException;
 import com.estoma.users.domain.PersonStatus;
 import com.estoma.users.domain.RejectionCode;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/**
- * JDBC implementation of {@link PersonRepository}. Hand-written SQL, not
- * JPA — see docs/system-contract.md §13 for why: client-supplied {@code
- * expectedVersion} needs a real {@code WHERE version = ?} guard that
- * Hibernate's {@code @Version} cannot express, and the schema's {@code
- * CHECK (version > 0)} conflicts with Hibernate seeding new entities at
- * version 0.
- */
 @Repository
 class JdbcPersonRepository implements PersonRepository {
 
-  private static final String COLUMNS =
-      """
+  private static final String COLUMNS = """
       person_id, first_name, paternal_surname, maternal_surname,
       institutional_email, institutional_email_normalized, phone,
       status, version, created_at, updated_at, deactivated_at
@@ -45,18 +37,34 @@ class JdbcPersonRepository implements PersonRepository {
 
   @Override
   public Optional<Person> findByNormalizedEmail(String normalizedEmail) {
-    return jdbc.sql(
-            "SELECT " + COLUMNS + " FROM persons WHERE institutional_email_normalized = :email")
+    return jdbc.sql("SELECT " + COLUMNS + " FROM persons WHERE institutional_email_normalized = :email")
         .param("email", normalizedEmail)
         .query(PersonRowMapper.INSTANCE)
         .optional();
   }
 
   @Override
+  public List<Person> listAfter(UUID cursorExclusive, int limit) {
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    if (cursorExclusive == null) {
+      return jdbc.sql("SELECT " + COLUMNS + " FROM persons ORDER BY person_id LIMIT :limit")
+          .param("limit", limit)
+          .query(PersonRowMapper.INSTANCE)
+          .list();
+    }
+    return jdbc.sql("SELECT " + COLUMNS + " FROM persons WHERE person_id > :cursor ORDER BY person_id LIMIT :limit")
+        .param("cursor", cursorExclusive)
+        .param("limit", limit)
+        .query(PersonRowMapper.INSTANCE)
+        .list();
+  }
+
+  @Override
   public void insert(Person person) {
     try {
-      jdbc.sql(
-              """
+      jdbc.sql("""
               INSERT INTO persons (
                 person_id, first_name, paternal_surname, maternal_surname,
                 institutional_email, institutional_email_normalized, phone,
@@ -88,8 +96,7 @@ class JdbcPersonRepository implements PersonRepository {
   @Override
   public int updateProfile(Person updated, int expectedVersion) {
     try {
-      return jdbc.sql(
-              """
+      return jdbc.sql("""
               UPDATE persons SET
                 first_name = :firstName,
                 paternal_surname = :paternalSurname,
@@ -113,16 +120,14 @@ class JdbcPersonRepository implements PersonRepository {
           .param("expectedVersion", expectedVersion)
           .update();
     } catch (DuplicateKeyException e) {
-      throw new PersonRejectedException(
-          RejectionCode.DUPLICATE_PERSON,
+      throw new PersonRejectedException(RejectionCode.DUPLICATE_PERSON,
           "institutional email is already claimed by a different person");
     }
   }
 
   @Override
   public int updateStatus(Person updated, int expectedVersion, PersonStatus expectedCurrentStatus) {
-    return jdbc.sql(
-            """
+    return jdbc.sql("""
             UPDATE persons SET
               status = CAST(:newStatus AS person_status),
               deactivated_at = :deactivatedAt,
@@ -145,16 +150,13 @@ class JdbcPersonRepository implements PersonRepository {
   private static PersonRejectedException translateInsertConflict(DuplicateKeyException e) {
     String message = e.getMostSpecificCause().getMessage();
     if (message != null && message.contains("persons_pkey")) {
-      return new PersonRejectedException(
-          RejectionCode.PERSON_ALREADY_EXISTS, "a person with this personId already exists");
+      return new PersonRejectedException(RejectionCode.PERSON_ALREADY_EXISTS,
+          "a person with this personId already exists");
     }
     if (message != null && message.contains("ux_persons_email_normalized")) {
-      return new PersonRejectedException(
-          RejectionCode.DUPLICATE_PERSON,
+      return new PersonRejectedException(RejectionCode.DUPLICATE_PERSON,
           "institutional email is already claimed by a different person");
     }
-    // Unrecognized constraint: surface the original technical failure rather
-    // than guessing a functional rejection code that might be wrong.
     throw e;
   }
 }
