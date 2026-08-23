@@ -19,4 +19,7 @@ public interface AppointmentRepository {
   Optional<Appointment> findActiveByExceptionalAuthorizationForUpdate(UUID authorizationId);
   List<Appointment> findByExceptionalAuthorization(UUID authorizationId);
   List<Appointment> findByStatus(AppointmentStatus status);
+
+  /** Active appointments across slots on a service date, used by symmetric IMMUNO checks. */
+  default List<Appointment> findActiveOnDate(LocalDate serviceDate) { return List.of(); }
 }

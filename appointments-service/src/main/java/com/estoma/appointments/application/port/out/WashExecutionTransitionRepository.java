@@ -7,6 +7,8 @@ import java.util.UUID;
 public interface WashExecutionTransitionRepository {
   boolean record(TransitionRecord transition);
   Optional<TransitionRecord> find(UUID appointmentId, String eventType);
+  Optional<TransitionRecord> findLatestForExecution(UUID washExecutionId);
+
   record TransitionRecord(UUID transitionId, UUID washExecutionId, UUID appointmentId,
       String eventType, long executionVersion, UUID sourceEventId, String state,
       Instant occurredAt, Instant appliedAt) {

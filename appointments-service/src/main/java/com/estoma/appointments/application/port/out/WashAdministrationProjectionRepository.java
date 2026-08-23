@@ -3,6 +3,8 @@ package com.estoma.appointments.application.port.out;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface WashAdministrationProjectionRepository {
@@ -12,6 +14,13 @@ public interface WashAdministrationProjectionRepository {
   void upsertCabin(CabinProjection projection);
   void upsertTank(TankProjection projection);
   void upsertResourcePriority(ResourcePriorityProjection projection);
+
+  Optional<ServiceCalendarProjection> findCalendar(UUID calendarId);
+  Optional<ServiceScheduleProjection> findSchedule(UUID scheduleId);
+  List<AdministrativeClosureProjection> findClosuresOverlapping(UUID calendarId, Instant startsAt, Instant endsAt);
+  List<CabinProjection> findCabins();
+  List<TankProjection> findTanks();
+  List<ResourcePriorityProjection> findActivePriorities();
   boolean reliable();
 
   record ServiceCalendarProjection(UUID calendarId, String code, String timezone,
