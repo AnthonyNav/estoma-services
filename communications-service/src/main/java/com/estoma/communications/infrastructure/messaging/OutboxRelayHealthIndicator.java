@@ -5,7 +5,7 @@ import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
-@Component("outboxRelay")
+@Component
 public class OutboxRelayHealthIndicator implements HealthIndicator {
 
   private final JdbcOutboxRelayRepository repository;
