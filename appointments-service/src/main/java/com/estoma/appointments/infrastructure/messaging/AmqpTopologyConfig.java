@@ -51,8 +51,8 @@ public class AmqpTopologyConfig {
   @Bean Declarables appointmentsEventTopology(TopicExchange appointmentsEventsExchange,
       TopicExchange appointmentsDlxExchange, MessagingProperties properties) {
     Queue main = main(MessagingNames.EVENT_QUEUE, MessagingNames.EVENT_DLQ);
-    Queue retry1 = localRetry(MessagingNames.EVENT_RETRY_1, properties.retry1Ttl().toMillis());
-    Queue retry2 = localRetry(MessagingNames.EVENT_RETRY_2, properties.retry2Ttl().toMillis());
+    Queue retry1 = localRetry(MessagingNames.EVENT_RETRY_1, properties.retry1Ttl().toMillis(), MessagingNames.EVENT_QUEUE);
+    Queue retry2 = localRetry(MessagingNames.EVENT_RETRY_2, properties.retry2Ttl().toMillis(), MessagingNames.EVENT_QUEUE);
     Queue dlq = QueueBuilder.durable(MessagingNames.EVENT_DLQ).build();
     return new Declarables(main,
         BindingBuilder.bind(main).to(appointmentsEventsExchange).with("academic.#"),
@@ -67,8 +67,8 @@ public class AmqpTopologyConfig {
   @Bean Declarables appointmentsResultTopology(DirectExchange appointmentsResultsExchange,
       TopicExchange appointmentsDlxExchange, MessagingProperties properties) {
     Queue main = main(MessagingNames.RESULT_QUEUE, MessagingNames.RESULT_DLQ);
-    Queue retry1 = localRetry(MessagingNames.RESULT_RETRY_1, properties.retry1Ttl().toMillis());
-    Queue retry2 = localRetry(MessagingNames.RESULT_RETRY_2, properties.retry2Ttl().toMillis());
+    Queue retry1 = localRetry(MessagingNames.RESULT_RETRY_1, properties.retry1Ttl().toMillis(), MessagingNames.RESULT_QUEUE);
+    Queue retry2 = localRetry(MessagingNames.RESULT_RETRY_2, properties.retry2Ttl().toMillis(), MessagingNames.RESULT_QUEUE);
     Queue dlq = QueueBuilder.durable(MessagingNames.RESULT_DLQ).build();
     return new Declarables(main, BindingBuilder.bind(main).to(appointmentsResultsExchange).with(MessagingNames.LOGICAL_COMPONENT_ID),
         retry1, BindingBuilder.bind(retry1).to(appointmentsDlxExchange).with(MessagingNames.RESULT_RETRY_1),
@@ -86,8 +86,8 @@ public class AmqpTopologyConfig {
         .withArgument("x-dead-letter-exchange", exchange).withArgument("x-dead-letter-routing-key", key).build();
   }
 
-  private static Queue localRetry(String name, long ttl) {
+  private static Queue localRetry(String name, long ttl, String returnQueue) {
     return QueueBuilder.durable(name).withArgument("x-message-ttl", ttl)
-        .withArgument("x-dead-letter-exchange", "").withArgument("x-dead-letter-routing-key", MessagingNames.EVENT_QUEUE).build();
+        .withArgument("x-dead-letter-exchange", "").withArgument("x-dead-letter-routing-key", returnQueue).build();
   }
 }
