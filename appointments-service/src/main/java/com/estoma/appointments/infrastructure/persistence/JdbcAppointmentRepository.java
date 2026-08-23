@@ -139,11 +139,16 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
     return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE s.service_date=:date AND a.status IN ('SCHEDULED','IN_PROGRESS') ORDER BY a.created_at,a.appointment_id")
         .param("date", date).query(JdbcAppointmentRepository::map).list();
   }
-
   @Override public List<Appointment> findMissedCandidates(Instant toleranceEndedBefore, int limit) {
     if (limit <= 0) return List.of();
     return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE a.status='SCHEDULED' AND a.entry_authorized_at IS NULL AND s.arrival_tolerance_until < :cutoff ORDER BY s.arrival_tolerance_until,a.appointment_id LIMIT :limit")
         .param("cutoff", Timestamps.toTimestamp(toleranceEndedBefore)).param("limit", limit)
+        .query(JdbcAppointmentRepository::map).list();
+  }
+  @Override public List<Appointment> findForServiceDatePage(LocalDate serviceDate, UUID afterAppointmentId, int limit) {
+    if (limit <= 0) return List.of();
+    return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE s.service_date=:date AND (:after IS NULL OR a.appointment_id > :after) ORDER BY a.appointment_id LIMIT :limit")
+        .param("date", serviceDate).param("after", afterAppointmentId).param("limit", limit)
         .query(JdbcAppointmentRepository::map).list();
   }
 }
