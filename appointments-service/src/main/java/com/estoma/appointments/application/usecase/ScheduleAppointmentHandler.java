@@ -26,7 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /** Complete booking workflow. Slot/capacity rows are locked before final demand validation. */
 @Service
-public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
+public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
   private final AppointmentRepository appointments;
   private final AppointmentTimeSlotRepository slots;
   private final AppointmentCapacityProjectionRepository capacity;
@@ -151,8 +151,14 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
     appointments.save(appointment);
     ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentScheduled",
         appointment.appointmentId(), appointment.version(), "{\"appointmentId\":\""
-            + appointment.appointmentId() + "\",\"slotId\":\"" + slot.appointmentTimeSlotId()
-            + "\",\"status\":\"SCHEDULED\"}", command.now());
+            + appointment.appointmentId() + "\",\"studentAccountId\":\""
+            + appointment.studentAccountId() + "\",\"appointmentTimeSlotId\":\""
+            + appointment.appointmentTimeSlotId() + "\",\"courseSectionId\":\""
+            + appointment.courseSectionId() + "\",\"appointmentType\":\""
+            + appointment.appointmentType() + "\",\"instrumentCount\":"
+            + appointment.instrumentCount() + ",\"pieceType\":\""
+            + appointment.pieceType() + "\",\"status\":\"SCHEDULED\",\"version\":"
+            + appointment.version() + "}", command.now());
     return ApplicationResult.applied(appointment.appointmentId(), appointment.version(), "appointment scheduled");
   }
 

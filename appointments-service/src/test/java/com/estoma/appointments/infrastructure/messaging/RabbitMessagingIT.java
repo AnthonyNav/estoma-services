@@ -125,7 +125,7 @@ class RabbitMessagingIT extends AbstractPostgresIT {
 
     Instant start = Instant.parse("2026-08-23T15:00:00Z");
     UUID slotId = UUID.randomUUID();
-    AppointmentTimeSlot slot = AppointmentTimeSlot.create(slotId, UUID.randomUUID(),
+    AppointmentTimeSlot slot = AppointmentTimeSlot.create(slotId, UUID.randomUUID(), UUID.randomUUID(),
         LocalDate.ofInstant(start, ZoneOffset.UTC), start, start.plusSeconds(3600), ZoneOffset.UTC,
         start.minusSeconds(600), start.minusSeconds(1200), start.plusSeconds(600));
     slots.save(slot);
@@ -155,6 +155,8 @@ class RabbitMessagingIT extends AbstractPostgresIT {
         .isEqualTo(appointmentId.toString());
     assertThat(result.payload().path("data").path("timeSlot").path("appointmentTimeSlotId").asString())
         .isEqualTo(slotId.toString());
+    assertThat(result.payload().path("data").path("timeSlot").path("calendarId").asString())
+        .isEqualTo(slot.calendarId().toString());
   }
 
   @Test
@@ -166,21 +168,21 @@ class RabbitMessagingIT extends AbstractPostgresIT {
         .isEqualTo(FailureRouter.Route.RETRY);
     Message secondAttempt = rabbit.receive(MessagingNames.COMMAND_QUEUE, 2_000);
     assertThat(body(secondAttempt)).isEqualTo(marker);
-    assertThat(secondAttempt.getMessageProperties().getHeader("x-appointments-attempt"))
+    assertThat((Object) secondAttempt.getMessageProperties().getHeader("x-appointments-attempt"))
         .isEqualTo(1);
 
     assertThat(failures.route(secondAttempt, MessagingNames.COMMAND_QUEUE, true))
         .isEqualTo(FailureRouter.Route.RETRY);
     Message thirdAttempt = rabbit.receive(MessagingNames.COMMAND_QUEUE, 2_000);
     assertThat(body(thirdAttempt)).isEqualTo(marker);
-    assertThat(thirdAttempt.getMessageProperties().getHeader("x-appointments-attempt"))
+    assertThat((Object) thirdAttempt.getMessageProperties().getHeader("x-appointments-attempt"))
         .isEqualTo(2);
 
     assertThat(failures.route(thirdAttempt, MessagingNames.COMMAND_QUEUE, true))
         .isEqualTo(FailureRouter.Route.DLQ);
     Message dead = rabbit.receive(MessagingNames.COMMAND_DLQ, 2_000);
     assertThat(body(dead)).isEqualTo(marker);
-    assertThat(dead.getMessageProperties().getHeader("x-appointments-attempt")).isEqualTo(3);
+    assertThat((Object) dead.getMessageProperties().getHeader("x-appointments-attempt")).isEqualTo(3);
   }
 
   private static Message message(String body) {

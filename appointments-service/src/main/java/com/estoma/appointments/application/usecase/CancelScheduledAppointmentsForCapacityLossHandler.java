@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class CancelScheduledAppointmentsForCapacityLossHandler
+public class CancelScheduledAppointmentsForCapacityLossHandler
     implements CancelScheduledAppointmentsForCapacityLossUseCase {
   private static final String CAPACITY_LOSS = "CAPACITY_LOSS";
   private final AppointmentRepository appointments;
@@ -73,7 +73,9 @@ public final class CancelScheduledAppointmentsForCapacityLossHandler
       cancelled++;
       ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentCancelled",
           changed.appointmentId(), changed.version(), "{\"appointmentId\":\""
-              + changed.appointmentId() + "\",\"cancellationType\":\"CLINIC\","
+              + changed.appointmentId() + "\",\"appointmentTimeSlotId\":\""
+              + changed.appointmentTimeSlotId() + "\",\"status\":\"CANCELLED\","
+              + "\"cancellationType\":\"CLINIC\","
               + "\"cancellationSubreason\":\"CAPACITY_LOSS\"}", now);
     }
 

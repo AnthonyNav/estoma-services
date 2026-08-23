@@ -108,7 +108,7 @@ class AppointmentDomainTest {
   }
 
   private static AppointmentTimeSlot slot(Instant starts) {
-    return AppointmentTimeSlot.create(UUID.randomUUID(), UUID.randomUUID(),
+    return AppointmentTimeSlot.create(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
         LocalDate.ofInstant(starts, ZoneOffset.UTC), starts, starts.plusSeconds(30 * 60), ZoneOffset.UTC,
         starts.minusSeconds(10 * 60), starts.minusSeconds(20 * 60), starts.plusSeconds(40 * 60));
   }

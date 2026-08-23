@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMissedUseCase {
+public class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMissedUseCase {
   private final AppointmentRepository appointments;
   private final AppointmentTimeSlotRepository slots;
   private final WashExecutionEvidenceRepository evidence;
@@ -70,9 +70,10 @@ public final class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMi
           result = ApplicationResult.deferred("CONCURRENT_MODIFICATION",
               "appointment changed while marking missed", appointment.appointmentId());
         } else {
-          ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentMarkedMissed",
+          ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentMissed",
               missed.appointmentId(), missed.version(), "{\"appointmentId\":\""
-                  + missed.appointmentId() + "\",\"points\":1}", now);
+                  + missed.appointmentId() + "\",\"appointmentTimeSlotId\":\""
+                  + missed.appointmentTimeSlotId() + "\",\"status\":\"MISSED\",\"points\":1}", now);
           result = ApplicationResult.applied(missed.appointmentId(), missed.version(), "appointment marked missed");
         }
       }

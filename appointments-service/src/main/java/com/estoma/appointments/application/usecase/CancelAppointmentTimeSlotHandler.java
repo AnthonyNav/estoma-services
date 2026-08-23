@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class CancelAppointmentTimeSlotHandler implements CancelAppointmentTimeSlotUseCase {
+public class CancelAppointmentTimeSlotHandler implements CancelAppointmentTimeSlotUseCase {
   private final AppointmentTimeSlotRepository slots;
   private final CommandIdempotencyRepository idempotency;
   private final OutboxRepository outbox;
@@ -53,7 +53,8 @@ public final class CancelAppointmentTimeSlotHandler implements CancelAppointment
       } else {
         ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentTimeSlotCancelled",
             cancelled.appointmentTimeSlotId(), cancelled.version(),
-            "{\"slotId\":\"" + cancelled.appointmentTimeSlotId() + "\"}", now);
+            "{\"appointmentTimeSlotId\":\"" + cancelled.appointmentTimeSlotId()
+                + "\",\"status\":\"CANCELLED\",\"version\":" + cancelled.version() + "}", now);
         result = ApplicationResult.applied(cancelled.appointmentTimeSlotId(), cancelled.version(), "slot cancelled");
       }
     }

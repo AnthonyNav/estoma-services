@@ -210,7 +210,7 @@ class PostgresFoundationIT extends AbstractPostgresIT {
   @Test void outboxFailureRollsBackTheContainingTransaction() {
     Instant now = Instant.parse("2026-01-07T10:00:00Z");
     UUID slotId = UUID.randomUUID();
-    AppointmentTimeSlot slot = AppointmentTimeSlot.create(slotId, UUID.randomUUID(), LocalDate.of(2026,1,7),
+    AppointmentTimeSlot slot = AppointmentTimeSlot.create(slotId, UUID.randomUUID(), UUID.randomUUID(), LocalDate.of(2026,1,7),
         now, now.plusSeconds(1800), ZoneOffset.UTC, now.minusSeconds(600), now.minusSeconds(1200),
         now.plusSeconds(600));
     TransactionTemplate transaction = new TransactionTemplate(transactionManager);
@@ -285,7 +285,7 @@ class PostgresFoundationIT extends AbstractPostgresIT {
   }
 
   private AppointmentTimeSlot saveSlot(Instant starts) {
-    AppointmentTimeSlot slot = AppointmentTimeSlot.create(UUID.randomUUID(), UUID.randomUUID(),
+    AppointmentTimeSlot slot = AppointmentTimeSlot.create(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
         LocalDate.ofInstant(starts, ZoneOffset.UTC), starts, starts.plusSeconds(1800), ZoneOffset.UTC,
         starts.minusSeconds(600), starts.minusSeconds(1200), starts.plusSeconds(600));
     slots.save(slot);

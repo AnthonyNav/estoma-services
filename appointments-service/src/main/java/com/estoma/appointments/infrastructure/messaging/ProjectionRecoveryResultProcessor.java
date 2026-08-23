@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +32,7 @@ public class ProjectionRecoveryResultProcessor {
   private final WashAdministrationProjectionRepository administration;
   private final WashExecutionOperationalProjectionRepository execution;
   private final WashExecutionSnapshotReconciler executionReconciler;
-  private final PendingProjectionRecoveryWorker pendingWorker;
+  private final Optional<PendingProjectionRecoveryWorker> pendingWorker;
   private final PendingProjectionEventRepository pending;
   private final OutboxRepository outbox;
   private final Clock clock;
@@ -42,7 +43,7 @@ public class ProjectionRecoveryResultProcessor {
       WashAdministrationProjectionRepository administration,
       WashExecutionOperationalProjectionRepository execution,
       WashExecutionSnapshotReconciler executionReconciler,
-      PendingProjectionRecoveryWorker pendingWorker, PendingProjectionEventRepository pending,
+      Optional<PendingProjectionRecoveryWorker> pendingWorker, PendingProjectionEventRepository pending,
       OutboxRepository outbox, Clock clock) {
     this.recovery=recovery; this.jobs=jobs; this.inbox=inbox; this.academic=academic;
     this.authorization=authorization; this.administration=administration; this.execution=execution;
@@ -229,7 +230,7 @@ public class ProjectionRecoveryResultProcessor {
   }
 
   private void finish(String projection,ProjectionRecoveryJobRepository.RecoveryJob job,long sourceVersion,Instant now){
-    pendingWorker.replay(projection);
+    pendingWorker.ifPresent(worker -> worker.replay(projection));
     if(pending.hasOpen(projection)){
       recovery.degraded(projection,"deferred projection Events remain unresolved after authoritative snapshot");
       jobs.delete(projection); return;
