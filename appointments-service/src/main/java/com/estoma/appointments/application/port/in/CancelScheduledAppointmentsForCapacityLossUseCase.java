@@ -8,6 +8,5 @@ import java.util.UUID;
 public interface CancelScheduledAppointmentsForCapacityLossUseCase {
   ApplicationResult cancel(Command command);
 
-  record Command(CommandMetadata metadata, UUID sourceEventId, UUID slotId, int availableCapacity,
-      Instant now) {}
+  record Command(CommandMetadata metadata, UUID sourceEventId, UUID slotId, Instant now) {}
 }
