@@ -2,11 +2,14 @@ package com.estoma.appointments.application.port.out;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface WashExecutionOperationalProjectionRepository {
   void upsertResourceUnavailability(ResourceUnavailabilityProjection projection);
   void upsertCleaningPeriod(CleaningPeriodProjection projection);
+  Optional<ResourceUnavailabilityProjection> findResourceUnavailability(UUID resourceUnavailabilityId);
+  Optional<CleaningPeriodProjection> findCleaningPeriod(UUID cleaningPeriodId);
   List<ResourceUnavailabilityProjection> findUnavailabilityOverlapping(Instant startsAt, Instant endsAt);
   List<CleaningPeriodProjection> findCleaningPeriodsOverlapping(Instant startsAt, Instant endsAt);
   boolean reliable();
