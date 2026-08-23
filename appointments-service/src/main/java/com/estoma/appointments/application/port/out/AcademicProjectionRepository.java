@@ -9,6 +9,7 @@ public interface AcademicProjectionRepository {
   void upsertStudentProfile(StudentAcademicProfileProjection projection);
   void upsertStudentCourse(StudentCourseSectionProjection projection);
 
+  Optional<AcademicPeriodProjection> findPeriod(UUID academicPeriodId);
   Optional<AcademicPeriodProjection> findActivePeriod();
   Optional<StudentAcademicProfileProjection> findStudentProfile(UUID studentAccountId);
   Optional<StudentCourseSectionProjection> findStudentCourse(UUID studentAccountId, UUID courseSectionId);
