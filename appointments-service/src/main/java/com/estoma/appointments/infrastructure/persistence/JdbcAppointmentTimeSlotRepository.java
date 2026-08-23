@@ -14,13 +14,14 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class JdbcAppointmentTimeSlotRepository implements AppointmentTimeSlotRepository {
-  private static final String COLUMNS = "appointment_time_slot_id,source_schedule_id,service_date,starts_at,ends_at,timezone,booking_deadline_at,cancellation_deadline_at,arrival_tolerance_until,status,version";
+  private static final String COLUMNS = "appointment_time_slot_id,source_schedule_id,calendar_id,service_date,starts_at,ends_at,timezone,booking_deadline_at,cancellation_deadline_at,arrival_tolerance_until,status,version";
   private final JdbcClient jdbc;
   public JdbcAppointmentTimeSlotRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
   @Override public AppointmentTimeSlot save(AppointmentTimeSlot slot) {
-    jdbc.sql("INSERT INTO appointment_time_slots (appointment_time_slot_id,source_schedule_id,service_date,starts_at,ends_at,timezone,booking_deadline_at,cancellation_deadline_at,arrival_tolerance_until,status,version,created_at,updated_at) VALUES (:id,:source,:date,:starts,:ends,:timezone,:booking,:cancel,:arrival,:status,:version,now(),now())")
+    jdbc.sql("INSERT INTO appointment_time_slots (appointment_time_slot_id,source_schedule_id,calendar_id,service_date,starts_at,ends_at,timezone,booking_deadline_at,cancellation_deadline_at,arrival_tolerance_until,status,version,created_at,updated_at) VALUES (:id,:source,:calendar,:date,:starts,:ends,:timezone,:booking,:cancel,:arrival,:status,:version,now(),now())")
       .param("id",slot.appointmentTimeSlotId()).param("source",slot.sourceScheduleId())
+      .param("calendar",slot.calendarId())
       .param("date",slot.serviceDate()).param("starts",Timestamps.toTimestamp(slot.startsAt()))
       .param("ends",Timestamps.toTimestamp(slot.endsAt())).param("timezone",slot.timezone().getId())
       .param("booking",Timestamps.toTimestamp(slot.bookingDeadlineAt())).param("cancel",Timestamps.toTimestamp(slot.cancellationDeadlineAt()))
@@ -62,7 +63,8 @@ public class JdbcAppointmentTimeSlotRepository implements AppointmentTimeSlotRep
 
   private static AppointmentTimeSlot map(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
     return AppointmentTimeSlot.reconstitute(rs.getObject("appointment_time_slot_id",UUID.class),
-        rs.getObject("source_schedule_id",UUID.class),rs.getObject("service_date",LocalDate.class),
+        rs.getObject("source_schedule_id",UUID.class),rs.getObject("calendar_id",UUID.class),
+        rs.getObject("service_date",LocalDate.class),
         Timestamps.toInstant(rs,"starts_at"),Timestamps.toInstant(rs,"ends_at"),ZoneId.of(rs.getString("timezone")),
         Timestamps.toInstant(rs,"booking_deadline_at"),Timestamps.toInstant(rs,"cancellation_deadline_at"),
         Timestamps.toInstant(rs,"arrival_tolerance_until"),AppointmentTimeSlotStatus.valueOf(rs.getString("status")),rs.getLong("version"));
