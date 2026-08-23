@@ -39,8 +39,7 @@ public interface PasswordRecoveryDeliveryPort {
 
   int resolveRecipient(UUID emailDeliveryId, String recipientAddress, String recipientName, Instant now);
 
-  /** Moves an expired WAITING row to PENDING so the worker records the canonical pre-provider failure/events. */
-  int releaseExpiredWaiting(UUID emailDeliveryId, Instant now);
+  int failWaiting(UUID emailDeliveryId, String code, Instant now);
 
   /** Technical RPC failure before any provider attempt: release the claim without changing attempt counters. */
   int requeueBeforeProviderAttempt(UUID emailDeliveryId, UUID claimToken, Instant nextAttemptAt, Instant now);
