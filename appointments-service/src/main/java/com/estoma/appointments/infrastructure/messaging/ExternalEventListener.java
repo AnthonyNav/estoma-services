@@ -86,7 +86,7 @@ public final class ExternalEventListener {
     }
   }
 
-  private static String expectedProducer(String messageType) {
+  static String expectedProducer(String messageType) {
     if (ACADEMIC_EVENTS.contains(messageType)) return "academic";
     if (AUTHORIZATION_EVENTS.contains(messageType)) return "authorization";
     if (ADMINISTRATION_EVENTS.contains(messageType)) return "wash-administration";
