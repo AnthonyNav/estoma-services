@@ -4,10 +4,11 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Normalized Execution event used by PR2 handlers and PR3 wire adapters. */
+/** Normalized Execution fact used by PR2 handlers and populated by PR3 wire adapters. */
 public record ExecutionEvent(UUID messageId, UUID sourceEventId, UUID washExecutionId,
     UUID appointmentId, String eventType, long executionVersion, Instant occurredAt,
-    Instant arrivedAt, Instant decidedAt, String reason, String payloadJson) {
+    Instant arrivedAt, Instant actionAt, UUID actorAccountId, Instant startedAt,
+    String cancellationType, String cancellationSubreason, String reason, String payloadJson) {
   public ExecutionEvent {
     Objects.requireNonNull(messageId, "messageId");
     Objects.requireNonNull(sourceEventId, "sourceEventId");
@@ -18,11 +19,7 @@ public record ExecutionEvent(UUID messageId, UUID sourceEventId, UUID washExecut
     if (executionVersion <= 0) throw new IllegalArgumentException("executionVersion must be positive");
   }
 
-  public Instant effectiveArrivalAt() {
-    return arrivedAt == null ? occurredAt : arrivedAt;
-  }
-
-  public String payloadOrEmpty() {
-    return payloadJson == null ? "{}" : payloadJson;
-  }
+  public Instant effectiveArrivalAt() { return arrivedAt == null ? occurredAt : arrivedAt; }
+  public Instant effectiveActionAt() { return actionAt == null ? occurredAt : actionAt; }
+  public String payloadOrEmpty() { return payloadJson == null ? "{}" : payloadJson; }
 }
