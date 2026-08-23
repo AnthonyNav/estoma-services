@@ -1,27 +1,20 @@
 package com.estoma.communications.infrastructure.email;
 
 import com.estoma.communications.application.port.EmailProviderPort;
+import com.estoma.communications.application.port.PasswordRecoveryDeliveryPort;
+import com.estoma.communications.application.port.RecoveryCodeDeliveryPort;
 import com.estoma.communications.contracts.EmailContentMode;
 import com.estoma.communications.domain.email.EmailDelivery;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/**
- * Implements "Email Delivery Operational Policy" (system_contract.md):
- * claims due deliveries in one transaction, calls the provider with NO
- * transaction open, then records the outcome in a second transaction --
- * data-consistency-architecture.md's hard rule that an external call must
- * never happen inside an open database transaction.
- *
- * <p>Provider retry policy is six physical calls per cycle with gaps {@code
- * 1m, 5m, 30m, 2h, 24h}; the sixth failure is terminal.
- */
+/** Claims email work, releases the DB transaction, calls external dependencies, then records one result transaction. */
 @Component
 public class EmailDeliveryWorker {
   private static final Logger LOGGER = LoggerFactory.getLogger(EmailDeliveryWorker.class);
@@ -35,6 +28,8 @@ public class EmailDeliveryWorker {
   private final EmailTemplateResolver templateResolver;
   private final PreProviderFailureTxService preProviderFailureService;
   private final ProviderNotStartedRecoveryTxService providerNotStartedRecoveryService;
+  private final PasswordRecoveryDeliveryPort recoveryDeliveries;
+  private final RecoveryCodeDeliveryPort recoveryCodes;
   private final boolean scheduledEnabled;
 
   private final AtomicReference<String> lastPollError = new AtomicReference<>();
@@ -48,6 +43,8 @@ public class EmailDeliveryWorker {
       EmailTemplateResolver templateResolver,
       PreProviderFailureTxService preProviderFailureService,
       ProviderNotStartedRecoveryTxService providerNotStartedRecoveryService,
+      PasswordRecoveryDeliveryPort recoveryDeliveries,
+      RecoveryCodeDeliveryPort recoveryCodes,
       @Value("${estoma.communications.email.worker.batch-size:20}") int batchSize,
       @Value("${estoma.communications.email.worker.enabled:true}") boolean scheduledEnabled) {
     this.provider = provider;
@@ -59,6 +56,8 @@ public class EmailDeliveryWorker {
     this.templateResolver = templateResolver;
     this.preProviderFailureService = preProviderFailureService;
     this.providerNotStartedRecoveryService = providerNotStartedRecoveryService;
+    this.recoveryDeliveries = recoveryDeliveries;
+    this.recoveryCodes = recoveryCodes;
     this.scheduledEnabled = scheduledEnabled;
   }
 
@@ -69,8 +68,6 @@ public class EmailDeliveryWorker {
 
   public void pollAndProcess() {
     try {
-      // A lease starts when a row is claimed. Claiming a batch and then processing
-      // it serially wastes leases for items waiting behind a slow provider call.
       for (int i = 0; i < batchSize; i++) {
         List<EmailDelivery> claimedRows = claimService.claim(1);
         if (claimedRows.isEmpty()) break;
@@ -78,33 +75,63 @@ public class EmailDeliveryWorker {
         boolean providerCallStarted = false;
         boolean recordingResult = false;
         try {
-          EmailProviderPort.EmailSendRequest request = new EmailProviderPort.EmailSendRequest(
-              claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
-              claimed.contentMode(), claimed.subject(), claimed.textBody(), claimed.htmlBody(), claimed.templateCode(), claimed.templateData());
-          EmailProviderPort.EmailSendRequest resolved = templateResolver.resolve(request);
+          var recovery = recoveryDeliveries.findMetadata(claimed.emailDeliveryId()).orElse(null);
+          EmailProviderPort.EmailSendRequest resolved;
+          if (recovery != null) {
+            Instant beforeRpc = Instant.now();
+            if (!recovery.expiresAt().isAfter(beforeRpc)) {
+              preProviderFailureService.record(claimed, "RECOVERY_EXPIRED", "recovery expired before provider call");
+              continue;
+            }
+
+            final String code;
+            try {
+              code = recoveryCodes.getCode(recovery.recoveryId(), correlationForRecovery(claimed));
+            } catch (RecoveryCodeDeliveryPort.NotAvailableException unavailable) {
+              preProviderFailureService.record(claimed, unavailable.normalizedCode(), "recovery code is not available");
+              continue;
+            } catch (RecoveryCodeDeliveryPort.TechnicalException technical) {
+              Instant now = Instant.now();
+              if (!recovery.expiresAt().isAfter(now)) {
+                preProviderFailureService.record(claimed, "RECOVERY_EXPIRED", "recovery expired during Security RPC");
+              } else {
+                Instant next = now.plusSeconds(5);
+                if (next.isAfter(recovery.expiresAt())) next = recovery.expiresAt();
+                if (recoveryDeliveries.requeueBeforeProviderAttempt(
+                    claimed.emailDeliveryId(), claimed.claimToken(), next, now) != 1) {
+                  throw new LostEmailClaimException();
+                }
+              }
+              continue;
+            }
+
+            resolved = new EmailProviderPort.EmailSendRequest(
+                claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
+                EmailContentMode.GENERIC, "Recuperación de contraseña",
+                "Tu código de recuperación es: " + code, null, null, null);
+          } else {
+            EmailProviderPort.EmailSendRequest request = new EmailProviderPort.EmailSendRequest(
+                claimed.recipientAddress(), claimed.recipientName(), claimed.fromName(), claimed.fromAddress(), claimed.replyToAddress(),
+                claimed.contentMode(), claimed.subject(), claimed.textBody(), claimed.htmlBody(), claimed.templateCode(), claimed.templateData());
+            resolved = templateResolver.resolve(request);
+          }
+
           EmailProviderRouter.ProviderSelection selection = provider.select();
           claimed = prepareService.prepare(claimed, selection.providerCode());
           claimed = startService.start(claimed);
           providerCallStarted = true;
-          // No transaction is open here: this is the only place the provider is called.
-            EmailProviderPort.EmailSendResult result = provider.send(selection, resolved);
-           recordingResult = true;
-           resultService.record(claimed, result);
+          EmailProviderPort.EmailSendResult result = provider.send(selection, resolved);
+          recordingResult = true;
+          resultService.record(claimed, result);
         } catch (RuntimeException itemError) {
           LOGGER.warn("email delivery item failed: deliveryId={}, providerCallStarted={}, error={}",
               claimed.emailDeliveryId(), providerCallStarted, itemError.toString());
           if (recordingResult) {
-            // Result persistence is the transaction of record. Retrying it here
-            // could duplicate state/events after a partial failure; roll back.
             throw itemError;
           } else if (itemError instanceof EmailProviderRouter.ProviderNotStartedException) {
             providerNotStartedRecoveryService.recover(claimed);
-            // The executor remains unavailable for this poll; do not reclaim
-            // the just-requeued delivery in a tight loop.
             break;
           } else if (providerCallStarted) {
-            // Provider execution errors are normalized by EmailProviderRouter.
-            // Any other failure here is technical and must not produce a second result write.
             throw itemError;
           } else if (itemError instanceof PreProviderValidationException validation) {
             preProviderFailureService.record(claimed, validation.normalizedErrorCode(), validation.sanitizedMessage());
@@ -120,18 +147,13 @@ public class EmailDeliveryWorker {
     }
   }
 
-  /**
-   * Read by {@link EmailWorkerHealthIndicator}. A method, not a field: this
-   * bean is proxied for {@code @Transactional}, and direct field access
-   * from another bean would silently read the (uninitialized) proxy's own
-   * copy of the field rather than delegating to the real target.
-   */
-  String lastPollError() {
-    return lastPollError.get();
+  /** Correlation is non-secret and exists only to match the ephemeral RPC response to this immediate attempt. */
+  private static java.util.UUID correlationForRecovery(EmailDelivery claimed) {
+    return java.util.UUID.nameUUIDFromBytes(
+        (claimed.communicationId().toString() + ":" + claimed.emailDeliveryId()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
   }
 
+  String lastPollError() { return lastPollError.get(); }
   List<EmailDelivery> claimDue() { return claimService.claim(batchSize); }
-
   void recordResult(EmailDelivery claimed, EmailProviderPort.EmailSendResult result) { resultService.record(claimed, result); }
-
 }
