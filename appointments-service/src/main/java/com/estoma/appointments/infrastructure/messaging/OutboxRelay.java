@@ -17,6 +17,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.JsonNode;
 
 /** Claims in a short transaction, publishes with confirm, then fences the claim. */
 @Component
@@ -84,16 +85,26 @@ public final class OutboxRelay {
     wireProperties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
     wireProperties.setMessageId(message.messageId().toString());
 
-    String idempotencyKey = kind == MessageKind.COMMAND ? message.messageId().toString() : null;
+    JsonNode payload = codec.readTree(message.payloadJson());
+    String idempotencyKey = kind == MessageKind.COMMAND
+        ? commandIdempotencyKey(message.messageType(), payload, message.messageId()) : null;
     MessageEnvelope envelope = new MessageEnvelope(message.messageId(), message.messageType(),
         message.messageVersion(), kind, MessagingNames.LOGICAL_COMPONENT_ID, message.occurredAt(),
         message.correlationId(), message.causationId(), message.operationId(), idempotencyKey,
         message.aggregateId(), message.aggregateVersion() == null ? null : Math.toIntExact(message.aggregateVersion()),
-        new WireActor("SYSTEM", null, MessagingNames.LOGICAL_COMPONENT_ID),
-        codec.readTree(message.payloadJson()));
+        new WireActor("SYSTEM", null, MessagingNames.LOGICAL_COMPONENT_ID), payload);
     Message wire = new Message(codec.encode(envelope), wireProperties);
     if (kind == MessageKind.EVENT) publisher.publishEvent(exchange, route, wire);
     else publisher.publishRequiredRoute(exchange, route, wire);
+  }
+
+  static String commandIdempotencyKey(String messageType, JsonNode payload, UUID fallback) {
+    return switch (messageType) {
+      case "RecalculateAppointmentCapacityForTimeSlot" -> required(payload,"sourceEventId") + ":" + required(payload,"slotId");
+      case "MarkAppointmentAsMissed" -> required(payload,"appointmentId") + ":" + requiredNumber(payload,"expectedVersion");
+      case "CreateAppointmentTimeSlot" -> required(payload,"slotId");
+      default -> fallback.toString();
+    };
   }
 
   static String routingKey(MessageKind kind, String messageType) {
@@ -114,5 +125,18 @@ public final class OutboxRelay {
     }
     String word = messageType.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
     return "appointments." + word;
+  }
+
+  private static String required(JsonNode payload, String field) {
+    if (!payload.hasNonNull(field) || !payload.path(field).isTextual() || payload.path(field).asText().isBlank()) {
+      throw new IllegalArgumentException(field + " is required for internal command idempotency");
+    }
+    return payload.path(field).asText();
+  }
+  private static long requiredNumber(JsonNode payload, String field) {
+    if (!payload.has(field) || !payload.path(field).isIntegralNumber()) {
+      throw new IllegalArgumentException(field + " is required for internal command idempotency");
+    }
+    return payload.path(field).asLong();
   }
 }
