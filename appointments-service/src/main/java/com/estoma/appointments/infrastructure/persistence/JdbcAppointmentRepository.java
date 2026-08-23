@@ -9,6 +9,7 @@ import com.estoma.appointments.domain.model.CancellationType;
 import com.estoma.appointments.domain.model.PieceType;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -46,25 +47,18 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
       .param("authorization", a.exceptionalAuthorizationId())
       .param("cancelType", a.cancellationType() == null ? null : a.cancellationType().name())
       .param("cancelSubreason", a.cancellationSubreason() == null ? null : a.cancellationSubreason().name())
-      .param("cancelReason", a.cancellationReason())
-      .param("cancelledBy", a.cancelledByAccountId())
-      .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt()))
-      .param("rejectionReason", a.rejectionReason())
-      .param("rejectedBy", a.rejectedByAccountId())
-      .param("rejectedAt", Timestamps.toTimestamp(a.rejectedAt()))
-      .param("missedAt", Timestamps.toTimestamp(a.missedAt()))
-      .param("startedAt", Timestamps.toTimestamp(a.startedAt()))
-      .param("completedBy", a.completedByAccountId())
-      .param("completedAt", Timestamps.toTimestamp(a.completedAt()))
-      .param("created", Timestamps.toTimestamp(a.createdAt()))
-      .param("updated", Timestamps.toTimestamp(a.updatedAt()))
+      .param("cancelReason", a.cancellationReason()).param("cancelledBy", a.cancelledByAccountId())
+      .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt())).param("rejectionReason", a.rejectionReason())
+      .param("rejectedBy", a.rejectedByAccountId()).param("rejectedAt", Timestamps.toTimestamp(a.rejectedAt()))
+      .param("missedAt", Timestamps.toTimestamp(a.missedAt())).param("startedAt", Timestamps.toTimestamp(a.startedAt()))
+      .param("completedBy", a.completedByAccountId()).param("completedAt", Timestamps.toTimestamp(a.completedAt()))
+      .param("created", Timestamps.toTimestamp(a.createdAt())).param("updated", Timestamps.toTimestamp(a.updatedAt()))
       .param("version", a.version()).update();
     return a;
   }
 
   @Override public Optional<Appointment> findById(UUID id) { return find("appointment_id=:id", "id", id, false); }
   @Override public Optional<Appointment> findByIdForUpdate(UUID id) { return find("appointment_id=:id", "id", id, true); }
-
   private Optional<Appointment> find(String predicate, String param, Object value, boolean lock) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM appointments WHERE " + predicate + (lock ? " FOR UPDATE" : ""))
         .param(param, value).query(JdbcAppointmentRepository::map).optional();
@@ -73,32 +67,20 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
   private static Appointment map(ResultSet rs, int row) throws SQLException {
     String cancellationType = rs.getString("cancellation_type");
     String cancellationSubreason = rs.getString("cancellation_subreason");
-    return Appointment.reconstitute(
-        rs.getObject("appointment_id", UUID.class),
-        rs.getObject("appointment_time_slot_id", UUID.class),
-        rs.getObject("student_account_id", UUID.class),
-        rs.getObject("course_section_id", UUID.class),
-        AppointmentType.valueOf(rs.getString("appointment_type")),
-        rs.getInt("instrument_count"),
-        PieceType.valueOf(rs.getString("piece_type")),
-        AppointmentStatus.valueOf(rs.getString("status")),
-        Timestamps.toInstant(rs, "entry_authorized_at"),
+    return Appointment.reconstitute(rs.getObject("appointment_id", UUID.class),
+        rs.getObject("appointment_time_slot_id", UUID.class), rs.getObject("student_account_id", UUID.class),
+        rs.getObject("course_section_id", UUID.class), AppointmentType.valueOf(rs.getString("appointment_type")),
+        rs.getInt("instrument_count"), PieceType.valueOf(rs.getString("piece_type")),
+        AppointmentStatus.valueOf(rs.getString("status")), Timestamps.toInstant(rs, "entry_authorized_at"),
         rs.getObject("exceptional_authorization_id", UUID.class),
         cancellationType == null ? null : CancellationType.valueOf(cancellationType),
         cancellationSubreason == null ? null : CancellationSubreason.valueOf(cancellationSubreason),
-        rs.getString("cancellation_reason"),
-        rs.getObject("cancelled_by_account_id", UUID.class),
-        Timestamps.toInstant(rs, "cancelled_at"),
-        rs.getString("rejection_reason"),
-        rs.getObject("rejected_by_account_id", UUID.class),
-        Timestamps.toInstant(rs, "rejected_at"),
-        Timestamps.toInstant(rs, "missed_at"),
-        Timestamps.toInstant(rs, "started_at"),
-        rs.getObject("completed_by_account_id", UUID.class),
-        Timestamps.toInstant(rs, "completed_at"),
-        Timestamps.toInstant(rs, "created_at"),
-        Timestamps.toInstant(rs, "updated_at"),
-        rs.getLong("version"));
+        rs.getString("cancellation_reason"), rs.getObject("cancelled_by_account_id", UUID.class),
+        Timestamps.toInstant(rs, "cancelled_at"), rs.getString("rejection_reason"),
+        rs.getObject("rejected_by_account_id", UUID.class), Timestamps.toInstant(rs, "rejected_at"),
+        Timestamps.toInstant(rs, "missed_at"), Timestamps.toInstant(rs, "started_at"),
+        rs.getObject("completed_by_account_id", UUID.class), Timestamps.toInstant(rs, "completed_at"),
+        Timestamps.toInstant(rs, "created_at"), Timestamps.toInstant(rs, "updated_at"), rs.getLong("version"));
   }
 
   @Override public boolean updateIfVersion(Appointment a, long expectedVersion) {
@@ -113,65 +95,55 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
         updated_at=:updated,version=:nextVersion
       WHERE appointment_id=:id AND version=:expectedVersion
       """)
-      .param("status", a.status().name())
-      .param("entry", Timestamps.toTimestamp(a.entryAuthorizedAt()))
+      .param("status", a.status().name()).param("entry", Timestamps.toTimestamp(a.entryAuthorizedAt()))
       .param("cancelType", a.cancellationType() == null ? null : a.cancellationType().name())
       .param("cancelSubreason", a.cancellationSubreason() == null ? null : a.cancellationSubreason().name())
-      .param("cancelReason", a.cancellationReason())
-      .param("cancelledBy", a.cancelledByAccountId())
-      .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt()))
-      .param("rejectionReason", a.rejectionReason())
-      .param("rejectedBy", a.rejectedByAccountId())
-      .param("rejectedAt", Timestamps.toTimestamp(a.rejectedAt()))
-      .param("missedAt", Timestamps.toTimestamp(a.missedAt()))
-      .param("startedAt", Timestamps.toTimestamp(a.startedAt()))
-      .param("completedBy", a.completedByAccountId())
-      .param("completedAt", Timestamps.toTimestamp(a.completedAt()))
-      .param("updated", Timestamps.toTimestamp(a.updatedAt()))
-      .param("nextVersion", a.version()).param("id", a.appointmentId())
-      .param("expectedVersion", expectedVersion).update() == 1;
+      .param("cancelReason", a.cancellationReason()).param("cancelledBy", a.cancelledByAccountId())
+      .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt())).param("rejectionReason", a.rejectionReason())
+      .param("rejectedBy", a.rejectedByAccountId()).param("rejectedAt", Timestamps.toTimestamp(a.rejectedAt()))
+      .param("missedAt", Timestamps.toTimestamp(a.missedAt())).param("startedAt", Timestamps.toTimestamp(a.startedAt()))
+      .param("completedBy", a.completedByAccountId()).param("completedAt", Timestamps.toTimestamp(a.completedAt()))
+      .param("updated", Timestamps.toTimestamp(a.updatedAt())).param("nextVersion", a.version())
+      .param("id", a.appointmentId()).param("expectedVersion", expectedVersion).update() == 1;
   }
 
   @Override public long countActiveForStudent(UUID student, LocalDate date) {
     return jdbc.sql("SELECT count(*) FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE a.student_account_id=:student AND s.service_date=:date AND a.status IN ('SCHEDULED','IN_PROGRESS')")
         .param("student", student).param("date", date).query(Long.class).single();
   }
-
   @Override public long countCompletedForStudent(UUID student, LocalDate date) {
     return jdbc.sql("SELECT count(*) FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE a.student_account_id=:student AND s.service_date=:date AND a.status='COMPLETED'")
         .param("student", student).param("date", date).query(Long.class).single();
   }
-
   @Override public List<Appointment> findForSlot(UUID slotId, boolean lock) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM appointments WHERE appointment_time_slot_id=:slot ORDER BY created_at DESC,appointment_id DESC" + (lock ? " FOR UPDATE" : ""))
         .param("slot", slotId).query(JdbcAppointmentRepository::map).list();
   }
-
   @Override public List<Appointment> findForStudentAndDate(UUID student, LocalDate date) {
     return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE a.student_account_id=:student AND s.service_date=:date ORDER BY a.created_at")
         .param("student", student).param("date", date).query(JdbcAppointmentRepository::map).list();
   }
-
   @Override public Optional<Appointment> findActiveByExceptionalAuthorizationForUpdate(UUID authorizationId) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM appointments WHERE exceptional_authorization_id=:authorization AND NOT (status='CANCELLED' AND cancellation_type='CLINIC') FOR UPDATE")
         .param("authorization", authorizationId).query(JdbcAppointmentRepository::map).optional();
   }
-
   @Override public List<Appointment> findByExceptionalAuthorization(UUID authorizationId) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM appointments WHERE exceptional_authorization_id=:authorization ORDER BY created_at")
         .param("authorization", authorizationId).query(JdbcAppointmentRepository::map).list();
   }
-
   @Override public List<Appointment> findByStatus(AppointmentStatus status) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM appointments WHERE status=:status ORDER BY created_at")
         .param("status", status.name()).query(JdbcAppointmentRepository::map).list();
   }
-
   @Override public List<Appointment> findActiveOnDate(LocalDate date) {
-    return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s "
-        + "ON s.appointment_time_slot_id=a.appointment_time_slot_id "
-        + "WHERE s.service_date=:date AND a.status IN ('SCHEDULED','IN_PROGRESS') "
-        + "ORDER BY a.created_at,a.appointment_id")
+    return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE s.service_date=:date AND a.status IN ('SCHEDULED','IN_PROGRESS') ORDER BY a.created_at,a.appointment_id")
         .param("date", date).query(JdbcAppointmentRepository::map).list();
+  }
+
+  @Override public List<Appointment> findMissedCandidates(Instant toleranceEndedBefore, int limit) {
+    if (limit <= 0) return List.of();
+    return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE a.status='SCHEDULED' AND a.entry_authorized_at IS NULL AND s.arrival_tolerance_until < :cutoff ORDER BY s.arrival_tolerance_until,a.appointment_id LIMIT :limit")
+        .param("cutoff", Timestamps.toTimestamp(toleranceEndedBefore)).param("limit", limit)
+        .query(JdbcAppointmentRepository::map).list();
   }
 }
