@@ -28,7 +28,10 @@ CREATE TABLE idempotency_records (
     request_fingerprint VARCHAR(128) NOT NULL,
     operation_id UUID NOT NULL REFERENCES client_operations(operation_id),
     created_at TIMESTAMPTZ NOT NULL,
-    expires_at TIMESTAMPTZ NOT NULL
+    expires_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT idempotency_logical_scope_uk UNIQUE NULLS NOT DISTINCT (
+        actor_account_id, public_operation, idempotency_key
+    )
 );
 
 CREATE INDEX idempotency_records_expiry_idx ON idempotency_records (expires_at);
