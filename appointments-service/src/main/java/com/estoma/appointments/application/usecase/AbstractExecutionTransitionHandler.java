@@ -8,7 +8,6 @@ import com.estoma.appointments.application.port.out.PendingWashExecutionEventRep
 import com.estoma.appointments.application.port.out.ProcessedMessageRepository;
 import com.estoma.appointments.application.port.out.WashExecutionTransitionRepository;
 import com.estoma.appointments.domain.model.Appointment;
-import com.estoma.appointments.domain.model.CancellationSubreason;
 import com.estoma.appointments.domain.model.CancellationType;
 import java.time.Instant;
 import java.util.UUID;
@@ -93,14 +92,13 @@ abstract class AbstractExecutionTransitionHandler {
   }
 
   private Appointment cancelFromExecution(Appointment current, ExecutionEvent event, Instant at) {
-    if (event.cancellationType() != null && !"CLINIC".equals(event.cancellationType())) {
+    if (!"CLINIC".equals(event.cancellationType())) {
       throw new IllegalArgumentException("WashExecutionCancelled must carry CLINIC cancellationType");
     }
-    if (event.cancellationSubreason() != null
-        && !CancellationSubreason.CAPACITY_LOSS.name().equals(event.cancellationSubreason())) {
-      throw new IllegalArgumentException("unsupported execution cancellation subreason");
+    if (event.cancellationSubreason() == null || event.cancellationSubreason().isBlank()) {
+      throw new IllegalArgumentException("WashExecutionCancelled requires cancellationSubreason");
     }
-    return current.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS,
+    return current.cancel(CancellationType.CLINIC, event.cancellationSubreason(),
         event.reason(), event.actorAccountId(), at);
   }
 
