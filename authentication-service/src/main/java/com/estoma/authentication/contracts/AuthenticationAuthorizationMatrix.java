@@ -35,7 +35,7 @@ public final class AuthenticationAuthorizationMatrix {
       personnelDurable(AuthenticationCommand.REVOKE_ALL_ACCOUNT_SESSIONS),
       durable(AuthenticationCommand.REQUEST_PASSWORD_RECOVERY, "bff", ActorMode.ANONYMOUS, "PUBLIC", null, null, TargetRule.FORBIDDEN),
       rpc(AuthenticationRpcOperation.AUTHENTICATE_ACCOUNT, "bff", ActorMode.ANONYMOUS, "PUBLIC", null, null, TargetRule.FORBIDDEN),
-      rpc(AuthenticationRpcOperation.REFRESH_SESSION, "bff", ActorMode.ACCOUNT, "SELF", null, null, TargetRule.ACCOUNT_COMPATIBLE),
+      rpc(AuthenticationRpcOperation.REFRESH_SESSION, "bff", ActorMode.ANONYMOUS, "PUBLIC", null, null, TargetRule.FORBIDDEN),
       rpc(AuthenticationRpcOperation.REVOKE_SESSION, "bff", ActorMode.ACCOUNT, "SELF", null, null, TargetRule.ACCOUNT_COMPATIBLE),
       rpc(AuthenticationRpcOperation.VALIDATE_RECOVERY_CODE, "bff", ActorMode.ANONYMOUS, "PUBLIC", null, null, TargetRule.FORBIDDEN),
       rpc(AuthenticationRpcOperation.RESET_PASSWORD, "bff", ActorMode.ANONYMOUS, "PUBLIC", null, null, TargetRule.FORBIDDEN),

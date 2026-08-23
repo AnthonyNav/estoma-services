@@ -5,12 +5,17 @@ import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.QueueBuilder;
+import org.springframework.amqp.core.TopicExchange;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@ConditionalOnProperty(prefix = "platform.messaging", name = "topology-declare", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(
+    prefix = "platform.messaging",
+    name = "topology-declare",
+    havingValue = "true",
+    matchIfMissing = true)
 public class AmqpTopologyConfig {
   @Bean
   DirectExchange commandsExchange() {
@@ -20,6 +25,11 @@ public class AmqpTopologyConfig {
   @Bean
   DirectExchange resultsExchange() {
     return new DirectExchange(MessagingTopology.RESULTS_EXCHANGE, true, false);
+  }
+
+  @Bean
+  TopicExchange eventsExchange() {
+    return new TopicExchange(MessagingTopology.EVENTS_EXCHANGE, true, false);
   }
 
   @Bean
@@ -35,7 +45,21 @@ public class AmqpTopologyConfig {
   @Bean
   Declarables bffResultsTopology(DirectExchange resultsExchange) {
     var queue = QueueBuilder.durable(MessagingTopology.RESULTS_QUEUE).build();
-    return new Declarables(queue,
+    return new Declarables(
+        queue,
         BindingBuilder.bind(queue).to(resultsExchange).with("bff"));
+  }
+
+  @Bean
+  Declarables bffSecurityProjectionTopology(TopicExchange eventsExchange) {
+    var queue = QueueBuilder.durable(MessagingTopology.PROJECTION_EVENTS_QUEUE).build();
+    return new Declarables(
+        queue,
+        BindingBuilder.bind(queue).to(eventsExchange).with("authentication.account.created"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authentication.account.deactivated"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.revoked"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.all-revoked"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.other-revoked"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("users.person.deactivated"));
   }
 }
