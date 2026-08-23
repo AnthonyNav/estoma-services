@@ -86,6 +86,65 @@ class ResultApplicationServiceTest {
   }
 
   @Test
+  void rejectsRejectedResultWithoutErrorCodeBeforeInbox() {
+    IncomingResult invalid = new IncomingResult(
+        UUID.randomUUID(), "CreatePersonRejected", 1, MessageKind.RESULT, "users",
+        Instant.now(), correlationId, commandMessageId, operationId, null, null,
+        "REJECTED", null, null, "{}");
+
+    assertThat(service.apply(invalid)).isFalse();
+    verify(inbox, never()).recordIfNew(any());
+  }
+
+  @Test
+  void rejectsSucceededResultThatCarriesErrorBeforeInbox() {
+    IncomingResult invalid = new IncomingResult(
+        UUID.randomUUID(), "CreatePersonSucceeded", 1, MessageKind.RESULT, "users",
+        Instant.now(), correlationId, commandMessageId, operationId, null, null,
+        "SUCCEEDED", "{\"personId\":\"p\"}", "UNEXPECTED",
+        "{\"code\":\"UNEXPECTED\"}");
+
+    assertThat(service.apply(invalid)).isFalse();
+    verify(inbox, never()).recordIfNew(any());
+  }
+
+  @Test
+  void rejectsFailedResultWithoutErrorCodeBeforeInbox() {
+    ClientOperation authenticationPending = operationFor(
+        "create-account", "CreateAccount", "authentication", OperationStatus.PENDING,
+        null, null, null);
+    when(operations.findById(operationId)).thenReturn(Optional.of(authenticationPending));
+
+    IncomingResult invalid = new IncomingResult(
+        UUID.randomUUID(), "CreateAccountResult", 1, MessageKind.RESULT, "authentication",
+        Instant.now(), correlationId, commandMessageId, operationId, null, null,
+        "FAILED", null, null, "{}");
+
+    assertThat(service.apply(invalid)).isFalse();
+    verify(inbox, never()).recordIfNew(any());
+  }
+
+  @Test
+  void expiredResultMayOmitError() {
+    ClientOperation authenticationPending = operationFor(
+        "create-account", "CreateAccount", "authentication", OperationStatus.PENDING,
+        null, null, null);
+    when(operations.findById(operationId)).thenReturn(Optional.of(authenticationPending));
+    when(inbox.recordIfNew(any(InboxMessage.class))).thenReturn(true);
+    when(operations.completeIfPending(any(), any(), any())).thenReturn(true);
+    when(idempotency.ensureExpiresAt(any(), any())).thenReturn(true);
+
+    IncomingResult expired = new IncomingResult(
+        UUID.randomUUID(), "CreateAccountResult", 1, MessageKind.RESULT, "authentication",
+        Instant.now(), correlationId, commandMessageId, operationId, null, null,
+        "EXPIRED", null, null, null);
+
+    assertThat(service.apply(expired)).isTrue();
+    verify(inbox).recordIfNew(any());
+    verify(operations).completeIfPending(any(), any(), any());
+  }
+
+  @Test
   void exactLateTerminalResultIsIdempotent() {
     ClientOperation terminal = operation(
         OperationStatus.SUCCEEDED, "{\"personId\":\"p\"}", null, null);
@@ -101,7 +160,8 @@ class ResultApplicationServiceTest {
 
   @Test
   void contradictoryLateTerminalResultIsUntrusted() {
-    ClientOperation terminal = operation(OperationStatus.REJECTED, null, "OWNER_REJECTED", "{}");
+    ClientOperation terminal = operation(OperationStatus.REJECTED, null, "OWNER_REJECTED",
+        "{\"code\":\"OWNER_REJECTED\"}");
     when(operations.findById(operationId)).thenReturn(Optional.of(terminal));
 
     assertThat(service.apply(succeeded())).isFalse();
@@ -112,7 +172,8 @@ class ResultApplicationServiceTest {
   void lostTerminalRaceRollsBackWhenWinnerContradictsResult() {
     when(inbox.recordIfNew(any(InboxMessage.class))).thenReturn(true);
     when(operations.completeIfPending(any(), any(), any())).thenReturn(false);
-    ClientOperation contradictory = operation(OperationStatus.REJECTED, null, "OWNER_REJECTED", "{}");
+    ClientOperation contradictory = operation(OperationStatus.REJECTED, null, "OWNER_REJECTED",
+        "{\"code\":\"OWNER_REJECTED\"}");
     when(operations.findById(operationId))
         .thenReturn(Optional.of(pending), Optional.of(contradictory));
 
@@ -136,9 +197,21 @@ class ResultApplicationServiceTest {
 
   private ClientOperation operation(
       OperationStatus status, String data, String errorCode, String errorDetails) {
+    return operationFor("create-person", "CreatePerson", "users", status, data, errorCode,
+        errorDetails);
+  }
+
+  private ClientOperation operationFor(
+      String publicOperation,
+      String commandType,
+      String owner,
+      OperationStatus status,
+      String data,
+      String errorCode,
+      String errorDetails) {
     Instant now = Instant.now();
     return new ClientOperation(
-        operationId, UUID.randomUUID(), "create-person", "CreatePerson", "users", "users",
+        operationId, UUID.randomUUID(), publicOperation, commandType, owner, owner,
         correlationId, "key", status, data, errorCode, errorDetails,
         now, now, status.terminal() ? now : null, null);
   }
