@@ -16,6 +16,7 @@ public interface WashAdministrationProjectionRepository {
   void upsertResourcePriority(ResourcePriorityProjection projection);
 
   Optional<ServiceCalendarProjection> findCalendar(UUID calendarId);
+  List<ServiceCalendarProjection> findCalendars();
   Optional<ServiceScheduleProjection> findSchedule(UUID scheduleId);
   Optional<AdministrativeClosureProjection> findClosure(UUID closureId);
   List<AdministrativeClosureProjection> findClosuresOverlapping(UUID calendarId, Instant startsAt, Instant endsAt);
