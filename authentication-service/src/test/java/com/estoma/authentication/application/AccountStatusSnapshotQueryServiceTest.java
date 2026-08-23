@@ -76,6 +76,27 @@ class AccountStatusSnapshotQueryServiceTest {
     assertThat(payload.path("data").path("hasMore").asBoolean()).isFalse();
   }
 
+  @Test
+  void failedQueryPersistsTerminalFailedResultForAuthorization() {
+    MessageEnvelope query = query(
+        AccountStatusSnapshotQueryService.GET,
+        Map.of("accountId", UUID.randomUUID().toString()));
+
+    service.fail(query, "TECHNICAL_FAILURE");
+
+    OutboxAppendRequest result = captured();
+    assertThat(result.messageType()).isEqualTo("GetAccountStatusSnapshotResult");
+    assertThat(result.messageKind()).isEqualTo(MessageKind.RESULT.name());
+    assertThat(result.resultRequester()).isEqualTo("authorization");
+    assertThat(result.correlationId()).isEqualTo(query.correlationId());
+    assertThat(result.causationId()).isEqualTo(query.messageId());
+    assertThat(result.operationId()).isEqualTo(query.operationId());
+    JsonNode payload = codec.readTree(result.payloadJson());
+    assertThat(payload.path("status").asString()).isEqualTo("FAILED");
+    assertThat(payload.path("error").path("code").asString()).isEqualTo("TECHNICAL_FAILURE");
+    assertThat(payload.has("data")).isFalse();
+  }
+
   private MessageEnvelope query(String type, Object payload) {
     return new MessageEnvelope(
         UUID.randomUUID(), type, 1, MessageKind.QUERY, "authorization", Instant.now(),
