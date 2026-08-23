@@ -12,9 +12,19 @@ import org.springframework.stereotype.Component;
 
 @Component
 public final class CommandListener {
-  private static final Set<String> COMMANDS = Set.of("ScheduleAppointment", "CancelAppointment",
+  private static final Set<String> CLIENT_COMMANDS = Set.of(
+      "ScheduleAppointment", "CancelAppointment",
       "GrantExceptionalAppointmentAuthorization", "CancelExceptionalAppointmentAuthorization",
       "CreateAppointmentTimeSlot", "CancelAppointmentTimeSlot");
+  private static final Set<String> INTERNAL_COMMANDS = Set.of(
+      "CreateAppointmentTimeSlot", "MarkAppointmentAsMissed",
+      "RecalculateAppointmentCapacityForTimeSlot");
+  private static final Set<String> COMMANDS = Set.of(
+      "ScheduleAppointment", "CancelAppointment",
+      "GrantExceptionalAppointmentAuthorization", "CancelExceptionalAppointmentAuthorization",
+      "CreateAppointmentTimeSlot", "CancelAppointmentTimeSlot", "MarkAppointmentAsMissed",
+      "RecalculateAppointmentCapacityForTimeSlot");
+
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
   private final CommandMessageMapper mapper;
@@ -23,14 +33,17 @@ public final class CommandListener {
 
   public CommandListener(EnvelopeJsonCodec codec, EnvelopeValidator validator, CommandMessageMapper mapper,
       AppointmentCommandDispatcher dispatcher, FailureRouter failures) {
-    this.codec = codec; this.validator = validator; this.mapper = mapper; this.dispatcher = dispatcher; this.failures = failures;
+    this.codec = codec; this.validator = validator; this.mapper = mapper;
+    this.dispatcher = dispatcher; this.failures = failures;
   }
 
-  @RabbitListener(id = "appointmentsCommandConsumer", queues = MessagingNames.COMMAND_QUEUE, containerFactory = "manualAckContainerFactory")
+  @RabbitListener(id = "appointmentsCommandConsumer", queues = MessagingNames.COMMAND_QUEUE,
+      containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
     long tag = message.getMessageProperties().getDeliveryTag();
     try {
       var envelope = validator.validate(codec.readTree(message.getBody()), MessageKind.COMMAND, COMMANDS);
+      validateProducerAndActor(envelope);
       ApplicationResult result = dispatcher.dispatch(mapper.map(envelope));
       if (result.status() == ApplicationResult.Status.DEFERRED) {
         failures.route(message, MessagingNames.COMMAND_QUEUE, true);
@@ -47,5 +60,31 @@ public final class CommandListener {
         channel.basicNack(tag, false, true);
       }
     }
+  }
+
+  private static void validateProducerAndActor(com.estoma.appointments.contracts.MessageEnvelope envelope) {
+    if (envelope.idempotencyKey() == null || envelope.idempotencyKey().isBlank()) {
+      throw new InvalidMessageException("command idempotencyKey is required");
+    }
+    boolean fromBff = "bff".equals(envelope.producer());
+    boolean internal = MessagingNames.LOGICAL_COMPONENT_ID.equals(envelope.producer());
+    if (fromBff && CLIENT_COMMANDS.contains(envelope.messageType())) {
+      if (envelope.operationId() == null) throw new InvalidMessageException("client command operationId is required");
+      if (envelope.actor() == null || !"ACCOUNT".equals(envelope.actor().type())
+          || envelope.actor().accountId() == null) {
+        throw new InvalidMessageException("client command requires ACCOUNT actor");
+      }
+      return;
+    }
+    if (internal && INTERNAL_COMMANDS.contains(envelope.messageType())) {
+      if (envelope.operationId() != null) throw new InvalidMessageException("internal command must not carry operationId");
+      if (envelope.actor() == null || !"SYSTEM".equals(envelope.actor().type())
+          || !MessagingNames.LOGICAL_COMPONENT_ID.equals(envelope.actor().service())
+          || envelope.actor().accountId() != null) {
+        throw new InvalidMessageException("internal command requires SYSTEM appointments actor");
+      }
+      return;
+    }
+    throw new InvalidMessageException("command producer is not authorized for messageType");
   }
 }
