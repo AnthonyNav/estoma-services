@@ -10,15 +10,14 @@ import com.estoma.appointments.domain.model.AppointmentTimeSlot;
 import com.estoma.appointments.domain.model.AppointmentType;
 import com.estoma.appointments.domain.model.CancellationSubreason;
 import com.estoma.appointments.domain.model.CancellationType;
-import com.estoma.appointments.domain.model.ExceptionalAppointmentAuthorization;
 import com.estoma.appointments.domain.model.PieceType;
+import com.estoma.appointments.domain.service.AppointmentCapacityMatcher;
 import com.estoma.appointments.domain.service.DailyPenaltyPolicy;
 import com.estoma.appointments.domain.service.ImmunocompromisedReservationPolicy;
-import com.estoma.appointments.domain.service.AppointmentCapacityMatcher;
-import java.util.List;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +28,8 @@ class AppointmentDomainTest {
     Appointment appointment = appointment(AppointmentType.NORMAL);
     Appointment cancelled = appointment.cancel(CancellationType.STUDENT, null, NOW.plusSeconds(1));
     assertThat(cancelled.status()).isEqualTo(AppointmentStatus.CANCELLED);
-    assertThatThrownBy(() -> cancelled.start(NOW.plusSeconds(2))).isInstanceOf(DomainViolationException.class);
+    assertThatThrownBy(() -> cancelled.start(NOW.plusSeconds(2)))
+        .isInstanceOf(DomainViolationException.class);
   }
 
   @Test void pointsAreDerivedFromStatusAndCancellationType() {
@@ -47,6 +47,12 @@ class AppointmentDomainTest {
     assertThat(appointment(AppointmentType.JOURNEY, 80).instrumentCount()).isEqualTo(80);
   }
 
+  @Test void courseSectionIsRequired() {
+    assertThatThrownBy(() -> Appointment.scheduled(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), null,
+        AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, null, NOW))
+        .isInstanceOf(NullPointerException.class);
+  }
+
   @Test void clinicCancellationRequiresConfirmedSubreason() {
     assertThatThrownBy(() -> appointment(AppointmentType.NORMAL).cancel(CancellationType.CLINIC, null, NOW))
         .isInstanceOf(DomainViolationException.class);
@@ -54,8 +60,8 @@ class AppointmentDomainTest {
 
   @Test void exceptionalAuthorizationRestoresOnlyForClinicCancellation() {
     UUID authorizationId = UUID.randomUUID();
-    Appointment appointment = Appointment.scheduled(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), null,
-        AppointmentType.JOURNEY, 1, PieceType.HIGH_SPEED, authorizationId, NOW);
+    Appointment appointment = Appointment.scheduled(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+        UUID.randomUUID(), AppointmentType.JOURNEY, 1, PieceType.HIGH_SPEED, authorizationId, NOW);
     assertThat(appointment.consumesExceptionalAuthorization()).isTrue();
     assertThat(appointment.cancel(CancellationType.STUDENT, null, NOW).consumesExceptionalAuthorization()).isTrue();
     assertThat(appointment.markMissed(NOW).consumesExceptionalAuthorization()).isTrue();
@@ -63,18 +69,34 @@ class AppointmentDomainTest {
     assertThat(clinic.consumesExceptionalAuthorization()).isFalse();
   }
 
-  @Test void immunocompromisedConflictIsSymmetric() {
+  @Test void immunocompromisedPreventiveConflictIsSymmetricOnlyWithinImmunoPool() {
     AppointmentTimeSlot early = slot(NOW);
     AppointmentTimeSlot later = slot(NOW.plusSeconds(3 * 60 * 60 - 60));
-    assertThat(ImmunocompromisedReservationPolicy.conflicts(early, AppointmentType.NORMAL, later, AppointmentType.IMMUNOCOMPROMISED)).isTrue();
-    assertThat(ImmunocompromisedReservationPolicy.conflicts(later, AppointmentType.IMMUNOCOMPROMISED, early, AppointmentType.NORMAL)).isTrue();
+    assertThat(ImmunocompromisedReservationPolicy.conflicts(
+        early, AppointmentType.IMMUNOCOMPROMISED, later, AppointmentType.IMMUNOCOMPROMISED)).isTrue();
+    assertThat(ImmunocompromisedReservationPolicy.conflicts(
+        later, AppointmentType.IMMUNOCOMPROMISED, early, AppointmentType.IMMUNOCOMPROMISED)).isTrue();
+    assertThat(ImmunocompromisedReservationPolicy.conflicts(
+        early, AppointmentType.NORMAL, later, AppointmentType.IMMUNOCOMPROMISED)).isFalse();
   }
 
-  @Test void capacityMatchingUsesOneUnitPerAppointmentAndImmunoIsExclusive() {
+  @Test void capacityMatchingSharesNormalJourneyAndKeepsImmunoIndependent() {
     Appointment normal = appointment(AppointmentType.NORMAL);
+    Appointment journey = appointment(AppointmentType.JOURNEY);
     Appointment immuno = appointment(AppointmentType.IMMUNOCOMPROMISED);
+
     assertThat(AppointmentCapacityMatcher.canFit(List.of(normal), AppointmentType.JOURNEY, 1, 1, 0)).isTrue();
-    assertThat(AppointmentCapacityMatcher.canFit(List.of(immuno), AppointmentType.NORMAL, 5, 5, 1)).isFalse();
+    assertThat(AppointmentCapacityMatcher.canFit(List.of(normal, journey), AppointmentType.NORMAL, 1, 1, 0)).isFalse();
+    assertThat(AppointmentCapacityMatcher.canFit(List.of(immuno), AppointmentType.NORMAL, 1, 0, 1)).isTrue();
+    assertThat(AppointmentCapacityMatcher.canFit(List.of(immuno), AppointmentType.IMMUNOCOMPROMISED, 1, 1, 1)).isFalse();
+  }
+
+  @Test void startedClinicCancellationPreservesStartedAt() {
+    Appointment started = appointment(AppointmentType.NORMAL).start(NOW.plusSeconds(30));
+    Appointment cancelled = started.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS,
+        "resource unavailable", UUID.randomUUID(), NOW.plusSeconds(60));
+    assertThat(cancelled.status()).isEqualTo(AppointmentStatus.CANCELLED);
+    assertThat(cancelled.startedAt()).isEqualTo(NOW.plusSeconds(30));
   }
 
   private static Appointment appointment(AppointmentType type) { return appointment(type, 1); }
@@ -82,8 +104,10 @@ class AppointmentDomainTest {
     return Appointment.scheduled(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), type,
         count, PieceType.HIGH_SPEED, null, NOW);
   }
+
   private static AppointmentTimeSlot slot(Instant starts) {
-    return AppointmentTimeSlot.create(UUID.randomUUID(), UUID.randomUUID(), LocalDate.ofInstant(starts, ZoneOffset.UTC), starts,
-        starts.plusSeconds(30 * 60), ZoneOffset.UTC, starts.minusSeconds(10 * 60), starts.minusSeconds(20 * 60), starts.plusSeconds(40 * 60));
+    return AppointmentTimeSlot.create(UUID.randomUUID(), UUID.randomUUID(),
+        LocalDate.ofInstant(starts, ZoneOffset.UTC), starts, starts.plusSeconds(30 * 60), ZoneOffset.UTC,
+        starts.minusSeconds(10 * 60), starts.minusSeconds(20 * 60), starts.plusSeconds(40 * 60));
   }
 }
