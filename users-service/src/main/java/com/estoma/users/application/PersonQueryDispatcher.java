@@ -4,6 +4,7 @@ import com.estoma.users.application.port.OutboxAppendRequest;
 import com.estoma.users.application.port.OutboxPort;
 import com.estoma.users.application.port.PersonRepository;
 import com.estoma.users.application.query.ResolvePersonByInstitutionalEmailQuery;
+import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
@@ -17,31 +18,19 @@ import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.messaging.OutboxMetadata;
 import com.estoma.users.messaging.inbound.InvalidMessageException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
-/**
- * Resolves {@code ResolvePersonByInstitutionalEmail} (queries.md §2):
- * {@code FOUND} for an {@code ACTIVE} match, {@code INACTIVE_MATCH} for
- * an {@code INACTIVE} one, {@code NOT_FOUND} otherwise — mutually
- * exclusive by construction, since {@code
- * institutional_email_normalized} is globally unique regardless of
- * status. Reuses {@link PersonRepository#findByNormalizedEmail} and
- * {@link InstitutionalEmail}'s normalization unchanged; this is the same
- * lookup {@code NormalizedEmailDuplicatePolicy} already performs for
- * {@code CreatePerson}/{@code UpdatePerson}.
- *
- * <p>Deliberately NOT {@code @Transactional}: a {@code SELECT} followed
- * by one independent Outbox {@code INSERT} needs no atomic coupling —
- * if the process crashes between the two, no ACK has happened yet, the
- * message redelivers, and a side-effect-free lookup simply re-evaluates
- * (queries.md §2: "repetir la solicitud simplemente vuelve a evaluar la
- * misma consulta"). No Consumer Inbox either, for the same reason —
- * {@code QueryListener} never registers one.
- */
 @Component
 public class PersonQueryDispatcher {
+
+  private static final int RECOVERY_PAGE_LIMIT = 200;
 
   private final PersonRepository personRepository;
   private final OutboxPort outbox;
@@ -54,51 +43,107 @@ public class PersonQueryDispatcher {
   }
 
   public void resolve(MessageEnvelope envelope) {
-    ResolvePersonByInstitutionalEmailQuery query =
-        codec.convertPayload(envelope, ResolvePersonByInstitutionalEmailQuery.class);
+    switch (envelope.messageType()) {
+      case MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL -> resolveEmail(envelope);
+      case MessageTypes.GET_PERSON_STATUS_SNAPSHOT -> resolveStatusSnapshot(envelope);
+      case MessageTypes.LIST_PERSON_STATUS_SNAPSHOTS_PAGE -> listStatusSnapshots(envelope);
+      default -> throw new InvalidMessageException("unsupported query " + envelope.messageType());
+    }
+  }
 
+  /** Persists the terminal technical outcome for a valid Query after retry exhaustion. */
+  public void fail(MessageEnvelope envelope, String errorCode) {
+    Map<String, Object> payload = Map.of(
+        "status", "FAILED",
+        "error", Map.of("code", errorCode));
+    Actor resultActor = MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL.equals(envelope.messageType())
+        ? envelope.actor()
+        : new Actor.System("users");
+    appendResult(envelope, envelope.messageType() + "Result", payload, null, resultActor);
+  }
+
+  private void resolveEmail(MessageEnvelope envelope) {
+    ResolvePersonByInstitutionalEmailQuery query = codec.convertPayload(envelope, ResolvePersonByInstitutionalEmailQuery.class);
     InstitutionalEmail email;
     try {
       email = InstitutionalEmail.of(query.institutionalEmail());
     } catch (PersonRejectedException malformed) {
-      // A malformed institutionalEmail is not NOT_FOUND -- queries.md
-      // defines only three successful outcomes. Translated explicitly to
-      // a structural failure here, rather than left to accidentally
-      // escape uncaught (queries.md has no REJECTED analog to catch it
-      // into) -- QueryListener routes this straight to the DLQ.
       throw new InvalidMessageException("institutionalEmail is malformed: " + malformed.getMessage());
     }
-
     Optional<Person> match = personRepository.findByNormalizedEmail(email.normalized());
-    appendResult(envelope, toData(match));
+    ResolvePersonByInstitutionalEmailData data = match.isEmpty()
+        ? ResolvePersonByInstitutionalEmailData.notFound()
+        : match.get().status() == PersonStatus.ACTIVE
+            ? ResolvePersonByInstitutionalEmailData.found(match.get().personId(), match.get().status().name())
+            : ResolvePersonByInstitutionalEmailData.inactiveMatch(match.get().personId(), match.get().status().name());
+    appendResult(envelope, MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL_RESULT,
+        ResultPayload.succeeded(data), data.personId(), envelope.actor());
   }
 
-  private static ResolvePersonByInstitutionalEmailData toData(Optional<Person> match) {
+  private void resolveStatusSnapshot(MessageEnvelope envelope) {
+    UUID personId = uuid(envelope.payload(), "personId");
+    Optional<Person> match = personRepository.findById(personId);
+    Map<String, Object> payload = new LinkedHashMap<>();
     if (match.isEmpty()) {
-      return ResolvePersonByInstitutionalEmailData.notFound();
+      payload.put("status", "NOT_FOUND");
+    } else {
+      payload.put("status", "FOUND");
+      payload.put("data", snapshot(match.get()));
     }
-    Person person = match.get();
-    return person.status() == PersonStatus.ACTIVE
-        ? ResolvePersonByInstitutionalEmailData.found(person.personId(), person.status().name())
-        : ResolvePersonByInstitutionalEmailData.inactiveMatch(person.personId(), person.status().name());
+    appendResult(envelope, MessageTypes.GET_PERSON_STATUS_SNAPSHOT_RESULT,
+        payload, personId, new Actor.System("users"));
   }
 
-  private void appendResult(MessageEnvelope envelope, ResolvePersonByInstitutionalEmailData data) {
-    ResultPayload payload = ResultPayload.succeeded(data);
-    OutboxMetadata metadata = new OutboxMetadata(envelope.producer(), envelope.operationId(), envelope.actor());
+  private void listStatusSnapshots(MessageEnvelope envelope) {
+    int limit = envelope.payload().path("limit").asInt(-1);
+    if (limit != RECOVERY_PAGE_LIMIT) {
+      throw new InvalidMessageException("ListPersonStatusSnapshotsPage requires limit=200");
+    }
+    UUID cursor = envelope.payload().hasNonNull("cursor") ? uuid(envelope.payload(), "cursor") : null;
+    List<Person> page = personRepository.listAfter(cursor, limit + 1);
+    boolean hasMore = page.size() > limit;
+    List<Person> visible = hasMore ? page.subList(0, limit) : page;
+    List<Map<String, Object>> items = new ArrayList<>(visible.size());
+    visible.forEach(person -> items.add(snapshot(person)));
 
-    outbox.append(
-        new OutboxAppendRequest(
-            UUID.randomUUID(),
-            MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL_RESULT,
-            1,
-            MessageKind.RESULT.name(),
-            data.personId(), // aggregateId -- null for NOT_FOUND
-            null, // no aggregateVersion: nothing mutated
-            envelope.correlationId(),
-            envelope.messageId(), // causationId: this Query's own messageId
-            codec.writeValueAsString(payload),
-            codec.writeValueAsString(metadata),
-            Instant.now()));
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("items", items);
+    data.put("hasMore", hasMore);
+    if (hasMore && !visible.isEmpty()) {
+      data.put("nextCursor", visible.getLast().personId());
+    }
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("status", "SUCCEEDED");
+    payload.put("data", data);
+    appendResult(envelope, MessageTypes.LIST_PERSON_STATUS_SNAPSHOTS_PAGE_RESULT,
+        payload, null, new Actor.System("users"));
+  }
+
+  private static Map<String, Object> snapshot(Person person) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("personId", person.personId());
+    data.put("status", person.status().name());
+    data.put("sourceVersion", person.version());
+    data.put("updatedAt", person.updatedAt());
+    return data;
+  }
+
+  private void appendResult(MessageEnvelope envelope, String messageType, Object payload, UUID aggregateId, Actor actor) {
+    OutboxMetadata metadata = new OutboxMetadata(envelope.producer(), envelope.operationId(), actor);
+    outbox.append(new OutboxAppendRequest(
+        UUID.randomUUID(), messageType, 1, MessageKind.RESULT.name(), aggregateId, null,
+        envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(payload),
+        codec.writeValueAsString(metadata), Instant.now()));
+  }
+
+  private static UUID uuid(JsonNode node, String field) {
+    if (!node.hasNonNull(field)) {
+      throw new InvalidMessageException(field + " is required");
+    }
+    try {
+      return UUID.fromString(node.path(field).asString());
+    } catch (IllegalArgumentException exception) {
+      throw new InvalidMessageException(field + " must be a UUID");
+    }
   }
 }

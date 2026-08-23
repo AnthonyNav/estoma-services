@@ -5,25 +5,17 @@ import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
-/**
- * Structural and contractual validation of an inbound envelope, run
- * before any business processing. Anything this rejects is a permanent
- * failure — {@link InvalidMessageException} — and goes straight to the
- * DLQ, never a retry tier (docs/system-contract.md §7).
- *
- * <p>This is deliberately NOT domain validation (blank names, malformed
- * email, etc.) — that happens inside the transactional dispatcher and
- * produces a functional rejection, not a DLQ'd message. This class only
- * checks that the envelope itself is a message {@code users-service}
- * should even attempt to process.
- */
 @Component
 public class EnvelopeValidator {
 
   private static final int SUPPORTED_MESSAGE_VERSION = 1;
+  private static final Set<String> ACADEMIC_COMMANDS = Set.of(
+      MessageTypes.CREATE_PERSON, MessageTypes.UPDATE_PERSON);
 
   private final MessagingProperties properties;
 
@@ -42,44 +34,52 @@ public class EnvelopeValidator {
     requireNonNull(envelope.messageKind(), "messageKind");
 
     if (envelope.messageKind() != MessageKind.COMMAND) {
-      throw new InvalidMessageException(
-          "expected messageKind=COMMAND on commands.users-service, got " + envelope.messageKind());
+      throw new InvalidMessageException("expected messageKind=COMMAND on commands.users, got " + envelope.messageKind());
     }
     if (envelope.messageVersion() != SUPPORTED_MESSAGE_VERSION) {
-      throw new InvalidMessageException(
-          "unsupported messageVersion " + envelope.messageVersion() + " for " + envelope.messageType());
+      throw new InvalidMessageException("unsupported messageVersion " + envelope.messageVersion());
     }
     if (!MessageTypes.COMMANDS.contains(envelope.messageType())) {
       throw new InvalidMessageException("unrecognized command messageType " + envelope.messageType());
     }
     requireNonNull(envelope.aggregateId(), "aggregateId");
-    requirePersonId(envelope);
+    requireUuid(envelope.payload(), "personId");
     if (!properties.isCommandAllowed(envelope.producer(), envelope.messageType())) {
-      throw new InvalidMessageException(
-          "producer not authorized for this operation: producer="
-              + envelope.producer()
-              + ", messageType="
-              + envelope.messageType());
+      throw new InvalidMessageException("producer not authorized for this operation: " + envelope.producer());
     }
     if (envelope.operationId() == null) {
       throw new InvalidMessageException("commands require operationId for result correlation");
     }
     if (envelope.idempotencyKey() == null || envelope.idempotencyKey().isBlank()) {
-      // commands.md §9: every modifying request is identified by an
-      // idempotencyKey (the functional intention), distinct from
-      // messageId (messaging-architecture.md §10.1).
       throw new InvalidMessageException("commands require a non-blank idempotencyKey");
     }
-    if (!(envelope.actor() instanceof Actor.Account account) || account.accountId() == null) {
-      // A command with no identified ACCOUNT actor is treated as
-      // structurally invalid, not as a business authorization failure —
-      // none of the four commands has a rejection code for "no actor"
-      // (there is no authorization-service yet to even define one
-      // against; docs/system-contract.md §10 D5). This guarantees every
-      // command PersonCommandDispatcher ever sees has a usable actor. A
-      // technical SYSTEM actor is never accepted here — that variant is
-      // reserved for Query, validated by QueryEnvelopeValidator.
-      throw new InvalidMessageException("commands require an ACCOUNT actor with accountId");
+
+    if ("academic".equals(envelope.producer())) {
+      validateAcademicCommand(envelope);
+    } else if (!(envelope.actor() instanceof Actor.Account account) || account.accountId() == null) {
+      throw new InvalidMessageException("BFF commands require an ACCOUNT actor with accountId");
+    }
+  }
+
+  private static void validateAcademicCommand(MessageEnvelope envelope) {
+    if (!ACADEMIC_COMMANDS.contains(envelope.messageType())) {
+      throw new InvalidMessageException("academic may only CreatePerson or UpdatePerson");
+    }
+    if (!(envelope.actor() instanceof Actor.System system) || !"academic".equals(system.service())) {
+      throw new InvalidMessageException("academic commands require SYSTEM/academic actor");
+    }
+    JsonNode execution = envelope.payload().path("importExecution");
+    requireUuid(execution, "importId");
+    requireUuid(execution, "planItemId");
+    requireUuid(execution, "authorizedByAccountId");
+    if (execution.path("executionGeneration").asInt(-1) < 1) {
+      throw new InvalidMessageException("importExecution.executionGeneration must be positive");
+    }
+    String expectedScope = MessageTypes.CREATE_PERSON.equals(envelope.messageType())
+        ? "CREATE_PERSON"
+        : "UPDATE_PERSON";
+    if (!expectedScope.equals(execution.path("scope").asString(null))) {
+      throw new InvalidMessageException("importExecution.scope does not match command");
     }
   }
 
@@ -95,15 +95,14 @@ public class EnvelopeValidator {
     }
   }
 
-  private static void requirePersonId(MessageEnvelope envelope) {
-    String personId = envelope.payload().path("personId").asString(null);
-    if (personId == null) {
-      throw new InvalidMessageException("payload.personId must not be null");
+  private static UUID requireUuid(JsonNode node, String field) {
+    if (!node.hasNonNull(field)) {
+      throw new InvalidMessageException(field + " must not be null");
     }
     try {
-      UUID.fromString(personId);
-    } catch (IllegalArgumentException e) {
-      throw new InvalidMessageException("payload.personId must be a UUID");
+      return UUID.fromString(node.path(field).asString());
+    } catch (IllegalArgumentException exception) {
+      throw new InvalidMessageException(field + " must be a UUID");
     }
   }
 }
