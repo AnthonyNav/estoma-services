@@ -10,14 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Component;
 
-/**
- * Consumes {@code AccountCreated}/{@code AccountActivated}/{@code
- * AccountDeactivated}/{@code LoginIdentifierChanged} to keep {@code
- * recipient_projection} current (events.md §5). This is the only consumed
- * event family that carries a concrete {@code accountId}, so it is the
- * only one that creates a {@code recipient_projection} row (see {@code
- * V7__recipient_projection.sql}).
- */
+/** Projects canonical Authentication Account events into the local recipient read model. */
 @Component
 class AccountRecipientProjectionHandler implements ProjectionHandler {
 
@@ -32,8 +25,9 @@ class AccountRecipientProjectionHandler implements ProjectionHandler {
   @Override
   public List<String> consumedMessageTypes() {
     return List.of(
-        ConsumedEventTypes.ACCOUNT_CREATED, ConsumedEventTypes.ACCOUNT_ACTIVATED, ConsumedEventTypes.ACCOUNT_DEACTIVATED,
-        ConsumedEventTypes.LOGIN_IDENTIFIER_CHANGED);
+        ConsumedEventTypes.ACCOUNT_CREATED,
+        ConsumedEventTypes.ACCOUNT_ACTIVATED,
+        ConsumedEventTypes.ACCOUNT_DEACTIVATED);
   }
 
   @Override
@@ -44,7 +38,12 @@ class AccountRecipientProjectionHandler implements ProjectionHandler {
   @Override
   public ProjectionHandlerResult handle(MessageEnvelope envelope) {
     AccountProjectionEventPayload payload = codec.convertPayload(envelope, AccountProjectionEventPayload.class);
-    repository.upsertAccountIfNewer(payload.accountId(), payload.personId(), payload.status(), payload.sourceVersion(), Instant.now());
+    if (payload == null || payload.accountId() == null || payload.personId() == null
+        || payload.status() == null || envelope.aggregateVersion() == null || envelope.aggregateVersion() < 1) {
+      throw new IllegalArgumentException("invalid canonical Account event for recipient projection");
+    }
+    repository.upsertAccountIfNewer(
+        payload.accountId(), payload.personId(), payload.status(), envelope.aggregateVersion(), Instant.now());
     return ProjectionHandlerResult.NONE;
   }
 }
