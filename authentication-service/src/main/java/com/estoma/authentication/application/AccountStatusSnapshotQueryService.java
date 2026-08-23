@@ -46,6 +46,13 @@ public class AccountStatusSnapshotQueryService {
     }
   }
 
+  /** Persists the terminal technical result for a structurally valid Query. */
+  @Transactional
+  public void fail(MessageEnvelope query, String errorCode) {
+    append(query, query.messageType() + "Result", null,
+        Map.of("status", "FAILED", "error", Map.of("code", errorCode)));
+  }
+
   private void point(MessageEnvelope query) {
     UUID accountId = requiredUuid(query.payload().path("accountId").asString(null), "accountId");
     Map<String, Object> payload = new LinkedHashMap<>();
