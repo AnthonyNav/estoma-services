@@ -81,7 +81,7 @@ public class ResultApplicationService {
     } catch (RuntimeException invalidStatus) {
       return false;
     }
-    if (!terminalStatus.terminal()) {
+    if (!terminalStatus.terminal() || !validTerminalPayload(terminalStatus, result)) {
       return false;
     }
 
@@ -162,6 +162,17 @@ public class ResultApplicationService {
         && result.causationId() != null
         && result.operationId() != null
         && result.status() != null;
+  }
+
+  private static boolean validTerminalPayload(OperationStatus status, IncomingResult result) {
+    boolean hasError = result.errorDetailsJson() != null;
+    boolean hasErrorCode = result.errorCode() != null && !result.errorCode().isBlank();
+    return switch (status) {
+      case SUCCEEDED -> !hasError && result.errorCode() == null;
+      case REJECTED, FAILED -> hasError && hasErrorCode;
+      case EXPIRED -> !hasError || hasErrorCode;
+      default -> false;
+    };
   }
 
   private OwnerRoute routeFor(String commandType) {
