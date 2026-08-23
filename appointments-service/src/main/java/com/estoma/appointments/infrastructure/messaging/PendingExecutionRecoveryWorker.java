@@ -32,9 +32,14 @@ public final class PendingExecutionRecoveryWorker {
       HandleWashEntryRejectedUseCase rejected, HandleWashExecutionStartedUseCase started,
       HandleWashExecutionCompletedUseCase completed, HandleWashExecutionCancelledUseCase cancelled,
       HandleWashEntryAuthorizedUseCase authorized, EnvelopeJsonCodec codec, Clock clock) {
-    this.pending = pending; this.rejected = rejected; this.started = started;
-    this.completed = completed; this.cancelled = cancelled; this.authorized = authorized;
-    this.codec = codec; this.clock = clock;
+    this.pending = pending;
+    this.rejected = rejected;
+    this.started = started;
+    this.completed = completed;
+    this.cancelled = cancelled;
+    this.authorized = authorized;
+    this.codec = codec;
+    this.clock = clock;
   }
 
   @Scheduled(fixedDelayString = "${estoma.messaging.pending-event-poll-interval:5s}")
@@ -86,7 +91,8 @@ public final class PendingExecutionRecoveryWorker {
       String cancellationType, String cancellationSubreason, String reason) {
     return new ExecutionEvent(value.sourceEventId(), value.sourceEventId(), value.washExecutionId(),
         value.appointmentId(), value.eventType(), value.executionVersion(), now, arrivedAt, actionAt,
-        actor, startedAt, cancellationType, cancellationSubreason, reason, value.payloadJson());
+        actor, startedAt, cancellationType, cancellationSubreason, reason, value.payloadJson(),
+        value.correlationId());
   }
 
   private static String text(JsonNode p, String field) {
@@ -96,7 +102,7 @@ public final class PendingExecutionRecoveryWorker {
   }
   private static String optionalText(JsonNode p, String field) {
     return !p.has(field) || p.path(field).isNull() || !p.path(field).isTextual()
-        ? null : p.path(field).asText();
+        ? null : p.path(field).asString();
   }
   private static Instant instant(JsonNode p, String field) {
     Instant value = optionalInstant(p, field);
