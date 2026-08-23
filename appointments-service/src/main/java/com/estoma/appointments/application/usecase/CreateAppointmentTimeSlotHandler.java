@@ -1,6 +1,7 @@
 package com.estoma.appointments.application.usecase;
 
 import com.estoma.appointments.application.model.ApplicationResult;
+import com.estoma.appointments.application.model.OutboxIntent;
 import com.estoma.appointments.application.port.in.CreateAppointmentTimeSlotUseCase;
 import com.estoma.appointments.application.port.out.AppointmentTimeSlotRepository;
 import com.estoma.appointments.application.port.out.AuthorizationProjectionRepository;
@@ -63,6 +64,12 @@ public final class CreateAppointmentTimeSlotHandler implements CreateAppointment
           ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentTimeSlotCreated",
               slot.appointmentTimeSlotId(), slot.version(),
               "{\"slotId\":\"" + slot.appointmentTimeSlotId() + "\"}", now);
+          String recalcPayload = "{\"sourceEventId\":\"" + command.metadata().messageId()
+              + "\",\"slotId\":\"" + slot.appointmentTimeSlotId()
+              + "\",\"expectedProjectionVersion\":0}";
+          ApplicationSupport.append(outbox, new OutboxIntent(
+              "RecalculateAppointmentCapacityForTimeSlot", "COMMAND", slot.appointmentTimeSlotId(),
+              0L, command.metadata().correlationId(), command.metadata().messageId(), recalcPayload, now));
           result = ApplicationResult.applied(slot.appointmentTimeSlotId(), slot.version(),
               "appointment time slot created");
         }
