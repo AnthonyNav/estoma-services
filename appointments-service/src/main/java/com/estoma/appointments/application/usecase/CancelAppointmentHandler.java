@@ -72,7 +72,7 @@ public final class CancelAppointmentHandler implements CancelAppointmentUseCase 
       result = ApplicationResult.rejected("INVALID_CANCELLATION", exception.getMessage());
     }
 
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
+    ApplicationSupport.appendResult(outbox, command.metadata(), "CancelAppointment", result, now);
     ApplicationSupport.complete(idempotency, command.metadata(), "CancelAppointment", result, now);
     return result;
   }
