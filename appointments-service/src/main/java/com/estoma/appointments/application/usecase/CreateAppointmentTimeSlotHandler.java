@@ -6,7 +6,6 @@ import com.estoma.appointments.application.port.out.AppointmentTimeSlotRepositor
 import com.estoma.appointments.application.port.out.AuthorizationProjectionRepository;
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
-import com.estoma.appointments.domain.error.DomainViolationException;
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
 import java.time.Instant;
 import java.util.Optional;
@@ -34,21 +33,28 @@ public final class CreateAppointmentTimeSlotHandler implements CreateAppointment
   public ApplicationResult create(Command command) {
     Instant now = command.now();
     Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
-        "CreateAppointmentTimeSlot", ApplicationSupport.fingerprint(command.slotId(), command.sourceScheduleId(),
-            command.serviceDate(), command.startsAt(), command.endsAt()), now);
+        "CreateAppointmentTimeSlot", ApplicationSupport.fingerprint(command.slotId(),
+            command.sourceScheduleId(), command.serviceDate(), command.startsAt(), command.endsAt()), now);
     if (gate.isPresent()) return gate.get();
+
     ApplicationResult result;
     try {
-      if (!policy.canManage(command.metadata())) result = ApplicationResult.rejected("FORBIDDEN", "actor cannot create slots");
-      else if (slots.findById(command.slotId()).isPresent()) result = ApplicationResult.rejected("SLOT_ALREADY_EXISTS", "slot already exists");
-      else {
+      boolean authorized = policy.canAdministerSlots(command.metadata())
+          || policy.isInternalAppointmentsProcess(command.metadata());
+      if (!authorized) {
+        result = ApplicationResult.rejected("FORBIDDEN", "actor cannot create slots");
+      } else if (slots.findById(command.slotId()).isPresent()) {
+        result = ApplicationResult.rejected("SLOT_ALREADY_EXISTS", "slot already exists");
+      } else {
         AppointmentTimeSlot slot = AppointmentTimeSlot.create(command.slotId(), command.sourceScheduleId(),
             command.serviceDate(), command.startsAt(), command.endsAt(), command.timezone(),
             command.bookingDeadlineAt(), command.cancellationDeadlineAt(), command.arrivalToleranceUntil());
         slots.save(slot);
         ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentTimeSlotCreated",
-            slot.appointmentTimeSlotId(), slot.version(), "{\"slotId\":\"" + slot.appointmentTimeSlotId() + "\"}", now);
-        result = ApplicationResult.applied(slot.appointmentTimeSlotId(), slot.version(), "appointment time slot created");
+            slot.appointmentTimeSlotId(), slot.version(),
+            "{\"slotId\":\"" + slot.appointmentTimeSlotId() + "\"}", now);
+        result = ApplicationResult.applied(slot.appointmentTimeSlotId(), slot.version(),
+            "appointment time slot created");
       }
     } catch (IllegalArgumentException exception) {
       result = ApplicationResult.rejected("INVALID_SLOT", exception.getMessage());
