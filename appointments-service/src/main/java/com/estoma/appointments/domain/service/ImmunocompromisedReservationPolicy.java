@@ -12,9 +12,13 @@ public final class ImmunocompromisedReservationPolicy {
   private static final Duration CLEANING = Duration.ofHours(3);
   private ImmunocompromisedReservationPolicy() {}
 
+  /** Planned reservation exists only for IMMUNOCOMPROMISED appointments. */
   public static TimeInterval reservation(AppointmentTimeSlot slot, AppointmentType type) {
     Objects.requireNonNull(slot, "slot");
     Objects.requireNonNull(type, "type");
+    if (type != AppointmentType.IMMUNOCOMPROMISED) {
+      throw new IllegalArgumentException("preventive cleaning reservation applies only to IMMUNOCOMPROMISED");
+    }
     return new TimeInterval(slot.startsAt(), slot.endsAt().plus(CLEANING));
   }
 
@@ -22,16 +26,15 @@ public final class ImmunocompromisedReservationPolicy {
     return reservation(slot, appointment.appointmentType());
   }
 
-  /**
-   * Checks both directions. A preceding appointment whose expected clean-up
-   * reaches the IMMUNO block conflicts just as a following appointment does.
-   */
+  /** Two planned preventive windows conflict only when both appointments are IMMUNO. */
   public static boolean conflicts(AppointmentTimeSlot firstSlot, AppointmentType firstType,
       AppointmentTimeSlot secondSlot, AppointmentType secondType) {
     Objects.requireNonNull(firstSlot, "firstSlot");
     Objects.requireNonNull(secondSlot, "secondSlot");
+    Objects.requireNonNull(firstType, "firstType");
+    Objects.requireNonNull(secondType, "secondType");
     if (firstType != AppointmentType.IMMUNOCOMPROMISED
-        && secondType != AppointmentType.IMMUNOCOMPROMISED) return false;
+        || secondType != AppointmentType.IMMUNOCOMPROMISED) return false;
     return reservation(firstSlot, firstType).overlaps(reservation(secondSlot, secondType));
   }
 
