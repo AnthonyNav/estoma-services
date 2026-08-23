@@ -51,7 +51,8 @@ public final class HandleWashEntryAuthorizedHandler implements HandleWashEntryAu
         if (!appointments.updateIfVersion(authorized, appointment.version())) {
           pending.defer(new PendingWashExecutionEventRepository.PendingEvent(UUID.randomUUID(),
               event.sourceEventId(), event.appointmentId(), event.washExecutionId(), event.eventType(),
-              event.executionVersion(), event.payloadOrEmpty(), "PENDING", 0, now, null, null));
+              event.executionVersion(), event.payloadOrEmpty(), "PENDING", 0, now, null, null,
+              event.correlationId()));
           inbox.markDeferred(event.sourceEventId(), "appointment changed while applying entry authorization", now);
           return ApplicationResult.deferred("CONCURRENT_MODIFICATION", "entry authorization will be retried", appointment.appointmentId());
         }
