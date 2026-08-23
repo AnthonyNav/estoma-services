@@ -38,7 +38,7 @@ public final class GrantExceptionalAppointmentAuthorizationHandler
   @Transactional
   public ApplicationResult grant(Command command) {
     Instant now = command.now();
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
+    Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox, command.metadata(),
         "GrantExceptionalAppointmentAuthorization", ApplicationSupport.fingerprint(
             command.authorizationId(), command.studentAccountId(), command.serviceDate(),
             command.reason(), command.expiresAt()), now);
