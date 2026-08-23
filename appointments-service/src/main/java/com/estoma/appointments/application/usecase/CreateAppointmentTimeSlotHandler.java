@@ -77,7 +77,9 @@ public final class CreateAppointmentTimeSlotHandler implements CreateAppointment
     } catch (IllegalArgumentException exception) {
       result = ApplicationResult.rejected("INVALID_SLOT", exception.getMessage());
     }
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
+    if (command.metadata().actor().isAccount()) {
+      ApplicationSupport.appendResult(outbox, command.metadata(), "CreateAppointmentTimeSlot", result, now);
+    }
     ApplicationSupport.complete(idempotency, command.metadata(), "CreateAppointmentTimeSlot", result, now);
     return result;
   }
