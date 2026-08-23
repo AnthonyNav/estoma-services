@@ -26,6 +26,48 @@ class ProjectionRecoveryWorkerTest {
   private static final Instant NOW = Instant.parse("2026-08-16T00:00:00Z");
 
   @Test
+  void normalUpgradeDoesNotForceFullWithoutHistoricalFull() {
+    ProjectionRecoveryCoordinator coordinator = mock(ProjectionRecoveryCoordinator.class);
+    ProjectionRecoveryJobRepository jobs = mock(ProjectionRecoveryJobRepository.class);
+    OutboxRepository outbox = mock(OutboxRepository.class);
+
+    worker(coordinator, jobs, outbox, "").scheduledWork();
+
+    for (ProjectionType type : ProjectionType.values()) {
+      verify(coordinator, never()).requestFull(type);
+    }
+  }
+
+  @Test
+  void explicitlyRequestedBootstrapStartsFullWhenNoGenerationExists() {
+    ProjectionRecoveryCoordinator coordinator = mock(ProjectionRecoveryCoordinator.class);
+    ProjectionRecoveryJobRepository jobs = mock(ProjectionRecoveryJobRepository.class);
+    OutboxRepository outbox = mock(OutboxRepository.class);
+    when(jobs.hasActiveFull("ACCOUNT_STATUS")).thenReturn(false);
+    when(jobs.hasCompletedFull("ACCOUNT_STATUS")).thenReturn(false);
+    when(jobs.hasFailedFull("ACCOUNT_STATUS")).thenReturn(false);
+
+    worker(coordinator, jobs, outbox, "ACCOUNT_STATUS").scheduledWork();
+
+    verify(coordinator).requestFull(ProjectionType.ACCOUNT_STATUS);
+    verify(coordinator, never()).requestFull(ProjectionType.PERSON_STATUS);
+    verify(coordinator, never()).requestFull(ProjectionType.ACADEMIC_ELIGIBILITY);
+  }
+
+  @Test
+  void failedFullDoesNotEnterAutomaticRetryLoop() {
+    ProjectionRecoveryCoordinator coordinator = mock(ProjectionRecoveryCoordinator.class);
+    ProjectionRecoveryJobRepository jobs = mock(ProjectionRecoveryJobRepository.class);
+    OutboxRepository outbox = mock(OutboxRepository.class);
+    when(jobs.hasFailedFull("ACCOUNT_STATUS")).thenReturn(true);
+
+    worker(coordinator, jobs, outbox, "ACCOUNT_STATUS").scheduledWork();
+
+    verify(coordinator, never()).requestFull(ProjectionType.ACCOUNT_STATUS);
+    verify(coordinator, never()).requestNewFullRecovery(ProjectionType.ACCOUNT_STATUS);
+  }
+
+  @Test
   void waitsForTheCurrentQueryToPublishBeforeIssuingAnotherRecoveryQuery() {
     ProjectionRecoveryCoordinator coordinator = mock(ProjectionRecoveryCoordinator.class);
     ProjectionRecoveryJobRepository jobs = completedFullJobs();
@@ -36,7 +78,7 @@ class ProjectionRecoveryWorkerTest {
     when(jobs.findWaitingBefore(NOW.minusSeconds(30), 50)).thenReturn(List.of(waiting));
     when(outbox.findById(waiting.currentQueryMessageId())).thenReturn(Optional.of(pending));
 
-    worker(coordinator, jobs, outbox).scheduledWork();
+    worker(coordinator, jobs, outbox, "").scheduledWork();
 
     verify(coordinator, never()).retry(waiting.recoveryJobId());
   }
@@ -52,7 +94,7 @@ class ProjectionRecoveryWorkerTest {
     when(jobs.findWaitingBefore(NOW.minusSeconds(30), 50)).thenReturn(List.of(waiting));
     when(outbox.findById(waiting.currentQueryMessageId())).thenReturn(Optional.of(published));
 
-    worker(coordinator, jobs, outbox).scheduledWork();
+    worker(coordinator, jobs, outbox, "").scheduledWork();
 
     verify(coordinator).retry(waiting.recoveryJobId());
   }
@@ -60,7 +102,8 @@ class ProjectionRecoveryWorkerTest {
   private static ProjectionRecoveryWorker worker(
       ProjectionRecoveryCoordinator coordinator,
       ProjectionRecoveryJobRepository jobs,
-      OutboxRepository outbox) {
+      OutboxRepository outbox,
+      String bootstrapProjections) {
     return new ProjectionRecoveryWorker(
         coordinator,
         jobs,
@@ -75,6 +118,7 @@ class ProjectionRecoveryWorkerTest {
             false,
             Duration.ofSeconds(1),
             true,
+            bootstrapProjections,
             Duration.ofSeconds(30),
             Duration.ofSeconds(5),
             Duration.ofSeconds(30)),

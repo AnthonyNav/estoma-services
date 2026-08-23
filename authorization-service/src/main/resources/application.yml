@@ -58,6 +58,7 @@ estoma:
     outbox-relay-enabled: ${ESTOMA_OUTBOX_RELAY_ENABLED:true}
     recovery-poll-interval: ${ESTOMA_RECOVERY_POLL_INTERVAL:1s}
     recovery-worker-enabled: ${ESTOMA_RECOVERY_WORKER_ENABLED:true}
+    recovery-bootstrap-projections: ${ESTOMA_RECOVERY_BOOTSTRAP_PROJECTIONS:}
     recovery-result-timeout: ${ESTOMA_RECOVERY_RESULT_TIMEOUT:30s}
     retry-1-ttl: ${ESTOMA_MESSAGING_RETRY_1_TTL:5s}
     retry-2-ttl: ${ESTOMA_MESSAGING_RETRY_2_TTL:30s}

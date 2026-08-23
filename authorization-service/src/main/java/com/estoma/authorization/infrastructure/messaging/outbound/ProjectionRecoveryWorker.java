@@ -40,13 +40,16 @@ final class ProjectionRecoveryWorker {
     if (!properties.recoveryWorkerEnabled()) {
       return;
     }
-    initializeFullRecovery();
+    initializeRequestedFullRecovery();
     retryExpiredResults();
   }
 
-  private void initializeFullRecovery() {
+  private void initializeRequestedFullRecovery() {
     for (ProjectionType projectionType : ProjectionType.values()) {
       String type = projectionType.name();
+      if (!properties.bootstrapRequested(type)) {
+        continue;
+      }
       if (!jobs.hasActiveFull(type)
           && !jobs.hasCompletedFull(type)
           && !jobs.hasFailedFull(type)) {

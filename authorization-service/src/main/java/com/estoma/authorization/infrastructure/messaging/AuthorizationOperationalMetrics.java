@@ -7,13 +7,7 @@ import io.micrometer.core.instrument.binder.MeterBinder;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
-/**
- * Durable-state observability for Authorization technical tables.
- *
- * <p>These meters deliberately query only Authorization-owned technical state. They keep metrics
- * derived from committed state instead of incrementing counters before the surrounding business
- * transaction has committed.
- */
+/** Durable-state observability for Authorization technical tables. */
 @Component
 final class AuthorizationOperationalMetrics implements MeterBinder {
 
@@ -86,6 +80,11 @@ final class AuthorizationOperationalMetrics implements MeterBinder {
             WHERE status IN ('PENDING', 'WAITING_RESULT')
             """))
         .description("Current active projection recovery jobs")
+        .register(registry);
+
+    Gauge.builder("authorization_projection_recovery_waiting_result", this, ignored -> count(
+            "SELECT count(*) FROM projection_recovery_jobs WHERE status = 'WAITING_RESULT'"))
+        .description("Current projection recovery jobs waiting for an authoritative Result")
         .register(registry);
 
     Gauge.builder("authorization_projection_recovery_duration_seconds", this, ignored -> scalar(

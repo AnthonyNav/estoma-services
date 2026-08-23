@@ -14,13 +14,7 @@
     "importExecution": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "importId",
-        "planItemId",
-        "executionGeneration",
-        "authorizedByAccountId",
-        "scope"
-      ],
+      "required": ["importId", "planItemId", "executionGeneration", "authorizedByAccountId", "scope"],
       "properties": {
         "importId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
         "planItemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
@@ -28,31 +22,19 @@
         "authorizedByAccountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
         "scope": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
         "causalDependency": { "$ref": "#/$defs/causalDependency" },
-        "causalDependencies": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/causalDependency" }
-        },
-        "authoritativeEvidence": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/authoritativeEvidence" }
-        }
+        "causalDependencies": { "type": "array", "items": { "$ref": "#/$defs/causalDependency" } },
+        "authoritativeEvidence": { "type": "array", "items": { "$ref": "#/$defs/authoritativeEvidence" } }
       },
       "not": { "required": ["causalDependency", "causalDependencies"] }
     },
     "causalDependency": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "priorCommandType",
-        "priorResultMessageId",
-        "priorResultStatus",
-        "expectedEventType",
-        "expectedAggregateId"
-      ],
+      "required": ["priorCommandType", "priorResultMessageId", "priorResultStatus", "expectedEventType", "expectedAggregateId"],
       "properties": {
         "priorCommandType": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
         "priorResultMessageId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
-        "priorResultStatus": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "priorResultStatus": { "const": "SUCCEEDED" },
         "expectedEventType": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
         "expectedAggregateId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
         "minimumSourceVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
@@ -61,17 +43,11 @@
     "authoritativeEvidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "sourceService",
-        "sourceOperation",
-        "sourceResultStatus",
-        "entityType",
-        "entityId"
-      ],
+      "required": ["sourceService", "sourceOperation", "sourceResultStatus", "entityType", "entityId"],
       "properties": {
         "sourceService": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
         "sourceOperation": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
-        "sourceResultStatus": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+        "sourceResultStatus": { "enum": ["SUCCEEDED", "FOUND"] },
         "sourceResultMessageId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
         "entityType": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
         "entityId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },

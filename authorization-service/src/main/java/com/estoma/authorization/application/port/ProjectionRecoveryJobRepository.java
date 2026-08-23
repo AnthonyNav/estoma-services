@@ -13,6 +13,9 @@ public interface ProjectionRecoveryJobRepository {
 
   Optional<RecoveryJob> findWaitingByQueryMessageId(UUID queryMessageId);
 
+  /** Locks the current WAITING_RESULT job for the duration of the caller transaction. */
+  Optional<RecoveryJob> findWaitingByQueryMessageIdForUpdate(UUID queryMessageId);
+
   boolean hasActiveFull(String projectionType);
 
   boolean hasCompletedFull(String projectionType);
@@ -31,10 +34,6 @@ public interface ProjectionRecoveryJobRepository {
 
   boolean insertIfAbsent(RecoveryJob job);
 
-  /**
-   * Compare-and-set update for the durable state machine. For WAITING_RESULT callers should pass the
-   * expected current query message id; for other states it may be null.
-   */
   int update(RecoveryJob job, String expectedStatus, UUID expectedCurrentQueryMessageId);
 
   record RecoveryJob(

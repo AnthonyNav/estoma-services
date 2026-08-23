@@ -47,11 +47,17 @@
             "roleVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
           }
         },
-        "systemAccesses": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/systemAccess" }
-        },
+        "systemAccesses": { "type": "array", "items": { "$ref": "#/$defs/systemAccess" } },
         "snapshotGeneratedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+      }
+    },
+    "failurePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "error"],
+      "properties": {
+        "status": { "enum": ["REJECTED", "FAILED"] },
+        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
       }
     },
     "pointFoundPayload": {
@@ -60,12 +66,7 @@
       "required": ["status", "data"],
       "properties": {
         "status": { "const": "FOUND" },
-        "data": {
-          "allOf": [
-            { "$ref": "#/$defs/snapshot" },
-            { "required": ["snapshotGeneratedAt"] }
-          ]
-        }
+        "data": { "allOf": [ { "$ref": "#/$defs/snapshot" }, { "required": ["snapshotGeneratedAt"] } ] }
       }
     },
     "pointNotFoundPayload": {
@@ -73,15 +74,6 @@
       "additionalProperties": false,
       "required": ["status"],
       "properties": { "status": { "const": "NOT_FOUND" } }
-    },
-    "rejectedPayload": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["status", "error"],
-      "properties": {
-        "status": { "const": "REJECTED" },
-        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
-      }
     },
     "pageSucceededPayload": {
       "type": "object",
@@ -94,11 +86,8 @@
           "additionalProperties": false,
           "required": ["items", "hasMore", "snapshotGeneratedAt"],
           "properties": {
-            "items": {
-              "type": "array",
-              "items": { "$ref": "#/$defs/snapshot" }
-            },
-            "nextCursor": { "$ref": "../common-envelope.schema.json#/$defs/nonBlankText" },
+            "items": { "type": "array", "items": { "$ref": "#/$defs/snapshot" } },
+            "nextCursor": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
             "hasMore": { "type": "boolean" },
             "snapshotGeneratedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
           },
@@ -122,7 +111,7 @@
               "oneOf": [
                 { "$ref": "#/$defs/pointFoundPayload" },
                 { "$ref": "#/$defs/pointNotFoundPayload" },
-                { "$ref": "#/$defs/rejectedPayload" }
+                { "$ref": "#/$defs/failurePayload" }
               ]
             }
           }
@@ -138,7 +127,7 @@
             "payload": {
               "oneOf": [
                 { "$ref": "#/$defs/pageSucceededPayload" },
-                { "$ref": "#/$defs/rejectedPayload" }
+                { "$ref": "#/$defs/failurePayload" }
               ]
             }
           }

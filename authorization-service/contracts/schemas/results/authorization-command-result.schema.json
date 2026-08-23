@@ -21,27 +21,24 @@
         "executionGeneration": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
       }
     },
-    "resultPayload": {
+    "genericTerminalPayload": {
       "type": "object",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "required": ["status", "data"],
-          "properties": {
-            "status": { "const": "SUCCEEDED" },
-            "data": { "type": "object" }
-          }
-        },
-        {
-          "additionalProperties": false,
-          "required": ["status", "error"],
-          "properties": {
-            "status": { "enum": ["REJECTED", "FAILED"] },
-            "data": { "$ref": "#/$defs/importCorrelationData" },
-            "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
-          }
-        }
-      ]
+      "additionalProperties": false,
+      "required": ["status", "error"],
+      "properties": {
+        "status": { "enum": ["REJECTED", "FAILED", "EXPIRED"] },
+        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
+      }
+    },
+    "academicTerminalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data", "error"],
+      "properties": {
+        "status": { "enum": ["REJECTED", "FAILED"] },
+        "data": { "$ref": "#/$defs/importCorrelationData" },
+        "error": { "$ref": "../common-envelope.schema.json#/$defs/error" }
+      }
     },
     "assignData": {
       "type": "object",
@@ -60,25 +57,14 @@
     "changeData": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "accountId",
-        "previousRole",
-        "newRole",
-        "changed",
-        "newVersion",
-        "suspendedSystemAccessIds",
-        "suspendedSystemAccessCount"
-      ],
+      "required": ["accountId", "previousRole", "newRole", "changed", "newVersion", "suspendedSystemAccessIds", "suspendedSystemAccessCount"],
       "properties": {
         "accountId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
         "previousRole": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
         "newRole": { "$ref": "../common-envelope.schema.json#/$defs/roleCode" },
         "changed": { "const": true },
         "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
-        "suspendedSystemAccessIds": {
-          "type": "array",
-          "items": { "$ref": "../common-envelope.schema.json#/$defs/uuid" }
-        },
+        "suspendedSystemAccessIds": { "type": "array", "items": { "$ref": "../common-envelope.schema.json#/$defs/uuid" } },
         "suspendedSystemAccessCount": { "$ref": "../common-envelope.schema.json#/$defs/nonNegativeInteger" }
       }
     },
@@ -134,24 +120,66 @@
         "newVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" }
       }
     },
+    "assignSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/assignData" } }
+    },
+    "changeSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/changeData" } }
+    },
+    "grantSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/grantData" } }
+    },
+    "suspendSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/suspendData" } }
+    },
+    "revokeSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/revokeData" } }
+    },
+    "restoreSuccessPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": { "status": { "const": "SUCCEEDED" }, "data": { "$ref": "#/$defs/restoreData" } }
+    },
+    "academicActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "service"],
+      "properties": { "type": { "const": "SYSTEM" }, "service": { "const": "academic" } }
+    },
     "assignAccountRoleResult": {
       "allOf": [
         { "$ref": "../common-envelope.schema.json" },
         {
-          "required": ["causationId", "operationId"],
+          "required": ["causationId", "operationId", "idempotencyKey"],
           "properties": {
             "messageType": { "const": "AssignAccountRoleResult" },
             "messageKind": { "const": "RESULT" },
             "producer": { "const": "authorization" },
-            "payload": {
-              "allOf": [
-                { "$ref": "#/$defs/resultPayload" },
-                {
-                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
-                  "then": { "properties": { "data": { "$ref": "#/$defs/assignData" } } }
-                }
-              ]
-            }
+            "payload": { "oneOf": [ { "$ref": "#/$defs/assignSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" }, { "$ref": "#/$defs/academicTerminalPayload" } ] }
+          }
+        },
+        {
+          "if": { "properties": { "actor": { "$ref": "#/$defs/academicActor" }, "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED"] } }, "required": ["status"] } }, "required": ["actor", "payload"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/academicTerminalPayload" } } },
+          "else": {
+            "if": { "properties": { "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED", "EXPIRED"] } }, "required": ["status"] } }, "required": ["payload"] },
+            "then": { "properties": { "payload": { "$ref": "#/$defs/genericTerminalPayload" } } }
           }
         }
       ]
@@ -160,20 +188,10 @@
       "allOf": [
         { "$ref": "../common-envelope.schema.json" },
         {
-          "required": ["causationId", "operationId"],
+          "required": ["causationId", "operationId", "idempotencyKey"],
           "properties": {
-            "messageType": { "const": "ChangeAccountRoleResult" },
-            "messageKind": { "const": "RESULT" },
-            "producer": { "const": "authorization" },
-            "payload": {
-              "allOf": [
-                { "$ref": "#/$defs/resultPayload" },
-                {
-                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
-                  "then": { "properties": { "data": { "$ref": "#/$defs/changeData" } } }
-                }
-              ]
-            }
+            "messageType": { "const": "ChangeAccountRoleResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" },
+            "payload": { "oneOf": [ { "$ref": "#/$defs/changeSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] }
           }
         }
       ]
@@ -182,89 +200,30 @@
       "allOf": [
         { "$ref": "../common-envelope.schema.json" },
         {
-          "required": ["causationId", "operationId"],
+          "required": ["causationId", "operationId", "idempotencyKey"],
           "properties": {
-            "messageType": { "const": "GrantSystemAccessResult" },
-            "messageKind": { "const": "RESULT" },
-            "producer": { "const": "authorization" },
-            "payload": {
-              "allOf": [
-                { "$ref": "#/$defs/resultPayload" },
-                {
-                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
-                  "then": { "properties": { "data": { "$ref": "#/$defs/grantData" } } }
-                }
-              ]
-            }
+            "messageType": { "const": "GrantSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" },
+            "payload": { "oneOf": [ { "$ref": "#/$defs/grantSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" }, { "$ref": "#/$defs/academicTerminalPayload" } ] }
+          }
+        },
+        {
+          "if": { "properties": { "actor": { "$ref": "#/$defs/academicActor" }, "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED"] } }, "required": ["status"] } }, "required": ["actor", "payload"] },
+          "then": { "properties": { "payload": { "$ref": "#/$defs/academicTerminalPayload" } } },
+          "else": {
+            "if": { "properties": { "payload": { "properties": { "status": { "enum": ["REJECTED", "FAILED", "EXPIRED"] } }, "required": ["status"] } }, "required": ["payload"] },
+            "then": { "properties": { "payload": { "$ref": "#/$defs/genericTerminalPayload" } } }
           }
         }
       ]
     },
     "suspendSystemAccessResult": {
-      "allOf": [
-        { "$ref": "../common-envelope.schema.json" },
-        {
-          "required": ["causationId", "operationId"],
-          "properties": {
-            "messageType": { "const": "SuspendSystemAccessResult" },
-            "messageKind": { "const": "RESULT" },
-            "producer": { "const": "authorization" },
-            "payload": {
-              "allOf": [
-                { "$ref": "#/$defs/resultPayload" },
-                {
-                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
-                  "then": { "properties": { "data": { "$ref": "#/$defs/suspendData" } } }
-                }
-              ]
-            }
-          }
-        }
-      ]
+      "allOf": [ { "$ref": "../common-envelope.schema.json" }, { "required": ["causationId", "operationId", "idempotencyKey"], "properties": { "messageType": { "const": "SuspendSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" }, "payload": { "oneOf": [ { "$ref": "#/$defs/suspendSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] } } } ]
     },
     "revokeSystemAccessResult": {
-      "allOf": [
-        { "$ref": "../common-envelope.schema.json" },
-        {
-          "required": ["causationId", "operationId"],
-          "properties": {
-            "messageType": { "const": "RevokeSystemAccessResult" },
-            "messageKind": { "const": "RESULT" },
-            "producer": { "const": "authorization" },
-            "payload": {
-              "allOf": [
-                { "$ref": "#/$defs/resultPayload" },
-                {
-                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
-                  "then": { "properties": { "data": { "$ref": "#/$defs/revokeData" } } }
-                }
-              ]
-            }
-          }
-        }
-      ]
+      "allOf": [ { "$ref": "../common-envelope.schema.json" }, { "required": ["causationId", "operationId", "idempotencyKey"], "properties": { "messageType": { "const": "RevokeSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" }, "payload": { "oneOf": [ { "$ref": "#/$defs/revokeSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] } } } ]
     },
     "restoreSystemAccessResult": {
-      "allOf": [
-        { "$ref": "../common-envelope.schema.json" },
-        {
-          "required": ["causationId", "operationId"],
-          "properties": {
-            "messageType": { "const": "RestoreSystemAccessResult" },
-            "messageKind": { "const": "RESULT" },
-            "producer": { "const": "authorization" },
-            "payload": {
-              "allOf": [
-                { "$ref": "#/$defs/resultPayload" },
-                {
-                  "if": { "properties": { "status": { "const": "SUCCEEDED" } }, "required": ["status"] },
-                  "then": { "properties": { "data": { "$ref": "#/$defs/restoreData" } } }
-                }
-              ]
-            }
-          }
-        }
-      ]
+      "allOf": [ { "$ref": "../common-envelope.schema.json" }, { "required": ["causationId", "operationId", "idempotencyKey"], "properties": { "messageType": { "const": "RestoreSystemAccessResult" }, "messageKind": { "const": "RESULT" }, "producer": { "const": "authorization" }, "payload": { "oneOf": [ { "$ref": "#/$defs/restoreSuccessPayload" }, { "$ref": "#/$defs/genericTerminalPayload" } ] } } } ]
     }
   }
 }
