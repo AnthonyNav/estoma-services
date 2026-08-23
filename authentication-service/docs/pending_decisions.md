@@ -1,24 +1,25 @@
 # authentication-service Pending Decisions
 
-## Purpose
+## Status
 
-This file tracks what is genuinely still open after Phase 1 (PR1). Everything this service had authority to decide on its own — password hashing, token format, session/lockout/recovery policy, migration tooling, Outbox operational policy, observability parameter names — was resolved in `docs/system_contract.md` during Phase 1 and is no longer listed here.
+The former Phase-3 cross-service contract questions are resolved by the canonical platform documentation and this PR3 integration.
 
-## Deferred To Phase 3
+Resolved in code:
 
-These require agreement with other services' teams before they can be finalized. Phase 2 proceeds using the conceptual payloads already documented in this service's own `events.md`/`data-model.md`/`commands.md`; Phase 3 formalizes and reconciles them.
+- Users Person events use canonical `producer = users` / `users.person.*` routing.
+- Academic coordinated account Commands use `producer = academic`, `SYSTEM/academic`, `importExecution`, stable `operationId` and `idempotencyKey`.
+- Authorization projection recovery uses `platform.queries -> queries.authentication` with `GetAccountStatusSnapshot` and `ListAccountStatusSnapshotsPage`.
+- Command Results route to the original requester and coordinated Academic terminal Results retain `importId`, `planItemId`, and `executionGeneration`.
+- `PasswordChanged` integration with Communications is governed by the Communications owner contract rather than Authentication-local assumptions.
 
-- Exact payload contract for `PersonCreated`, `PersonActivated`, `PersonDeactivated` as actually published by `users-service`.
-- Exact payload contract for `StudentNumberCorrected` as actually published by `academic-service`.
-- Final durable command envelopes expected from the BFF (`CreateAccount`, `ActivateAccount`, `DeactivateAccount`, `ChangeLoginIdentifier`, `RevokeAllAccountSessions`, `RequestPasswordRecovery`) — actor data, `Idempotency-Key`, `correlationId` conventions.
-- Whether `PasswordChanged` (and related credential events) should trigger an email notification — depends on the finalized `communications-service` contract.
-- Concrete routing keys, final result envelopes, and event versioning at the platform level.
+## Outside This Service
 
-## Out Of This Service's Control
+The following remain platform/infra ownership and do not change Authentication business behavior:
 
-Owned by `estoma-infra` / the platform team. Not a blocker for Phase 2.
+- secret-management implementation beyond the application contract;
+- resource requests/limits and HPA policy;
+- database/user provisioning;
+- physical RabbitMQ provisioning in environments where application topology declaration is disabled;
+- distributed E2E validation across Users, Academic, Authorization, BFF and Communications.
 
-- Secret management strategy beyond raw Kubernetes Secrets.
-- Resource requests/limits and HPA metrics.
-- Database user and database creation workflow.
-- Physical RabbitMQ topology ownership per environment.
+No open Authentication-local business decision blocks V1.
