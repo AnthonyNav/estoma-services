@@ -13,7 +13,7 @@ import tools.jackson.databind.JsonNode;
 @Component
 public final class ProjectionEventProcessor {
   public record Outcome(boolean applied, String deferredReason) {
-    static Outcome applied() { return new Outcome(true, null); }
+    static Outcome success() { return new Outcome(true, null); }
     static Outcome deferred(String reason) { return new Outcome(false, reason); }
   }
 
@@ -68,114 +68,114 @@ public final class ProjectionEventProcessor {
   private Outcome appointmentScheduled(JsonNode p, long version) {
     UUID id = uuid(p, "appointmentId");
     var current = appointments.findById(id);
-    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.success();
     appointments.upsert(new ProjectionRepositories.AppointmentContext(
         id, uuid(p, "studentAccountId"), uuid(p, "appointmentTimeSlotId"), uuid(p, "courseSectionId"),
         AppointmentType.valueOf(text(p, "appointmentType")), integer(p, "instrumentCount"), text(p, "pieceType"),
         "SCHEDULED", null, version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome updateAppointmentStatus(JsonNode p, long version, String status) {
     UUID id = uuid(p, "appointmentId");
     var current = appointments.findById(id);
     if (current.isEmpty()) return Outcome.deferred("APPOINTMENT_PREREQUISITE_MISSING");
-    if (current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.get().sourceVersion() >= version) return Outcome.success();
     var c = current.get();
     appointments.upsert(new ProjectionRepositories.AppointmentContext(
         c.appointmentId(), c.studentAccountId(), c.appointmentTimeSlotId(), c.courseSectionId(),
         c.appointmentType(), c.instrumentCount(), c.pieceType(), status, c.entryAuthorizedAt(), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome slotCreated(JsonNode p, long version) {
     UUID id = uuid(p, "appointmentTimeSlotId");
     var current = slots.findById(id);
-    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.success();
     UUID calendarId = optionalUuid(p, "calendarId");
     if (calendarId == null) return Outcome.deferred("APPOINTMENT_SLOT_CALENDAR_CONTEXT_MISSING");
     slots.upsert(new ProjectionRepositories.TimeSlotContext(
         id, calendarId, LocalDate.parse(text(p, "serviceDate")), instant(p, "startsAt"), instant(p, "endsAt"),
         text(p, "timezone"), instant(p, "arrivalToleranceUntil"), text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome slotCancelled(JsonNode p, long version) {
     UUID id = uuid(p, "appointmentTimeSlotId");
     var current = slots.findById(id);
     if (current.isEmpty()) return Outcome.deferred("TIME_SLOT_PREREQUISITE_MISSING");
-    if (current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.get().sourceVersion() >= version) return Outcome.success();
     var c = current.get();
     slots.upsert(new ProjectionRepositories.TimeSlotContext(
         c.appointmentTimeSlotId(), c.calendarId(), c.serviceDate(), c.startsAt(), c.endsAt(), c.timezone(),
         c.arrivalToleranceUntil(), "CANCELLED", version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome cabinRegistered(JsonNode p, long version) {
     UUID id = uuid(p, "cabinId");
     var current = resources.findCabin(id);
-    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.success();
     resources.upsertCabin(new ProjectionRepositories.CabinProjection(
         id, text(p, "code"), optionalText(p, "name"), CabinType.valueOf(text(p, "cabinType")),
         text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome cabinUpdated(JsonNode p, long version) {
     UUID id = uuid(p, "cabinId");
     var current = resources.findCabin(id);
     if (current.isEmpty()) return Outcome.deferred("CABIN_PREREQUISITE_MISSING");
-    if (current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.get().sourceVersion() >= version) return Outcome.success();
     var c = current.get();
     resources.upsertCabin(new ProjectionRepositories.CabinProjection(
         id, c.code(), optionalText(p, "name"), CabinType.valueOf(text(p, "cabinType")), text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome cabinStatus(JsonNode p, long version, String status) {
     UUID id = uuid(p, "cabinId");
     var current = resources.findCabin(id);
     if (current.isEmpty()) return Outcome.deferred("CABIN_PREREQUISITE_MISSING");
-    if (current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.get().sourceVersion() >= version) return Outcome.success();
     var c = current.get();
     resources.upsertCabin(new ProjectionRepositories.CabinProjection(
         id, c.code(), c.name(), c.type(), status, version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome tankRegistered(JsonNode p, long version) {
     UUID id = uuid(p, "tankId");
     var current = resources.findTank(id);
-    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.isPresent() && current.get().sourceVersion() >= version) return Outcome.success();
     resources.upsertTank(new ProjectionRepositories.TankProjection(
         id, uuid(p, "cabinId"), text(p, "code"), optionalText(p, "name"), integer(p, "configuredCapacity"),
         text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome tankUpdated(JsonNode p, long version) {
     UUID id = uuid(p, "tankId");
     var current = resources.findTank(id);
     if (current.isEmpty()) return Outcome.deferred("TANK_PREREQUISITE_MISSING");
-    if (current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.get().sourceVersion() >= version) return Outcome.success();
     var c = current.get();
     UUID cabinId = optionalUuid(p, "cabinId");
     resources.upsertTank(new ProjectionRepositories.TankProjection(
         id, cabinId == null ? c.cabinId() : cabinId, c.code(), optionalText(p, "name"),
         integer(p, "configuredCapacity"), text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome tankStatus(JsonNode p, long version, String status) {
     UUID id = uuid(p, "tankId");
     var current = resources.findTank(id);
     if (current.isEmpty()) return Outcome.deferred("TANK_PREREQUISITE_MISSING");
-    if (current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.get().sourceVersion() >= version) return Outcome.success();
     var c = current.get();
     resources.upsertTank(new ProjectionRepositories.TankProjection(
         id, c.cabinId(), c.code(), c.name(), c.configuredCapacity(), status, version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome priorityConfigured(JsonNode p, long version) {
@@ -183,43 +183,43 @@ public final class ProjectionEventProcessor {
         uuid(p, "resourcePriorityId"), AppointmentType.valueOf(text(p, "appointmentType")),
         CabinType.valueOf(text(p, "cabinType")), text(p, "usageMode"), integer(p, "priorityOrder"),
         text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome closureScheduled(JsonNode p, long version) {
     closures.upsert(new ProjectionRepositories.AdministrativeClosureProjection(
         uuid(p, "closureId"), uuid(p, "calendarId"), text(p, "scope"), optionalUuid(p, "cabinId"),
         optionalUuid(p, "tankId"), instant(p, "startsAt"), instant(p, "endsAt"), text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome closureCancelled(JsonNode p, long version) {
     UUID id = uuid(p, "closureId");
     var current = closures.findById(id);
     if (current.isEmpty()) return Outcome.deferred("CLOSURE_PREREQUISITE_MISSING");
-    if (current.get().sourceVersion() >= version) return Outcome.applied();
+    if (current.get().sourceVersion() >= version) return Outcome.success();
     var c = current.get();
     closures.upsert(new ProjectionRepositories.AdministrativeClosureProjection(
         id, c.calendarId(), c.scope(), c.cabinId(), c.tankId(), c.startsAt(), c.endsAt(), "CANCELLED", version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome roleAssigned(JsonNode p, long version) {
     authorization.upsertRole(new ProjectionRepositories.RoleProjection(
         uuid(p, "accountId"), text(p, "roleCode"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome roleChanged(JsonNode p, long version) {
     authorization.upsertRole(new ProjectionRepositories.RoleProjection(
         uuid(p, "accountId"), text(p, "newRoleCode"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private Outcome accessChanged(JsonNode p, long version) {
     authorization.upsertAccess(new ProjectionRepositories.AccessProjection(
         uuid(p, "accountId"), uuid(p, "systemId"), text(p, "systemCode"), text(p, "status"), version));
-    return Outcome.applied();
+    return Outcome.success();
   }
 
   private static long sourceVersion(MessageEnvelope e) {

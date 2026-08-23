@@ -34,7 +34,8 @@ public final class JdbcOutboxRelayStore implements OutboxRelayStore {
         FROM candidate c
         WHERE o.message_id=c.message_id
         RETURNING o.*
-        """, this::map, now, now, limit, claimToken, leaseUntil);
+        """, this::map, JdbcTemporal.timestamp(now), JdbcTemporal.timestamp(now), limit, claimToken,
+        JdbcTemporal.timestamp(leaseUntil));
   }
 
   @Override
@@ -43,7 +44,7 @@ public final class JdbcOutboxRelayStore implements OutboxRelayStore {
         UPDATE outbox_messages
         SET status='PUBLISHED',published_at=?,claim_token=NULL,lease_until=NULL,last_error=NULL
         WHERE message_id=? AND status='PROCESSING' AND claim_token=?
-        """, publishedAt, messageId, claimToken) == 1;
+        """, JdbcTemporal.timestamp(publishedAt), messageId, claimToken) == 1;
   }
 
   @Override
@@ -52,7 +53,7 @@ public final class JdbcOutboxRelayStore implements OutboxRelayStore {
         UPDATE outbox_messages
         SET status='PENDING',available_at=?,last_error=?,claim_token=NULL,lease_until=NULL
         WHERE message_id=? AND status='PROCESSING' AND claim_token=?
-        """, availableAt, error, messageId, claimToken) == 1;
+        """, JdbcTemporal.timestamp(availableAt), error, messageId, claimToken) == 1;
   }
 
   @Override

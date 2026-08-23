@@ -28,7 +28,7 @@ public class JdbcAdministrativeClosureRepository implements ProjectionRepositori
         SELECT * FROM administrative_closure_projection
         WHERE status='SCHEDULED' AND starts_at < ? AND ends_at > ?
         ORDER BY starts_at,administrative_closure_id
-        """, this::map, endsAt, startsAt);
+        """, this::map, JdbcTemporal.timestamp(endsAt), JdbcTemporal.timestamp(startsAt));
   }
 
   @Override
@@ -42,8 +42,9 @@ public class JdbcAdministrativeClosureRepository implements ProjectionRepositori
           starts_at=excluded.starts_at,ends_at=excluded.ends_at,status=excluded.status,
           source_version=excluded.source_version,updated_at=excluded.updated_at
         WHERE administrative_closure_projection.source_version < excluded.source_version
-        """, c.administrativeClosureId(), c.calendarId(), c.scope(), c.cabinId(), c.tankId(), c.startsAt(),
-        c.endsAt(), c.status(), c.sourceVersion(), Instant.now());
+        """, c.administrativeClosureId(), c.calendarId(), c.scope(), c.cabinId(), c.tankId(),
+        JdbcTemporal.timestamp(c.startsAt()), JdbcTemporal.timestamp(c.endsAt()), c.status(), c.sourceVersion(),
+        JdbcTemporal.timestamp(Instant.now()));
   }
 
   private ProjectionRepositories.AdministrativeClosureProjection map(ResultSet rs, int row) throws SQLException {

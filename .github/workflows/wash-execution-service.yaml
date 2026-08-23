@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "wash-execution-service/**"
+      - "appointments-service/**"
       - ".github/workflows/wash-execution-service.yaml"
   push:
     branches:
@@ -11,6 +12,7 @@ on:
       - main
     paths:
       - "wash-execution-service/**"
+      - "appointments-service/**"
       - ".github/workflows/wash-execution-service.yaml"
 
 permissions:
@@ -34,5 +36,8 @@ jobs:
           cache: maven
           cache-dependency-path: wash-execution-service/pom.xml
 
-      - name: Run tests
+      - name: Run service tests
         run: ./mvnw -B clean verify
+
+      - name: Run bounded-context E2E
+        run: bash e2e/verify.sh

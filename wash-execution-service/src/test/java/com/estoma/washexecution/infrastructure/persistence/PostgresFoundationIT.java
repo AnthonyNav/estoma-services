@@ -22,6 +22,7 @@ import com.estoma.washexecution.domain.execution.UnavailabilityCauseType;
 import com.estoma.washexecution.domain.execution.WashExecution;
 import com.estoma.washexecution.testsupport.AbstractPostgresIT;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -208,7 +209,7 @@ class PostgresFoundationIT extends AbstractPostgresIT {
       start.countDown();
       assertThat(a.get()).isNotEqualTo(b.get());
       assertThat(cleaningPeriods.findByAssignmentId(assignmentId).orElseThrow().completedAt())
-          .isEqualTo(cleaning.expectedEndsAt());
+          .isEqualTo(cleaning.expectedEndsAt().truncatedTo(ChronoUnit.MICROS));
     }
   }
 

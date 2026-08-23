@@ -28,12 +28,13 @@ public class JdbcProjectionRecoveryRepository implements ProjectionRecoveryRepos
     jdbc.update("""
         INSERT INTO projection_recovery_state(
           projection_name,source_logical_component_id,readiness_status,last_successful_rebuild_at,last_error,updated_at)
-        VALUES(?,?,?,CASE WHEN ?='READY' THEN ? ELSE NULL END,?,?)
+        VALUES(?,?,?,CASE WHEN ?='READY' THEN CAST(? AS timestamptz) ELSE NULL END,?,?)
         ON CONFLICT(projection_name) DO UPDATE SET source_logical_component_id=excluded.source_logical_component_id,
           readiness_status=excluded.readiness_status,
           last_successful_rebuild_at=CASE WHEN excluded.readiness_status='READY' THEN excluded.updated_at
             ELSE projection_recovery_state.last_successful_rebuild_at END,
           last_error=excluded.last_error,updated_at=excluded.updated_at
-        """, projectionName, source, status, status, updatedAt, error, updatedAt);
+        """, projectionName, source, status, status, JdbcTemporal.timestamp(updatedAt), error,
+        JdbcTemporal.timestamp(updatedAt));
   }
 }

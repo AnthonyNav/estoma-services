@@ -21,7 +21,8 @@ public class JdbcAffectedExecutionRepository implements AffectedExecutionReposit
         INSERT INTO resource_unavailability_affected_executions (
           resource_unavailability_id,wash_execution_id,resource_assignment_id,affected_at,created_at)
         VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING
-        """, unavailabilityId, executionId, assignmentId, affectedAt, Instant.now());
+        """, unavailabilityId, executionId, assignmentId, JdbcTemporal.timestamp(affectedAt),
+        JdbcTemporal.timestamp(Instant.now()));
   }
 
   @Override

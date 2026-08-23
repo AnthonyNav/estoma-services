@@ -8,6 +8,7 @@ import com.estoma.washexecution.contracts.MessageKind;
 import com.estoma.washexecution.contracts.MessagingNames;
 import com.estoma.washexecution.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.washexecution.infrastructure.messaging.outbound.OutboxRelay;
+import com.estoma.washexecution.infrastructure.persistence.jdbc.JdbcTemporal;
 import com.estoma.washexecution.testsupport.AbstractMessagingIT;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -147,7 +148,9 @@ class CommandMessagingIT extends AbstractMessagingIT {
           arrival_tolerance_until,status,source_version,updated_at)
         VALUES(?,?,?, ?,?,'UTC',?,'ACTIVE',1,now())
         """, slotId, UUID.randomUUID(), LocalDate.of(2026, 8, 23),
-        START.plusSeconds(15 * 60L), START.plusSeconds(75 * 60L), START.plusSeconds(25 * 60L));
+        JdbcTemporal.timestamp(START.plusSeconds(15 * 60L)),
+        JdbcTemporal.timestamp(START.plusSeconds(75 * 60L)),
+        JdbcTemporal.timestamp(START.plusSeconds(25 * 60L)));
   }
 
   private void seedAppointment(UUID appointmentId, UUID student, UUID slotId) {

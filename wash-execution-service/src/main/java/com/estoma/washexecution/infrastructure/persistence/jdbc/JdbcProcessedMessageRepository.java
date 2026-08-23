@@ -28,7 +28,8 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
         """, m.consumerName(), m.messageId(), m.status().name(), m.messageType(), m.messageVersion(),
         m.messageKind(), m.producer(), m.correlationId(), m.causationId(), m.operationId(),
         m.idempotencyKey(), m.aggregateId(), m.aggregateVersion(), m.actorJson(), m.payloadJson(),
-        m.receivedAt(), m.occurredAt(), m.appliedAt(), m.deferredReason(), m.updatedAt()) == 1;
+        JdbcTemporal.timestamp(m.receivedAt()), JdbcTemporal.timestamp(m.occurredAt()),
+        JdbcTemporal.timestamp(m.appliedAt()), m.deferredReason(), JdbcTemporal.timestamp(m.updatedAt())) == 1;
   }
 
   @Override
@@ -45,7 +46,8 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
         SET claim_token=?,lease_until=?,updated_at=?
         WHERE consumer_name=? AND message_id=? AND status='DEFERRED'
           AND (lease_until IS NULL OR lease_until <= ?)
-        """, claimToken, leaseUntil, now, consumerName, messageId, now) == 1;
+        """, claimToken, JdbcTemporal.timestamp(leaseUntil), JdbcTemporal.timestamp(now), consumerName,
+        messageId, JdbcTemporal.timestamp(now)) == 1;
   }
 
   @Override
@@ -67,7 +69,8 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
         FROM candidates c
         WHERE p.consumer_name=c.consumer_name AND p.message_id=c.message_id
         RETURNING p.*
-        """, this::map, consumerName, now, limit, claimToken, leaseUntil, now);
+        """, this::map, consumerName, JdbcTemporal.timestamp(now), limit, claimToken,
+        JdbcTemporal.timestamp(leaseUntil), JdbcTemporal.timestamp(now));
   }
 
   @Override
@@ -76,7 +79,8 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
         UPDATE processed_messages
         SET status='APPLIED', applied_at=?, deferred_reason=NULL, claim_token=NULL, lease_until=NULL, updated_at=?
         WHERE consumer_name=? AND message_id=? AND status='DEFERRED' AND claim_token=?
-        """, appliedAt, appliedAt, consumerName, messageId, claimToken) == 1;
+        """, JdbcTemporal.timestamp(appliedAt), JdbcTemporal.timestamp(appliedAt), consumerName,
+        messageId, claimToken) == 1;
   }
 
   @Override
@@ -86,7 +90,7 @@ public class JdbcProcessedMessageRepository implements ProcessedMessageRepositor
         UPDATE processed_messages
         SET deferred_reason=?,claim_token=NULL,lease_until=NULL,updated_at=?
         WHERE consumer_name=? AND message_id=? AND status='DEFERRED' AND claim_token=?
-        """, reason, updatedAt, consumerName, messageId, claimToken) == 1;
+        """, reason, JdbcTemporal.timestamp(updatedAt), consumerName, messageId, claimToken) == 1;
   }
 
   private ProcessedMessage map(ResultSet rs, int row) throws SQLException {

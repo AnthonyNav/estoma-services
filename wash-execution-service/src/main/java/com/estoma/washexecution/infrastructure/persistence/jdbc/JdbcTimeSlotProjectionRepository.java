@@ -41,8 +41,9 @@ public class JdbcTimeSlotProjectionRepository implements ProjectionRepositories.
           source_version=excluded.source_version,
           updated_at=excluded.updated_at
         WHERE appointment_time_slot_projection.source_version < excluded.source_version
-        """, c.appointmentTimeSlotId(), c.calendarId(), c.serviceDate(), c.startsAt(), c.endsAt(),
-        c.timezone(), c.arrivalToleranceUntil(), c.status(), c.sourceVersion(), Instant.now());
+        """, c.appointmentTimeSlotId(), c.calendarId(), c.serviceDate(), JdbcTemporal.timestamp(c.startsAt()),
+        JdbcTemporal.timestamp(c.endsAt()), c.timezone(), JdbcTemporal.timestamp(c.arrivalToleranceUntil()),
+        c.status(), c.sourceVersion(), JdbcTemporal.timestamp(Instant.now()));
   }
 
   private ProjectionRepositories.TimeSlotContext map(ResultSet rs, int row) throws SQLException {

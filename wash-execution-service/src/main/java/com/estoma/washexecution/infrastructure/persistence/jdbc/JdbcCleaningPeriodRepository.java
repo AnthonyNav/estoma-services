@@ -27,14 +27,14 @@ public class JdbcCleaningPeriodRepository implements CleaningPeriodRepository {
   public List<CleaningPeriod> findExpiredForUpdate(Instant now) {
     return jdbc.query(
         "SELECT * FROM cleaning_periods WHERE completed_at IS NULL AND expected_ends_at <= ? ORDER BY expected_ends_at,cleaning_period_id FOR UPDATE SKIP LOCKED",
-        this::map, now);
+        this::map, JdbcTemporal.timestamp(now));
   }
 
   @Override
   public List<CleaningPeriod> findOverlapping(UUID cabinId, Instant start, Instant end) {
     return jdbc.query(
         "SELECT * FROM cleaning_periods WHERE cabin_id=? AND starts_at < ? AND expected_ends_at > ?",
-        this::map, cabinId, end, start);
+        this::map, cabinId, JdbcTemporal.timestamp(end), JdbcTemporal.timestamp(start));
   }
 
   @Override
@@ -47,14 +47,17 @@ public class JdbcCleaningPeriodRepository implements CleaningPeriodRepository {
             starts_at,expected_ends_at,completed_by_account_id,completed_at,version,created_at,updated_at)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
           """, p.cleaningPeriodId(), p.washExecutionId(), p.resourceAssignmentId(), p.cabinId(),
-          p.cleaningTrigger().name(), p.startsAt(), p.expectedEndsAt(), null, p.completedAt(), p.version(), now, now);
+          p.cleaningTrigger().name(), JdbcTemporal.timestamp(p.startsAt()), JdbcTemporal.timestamp(p.expectedEndsAt()),
+          null, JdbcTemporal.timestamp(p.completedAt()), p.version(), JdbcTemporal.timestamp(now),
+          JdbcTemporal.timestamp(now));
       return;
     }
     int updated = jdbc.update("""
         UPDATE cleaning_periods
         SET completed_by_account_id=NULL,completed_at=?,version=?,updated_at=?
         WHERE cleaning_period_id=? AND version=?
-        """, p.completedAt(), p.version(), now, p.cleaningPeriodId(), expectedVersion);
+        """, JdbcTemporal.timestamp(p.completedAt()), p.version(), JdbcTemporal.timestamp(now),
+        p.cleaningPeriodId(), expectedVersion);
     if (updated != 1) throw new IllegalStateException("VERSION_CONFLICT");
   }
 

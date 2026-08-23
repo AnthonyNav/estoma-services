@@ -28,7 +28,8 @@ public class JdbcResourceUnavailabilityRepository implements ResourceUnavailabil
     return jdbc.query("""
         SELECT * FROM resource_unavailabilities
         WHERE restored_at IS NULL
-          AND ((? IS NOT NULL AND cabin_id=?) OR (? IS NOT NULL AND tank_id=?))
+          AND ((CAST(? AS uuid) IS NOT NULL AND cabin_id=CAST(? AS uuid))
+            OR (CAST(? AS uuid) IS NOT NULL AND tank_id=CAST(? AS uuid)))
         ORDER BY disabled_at,resource_unavailability_id
         """, this::map, cabinId, cabinId, tankId, tankId);
   }
@@ -45,16 +46,17 @@ public class JdbcResourceUnavailabilityRepository implements ResourceUnavailabil
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           """, value.resourceUnavailabilityId(), value.detectedDuringWashExecutionId(), value.cabinId(),
           value.tankId(), value.causeType().name(), value.reason(), value.disabledByAccountId(),
-          value.disabledAt(), value.restoredByAccountId(), value.restoredAt(), value.resolution(),
-          value.version(), now, now);
+          JdbcTemporal.timestamp(value.disabledAt()), value.restoredByAccountId(),
+          JdbcTemporal.timestamp(value.restoredAt()), value.resolution(), value.version(),
+          JdbcTemporal.timestamp(now), JdbcTemporal.timestamp(now));
       return;
     }
     int updated = jdbc.update("""
         UPDATE resource_unavailabilities
         SET restored_by_account_id=?,restored_at=?,resolution=?,version=?,updated_at=?
         WHERE resource_unavailability_id=? AND version=?
-        """, value.restoredByAccountId(), value.restoredAt(), value.resolution(), value.version(), now,
-        value.resourceUnavailabilityId(), expectedVersion);
+        """, value.restoredByAccountId(), JdbcTemporal.timestamp(value.restoredAt()), value.resolution(),
+        value.version(), JdbcTemporal.timestamp(now), value.resourceUnavailabilityId(), expectedVersion);
     if (updated != 1) throw new IllegalStateException("VERSION_CONFLICT");
   }
 
