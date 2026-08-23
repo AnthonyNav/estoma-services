@@ -12,6 +12,7 @@ public final class MessageTypes {
   public static final String ACTIVATE_PERSON = "ActivatePerson";
   public static final String DEACTIVATE_PERSON = "DeactivatePerson";
 
+  // Existing BFF-facing result vocabulary.
   public static final String CREATE_PERSON_SUCCEEDED = "CreatePersonSucceeded";
   public static final String CREATE_PERSON_REJECTED = "CreatePersonRejected";
   public static final String UPDATE_PERSON_SUCCEEDED = "UpdatePersonSucceeded";
@@ -20,6 +21,10 @@ public final class MessageTypes {
   public static final String ACTIVATE_PERSON_REJECTED = "ActivatePersonRejected";
   public static final String DEACTIVATE_PERSON_SUCCEEDED = "DeactivatePersonSucceeded";
   public static final String DEACTIVATE_PERSON_REJECTED = "DeactivatePersonRejected";
+
+  // Canonical coordinated Academic result vocabulary.
+  public static final String CREATE_PERSON_RESULT = "CreatePersonResult";
+  public static final String UPDATE_PERSON_RESULT = "UpdatePersonResult";
 
   public static final String PERSON_CREATED = "PersonCreated";
   public static final String PERSON_UPDATED = "PersonUpdated";
@@ -39,7 +44,8 @@ public final class MessageTypes {
       CREATE_PERSON_SUCCEEDED, CREATE_PERSON_REJECTED,
       UPDATE_PERSON_SUCCEEDED, UPDATE_PERSON_REJECTED,
       ACTIVATE_PERSON_SUCCEEDED, ACTIVATE_PERSON_REJECTED,
-      DEACTIVATE_PERSON_SUCCEEDED, DEACTIVATE_PERSON_REJECTED);
+      DEACTIVATE_PERSON_SUCCEEDED, DEACTIVATE_PERSON_REJECTED,
+      CREATE_PERSON_RESULT, UPDATE_PERSON_RESULT);
   public static final Set<String> EVENTS = Set.of(PERSON_CREATED, PERSON_UPDATED, PERSON_ACTIVATED, PERSON_DEACTIVATED);
   public static final Set<String> QUERIES = Set.of(
       RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL,
