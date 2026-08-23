@@ -38,9 +38,13 @@ public final class CreateAppointmentTimeSlotHandler implements CreateAppointment
   @Transactional
   public ApplicationResult create(Command command) {
     Instant now = command.now();
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
-        "CreateAppointmentTimeSlot", ApplicationSupport.fingerprint(command.slotId(),
-            command.sourceScheduleId(), command.serviceDate(), command.startsAt(), command.endsAt()), now);
+    String fingerprint = ApplicationSupport.fingerprint(command.slotId(), command.sourceScheduleId(),
+        command.serviceDate(), command.startsAt(), command.endsAt());
+    Optional<ApplicationResult> gate = command.metadata().actor().isAccount()
+        ? ApplicationSupport.claimClient(idempotency, outbox, command.metadata(),
+            "CreateAppointmentTimeSlot", fingerprint, now)
+        : ApplicationSupport.claim(idempotency, command.metadata(),
+            "CreateAppointmentTimeSlot", fingerprint, now);
     if (gate.isPresent()) return gate.get();
 
     ApplicationResult result;
