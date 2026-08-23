@@ -20,7 +20,7 @@ public class JdbcAdministrativeClosureRepository implements ProjectionRepositori
       UUID cabinId, UUID tankId, Instant startsAt, Instant endsAt) {
     return jdbc.query("""
         SELECT * FROM administrative_closure_projection
-        WHERE status='ACTIVE' AND starts_at < ? AND ends_at > ?
+        WHERE status='SCHEDULED' AND starts_at < ? AND ends_at > ?
           AND (scope='SERVICE'
             OR (scope='CABIN' AND cabin_id=?)
             OR (scope='TANK' AND tank_id=?))
