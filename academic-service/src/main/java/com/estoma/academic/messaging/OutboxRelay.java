@@ -108,7 +108,7 @@ public class OutboxRelay {
     String key = switch (row.kind()) {
       case "EVENT" -> AcademicEventRoutingKeyResolver.resolve(row.type());
       case "RESULT" -> meta.path("destination").asString();
-      case "QUERY" -> "users";
+      case "QUERY" -> queryDestination(row, meta);
       case "COMMAND" -> meta.path("destination").asString();
       default -> throw new IllegalStateException("unsupported outbox message kind " + row.kind());
     };
@@ -146,6 +146,20 @@ public class OutboxRelay {
     if (!"EVENT".equals(row.kind()) && correlation.getReturned() != null) {
       throw new IllegalStateException("PUBLISH_RETURNED");
     }
+  }
+
+  private static String queryDestination(OutboxRepository.Row row, JsonNode metadata) {
+    String destination = metadata.path("destination").asString();
+    if (!destination.isBlank()) {
+      return destination;
+    }
+    // PR2 rows may still be pending without metadata.destination. They are
+    // limited to the original Users resolution Query; all new Queries must
+    // persist their requester explicitly.
+    if ("ResolvePersonByInstitutionalEmail".equals(row.type())) {
+      return "users";
+    }
+    throw new IllegalStateException("QUERY outbox row has no destination");
   }
 
   private static String failureCode(Exception ex) {
