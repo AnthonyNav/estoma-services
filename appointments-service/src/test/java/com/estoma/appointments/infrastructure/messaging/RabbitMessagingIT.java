@@ -23,7 +23,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Binding;
-import org.springframework.amqp.core.ExchangeTypes;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
@@ -178,7 +177,7 @@ class RabbitMessagingIT extends AbstractPostgresIT {
         .isEqualTo(2);
 
     assertThat(failures.route(thirdAttempt, MessagingNames.COMMAND_QUEUE, true))
-        .isEqualTo(FailureRouter.Route.RETRY.DLQ);
+        .isEqualTo(FailureRouter.Route.DLQ);
     Message dead = rabbit.receive(MessagingNames.COMMAND_DLQ, 2_000);
     assertThat(body(dead)).isEqualTo(marker);
     assertThat(dead.getMessageProperties().getHeader("x-appointments-attempt")).isEqualTo(3);
