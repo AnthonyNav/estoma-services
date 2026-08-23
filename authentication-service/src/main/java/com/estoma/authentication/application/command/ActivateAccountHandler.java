@@ -20,11 +20,6 @@ import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
 
-/**
- * Handles {@code ActivateAccount} (commands.md §4.2): the explicit step
- * after {@code CreateAccount} that requires a credential to already be
- * configured through the ephemeral security RPC flow.
- */
 @Component
 class ActivateAccountHandler implements CommandHandler {
 
@@ -56,51 +51,56 @@ class ActivateAccountHandler implements CommandHandler {
   public CommandHandlerResult handle(MessageEnvelope envelope) {
     ActivateAccountCommand command = codec.convertPayload(envelope, ActivateAccountCommand.class);
 
-    Account account =
-        accountRepository
-            .findById(command.accountId())
-            .orElseThrow(() -> new AuthenticationRejectedException(RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
+    Account account = accountRepository.findById(command.accountId())
+        .orElseThrow(() -> new AuthenticationRejectedException(
+            RejectionCode.ACCOUNT_NOT_FOUND, "account " + command.accountId() + " does not exist"));
 
     if (!credentialRepository.existsByAccountId(command.accountId())) {
-      throw new AuthenticationRejectedException(RejectionCode.CREDENTIAL_NOT_CONFIGURED, "account " + command.accountId() + " has no configured credential");
+      throw new AuthenticationRejectedException(
+          RejectionCode.CREDENTIAL_NOT_CONFIGURED, "account " + command.accountId() + " has no configured credential");
     }
 
     var personStatus = personStatusProjectionRepository.findByPersonId(account.personId());
     if (personStatus.isEmpty()) {
-      throw new AuthenticationRejectedException(RejectionCode.PERSON_NOT_FOUND, "person " + account.personId() + " is not known to this service");
+      throw new AuthenticationRejectedException(
+          RejectionCode.PERSON_NOT_FOUND, "person " + account.personId() + " is not known to this service");
     }
     if (!"ACTIVE".equals(personStatus.get().status())) {
-      throw new AuthenticationRejectedException(RejectionCode.PERSON_INACTIVE, "person " + account.personId() + " is not active");
+      throw new AuthenticationRejectedException(
+          RejectionCode.PERSON_INACTIVE, "person " + account.personId() + " is not active");
     }
 
-    if (isStudentImportActivation(envelope)
+    if (isAcademicImport(envelope)
         && (account.loginIdentifier().type() != LoginType.MATRICULA
             || account.deactivatedAt() == null
             || !"ACADEMIC_ABSENCE".equals(account.deactivationReasonCode()))) {
-      throw new AuthenticationRejectedException(RejectionCode.ACTOR_NOT_AUTHORIZED, "student import may only reactivate academic-absence matricula accounts");
+      throw new AuthenticationRejectedException(
+          RejectionCode.ACTOR_NOT_AUTHORIZED,
+          "academic import may only reactivate academic-absence matricula accounts");
     }
 
     Instant now = Instant.now();
-    Account activated = account.activated(now); // throws ACCOUNT_ALREADY_ACTIVE
-
+    Account activated = account.activated(now);
     int rowsAffected = accountRepository.update(activated, command.expectedVersion());
     if (rowsAffected == 0) {
       AccountUpdateGuard.rejectForFailedUpdate(accountRepository, command.accountId(), command.expectedVersion());
     }
-    String activationReason = isStudentImportActivation(envelope) ? "ACADEMIC_ABSENCE" : "ADMINISTRATIVE";
-    statusHistoryRepository.insert(
-        new AccountStatusChange(
-            UUID.randomUUID(), activated.accountId(), account.status(), activated.status(), activationReason, null, envelope.actor(), envelope.correlationId(), now,
-            activated.version()));
+    String activationReason = isAcademicImport(envelope) ? "ACADEMIC_ABSENCE" : "ADMINISTRATIVE";
+    statusHistoryRepository.insert(new AccountStatusChange(
+        UUID.randomUUID(), activated.accountId(), account.status(), activated.status(), activationReason,
+        null, envelope.actor(), envelope.correlationId(), now, activated.version()));
 
     AccountActivatedPayload eventPayload = new AccountActivatedPayload(
-        activated.accountId(), activated.personId(), account.status().name(), activated.status().name(), activationReason, now);
-    return CommandHandlerResult.of(activated.accountId(), activated.version(), new EventToAppend(AuthenticationEvent.ACCOUNT_ACTIVATED.wireName(), eventPayload));
+        activated.accountId(), activated.personId(), account.status().name(),
+        activated.status().name(), activationReason, now);
+    return CommandHandlerResult.of(
+        activated.accountId(), activated.version(),
+        new EventToAppend(AuthenticationEvent.ACCOUNT_ACTIVATED.wireName(), eventPayload));
   }
 
-  private static boolean isStudentImportActivation(MessageEnvelope envelope) {
-    return "student-import-process".equals(envelope.producer())
+  private static boolean isAcademicImport(MessageEnvelope envelope) {
+    return "academic".equals(envelope.producer())
         && envelope.actor() != null
-        && "academic".equals(envelope.actor().service());
+        && envelope.actor().isSystemService("academic");
   }
 }
