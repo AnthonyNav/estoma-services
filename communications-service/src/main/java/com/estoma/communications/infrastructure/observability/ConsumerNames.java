@@ -1,6 +1,14 @@
 package com.estoma.communications.infrastructure.observability;
 
-/** Stable Consumer Inbox identities independent of physical queue names. */
+/**
+ * Consumer Inbox identities. Logical names, independent of the physical
+ * queue names the messaging tramo (Phase 3) will declare. Unlike {@code
+ * authentication-service} (a single {@code EVENTS} consumer),
+ * {@code recipient-projection} and {@code appointment-cancelled-adapter}
+ * are two conceptually independent consumers from day one (see
+ * system_contract.md "Internal Architecture" and execution_plan.md Phase
+ * 3, which declares them as separate physical queues).
+ */
 public final class ConsumerNames {
 
   public static final String COMMANDS = "communications-service.commands";
