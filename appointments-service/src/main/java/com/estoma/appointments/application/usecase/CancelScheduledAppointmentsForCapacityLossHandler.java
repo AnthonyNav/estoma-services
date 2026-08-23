@@ -7,7 +7,6 @@ import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
 import com.estoma.appointments.domain.model.Appointment;
-import com.estoma.appointments.domain.model.CancellationSubreason;
 import com.estoma.appointments.domain.model.CancellationType;
 import java.time.Instant;
 import java.util.Optional;
@@ -17,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public final class CancelScheduledAppointmentsForCapacityLossHandler
     implements CancelScheduledAppointmentsForCapacityLossUseCase {
+  private static final String CAPACITY_LOSS = "CAPACITY_LOSS";
   private final AppointmentRepository appointments;
   private final AppointmentCapacityProjectionRepository capacity;
   private final CommandIdempotencyRepository idempotency;
@@ -66,7 +66,7 @@ public final class CancelScheduledAppointmentsForCapacityLossHandler
           || candidate.entryAuthorizedAt() != null) continue;
       var current = appointments.findByIdForUpdate(candidate.appointmentId()).orElse(candidate);
       if (!current.status().name().equals("SCHEDULED") || current.entryAuthorizedAt() != null) continue;
-      var changed = current.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS,
+      var changed = current.cancel(CancellationType.CLINIC, CAPACITY_LOSS,
           "capacity loss", null, now);
       if (!appointments.updateIfVersion(changed, current.version())) continue;
       if (sharedOverflow) sharedDemand--; else immunoDemand--;
