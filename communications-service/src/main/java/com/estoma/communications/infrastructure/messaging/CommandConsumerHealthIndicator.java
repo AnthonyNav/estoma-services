@@ -5,7 +5,7 @@ import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
-@Component("commandConsumer")
+@Component
 public class CommandConsumerHealthIndicator implements HealthIndicator {
 
   private final RabbitListenerEndpointRegistry registry;
