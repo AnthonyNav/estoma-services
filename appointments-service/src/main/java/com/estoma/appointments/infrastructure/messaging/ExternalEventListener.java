@@ -19,11 +19,9 @@ public final class ExternalEventListener {
       "CourseSectionRegistered", "CourseSectionUpdated", "CourseSectionStatusChanged",
       "StudentEnrolledInCourseSection", "StudentEnrollmentReactivated",
       "StudentRemovedFromCourseSection");
-
   private static final Set<String> AUTHORIZATION_EVENTS = Set.of(
       "AccountRoleAssigned", "AccountRoleChanged", "SystemAccessGranted",
       "SystemAccessRestored", "SystemAccessSuspended", "SystemAccessRevoked");
-
   private static final Set<String> ADMINISTRATION_EVENTS = Set.of(
       "ServiceCalendarCreated", "ServiceCalendarUpdated", "ServiceCalendarActivated",
       "ServiceCalendarDeactivated", "ServiceScheduleConfigured", "ServiceScheduleUpdated",
@@ -31,13 +29,11 @@ public final class ExternalEventListener {
       "AdministrativeClosureCancelled", "CabinRegistered", "CabinUpdated", "CabinActivated",
       "CabinDeactivated", "CabinRetired", "TankRegistered", "TankUpdated", "TankActivated",
       "TankDeactivated", "TankRetired", "ResourcePriorityConfigured");
-
   private static final Set<String> EXECUTION_EVENTS = Set.of(
       "WashArrivalRegistered", "WashEntryAuthorized", "WashEntryRejected",
       "WashExecutionStarted", "WashExecutionCompleted", "WashExecutionCancelled",
       "OperationalResourceDisabled", "OperationalResourceRestored",
       "CleaningPeriodStarted", "CleaningPeriodCompleted");
-
   private static final Set<String> EVENTS = java.util.stream.Stream.of(
           ACADEMIC_EVENTS, AUTHORIZATION_EVENTS, ADMINISTRATION_EVENTS, EXECUTION_EVENTS)
       .flatMap(Set::stream).collect(java.util.stream.Collectors.toUnmodifiableSet());
@@ -66,15 +62,11 @@ public final class ExternalEventListener {
       dispatcher.dispatch(envelope);
       channel.basicAck(tag, false);
     } catch (InvalidMessageException | IllegalArgumentException invalid) {
-      failures.route(message, MessagingNames.EVENT_QUEUE, false);
-      channel.basicAck(tag, false);
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.EVENT_QUEUE, false, channel, tag);
     } catch (RuntimeException technical) {
-      try {
-        failures.route(message, MessagingNames.EVENT_QUEUE, true);
-        channel.basicAck(tag, false);
-      } catch (RuntimeException routingFailure) {
-        channel.basicNack(tag, false, true);
-      }
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.EVENT_QUEUE, true, channel, tag);
     }
   }
 
