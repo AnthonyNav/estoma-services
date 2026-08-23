@@ -31,7 +31,6 @@ public class EmailDeliveryWorker {
   private final PasswordRecoveryDeliveryPort recoveryDeliveries;
   private final RecoveryCodeDeliveryPort recoveryCodes;
   private final boolean scheduledEnabled;
-
   private final AtomicReference<String> lastPollError = new AtomicReference<>();
 
   EmailDeliveryWorker(
@@ -86,7 +85,7 @@ public class EmailDeliveryWorker {
 
             final String code;
             try {
-              code = recoveryCodes.getCode(recovery.recoveryId(), correlationForRecovery(claimed));
+              code = recoveryCodes.getCode(recovery.recoveryId(), recovery.correlationId());
             } catch (RecoveryCodeDeliveryPort.NotAvailableException unavailable) {
               preProviderFailureService.record(claimed, unavailable.normalizedCode(), "recovery code is not available");
               continue;
@@ -145,12 +144,6 @@ public class EmailDeliveryWorker {
       lastPollError.set(e.getMessage());
       throw e;
     }
-  }
-
-  /** Correlation is non-secret and exists only to match the ephemeral RPC response to this immediate attempt. */
-  private static java.util.UUID correlationForRecovery(EmailDelivery claimed) {
-    return java.util.UUID.nameUUIDFromBytes(
-        (claimed.communicationId().toString() + ":" + claimed.emailDeliveryId()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
   }
 
   String lastPollError() { return lastPollError.get(); }
