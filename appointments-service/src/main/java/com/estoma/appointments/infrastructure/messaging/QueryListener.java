@@ -20,7 +20,10 @@ public final class QueryListener {
 
   public QueryListener(EnvelopeJsonCodec codec, EnvelopeValidator validator,
       AppointmentExecutionQueryService queries, FailureRouter failures) {
-    this.codec = codec; this.validator = validator; this.queries = queries; this.failures = failures;
+    this.codec = codec;
+    this.validator = validator;
+    this.queries = queries;
+    this.failures = failures;
   }
 
   @RabbitListener(id = "appointmentsQueryConsumer", queues = MessagingNames.QUERY_QUEUE,
@@ -33,11 +36,11 @@ public final class QueryListener {
       queries.answer(query);
       channel.basicAck(tag, false);
     } catch (InvalidMessageException | IllegalArgumentException invalid) {
-      failures.route(message, MessagingNames.QUERY_QUEUE, false);
-      channel.basicAck(tag, false);
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.QUERY_QUEUE, false, channel, tag);
     } catch (RuntimeException technical) {
-      try { failures.route(message, MessagingNames.QUERY_QUEUE, true); channel.basicAck(tag, false); }
-      catch (RuntimeException routingFailure) { channel.basicNack(tag, false, true); }
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.QUERY_QUEUE, true, channel, tag);
     }
   }
 
