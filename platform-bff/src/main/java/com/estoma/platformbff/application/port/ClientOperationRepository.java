@@ -8,6 +8,8 @@ import java.util.UUID;
 public interface ClientOperationRepository {
   void insert(ClientOperation operation);
 
+  void deletePending(UUID operationId);
+
   Optional<ClientOperation> findById(UUID operationId);
 
   boolean completeIfPending(UUID operationId, ClientOperation terminalOperation, Instant now);
