@@ -24,6 +24,8 @@ public final class ProjectionRepositories {
   public interface ResourceProjectionRepository {
     List<ResourceCandidate> findCandidates(AppointmentType type, UUID slotId);
     Optional<ResourceCandidate> findCandidate(UUID cabinId, UUID tankId, UUID slotId);
+    Optional<CabinProjection> findCabin(UUID cabinId);
+    Optional<TankProjection> findTank(UUID tankId);
     void upsertCabin(CabinProjection cabin);
     void upsertTank(TankProjection tank);
     void upsertPriority(ResourcePriorityProjection priority);
@@ -55,6 +57,7 @@ public final class ProjectionRepositories {
 
   public record TimeSlotContext(
       UUID appointmentTimeSlotId,
+      UUID calendarId,
       LocalDate serviceDate,
       Instant startsAt,
       Instant endsAt,

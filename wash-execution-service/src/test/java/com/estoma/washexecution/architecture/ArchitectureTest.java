@@ -26,23 +26,19 @@ class ArchitectureTest {
           .because("domain must remain framework-free and independent of outer hexagonal layers");
 
   @ArchTest
-  static final ArchRule application_does_not_depend_on_infrastructure =
+  static final ArchRule application_is_framework_and_adapter_free =
       noClasses()
           .that().resideInAnyPackage("com.estoma.washexecution.application..")
           .should().dependOnClassesThat().resideInAnyPackage(
               "com.estoma.washexecution.infrastructure..",
-              "org.springframework.jdbc..",
-              "java.sql..")
-          .because("application depends on output ports, never concrete JDBC adapters");
-
-  @ArchTest
-  static final ArchRule application_is_transport_neutral =
-      noClasses()
-          .that().resideInAnyPackage("com.estoma.washexecution.application..")
-          .should().dependOnClassesThat().resideInAnyPackage(
+              "org.springframework..",
+              "org.postgresql..",
+              "java.sql..",
               "org.springframework.amqp..",
-              "com.rabbitmq..")
-          .because("RabbitMQ belongs to infrastructure and is introduced in PR3");
+              "com.rabbitmq..",
+              "tools.jackson..",
+              "com.fasterxml.jackson..")
+          .because("application owns use cases and ports, not Spring, JDBC, RabbitMQ, or JSON adapters");
 
   @ArchTest
   static final ArchRule jdbc_implementations_live_in_persistence_infrastructure =
@@ -50,4 +46,11 @@ class ArchitectureTest {
           .that().haveSimpleNameStartingWith("Jdbc")
           .should().resideInAPackage("com.estoma.washexecution.infrastructure.persistence.jdbc..")
           .because("JDBC is an outbound adapter detail");
+
+  @ArchTest
+  static final ArchRule schedulers_live_in_scheduling_infrastructure =
+      classes()
+          .that().haveSimpleNameEndingWith("Scheduler")
+          .should().resideInAPackage("com.estoma.washexecution.infrastructure.scheduling..")
+          .because("schedulers are inbound infrastructure adapters");
 }
