@@ -9,6 +9,7 @@ import com.estoma.washexecution.contracts.MessagingNames;
 import com.estoma.washexecution.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.washexecution.infrastructure.messaging.outbound.OutboxRelay;
 import com.estoma.washexecution.testsupport.AbstractMessagingIT;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
@@ -39,30 +40,87 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
           entry_validation_id,wash_execution_id,identity_confirmed,requirements_satisfied,decision,
           rejection_reason,decided_by_account_id,decided_at,created_at)
         VALUES(?,?,true,true,'AUTHORIZED',NULL,?,?,now())
-        """, UUID.randomUUID(), executionId, supervisorId, decidedAt);
+        """, UUID.randomUUID(), executionId, supervisorId, Timestamp.from(decidedAt));
 
-    MessageEnvelope query = query(
-        "GetWashExecutionIntegrationContext",
-        "appointments",
-        Map.of("appointmentId", appointmentId));
-    send(query);
-    awaitOutbox(query.messageId());
-
-    relay.relay();
-
-    Message raw = rabbit.receive(APPOINTMENTS_RESULT_QUEUE, 5_000);
-    assertThat(raw).isNotNull();
-    MessageEnvelope result = codec.decode(raw.getBody());
-    assertThat(result.messageType()).isEqualTo("GetWashExecutionIntegrationContextResult");
-    assertThat(result.messageKind()).isEqualTo(MessageKind.RESULT);
-    assertThat(result.causationId()).isEqualTo(query.messageId());
-    assertThat(result.operationId()).isEqualTo(query.operationId());
-    assertThat(result.correlationId()).isEqualTo(query.correlationId());
-    assertThat(result.payload().get("status").asText()).isEqualTo("SUCCEEDED");
-    JsonNode execution = result.payload().path("data").path("washExecution");
+    JsonNode execution = queryExecution(appointmentId);
     assertThat(execution.path("appointmentId").asText()).isEqualTo(appointmentId.toString());
     assertThat(execution.path("status").asText()).isEqualTo("IN_PROGRESS");
     assertThat(Instant.parse(execution.path("entryAuthorizedAt").asText())).isEqualTo(decidedAt);
+  }
+
+  @Test
+  void pointQueryReconstructsEntryRejectionAudit() throws Exception {
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID supervisorId = UUID.randomUUID();
+    Instant rejectedAt = NOW.plusSeconds(90);
+    seedExecution(executionId, appointmentId, "ENTRY_REJECTED", 2);
+    jdbc.update("""
+        INSERT INTO entry_validations(
+          entry_validation_id,wash_execution_id,identity_confirmed,requirements_satisfied,decision,
+          rejection_reason,decided_by_account_id,decided_at,created_at)
+        VALUES(?,?,true,false,'REJECTED','missing requirements',?,?,now())
+        """, UUID.randomUUID(), executionId, supervisorId, Timestamp.from(rejectedAt));
+
+    JsonNode execution = queryExecution(appointmentId);
+    assertThat(execution.path("status").asText()).isEqualTo("ENTRY_REJECTED");
+    assertThat(Instant.parse(execution.path("rejectedAt").asText())).isEqualTo(rejectedAt);
+    assertThat(execution.path("rejectionReason").asText()).isEqualTo("missing requirements");
+    assertThat(execution.path("rejectedByAccountId").asText()).isEqualTo(supervisorId.toString());
+    assertThat(execution.has("entryAuthorizedAt")).isFalse();
+  }
+
+  @Test
+  void pointQueryReconstructsCompletionAudit() throws Exception {
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID studentId = UUID.randomUUID();
+    UUID supervisorId = UUID.randomUUID();
+    Instant startedAt = NOW.plusSeconds(60);
+    Instant exitAt = NOW.plusSeconds(900);
+    Instant completedAt = NOW.plusSeconds(960);
+    jdbc.update("""
+        INSERT INTO wash_executions(
+          wash_execution_id,appointment_id,appointment_type,status,arrived_at,started_at,
+          exit_submitted_by_account_id,exit_submitted_at,package_count,green_paper_cassette_8_count,
+          green_paper_cassette_10_count,witness_tape_portion_count,completed_by_account_id,completed_at,
+          version,created_at,updated_at)
+        VALUES(?,?,'NORMAL','COMPLETED',?,?,?,?,1,0,0,0,?,?,5,now(),now())
+        """, executionId, appointmentId, Timestamp.from(NOW), Timestamp.from(startedAt), studentId,
+        Timestamp.from(exitAt), supervisorId, Timestamp.from(completedAt));
+
+    JsonNode execution = queryExecution(appointmentId);
+    assertThat(execution.path("status").asText()).isEqualTo("COMPLETED");
+    assertThat(Instant.parse(execution.path("startedAt").asText())).isEqualTo(startedAt);
+    assertThat(Instant.parse(execution.path("completedAt").asText())).isEqualTo(completedAt);
+    assertThat(execution.path("completedByAccountId").asText()).isEqualTo(supervisorId.toString());
+  }
+
+  @Test
+  void pointQueryReconstructsClinicCancellationAuditLiterally() throws Exception {
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID supervisorId = UUID.randomUUID();
+    Instant startedAt = NOW.plusSeconds(60);
+    Instant cancelledAt = NOW.plusSeconds(300);
+    jdbc.update("""
+        INSERT INTO wash_executions(
+          wash_execution_id,appointment_id,appointment_type,status,arrived_at,started_at,
+          cancellation_type,cancellation_subreason,cancellation_reason,cancelled_by_account_id,cancelled_at,
+          version,created_at,updated_at)
+        VALUES(?,?,'IMMUNOCOMPROMISED','CANCELLED',?,?,'CLINIC','OWNER_FUTURE_CODE',
+          'cannot continue safely',?,?,6,now(),now())
+        """, executionId, appointmentId, Timestamp.from(NOW), Timestamp.from(startedAt), supervisorId,
+        Timestamp.from(cancelledAt));
+
+    JsonNode execution = queryExecution(appointmentId);
+    assertThat(execution.path("status").asText()).isEqualTo("CANCELLED");
+    assertThat(execution.path("cancellationType").asText()).isEqualTo("CLINIC");
+    assertThat(execution.path("cancellationSubreason").asText()).isEqualTo("OWNER_FUTURE_CODE");
+    assertThat(execution.path("cancellationReason").asText()).isEqualTo("cannot continue safely");
+    assertThat(execution.path("cancelledByAccountId").asText()).isEqualTo(supervisorId.toString());
+    assertThat(Instant.parse(execution.path("cancelledAt").asText())).isEqualTo(cancelledAt);
+    assertThat(Instant.parse(execution.path("startedAt").asText())).isEqualTo(startedAt);
   }
 
   @Test
@@ -100,7 +158,7 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
           reason,disabled_by_account_id,disabled_at,restored_by_account_id,restored_at,resolution,
           version,created_at,updated_at)
         VALUES(?,NULL,?,NULL,'MANUAL_DISABLE','maintenance',?,?,NULL,NULL,NULL,1,now(),now())
-        """, unavailabilityId, UUID.randomUUID(), UUID.randomUUID(), NOW);
+        """, unavailabilityId, UUID.randomUUID(), UUID.randomUUID(), Timestamp.from(NOW));
 
     MessageEnvelope query = query(
         "ListWashExecutionIntegrationContextsPage",
@@ -135,6 +193,26 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
     MessageEnvelope result = codec.decode(raw.getBody());
     assertThat(result.payload().path("status").asText()).isEqualTo("REJECTED");
     assertThat(result.payload().path("error").path("code").asText()).isEqualTo("INVALID_PAGE_TOKEN");
+  }
+
+  private JsonNode queryExecution(UUID appointmentId) throws Exception {
+    MessageEnvelope query = query(
+        "GetWashExecutionIntegrationContext", "appointments", Map.of("appointmentId", appointmentId));
+    send(query);
+    awaitOutbox(query.messageId());
+    relay.relay();
+    Message raw = rabbit.receive(APPOINTMENTS_RESULT_QUEUE, 5_000);
+    assertThat(raw).isNotNull();
+    MessageEnvelope result = codec.decode(raw.getBody());
+    assertThat(result.messageType()).isEqualTo("GetWashExecutionIntegrationContextResult");
+    assertThat(result.messageKind()).isEqualTo(MessageKind.RESULT);
+    assertThat(result.causationId()).isEqualTo(query.messageId());
+    assertThat(result.operationId()).isEqualTo(query.operationId());
+    assertThat(result.correlationId()).isEqualTo(query.correlationId());
+    assertThat(result.payload().path("status").asText()).isEqualTo("SUCCEEDED");
+    assertThat(result.payload().path("data").path("appointmentId").asText())
+        .isEqualTo(appointmentId.toString());
+    return result.payload().path("data").path("washExecution");
   }
 
   private MessageEnvelope query(String type, String producer, Map<String, Object> payload) {
@@ -173,7 +251,7 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
         INSERT INTO wash_executions(
           wash_execution_id,appointment_id,appointment_type,status,arrived_at,version,created_at,updated_at)
         VALUES(?,?,'NORMAL',?,?,?,now(),now())
-        """, executionId, appointmentId, status, NOW, version);
+        """, executionId, appointmentId, status, Timestamp.from(NOW), version);
   }
 
   private void seedSlot(UUID slotId) {
@@ -182,7 +260,8 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
           appointment_time_slot_id,calendar_id,service_date,starts_at,ends_at,timezone,
           arrival_tolerance_until,status,source_version,updated_at)
         VALUES(?,?,?, ?,?,'America/Mexico_City',?,'ACTIVE',1,now())
-        """, slotId, UUID.randomUUID(), DATE, NOW, NOW.plusSeconds(3600), NOW.plusSeconds(600));
+        """, slotId, UUID.randomUUID(), DATE, Timestamp.from(NOW),
+        Timestamp.from(NOW.plusSeconds(3600)), Timestamp.from(NOW.plusSeconds(600)));
   }
 
   private void seedAppointment(UUID appointmentId, UUID slotId) {

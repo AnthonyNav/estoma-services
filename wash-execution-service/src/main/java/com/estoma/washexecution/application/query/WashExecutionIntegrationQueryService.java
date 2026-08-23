@@ -125,13 +125,24 @@ public final class WashExecutionIntegrationQueryService {
     value.put("appointmentType", execution.appointmentType());
     value.put("status", execution.status());
     value.put("arrivedAt", execution.arrivedAt());
-    if (execution.startedAt() != null) value.put("startedAt", execution.startedAt());
-    if (execution.entryAuthorizedAt() != null) value.put("entryAuthorizedAt", execution.entryAuthorizedAt());
-    if (execution.completedAt() != null) value.put("completedAt", execution.completedAt());
-    if (execution.cancelledAt() != null) value.put("cancelledAt", execution.cancelledAt());
-    if (execution.cancellationType() != null) value.put("cancellationType", execution.cancellationType());
+    putIfPresent(value, "startedAt", execution.startedAt());
+    putIfPresent(value, "entryAuthorizedAt", execution.entryAuthorizedAt());
+    putIfPresent(value, "rejectedAt", execution.rejectedAt());
+    putIfPresent(value, "rejectionReason", execution.rejectionReason());
+    putIfPresent(value, "rejectedByAccountId", execution.rejectedByAccountId());
+    putIfPresent(value, "completedAt", execution.completedAt());
+    putIfPresent(value, "completedByAccountId", execution.completedByAccountId());
+    putIfPresent(value, "cancelledAt", execution.cancelledAt());
+    putIfPresent(value, "cancellationType", execution.cancellationType());
+    putIfPresent(value, "cancellationSubreason", execution.cancellationSubreason());
+    putIfPresent(value, "cancellationReason", execution.cancellationReason());
+    putIfPresent(value, "cancelledByAccountId", execution.cancelledByAccountId());
     value.put("version", execution.version());
     return value;
+  }
+
+  private static void putIfPresent(Map<String, Object> target, String field, Object value) {
+    if (value != null) target.put(field, value);
   }
 
   private static List<Map<String, Object>> unavailabilities(

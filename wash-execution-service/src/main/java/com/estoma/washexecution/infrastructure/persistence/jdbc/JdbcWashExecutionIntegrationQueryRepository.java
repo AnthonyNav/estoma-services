@@ -16,6 +16,16 @@ import org.springframework.stereotype.Repository;
 @Repository
 public final class JdbcWashExecutionIntegrationQueryRepository
     implements WashExecutionIntegrationQueryRepository {
+  private static final String EXECUTION_SELECT = """
+      SELECT w.*,
+             CASE WHEN ev.decision='AUTHORIZED' THEN ev.decided_at END AS entry_authorized_at,
+             CASE WHEN ev.decision='REJECTED' THEN ev.decided_at END AS rejected_at,
+             CASE WHEN ev.decision='REJECTED' THEN ev.rejection_reason END AS rejection_reason,
+             CASE WHEN ev.decision='REJECTED' THEN ev.decided_by_account_id END AS rejected_by_account_id
+      FROM wash_executions w
+      LEFT JOIN entry_validations ev ON ev.wash_execution_id=w.wash_execution_id
+      """;
+
   private final JdbcTemplate jdbc;
 
   public JdbcWashExecutionIntegrationQueryRepository(JdbcTemplate jdbc) {
@@ -24,13 +34,8 @@ public final class JdbcWashExecutionIntegrationQueryRepository
 
   @Override
   public EntityContext get(UUID appointmentId) {
-    var execution = jdbc.query("""
-        SELECT w.*, ev.decided_at AS entry_authorized_at
-        FROM wash_executions w
-        LEFT JOIN entry_validations ev
-          ON ev.wash_execution_id=w.wash_execution_id AND ev.decision='AUTHORIZED'
-        WHERE w.appointment_id=?
-        """, this::execution, appointmentId).stream().findFirst().orElse(null);
+    var execution = jdbc.query(EXECUTION_SELECT + " WHERE w.appointment_id=?",
+        this::execution, appointmentId).stream().findFirst().orElse(null);
     if (execution == null) {
       return new EntityContext(appointmentId, null, List.of(), List.of());
     }
@@ -45,13 +50,16 @@ public final class JdbcWashExecutionIntegrationQueryRepository
   public Page list(LocalDate date, int pageSize, String token) {
     UUID after = token == null || token.isBlank() ? null : UUID.fromString(token);
     String sql = """
-        SELECT w.*, ev.decided_at AS entry_authorized_at
+        SELECT w.*,
+               CASE WHEN ev.decision='AUTHORIZED' THEN ev.decided_at END AS entry_authorized_at,
+               CASE WHEN ev.decision='REJECTED' THEN ev.decided_at END AS rejected_at,
+               CASE WHEN ev.decision='REJECTED' THEN ev.rejection_reason END AS rejection_reason,
+               CASE WHEN ev.decision='REJECTED' THEN ev.decided_by_account_id END AS rejected_by_account_id
         FROM wash_executions w
         JOIN appointment_projection a ON a.appointment_id=w.appointment_id
         JOIN appointment_time_slot_projection s
           ON s.appointment_time_slot_id=a.appointment_time_slot_id
-        LEFT JOIN entry_validations ev
-          ON ev.wash_execution_id=w.wash_execution_id AND ev.decision='AUTHORIZED'
+        LEFT JOIN entry_validations ev ON ev.wash_execution_id=w.wash_execution_id
         WHERE s.service_date=? %s
         ORDER BY w.appointment_id
         LIMIT ?
@@ -124,9 +132,16 @@ public final class JdbcWashExecutionIntegrationQueryRepository
         rs.getTimestamp("arrived_at").toInstant(),
         instant(rs, "started_at"),
         instant(rs, "entry_authorized_at"),
+        instant(rs, "rejected_at"),
+        rs.getString("rejection_reason"),
+        rs.getObject("rejected_by_account_id", UUID.class),
         instant(rs, "completed_at"),
+        rs.getObject("completed_by_account_id", UUID.class),
         instant(rs, "cancelled_at"),
         rs.getString("cancellation_type"),
+        rs.getString("cancellation_subreason"),
+        rs.getString("cancellation_reason"),
+        rs.getObject("cancelled_by_account_id", UUID.class),
         rs.getInt("version"));
   }
 
