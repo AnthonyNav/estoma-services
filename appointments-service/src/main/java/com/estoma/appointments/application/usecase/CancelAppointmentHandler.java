@@ -35,7 +35,7 @@ public final class CancelAppointmentHandler implements CancelAppointmentUseCase 
   @Transactional
   public ApplicationResult cancel(Command command) {
     Instant now = command.now();
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
+    Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox, command.metadata(),
         "CancelAppointment", ApplicationSupport.fingerprint(command.appointmentId(),
             command.expectedVersion(), command.reason()), now);
     if (gate.isPresent()) return gate.get();
@@ -72,7 +72,7 @@ public final class CancelAppointmentHandler implements CancelAppointmentUseCase 
       result = ApplicationResult.rejected("INVALID_CANCELLATION", exception.getMessage());
     }
 
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
+    ApplicationSupport.appendResult(outbox, command.metadata(), "CancelAppointment", result, now);
     ApplicationSupport.complete(idempotency, command.metadata(), "CancelAppointment", result, now);
     return result;
   }

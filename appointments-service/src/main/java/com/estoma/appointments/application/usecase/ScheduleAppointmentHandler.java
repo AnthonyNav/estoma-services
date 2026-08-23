@@ -59,7 +59,7 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
     String fingerprint = ApplicationSupport.fingerprint(command.studentAccountId(),
         command.appointmentTimeSlotId(), command.courseSectionId(), command.appointmentType(),
         command.instrumentCount(), command.pieceType(), command.exceptionalAuthorizationId());
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, metadata,
+    Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox, metadata,
         "ScheduleAppointment", fingerprint, now);
     if (gate.isPresent()) return gate.get();
 
@@ -69,7 +69,7 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
     } catch (IllegalArgumentException exception) {
       result = ApplicationResult.rejected(code(exception), exception.getMessage());
     }
-    ApplicationSupport.appendResult(outbox, metadata, result, now);
+    ApplicationSupport.appendResult(outbox, metadata, "ScheduleAppointment", result, now);
     ApplicationSupport.complete(idempotency, metadata, "ScheduleAppointment", result, now);
     return result;
   }
@@ -85,11 +85,15 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
         .filter(value -> value.reliable() && "ACTIVE".equals(value.status())).orElse(null);
     var profile = academic.findStudentProfile(command.studentAccountId())
         .filter(value -> value.reliable() && "ACTIVE".equals(value.academicStatus())).orElse(null);
-    var course = academic.findStudentCourse(command.studentAccountId(), command.courseSectionId())
+    var section = academic.findCourseSection(command.courseSectionId())
+        .filter(value -> value.reliable() && "ACTIVE".equals(value.status())).orElse(null);
+    var enrollment = academic.findStudentCourse(command.studentAccountId(), command.courseSectionId())
         .filter(value -> value.reliable() && value.active()).orElse(null);
-    if (period == null || profile == null || course == null
-        || !period.academicPeriodId().equals(course.academicPeriodId())) {
-      return ApplicationResult.rejected("ACADEMIC_ENROLLMENT_INVALID", "active academic enrollment is required");
+    if (period == null || profile == null || section == null || enrollment == null
+        || !period.academicPeriodId().equals(section.academicPeriodId())
+        || !period.academicPeriodId().equals(enrollment.academicPeriodId())) {
+      return ApplicationResult.rejected("ACADEMIC_ENROLLMENT_INVALID",
+          "active academic period, course section and enrollment are required");
     }
 
     AppointmentTimeSlot slot = slots.findByIdForUpdate(command.appointmentTimeSlotId()).orElse(null);
@@ -110,41 +114,23 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
       return ApplicationResult.rejected("STUDENT_BLOCKED", "student has reached the daily penalty limit");
     }
 
-    long completed = studentAppointments.stream()
-        .filter(a -> a.status().name().equals("COMPLETED")).count();
+    long completed = studentAppointments.stream().filter(a -> a.status().name().equals("COMPLETED")).count();
     UUID authorizationId = command.exceptionalAuthorizationId();
-    if (completed >= 2) {
-      return ApplicationResult.rejected("DAILY_COMPLETED_LIMIT", "student has reached the maximum of two completed appointments");
-    }
-    if (completed == 0 && authorizationId != null) {
-      return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_NOT_REQUIRED", "exceptional authorization is only consumed by the additional appointment");
-    }
-    if (completed == 1 && authorizationId == null) {
-      return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_REQUIRED", "the additional appointment requires exceptional authorization");
-    }
+    if (completed >= 2) return ApplicationResult.rejected("DAILY_COMPLETED_LIMIT", "student has reached the maximum of two completed appointments");
+    if (completed == 0 && authorizationId != null) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_NOT_REQUIRED", "exceptional authorization is only consumed by the additional appointment");
+    if (completed == 1 && authorizationId == null) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_REQUIRED", "the additional appointment requires exceptional authorization");
     if (authorizationId != null) {
       var authorization = authorizations.findByIdForUpdate(authorizationId).orElse(null);
-      if (authorization == null) {
-        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_NOT_FOUND", "exceptional authorization was not found");
-      }
-      if (!authorization.studentAccountId().equals(command.studentAccountId())) {
-        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_STUDENT_MISMATCH", "authorization belongs to another student");
-      }
-      if (!authorization.isUsableAt(slot.serviceDate(), command.now())) {
-        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_UNAVAILABLE", "exceptional authorization is cancelled or expired");
-      }
-      if (appointments.findActiveByExceptionalAuthorizationForUpdate(authorizationId).isPresent()) {
-        return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_ALREADY_USED", "exceptional authorization is already consumed");
-      }
+      if (authorization == null) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_NOT_FOUND", "exceptional authorization was not found");
+      if (!authorization.studentAccountId().equals(command.studentAccountId())) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_STUDENT_MISMATCH", "authorization belongs to another student");
+      if (!authorization.isUsableAt(slot.serviceDate(), command.now())) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_UNAVAILABLE", "exceptional authorization is cancelled or expired");
+      if (appointments.findActiveByExceptionalAuthorizationForUpdate(authorizationId).isPresent()) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_ALREADY_USED", "exceptional authorization is already consumed");
     }
 
     var projection = capacity.findBySlotIdForUpdate(slot.appointmentTimeSlotId()).orElse(null);
-    if (projection == null) {
-      return ApplicationResult.rejected("CAPACITY_UNAVAILABLE", "slot capacity has not been projected");
-    }
+    if (projection == null) return ApplicationResult.rejected("CAPACITY_UNAVAILABLE", "slot capacity has not been projected");
     List<Appointment> slotAppointments = appointments.findForSlot(slot.appointmentTimeSlotId(), true);
-    if (!AppointmentCapacityMatcher.canFit(slotAppointments, command.appointmentType(),
-        projection.normalCapacity(), projection.journeyCapacity(), projection.immunocompromisedCapacity())) {
+    if (!AppointmentCapacityMatcher.canFit(slotAppointments, command.appointmentType(), projection.normalCapacity(), projection.journeyCapacity(), projection.immunocompromisedCapacity())) {
       return ApplicationResult.rejected("CAPACITY_EXHAUSTED", "slot has no compatible capacity");
     }
 
@@ -152,8 +138,7 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
         && appointments.findActiveOnDate(slot.serviceDate()).stream().anyMatch(existing -> {
           if (existing.appointmentType() != AppointmentType.IMMUNOCOMPROMISED) return false;
           return slots.findById(existing.appointmentTimeSlotId())
-              .map(other -> ImmunocompromisedReservationPolicy.conflicts(
-                  slot, command.appointmentType(), other, existing.appointmentType()))
+              .map(other -> ImmunocompromisedReservationPolicy.conflicts(slot, command.appointmentType(), other, existing.appointmentType()))
               .orElse(true);
         })) {
       return ApplicationResult.rejected("IMMUNOCOMPROMISED_RESERVATION_CONFLICT",

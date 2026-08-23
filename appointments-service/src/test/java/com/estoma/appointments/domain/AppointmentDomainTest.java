@@ -8,7 +8,6 @@ import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentStatus;
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
 import com.estoma.appointments.domain.model.AppointmentType;
-import com.estoma.appointments.domain.model.CancellationSubreason;
 import com.estoma.appointments.domain.model.CancellationType;
 import com.estoma.appointments.domain.model.PieceType;
 import com.estoma.appointments.domain.service.AppointmentCapacityMatcher;
@@ -36,7 +35,7 @@ class AppointmentDomainTest {
     Appointment appointment = appointment(AppointmentType.NORMAL);
     assertThat(appointment.points()).isZero();
     assertThat(appointment.cancel(CancellationType.STUDENT, null, NOW).points()).isOne();
-    assertThat(appointment.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS, NOW).points()).isZero();
+    assertThat(appointment.cancel(CancellationType.CLINIC, "CAPACITY_LOSS", NOW).points()).isZero();
     assertThat(appointment.markMissed(NOW).points()).isOne();
     assertThat(DailyPenaltyPolicy.MAX_POINTS).isEqualTo(3);
   }
@@ -53,9 +52,12 @@ class AppointmentDomainTest {
         .isInstanceOf(NullPointerException.class);
   }
 
-  @Test void clinicCancellationRequiresConfirmedSubreason() {
+  @Test void clinicCancellationRequiresOwnerSubreasonButDoesNotOwnItsCatalog() {
     assertThatThrownBy(() -> appointment(AppointmentType.NORMAL).cancel(CancellationType.CLINIC, null, NOW))
         .isInstanceOf(DomainViolationException.class);
+    Appointment extendedOwnerCode = appointment(AppointmentType.NORMAL)
+        .cancel(CancellationType.CLINIC, "RESOURCE_UNAVAILABLE", NOW);
+    assertThat(extendedOwnerCode.cancellationSubreason()).isEqualTo("RESOURCE_UNAVAILABLE");
   }
 
   @Test void exceptionalAuthorizationRestoresOnlyForClinicCancellation() {
@@ -65,7 +67,7 @@ class AppointmentDomainTest {
     assertThat(appointment.consumesExceptionalAuthorization()).isTrue();
     assertThat(appointment.cancel(CancellationType.STUDENT, null, NOW).consumesExceptionalAuthorization()).isTrue();
     assertThat(appointment.markMissed(NOW).consumesExceptionalAuthorization()).isTrue();
-    Appointment clinic = appointment.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS, NOW);
+    Appointment clinic = appointment.cancel(CancellationType.CLINIC, "CAPACITY_LOSS", NOW);
     assertThat(clinic.consumesExceptionalAuthorization()).isFalse();
   }
 
@@ -93,7 +95,7 @@ class AppointmentDomainTest {
 
   @Test void startedClinicCancellationPreservesStartedAt() {
     Appointment started = appointment(AppointmentType.NORMAL).start(NOW.plusSeconds(30));
-    Appointment cancelled = started.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS,
+    Appointment cancelled = started.cancel(CancellationType.CLINIC, "CAPACITY_LOSS",
         "resource unavailable", UUID.randomUUID(), NOW.plusSeconds(60));
     assertThat(cancelled.status()).isEqualTo(AppointmentStatus.CANCELLED);
     assertThat(cancelled.startedAt()).isEqualTo(NOW.plusSeconds(30));

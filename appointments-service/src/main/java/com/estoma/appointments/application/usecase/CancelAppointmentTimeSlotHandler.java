@@ -31,8 +31,9 @@ public final class CancelAppointmentTimeSlotHandler implements CancelAppointment
   @Transactional
   public ApplicationResult cancel(Command command) {
     Instant now = command.now();
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
-        "CancelAppointmentTimeSlot", ApplicationSupport.fingerprint(command.slotId(), command.expectedVersion()), now);
+    Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox,
+        command.metadata(), "CancelAppointmentTimeSlot",
+        ApplicationSupport.fingerprint(command.slotId(), command.expectedVersion()), now);
     if (gate.isPresent()) return gate.get();
 
     ApplicationResult result;
@@ -56,7 +57,7 @@ public final class CancelAppointmentTimeSlotHandler implements CancelAppointment
         result = ApplicationResult.applied(cancelled.appointmentTimeSlotId(), cancelled.version(), "slot cancelled");
       }
     }
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
+    ApplicationSupport.appendResult(outbox, command.metadata(), "CancelAppointmentTimeSlot", result, now);
     ApplicationSupport.complete(idempotency, command.metadata(), "CancelAppointmentTimeSlot", result, now);
     return result;
   }

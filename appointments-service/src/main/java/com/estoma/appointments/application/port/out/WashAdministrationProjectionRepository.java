@@ -16,12 +16,21 @@ public interface WashAdministrationProjectionRepository {
   void upsertResourcePriority(ResourcePriorityProjection projection);
 
   Optional<ServiceCalendarProjection> findCalendar(UUID calendarId);
+  List<ServiceCalendarProjection> findCalendars();
   Optional<ServiceScheduleProjection> findSchedule(UUID scheduleId);
+  Optional<AdministrativeClosureProjection> findClosure(UUID closureId);
   List<AdministrativeClosureProjection> findClosuresOverlapping(UUID calendarId, Instant startsAt, Instant endsAt);
   List<CabinProjection> findCabins();
   List<TankProjection> findTanks();
   List<ResourcePriorityProjection> findActivePriorities();
   boolean reliable();
+
+  default Optional<CabinProjection> findCabin(UUID cabinId) {
+    return findCabins().stream().filter(value -> value.cabinId().equals(cabinId)).findFirst();
+  }
+  default Optional<TankProjection> findTank(UUID tankId) {
+    return findTanks().stream().filter(value -> value.tankId().equals(tankId)).findFirst();
+  }
 
   record ServiceCalendarProjection(UUID calendarId, String code, String timezone,
       LocalDate effectiveFrom, LocalDate effectiveUntil, String status,

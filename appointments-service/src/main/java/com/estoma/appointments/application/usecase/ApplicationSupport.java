@@ -40,6 +40,25 @@ final class ApplicationSupport {
       CommandMetadata metadata, String operation, String fingerprint, Instant now) {
     CommandIdempotencyRepository.IdempotencyDecision decision = repository.claim(
         operation, metadata.idempotencyKey(), fingerprint, metadata.messageId(), now);
+    return decisionResult(decision);
+  }
+
+  static Optional<ApplicationResult> claimClient(CommandIdempotencyRepository repository,
+      OutboxRepository outbox, CommandMetadata metadata, String operation, String fingerprint,
+      Instant now) {
+    CommandIdempotencyRepository.IdempotencyDecision decision = repository.claim(
+        operation, metadata.idempotencyKey(), fingerprint, metadata.messageId(), now);
+    Optional<ApplicationResult> gate = decisionResult(decision);
+    if (gate.isEmpty() || gate.get().status() == ApplicationResult.Status.DEFERRED) return gate;
+
+    boolean exactRedelivery = decision.replay() && decision.record() != null
+        && metadata.messageId().equals(decision.record().messageId());
+    if (!exactRedelivery) appendResult(outbox, metadata, operation, gate.get(), now);
+    return gate;
+  }
+
+  private static Optional<ApplicationResult> decisionResult(
+      CommandIdempotencyRepository.IdempotencyDecision decision) {
     if (decision.conflict()) {
       return Optional.of(ApplicationResult.rejected(
           "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST", "idempotency key belongs to another request"));
@@ -69,21 +88,28 @@ final class ApplicationSupport {
     }
   }
 
-  static void appendResult(OutboxRepository outbox, CommandMetadata metadata,
+  static void appendResult(OutboxRepository outbox, CommandMetadata metadata, String operation,
       ApplicationResult result, Instant now) {
-    append(outbox, new OutboxIntent("AppointmentCommandResult", "RESULT", result.aggregateId(),
-        result.aggregateVersion(), metadata.correlationId(), metadata.causationId(), resultJson(result), now));
+    if (result.status() == ApplicationResult.Status.DEFERRED) {
+      throw new IllegalArgumentException("DEFERRED is not a terminal wire Result");
+    }
+    boolean succeeded = result.status() == ApplicationResult.Status.APPLIED
+        || result.status() == ApplicationResult.Status.DUPLICATE;
+    String type = operation + (succeeded ? "Succeeded" : "Rejected");
+    append(outbox, new OutboxIntent(type, "RESULT", result.aggregateId(), result.aggregateVersion(),
+        metadata.correlationId(), metadata.messageId(), wireResultJson(result, succeeded), now,
+        metadata.operationId()));
   }
 
   static void appendEvent(OutboxRepository outbox, CommandMetadata metadata, String type,
       UUID aggregateId, long aggregateVersion, String payload, Instant now) {
     append(outbox, new OutboxIntent(type, "EVENT", aggregateId, aggregateVersion,
-        metadata.correlationId(), metadata.causationId(), payload, now));
+        metadata.correlationId(), metadata.messageId(), payload, now));
   }
 
   static CommandMetadata inboundMetadata(ExecutionEvent event, Instant now) {
-    return new CommandMetadata(event.messageId(), event.sourceEventId().toString(), event.messageId(),
-        event.sourceEventId(), ActorContext.system("appointments"), now);
+    return new CommandMetadata(event.messageId(), event.sourceEventId().toString(),
+        event.correlationId(), event.sourceEventId(), ActorContext.system("appointments"), now);
   }
 
   static void append(OutboxRepository outbox, OutboxIntent intent) {
@@ -91,7 +117,7 @@ final class ApplicationSupport {
     outbox.append(new OutboxRepository.OutboxMessage(UUID.randomUUID(), intent.messageType(), 1,
         intent.messageKind(), intent.aggregateId(), intent.aggregateVersion(), intent.correlationId(),
         intent.causationId(), intent.payloadJson() == null ? "{}" : intent.payloadJson(), occurred,
-        occurred, "PENDING", 0, null, null));
+        occurred, "PENDING", 0, null, null, intent.operationId()));
   }
 
   static String resultJson(ApplicationResult result) {
@@ -99,6 +125,18 @@ final class ApplicationSupport {
         + escape(result.code()) + "\",\"message\":\"" + escape(result.message()) + "\""
         + (result.aggregateId() == null ? "" : ",\"aggregateId\":\"" + result.aggregateId() + "\"")
         + ",\"aggregateVersion\":" + result.aggregateVersion() + "}";
+  }
+
+  private static String wireResultJson(ApplicationResult result, boolean succeeded) {
+    if (succeeded) {
+      return "{\"status\":\"SUCCEEDED\",\"data\":{"
+          + (result.aggregateId() == null ? "" : "\"aggregateId\":\"" + result.aggregateId() + "\",")
+          + "\"aggregateVersion\":" + result.aggregateVersion()
+          + ",\"message\":\"" + escape(result.message()) + "\"}}";
+    }
+    return "{\"status\":\"REJECTED\",\"error\":{\"code\":\""
+        + escape(result.code()) + "\",\"details\":{\"message\":\""
+        + escape(result.message()) + "\"}}}";
   }
 
   private static ApplicationResult replay(String outcomeJson) {
@@ -116,7 +154,7 @@ final class ApplicationSupport {
   }
 
   static String escape(String value) {
-    return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
   }
 
   private static String unescape(String value) {

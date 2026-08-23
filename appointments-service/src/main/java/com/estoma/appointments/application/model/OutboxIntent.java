@@ -6,4 +6,11 @@ import java.util.UUID;
 /** Intent serialized into the local transactional outbox. */
 public record OutboxIntent(String messageType, String messageKind, UUID aggregateId,
     Long aggregateVersion, UUID correlationId, UUID causationId, String payloadJson,
-    Instant occurredAt) {}
+    Instant occurredAt, UUID operationId) {
+  public OutboxIntent(String messageType, String messageKind, UUID aggregateId,
+      Long aggregateVersion, UUID correlationId, UUID causationId, String payloadJson,
+      Instant occurredAt) {
+    this(messageType,messageKind,aggregateId,aggregateVersion,correlationId,causationId,
+        payloadJson,occurredAt,null);
+  }
+}
