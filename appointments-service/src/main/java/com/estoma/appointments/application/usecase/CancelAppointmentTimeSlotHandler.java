@@ -32,19 +32,27 @@ public final class CancelAppointmentTimeSlotHandler implements CancelAppointment
   public ApplicationResult cancel(Command command) {
     Instant now = command.now();
     Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
-        "CancelAppointmentTimeSlot", ApplicationSupport.fingerprint(command.slotId()), now);
+        "CancelAppointmentTimeSlot", ApplicationSupport.fingerprint(command.slotId(), command.expectedVersion()), now);
     if (gate.isPresent()) return gate.get();
+
     ApplicationResult result;
     var slot = slots.findByIdForUpdate(command.slotId()).orElse(null);
-    if (!policy.canManage(command.metadata())) result = ApplicationResult.rejected("FORBIDDEN", "actor cannot cancel slots");
-    else if (slot == null) result = ApplicationResult.rejected("SLOT_NOT_FOUND", "slot was not found");
-    else if (slot.isCancelled()) result = ApplicationResult.applied(slot.appointmentTimeSlotId(), slot.version(), "slot already cancelled");
-    else {
+    if (!policy.canAdministerSlots(command.metadata())) {
+      result = ApplicationResult.rejected("FORBIDDEN", "actor cannot cancel slots");
+    } else if (slot == null) {
+      result = ApplicationResult.rejected("SLOT_NOT_FOUND", "slot was not found");
+    } else if (slot.version() != command.expectedVersion()) {
+      result = ApplicationResult.rejected("VERSION_CONFLICT", "slot version changed");
+    } else if (slot.isCancelled()) {
+      result = ApplicationResult.applied(slot.appointmentTimeSlotId(), slot.version(), "slot already cancelled");
+    } else {
       var cancelled = slot.cancel();
-      if (!slots.updateIfVersion(cancelled, slot.version())) result = ApplicationResult.rejected("CONCURRENT_MODIFICATION", "slot changed while cancelling");
-      else {
+      if (!slots.updateIfVersion(cancelled, command.expectedVersion())) {
+        result = ApplicationResult.rejected("VERSION_CONFLICT", "slot changed while cancelling");
+      } else {
         ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentTimeSlotCancelled",
-            cancelled.appointmentTimeSlotId(), cancelled.version(), "{\"slotId\":\"" + cancelled.appointmentTimeSlotId() + "\"}", now);
+            cancelled.appointmentTimeSlotId(), cancelled.version(),
+            "{\"slotId\":\"" + cancelled.appointmentTimeSlotId() + "\"}", now);
         result = ApplicationResult.applied(cancelled.appointmentTimeSlotId(), cancelled.version(), "slot cancelled");
       }
     }
