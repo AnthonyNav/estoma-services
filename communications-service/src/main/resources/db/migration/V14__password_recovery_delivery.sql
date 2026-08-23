@@ -10,7 +10,18 @@ ALTER TABLE email_deliveries
     ADD CONSTRAINT ck_email_delivery_waiting_recipient_is_recovery
       CHECK (status <> CAST('WAITING_FOR_RECIPIENT' AS email_delivery_status) OR recovery_id IS NOT NULL),
     ADD CONSTRAINT ck_email_delivery_non_recovery_requires_recipient
-      CHECK (recovery_id IS NOT NULL OR recipient_address IS NOT NULL);
+      CHECK (recovery_id IS NOT NULL OR recipient_address IS NOT NULL),
+    ADD CONSTRAINT ck_email_delivery_recovery_content_never_persisted
+      CHECK (
+        recovery_id IS NULL OR (
+          content_mode = CAST('TEMPLATE' AS email_content_mode)
+          AND template_code = 'PASSWORD_RECOVERY'
+          AND template_data IS NULL
+          AND subject IS NULL
+          AND text_body IS NULL
+          AND html_body IS NULL
+        )
+      );
 
 CREATE UNIQUE INDEX ux_email_deliveries_recovery_id
     ON email_deliveries (recovery_id)
