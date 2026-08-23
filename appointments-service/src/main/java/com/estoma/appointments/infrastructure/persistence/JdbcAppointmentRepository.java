@@ -4,7 +4,6 @@ import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentStatus;
 import com.estoma.appointments.domain.model.AppointmentType;
-import com.estoma.appointments.domain.model.CancellationSubreason;
 import com.estoma.appointments.domain.model.CancellationType;
 import com.estoma.appointments.domain.model.PieceType;
 import java.sql.ResultSet;
@@ -46,7 +45,7 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
       .param("entry", Timestamps.toTimestamp(a.entryAuthorizedAt()))
       .param("authorization", a.exceptionalAuthorizationId())
       .param("cancelType", a.cancellationType() == null ? null : a.cancellationType().name())
-      .param("cancelSubreason", a.cancellationSubreason() == null ? null : a.cancellationSubreason().name())
+      .param("cancelSubreason", a.cancellationSubreason())
       .param("cancelReason", a.cancellationReason()).param("cancelledBy", a.cancelledByAccountId())
       .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt())).param("rejectionReason", a.rejectionReason())
       .param("rejectedBy", a.rejectedByAccountId()).param("rejectedAt", Timestamps.toTimestamp(a.rejectedAt()))
@@ -66,7 +65,6 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
 
   private static Appointment map(ResultSet rs, int row) throws SQLException {
     String cancellationType = rs.getString("cancellation_type");
-    String cancellationSubreason = rs.getString("cancellation_subreason");
     return Appointment.reconstitute(rs.getObject("appointment_id", UUID.class),
         rs.getObject("appointment_time_slot_id", UUID.class), rs.getObject("student_account_id", UUID.class),
         rs.getObject("course_section_id", UUID.class), AppointmentType.valueOf(rs.getString("appointment_type")),
@@ -74,7 +72,7 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
         AppointmentStatus.valueOf(rs.getString("status")), Timestamps.toInstant(rs, "entry_authorized_at"),
         rs.getObject("exceptional_authorization_id", UUID.class),
         cancellationType == null ? null : CancellationType.valueOf(cancellationType),
-        cancellationSubreason == null ? null : CancellationSubreason.valueOf(cancellationSubreason),
+        rs.getString("cancellation_subreason"),
         rs.getString("cancellation_reason"), rs.getObject("cancelled_by_account_id", UUID.class),
         Timestamps.toInstant(rs, "cancelled_at"), rs.getString("rejection_reason"),
         rs.getObject("rejected_by_account_id", UUID.class), Timestamps.toInstant(rs, "rejected_at"),
@@ -97,7 +95,7 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
       """)
       .param("status", a.status().name()).param("entry", Timestamps.toTimestamp(a.entryAuthorizedAt()))
       .param("cancelType", a.cancellationType() == null ? null : a.cancellationType().name())
-      .param("cancelSubreason", a.cancellationSubreason() == null ? null : a.cancellationSubreason().name())
+      .param("cancelSubreason", a.cancellationSubreason())
       .param("cancelReason", a.cancellationReason()).param("cancelledBy", a.cancelledByAccountId())
       .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt())).param("rejectionReason", a.rejectionReason())
       .param("rejectedBy", a.rejectedByAccountId()).param("rejectedAt", Timestamps.toTimestamp(a.rejectedAt()))
