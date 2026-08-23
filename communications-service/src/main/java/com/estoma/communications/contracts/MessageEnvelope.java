@@ -20,7 +20,7 @@ public record MessageEnvelope(
     UUID correlationId,
     UUID causationId,
     UUID operationId,
-    UUID idempotencyKey,
+    String idempotencyKey,
     UUID aggregateId,
     Integer aggregateVersion,
     Actor actor,
