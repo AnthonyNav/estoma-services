@@ -8,6 +8,7 @@ import java.util.UUID;
 public interface HandleResourceCapacityEventUseCase {
   ApplicationResult handle(Command command);
 
-  record Command(CommandMetadata metadata, UUID sourceEventId, UUID slotId, int normalCapacity,
-      int journeyCapacity, int immunocompromisedCapacity, Instant now) {}
+  /** affectedUntil null means every future active slot from affectedFrom. */
+  record Command(CommandMetadata metadata, UUID sourceEventId, Instant affectedFrom,
+      Instant affectedUntil, Instant now) {}
 }
