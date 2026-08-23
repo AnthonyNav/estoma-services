@@ -15,19 +15,6 @@ import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * The single transactional entry point for every consumed event this
- * service handles ({@code recipient_projection} updates, and the {@code
- * AppointmentCancelled} adapter). Consumer Inbox first, same as {@link
- * CommandDispatcher}, but keyed by {@code handler.consumerName()} rather
- * than one shared constant -- see {@link ProjectionHandler}'s javadoc.
- * No result is ever produced (events have no reply channel), only zero or
- * more derived events.
- *
- * <p>No RabbitMQ dependency, fully testable without any messaging
- * infrastructure -- see execution_plan.md's note on business logic before
- * the messaging shell (Phase 3).
- */
 @Component
 public class ProjectionDispatcher {
 
@@ -64,9 +51,10 @@ public class ProjectionDispatcher {
   }
 
   private void appendEvent(MessageEnvelope envelope, EventToAppend event) {
-    outbox.append(
-        new OutboxAppendRequest(
-            UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), envelope.aggregateId(), envelope.aggregateVersion(),
-            envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(event.payload()), Instant.now()));
+    UUID aggregateId = event.aggregateId() == null ? envelope.aggregateId() : event.aggregateId();
+    Integer aggregateVersion = event.aggregateVersion() == null ? envelope.aggregateVersion() : event.aggregateVersion();
+    outbox.append(new OutboxAppendRequest(
+        UUID.randomUUID(), event.messageType(), 1, MessageKind.EVENT.name(), aggregateId, aggregateVersion,
+        envelope.correlationId(), envelope.messageId(), codec.writeValueAsString(event.payload()), Instant.now()));
   }
 }
