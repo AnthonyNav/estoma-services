@@ -6,7 +6,7 @@ import java.util.UUID;
 
 /** Transport-neutral command metadata. RabbitMQ maps to this type in PR3. */
 public record CommandMetadata(UUID messageId, String idempotencyKey, UUID correlationId,
-    UUID causationId, ActorContext actor, Instant receivedAt) {
+    UUID causationId, ActorContext actor, Instant receivedAt, UUID operationId) {
   public CommandMetadata {
     Objects.requireNonNull(messageId, "messageId");
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
@@ -16,8 +16,13 @@ public record CommandMetadata(UUID messageId, String idempotencyKey, UUID correl
     Objects.requireNonNull(receivedAt, "receivedAt");
   }
 
+  public CommandMetadata(UUID messageId, String idempotencyKey, UUID correlationId,
+      UUID causationId, ActorContext actor, Instant receivedAt) {
+    this(messageId, idempotencyKey, correlationId, causationId, actor, receivedAt, null);
+  }
+
   public static CommandMetadata direct(ActorContext actor, Instant now) {
     UUID messageId = UUID.randomUUID();
-    return new CommandMetadata(messageId, messageId.toString(), messageId, null, actor, now);
+    return new CommandMetadata(messageId, messageId.toString(), messageId, null, actor, now, null);
   }
 }

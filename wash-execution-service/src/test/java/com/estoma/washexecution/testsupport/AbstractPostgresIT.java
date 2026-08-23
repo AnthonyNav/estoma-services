@@ -32,7 +32,11 @@ public abstract class AbstractPostgresIT {
     registry.add("spring.flyway.url", POSTGRES::getJdbcUrl);
     registry.add("spring.flyway.user", POSTGRES::getUsername);
     registry.add("spring.flyway.password", POSTGRES::getPassword);
+    registry.add("spring.rabbitmq.listener.simple.auto-startup", () -> "false");
     registry.add("wash-execution.cleaning-worker-enabled", () -> "false");
+    registry.add("estoma.messaging.outbox-relay-enabled", () -> "false");
+    registry.add("estoma.messaging.deferred-replay-enabled", () -> "false");
+    registry.add("estoma.messaging.recovery-worker-enabled", () -> "false");
   }
 
   @BeforeEach
@@ -54,6 +58,7 @@ public abstract class AbstractPostgresIT {
           authorization_access_projection,
           authorization_role_projection,
           projection_recovery_state,
+          projection_recovery_jobs,
           command_idempotency_records,
           processed_messages,
           outbox_messages

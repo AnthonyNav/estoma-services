@@ -3,12 +3,15 @@ package com.estoma.appointments.infrastructure.persistence;
 import com.estoma.appointments.application.port.out.WashExecutionOperationalProjectionRepository;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class JdbcWashExecutionOperationalProjectionRepository implements WashExecutionOperationalProjectionRepository {
+  private static final String UNAVAILABILITY_COLUMNS = "resource_unavailability_id,cabin_id,tank_id,disabled_at,restored_at,source_version,updated_at";
+  private static final String CLEANING_COLUMNS = "cleaning_period_id,wash_execution_id,resource_assignment_id,cabin_id,cleaning_trigger,starts_at,expected_ends_at,completed_at,source_version,updated_at";
   private final JdbcClient jdbc;
   public JdbcWashExecutionOperationalProjectionRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
@@ -27,20 +30,45 @@ public class JdbcWashExecutionOperationalProjectionRepository implements WashExe
       .param("version",p.sourceVersion()).param("updated",Timestamps.toTimestamp(p.updatedAt())).update();
   }
 
+  @Override public Optional<ResourceUnavailabilityProjection> findResourceUnavailability(UUID id) {
+    return jdbc.sql("SELECT " + UNAVAILABILITY_COLUMNS + " FROM resource_unavailability_projection WHERE resource_unavailability_id=:id")
+      .param("id", id).query(JdbcWashExecutionOperationalProjectionRepository::mapUnavailability).optional();
+  }
+
+  @Override public Optional<CleaningPeriodProjection> findCleaningPeriod(UUID id) {
+    return jdbc.sql("SELECT " + CLEANING_COLUMNS + " FROM cleaning_period_projection WHERE cleaning_period_id=:id")
+      .param("id", id).query(JdbcWashExecutionOperationalProjectionRepository::mapCleaning).optional();
+  }
+
   @Override public List<ResourceUnavailabilityProjection> findUnavailabilityOverlapping(Instant startsAt, Instant endsAt) {
-    return jdbc.sql("SELECT resource_unavailability_id,cabin_id,tank_id,disabled_at,restored_at,source_version,updated_at FROM resource_unavailability_projection WHERE disabled_at < :ends AND (restored_at IS NULL OR restored_at > :starts)")
+    return jdbc.sql("SELECT " + UNAVAILABILITY_COLUMNS + " FROM resource_unavailability_projection WHERE disabled_at < :ends AND (restored_at IS NULL OR restored_at > :starts)")
       .param("starts",Timestamps.toTimestamp(startsAt)).param("ends",Timestamps.toTimestamp(endsAt))
-      .query((rs,row)->new ResourceUnavailabilityProjection(rs.getObject("resource_unavailability_id",UUID.class),rs.getObject("cabin_id",UUID.class),rs.getObject("tank_id",UUID.class),Timestamps.toInstant(rs,"disabled_at"),Timestamps.toInstant(rs,"restored_at"),rs.getLong("source_version"),Timestamps.toInstant(rs,"updated_at"))).list();
+      .query(JdbcWashExecutionOperationalProjectionRepository::mapUnavailability).list();
   }
 
   @Override public List<CleaningPeriodProjection> findCleaningPeriodsOverlapping(Instant startsAt, Instant endsAt) {
-    return jdbc.sql("SELECT cleaning_period_id,wash_execution_id,resource_assignment_id,cabin_id,cleaning_trigger,starts_at,expected_ends_at,completed_at,source_version,updated_at FROM cleaning_period_projection WHERE starts_at < :ends AND expected_ends_at > :starts")
+    return jdbc.sql("SELECT " + CLEANING_COLUMNS + " FROM cleaning_period_projection WHERE starts_at < :ends AND expected_ends_at > :starts")
       .param("starts",Timestamps.toTimestamp(startsAt)).param("ends",Timestamps.toTimestamp(endsAt))
-      .query((rs,row)->new CleaningPeriodProjection(rs.getObject("cleaning_period_id",UUID.class),rs.getObject("wash_execution_id",UUID.class),rs.getObject("resource_assignment_id",UUID.class),rs.getObject("cabin_id",UUID.class),rs.getString("cleaning_trigger"),Timestamps.toInstant(rs,"starts_at"),Timestamps.toInstant(rs,"expected_ends_at"),Timestamps.toInstant(rs,"completed_at"),rs.getLong("source_version"),Timestamps.toInstant(rs,"updated_at"))).list();
+      .query(JdbcWashExecutionOperationalProjectionRepository::mapCleaning).list();
   }
 
   @Override public boolean reliable() {
     return jdbc.sql("SELECT COALESCE(bool_and(reliable),true) FROM (SELECT reliable FROM resource_unavailability_projection UNION ALL SELECT reliable FROM cleaning_period_projection) p")
       .query(Boolean.class).single();
+  }
+
+  private static ResourceUnavailabilityProjection mapUnavailability(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
+    return new ResourceUnavailabilityProjection(rs.getObject("resource_unavailability_id",UUID.class),
+        rs.getObject("cabin_id",UUID.class), rs.getObject("tank_id",UUID.class),
+        Timestamps.toInstant(rs,"disabled_at"), Timestamps.toInstant(rs,"restored_at"),
+        rs.getLong("source_version"), Timestamps.toInstant(rs,"updated_at"));
+  }
+  private static CleaningPeriodProjection mapCleaning(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
+    return new CleaningPeriodProjection(rs.getObject("cleaning_period_id",UUID.class),
+        rs.getObject("wash_execution_id",UUID.class), rs.getObject("resource_assignment_id",UUID.class),
+        rs.getObject("cabin_id",UUID.class), rs.getString("cleaning_trigger"),
+        Timestamps.toInstant(rs,"starts_at"), Timestamps.toInstant(rs,"expected_ends_at"),
+        Timestamps.toInstant(rs,"completed_at"), rs.getLong("source_version"),
+        Timestamps.toInstant(rs,"updated_at"));
   }
 }

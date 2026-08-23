@@ -31,11 +31,9 @@ public interface ProcessedMessageRepository {
       Instant updatedAt) {}
 
   boolean insertIfAbsent(ProcessedMessage message);
-
   Optional<ProcessedMessage> find(String consumerName, UUID messageId);
-
-  List<ProcessedMessage> claimDeferred(
-      String consumerName, int limit, Instant now, UUID claimToken, Instant leaseUntil);
-
+  boolean claimDeferred(String consumerName, UUID messageId, Instant now, UUID claimToken, Instant leaseUntil);
+  List<ProcessedMessage> claimDeferred(String consumerName, int limit, Instant now, UUID claimToken, Instant leaseUntil);
   boolean markApplied(String consumerName, UUID messageId, UUID claimToken, Instant appliedAt);
+  boolean keepDeferred(String consumerName, UUID messageId, UUID claimToken, String reason, Instant updatedAt);
 }

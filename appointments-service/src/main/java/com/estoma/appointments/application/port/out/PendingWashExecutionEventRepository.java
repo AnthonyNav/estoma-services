@@ -13,5 +13,14 @@ public interface PendingWashExecutionEventRepository {
 
   record PendingEvent(UUID pendingEventId, UUID sourceEventId, UUID appointmentId,
       UUID washExecutionId, String eventType, long executionVersion, String payloadJson,
-      String status, int attempts, Instant availableAt, String claimedBy, Instant leaseUntil) {}
+      String status, int attempts, Instant availableAt, String claimedBy, Instant leaseUntil,
+      UUID correlationId) {
+    public PendingEvent(UUID pendingEventId, UUID sourceEventId, UUID appointmentId,
+        UUID washExecutionId, String eventType, long executionVersion, String payloadJson,
+        String status, int attempts, Instant availableAt, String claimedBy, Instant leaseUntil) {
+      this(pendingEventId, sourceEventId, appointmentId, washExecutionId, eventType,
+          executionVersion, payloadJson, status, attempts, availableAt, claimedBy, leaseUntil,
+          sourceEventId);
+    }
+  }
 }

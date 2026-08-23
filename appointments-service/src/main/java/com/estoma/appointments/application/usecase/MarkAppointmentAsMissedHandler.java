@@ -81,7 +81,6 @@ public final class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMi
     if (result.status() == ApplicationResult.Status.DEFERRED) {
       ApplicationSupport.releaseDeferred(idempotency, command.metadata(), "MarkAppointmentAsMissed", result);
     } else {
-      ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
       ApplicationSupport.complete(idempotency, command.metadata(), "MarkAppointmentAsMissed", result, now);
     }
     return result;

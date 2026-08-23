@@ -38,7 +38,7 @@ public final class GrantExceptionalAppointmentAuthorizationHandler
   @Transactional
   public ApplicationResult grant(Command command) {
     Instant now = command.now();
-    Optional<ApplicationResult> gate = ApplicationSupport.claim(idempotency, command.metadata(),
+    Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox, command.metadata(),
         "GrantExceptionalAppointmentAuthorization", ApplicationSupport.fingerprint(
             command.authorizationId(), command.studentAccountId(), command.serviceDate(),
             command.reason(), command.expiresAt()), now);
@@ -80,7 +80,8 @@ public final class GrantExceptionalAppointmentAuthorizationHandler
       result = ApplicationResult.rejected("INVALID_AUTHORIZATION", exception.getMessage());
     }
 
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
+    ApplicationSupport.appendResult(outbox, command.metadata(),
+        "GrantExceptionalAppointmentAuthorization", result, now);
     ApplicationSupport.complete(idempotency, command.metadata(),
         "GrantExceptionalAppointmentAuthorization", result, now);
     return result;
