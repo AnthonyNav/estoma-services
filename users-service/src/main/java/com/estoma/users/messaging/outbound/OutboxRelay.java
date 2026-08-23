@@ -124,9 +124,11 @@ public class OutboxRelay {
   private MessageEnvelope buildEnvelope(OutboxRecord record, MessageKind kind, OutboxMetadata metadata) {
     var actor = metadata == null ? null : metadata.actor();
     var operationId = kind == MessageKind.RESULT && metadata != null ? metadata.operationId() : null;
+    var idempotencyKey = kind == MessageKind.RESULT && metadata != null ? metadata.idempotencyKey() : null;
     return new MessageEnvelope(
         record.messageId(), record.messageType(), record.messageVersion(), kind, PRODUCER,
         record.occurredAt(), record.correlationId(), record.causationId(), operationId,
-        null, record.aggregateId(), record.aggregateVersion(), actor, codec.parseJson(record.payloadJson()));
+        idempotencyKey, record.aggregateId(), record.aggregateVersion(), actor,
+        codec.parseJson(record.payloadJson()));
   }
 }
