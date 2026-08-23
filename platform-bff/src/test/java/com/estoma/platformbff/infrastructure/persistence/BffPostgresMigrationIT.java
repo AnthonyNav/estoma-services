@@ -25,11 +25,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -61,6 +62,7 @@ class BffPostgresMigrationIT {
   @Autowired JdbcInboxRepository inbox;
   @Autowired JdbcOutboxRepository outbox;
   @Autowired JdbcProjectionStatusRepository projectionStatus;
+  @Autowired PlatformTransactionManager transactionManager;
 
   @BeforeEach
   void clearMutableTables() {
@@ -140,33 +142,90 @@ class BffPostgresMigrationIT {
   }
 
   @Test
-  void idempotencyScopeIsUnique() {
+  void idempotencyLogicalScopeIsUniqueEvenWhenScopeKeyDiffers() {
     Instant now = Instant.now();
-    var operation = pendingOperation(UUID.randomUUID(), now);
-    operations.insert(operation);
-    var record = new IdempotencyRecord(
-        "actor|test.operation|same-key",
-        operation.actorAccountId(),
-        operation.publicOperation(),
+    UUID actorAccountId = UUID.randomUUID();
+    var firstOperation = pendingOperation(UUID.randomUUID(), actorAccountId, "same-key", now);
+    var secondOperation = pendingOperation(UUID.randomUUID(), actorAccountId, "same-key", now);
+    operations.insert(firstOperation);
+    operations.insert(secondOperation);
+
+    idempotency.insert(new IdempotencyRecord(
+        "scope-a",
+        actorAccountId,
+        firstOperation.publicOperation(),
         "same-key",
-        "fingerprint",
-        operation.operationId(),
+        "fingerprint-a",
+        firstOperation.operationId(),
+        now,
+        now.plus(24, ChronoUnit.HOURS)));
+
+    var duplicateLogicalScope = new IdempotencyRecord(
+        "scope-b",
+        actorAccountId,
+        secondOperation.publicOperation(),
+        "same-key",
+        "fingerprint-b",
+        secondOperation.operationId(),
         now,
         now.plus(24, ChronoUnit.HOURS));
 
-    idempotency.insert(record);
-    assertThatThrownBy(() -> idempotency.insert(record)).isInstanceOf(DuplicateKeyException.class);
+    assertThatThrownBy(() -> idempotency.insert(duplicateLogicalScope))
+        .isInstanceOf(DataIntegrityViolationException.class);
   }
 
   @Test
-  void inboxDeduplicatesPerConsumerAndMessageId() {
+  void idempotencyLogicalScopeTreatsNullActorAsSameScope() {
+    Instant now = Instant.now();
+    var firstOperation = pendingOperation(UUID.randomUUID(), null, "public-key", now);
+    var secondOperation = pendingOperation(UUID.randomUUID(), null, "public-key", now);
+    operations.insert(firstOperation);
+    operations.insert(secondOperation);
+
+    idempotency.insert(new IdempotencyRecord(
+        "public-scope-a",
+        null,
+        firstOperation.publicOperation(),
+        "public-key",
+        "fingerprint-a",
+        firstOperation.operationId(),
+        now,
+        now.plus(24, ChronoUnit.HOURS)));
+
+    var duplicateLogicalScope = new IdempotencyRecord(
+        "public-scope-b",
+        null,
+        secondOperation.publicOperation(),
+        "public-key",
+        "fingerprint-b",
+        secondOperation.operationId(),
+        now,
+        now.plus(24, ChronoUnit.HOURS));
+
+    assertThatThrownBy(() -> idempotency.insert(duplicateLogicalScope))
+        .isInstanceOf(DataIntegrityViolationException.class);
+  }
+
+  @Test
+  void inboxDeduplicationDoesNotAbortSurroundingTransaction() {
     Instant now = Instant.now();
     UUID messageId = UUID.randomUUID();
     var first = inboxMessage("results.bff", messageId, now);
+    var transaction = new TransactionTemplate(transactionManager);
 
-    assertThat(inbox.recordIfNew(first)).isTrue();
-    assertThat(inbox.recordIfNew(first)).isFalse();
-    assertThat(inbox.recordIfNew(inboxMessage("events.bff-projections", messageId, now))).isTrue();
+    transaction.executeWithoutResult(ignored -> {
+      assertThat(inbox.recordIfNew(first)).isTrue();
+      assertThat(inbox.recordIfNew(first)).isFalse();
+      assertThat(inbox.recordIfNew(inboxMessage("events.bff-projections", messageId, now))).isTrue();
+
+      var count = jdbc.sql("""
+          SELECT count(*) FROM inbox_messages WHERE message_id = :messageId
+          """)
+          .param("messageId", messageId)
+          .query(Integer.class)
+          .single();
+      assertThat(count).isEqualTo(2);
+    });
   }
 
   @Test
@@ -316,7 +375,11 @@ class BffPostgresMigrationIT {
   }
 
   private static ClientOperation pendingOperation(UUID operationId, Instant now) {
-    UUID actorAccountId = UUID.randomUUID();
+    return pendingOperation(operationId, UUID.randomUUID(), "idem-" + operationId, now);
+  }
+
+  private static ClientOperation pendingOperation(UUID operationId, UUID actorAccountId,
+      String idempotencyKey, Instant now) {
     return new ClientOperation(
         operationId,
         actorAccountId,
@@ -325,7 +388,7 @@ class BffPostgresMigrationIT {
         "users",
         "users",
         UUID.randomUUID(),
-        "idem-" + operationId,
+        idempotencyKey,
         OperationStatus.PENDING,
         null,
         null,
