@@ -7,7 +7,6 @@ import com.estoma.appointments.application.port.out.AuthorizationProjectionRepos
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
 import com.estoma.appointments.application.port.out.ExceptionalAppointmentAuthorizationRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
-import com.estoma.appointments.domain.error.DomainViolationException;
 import java.time.Instant;
 import java.util.Optional;
 import org.springframework.stereotype.Service;
@@ -41,30 +40,42 @@ public final class CancelExceptionalAppointmentAuthorizationHandler
         "CancelExceptionalAppointmentAuthorization", ApplicationSupport.fingerprint(
             command.authorizationId(), command.reason()), now);
     if (gate.isPresent()) return gate.get();
+
     ApplicationResult result;
     try {
       var current = authorizations.findByIdForUpdate(command.authorizationId()).orElse(null);
-      if (current == null) result = ApplicationResult.rejected("AUTHORIZATION_NOT_FOUND", "authorization was not found");
-      else if (!policy.canManage(command.metadata())) result = ApplicationResult.rejected("FORBIDDEN", "actor cannot cancel exceptional authorization");
-      else if (appointments.findActiveByExceptionalAuthorizationForUpdate(command.authorizationId()).isPresent()) {
-        result = ApplicationResult.rejected("AUTHORIZATION_IN_USE", "an active appointment still consumes this authorization");
-      } else if (current.isCancelled()) result = ApplicationResult.applied(current.exceptionalAuthorizationId(), current.version(), "authorization already cancelled");
-      else {
+      if (current == null) {
+        result = ApplicationResult.rejected("AUTHORIZATION_NOT_FOUND", "authorization was not found");
+      } else if (!policy.canGrantExceptionalAuthorization(command.metadata())) {
+        result = ApplicationResult.rejected("FORBIDDEN",
+            "only an authorized wash supervisor can cancel exceptional authorization");
+      } else if (appointments.findActiveByExceptionalAuthorizationForUpdate(command.authorizationId()).isPresent()) {
+        result = ApplicationResult.rejected("AUTHORIZATION_IN_USE",
+            "an appointment still consumes this authorization");
+      } else if (current.isCancelled()) {
+        result = ApplicationResult.applied(current.exceptionalAuthorizationId(), current.version(),
+            "authorization already cancelled");
+      } else {
         var cancelled = current.cancel(command.metadata().actor().accountId(), command.reason(), now);
         if (!authorizations.updateIfVersion(cancelled, current.version())) {
-          result = ApplicationResult.rejected("CONCURRENT_MODIFICATION", "authorization changed while cancelling");
+          result = ApplicationResult.rejected("CONCURRENT_MODIFICATION",
+              "authorization changed while cancelling");
         } else {
-          ApplicationSupport.appendEvent(outbox, command.metadata(), "ExceptionalAppointmentAuthorizationCancelled",
-              cancelled.exceptionalAuthorizationId(), cancelled.version(), "{\"authorizationId\":\""
+          ApplicationSupport.appendEvent(outbox, command.metadata(),
+              "ExceptionalAppointmentAuthorizationCancelled", cancelled.exceptionalAuthorizationId(),
+              cancelled.version(), "{\"authorizationId\":\""
                   + cancelled.exceptionalAuthorizationId() + "\"}", now);
-          result = ApplicationResult.applied(cancelled.exceptionalAuthorizationId(), cancelled.version(), "authorization cancelled");
+          result = ApplicationResult.applied(cancelled.exceptionalAuthorizationId(),
+              cancelled.version(), "authorization cancelled");
         }
       }
     } catch (IllegalArgumentException exception) {
       result = ApplicationResult.rejected("INVALID_AUTHORIZATION", exception.getMessage());
     }
+
     ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
-    ApplicationSupport.complete(idempotency, command.metadata(), "CancelExceptionalAppointmentAuthorization", result, now);
+    ApplicationSupport.complete(idempotency, command.metadata(),
+        "CancelExceptionalAppointmentAuthorization", result, now);
     return result;
   }
 }
