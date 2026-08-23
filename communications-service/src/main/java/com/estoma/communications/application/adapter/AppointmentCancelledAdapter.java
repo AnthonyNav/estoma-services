@@ -64,7 +64,9 @@ class AppointmentCancelledAdapter implements ProjectionHandler {
           envelope.messageId(), envelope.operationId(), payload.appointmentId(),
           envelope.aggregateId(), envelope.aggregateVersion(), envelope.actor(), envelope.payload());
       CommandHandlerResult result = service.create(command, boundary);
-      return new ProjectionHandlerResult(result.events());
+      return new ProjectionHandlerResult(result.events().stream()
+          .map(event -> event.onAggregate(result.aggregateId(), result.aggregateVersion()))
+          .toList());
     } catch (CommunicationsRejectedException rejected) {
       if (rejected.code() == RejectionCode.COMMUNICATION_ALREADY_EXISTS) {
         return ProjectionHandlerResult.NONE;
