@@ -12,8 +12,18 @@ public interface OutboxRepository {
   default boolean quarantine(UUID messageId, String workerId, String error, Instant at) {
     return markFailed(messageId, workerId, error, at);
   }
+
   record OutboxMessage(UUID messageId, String messageType, int messageVersion, String messageKind,
       UUID aggregateId, Long aggregateVersion, UUID correlationId, UUID causationId,
       String payloadJson, Instant occurredAt, Instant availableAt, String status,
-      int attempts, String claimedBy, Instant leaseUntil) {}
+      int attempts, String claimedBy, Instant leaseUntil, UUID operationId) {
+    public OutboxMessage(UUID messageId, String messageType, int messageVersion, String messageKind,
+        UUID aggregateId, Long aggregateVersion, UUID correlationId, UUID causationId,
+        String payloadJson, Instant occurredAt, Instant availableAt, String status,
+        int attempts, String claimedBy, Instant leaseUntil) {
+      this(messageId,messageType,messageVersion,messageKind,aggregateId,aggregateVersion,
+          correlationId,causationId,payloadJson,occurredAt,availableAt,status,attempts,claimedBy,
+          leaseUntil,null);
+    }
+  }
 }
