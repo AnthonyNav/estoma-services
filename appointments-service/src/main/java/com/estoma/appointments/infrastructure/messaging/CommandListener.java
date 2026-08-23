@@ -33,8 +33,11 @@ public final class CommandListener {
 
   public CommandListener(EnvelopeJsonCodec codec, EnvelopeValidator validator, CommandMessageMapper mapper,
       AppointmentCommandDispatcher dispatcher, FailureRouter failures) {
-    this.codec = codec; this.validator = validator; this.mapper = mapper;
-    this.dispatcher = dispatcher; this.failures = failures;
+    this.codec = codec;
+    this.validator = validator;
+    this.mapper = mapper;
+    this.dispatcher = dispatcher;
+    this.failures = failures;
   }
 
   @RabbitListener(id = "appointmentsCommandConsumer", queues = MessagingNames.COMMAND_QUEUE,
@@ -46,19 +49,17 @@ public final class CommandListener {
       validateProducerAndActor(envelope);
       ApplicationResult result = dispatcher.dispatch(mapper.map(envelope));
       if (result.status() == ApplicationResult.Status.DEFERRED) {
-        failures.route(message, MessagingNames.COMMAND_QUEUE, true);
+        DeliveryFailureSupport.routeThenAck(
+            failures, message, MessagingNames.COMMAND_QUEUE, true, channel, tag);
+        return;
       }
       channel.basicAck(tag, false);
     } catch (InvalidMessageException | IllegalArgumentException invalid) {
-      failures.route(message, MessagingNames.COMMAND_QUEUE, false);
-      channel.basicAck(tag, false);
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.COMMAND_QUEUE, false, channel, tag);
     } catch (RuntimeException technical) {
-      try {
-        failures.route(message, MessagingNames.COMMAND_QUEUE, true);
-        channel.basicAck(tag, false);
-      } catch (RuntimeException routingFailure) {
-        channel.basicNack(tag, false, true);
-      }
+      DeliveryFailureSupport.routeThenAck(
+          failures, message, MessagingNames.COMMAND_QUEUE, true, channel, tag);
     }
   }
 
