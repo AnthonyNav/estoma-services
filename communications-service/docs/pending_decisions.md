@@ -2,27 +2,29 @@
 
 ## Purpose
 
-This file tracks what is genuinely still open after Phase 1 (PR1). Everything this service had authority to decide on its own — internal architecture, migration tooling, Outbox operational policy, email delivery operational policy (worker cadence, retry backoff), observability parameter names — was resolved in `docs/system_contract.md` during Phase 1 and is no longer listed here.
+Tracks only decisions that still remain genuinely open after the canonical Phase 3 integration and secure password-recovery delivery work.
 
-## Deferred To Phase 3
+The following are now resolved and are intentionally no longer pending:
 
-These require agreement with other services' teams, or vendor/operational decisions outside this service's own technical authority, before they can be finalized. Phase 2 proceeds using the conceptual payloads and the stub provider already documented in this service's own `events.md`/`data-model.md`/`commands.md`; Phase 3 formalizes and reconciles them.
+- canonical Users/Authentication projection payload handling;
+- the durable RabbitMQ command/event shell;
+- the secure mechanism for password-recovery secrets: `PasswordRecoveryRequested` is non-secret and durable, while `GetRecoveryCodeForDelivery` is an ephemeral Authentication Security RPC immediately before each provider call; the returned code exists only in memory and is never persisted or logged.
 
-- Exact payload contracts for `PersonCreated`/`PersonUpdated`/`PersonActivated`/`PersonDeactivated` (from `users-service`) and `AccountCreated`/`AccountActivated`/`AccountDeactivated` (from `authentication-service`), once those services build their own messaging shells.
-- Definitive real email provider selection, without introducing provider fallback in this scope.
-- Definitive normalized provider-error-code catalog.
-- Secure mechanism for temporary links or secrets carried in email content (`README.md` §9, "pendiente de definición").
+## Still Pending
+
+- Definitive real email provider selection/activation beyond the current provider-neutral port/stub.
+- Definitive normalized provider-error-code catalog and provider capability matrix.
 - Future webhook support and the criterion for when `EmailDeliveryDelivered`/`DELIVERED` becomes reachable.
-- Final RabbitMQ topology details beyond the platform-wide defaults Phase 3 applies (exact prefetch, exact retention, exact message size limits — `messaging-architecture.md` §20 lists these as globally pending, not specific to this service).
+- Final platform-wide RabbitMQ tunables such as exact prefetch, retention and message-size limits.
 - Retention policy for `email_delivery_attempts`.
-- The canonical normalized provider-error-code catalog remains deferred; timeout, ambiguous outcomes, and legacy `SENDING` rows use durable indeterminate codes.
+- Retention policy for the restricted `InboxMessageCreated` event/projection data.
+- Which additional business scenarios count as critical communications and the corresponding inbox expiration policy, where still owned by the cross-cutting business specification.
 
 ## Out Of This Service's Control
 
-- Which communications count as "critical" and the inbox message expiration policy — sourced to `01-domain/shared-platform-business.md` §11 as a cross-cutting platform decision, not this service's to resolve on its own.
-- Secret management strategy beyond raw Kubernetes Secrets.
+- Secret-management strategy beyond raw Kubernetes Secrets.
 - Resource requests/limits and HPA metrics.
-- Database user and database creation workflow.
+- Database user/database creation workflow.
 - Physical RabbitMQ topology ownership per environment.
 
-Owned by `estoma-infra` / the platform team (last three items). Not a blocker for Phase 2 or Phase 3.
+The last items belong to `estoma-infra` / the platform team and remain outside this code PR.
