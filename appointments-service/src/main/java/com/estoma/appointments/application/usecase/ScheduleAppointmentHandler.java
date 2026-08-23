@@ -69,7 +69,7 @@ public final class ScheduleAppointmentHandler implements ScheduleAppointmentUseC
     } catch (IllegalArgumentException exception) {
       result = ApplicationResult.rejected(code(exception), exception.getMessage());
     }
-    ApplicationSupport.appendResult(outbox, metadata, result, now);
+    ApplicationSupport.appendResult(outbox, metadata, "ScheduleAppointment", result, now);
     ApplicationSupport.complete(idempotency, metadata, "ScheduleAppointment", result, now);
     return result;
   }
