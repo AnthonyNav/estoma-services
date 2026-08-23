@@ -14,18 +14,6 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
-/**
- * The AMQP entry point for durable commands. Not transactional itself --
- * it validates, calls {@link CommandDispatcher} (which opens and closes
- * the one transaction, including Consumer Inbox dedup), and then decides
- * ACK / retry-tier / DLQ. Nothing here can roll back a commit that
- * already happened.
- *
- * <p>The original delivery is ACKed only after its retry/DLQ
- * republication is itself confirmed by RabbitMQ -- never on a bare
- * {@code send()}. If the republication cannot be confirmed, the original
- * is NACKed with requeue instead of silently dropped or acknowledged.
- */
 @Component
 public class CommandListener {
 
@@ -38,7 +26,11 @@ public class CommandListener {
   private final FailureRouter failureRouter;
 
   public CommandListener(
-      EnvelopeJsonCodec codec, EnvelopeValidator validator, CommandDispatcher dispatcher, TransientFailureClassifier classifier, FailureRouter failureRouter) {
+      EnvelopeJsonCodec codec,
+      EnvelopeValidator validator,
+      CommandDispatcher dispatcher,
+      TransientFailureClassifier classifier,
+      FailureRouter failureRouter) {
     this.codec = codec;
     this.validator = validator;
     this.dispatcher = dispatcher;
@@ -47,12 +39,11 @@ public class CommandListener {
   }
 
   @RabbitListener(
-      id = "commandListener", // referenced by CommandConsumerHealthIndicator
+      id = "commandListener",
       queues = MessagingNames.AUTHENTICATION_COMMAND_QUEUE,
       containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
-
     MessageEnvelope envelope;
     try {
       envelope = codec.decode(message.getBody());
@@ -71,10 +62,11 @@ public class CommandListener {
     try {
       CommandOutcome outcome = dispatcher.dispatch(envelope);
       log.info("command {} processed: {}", envelope.messageType(), describe(outcome));
-      channel.basicAck(deliveryTag, false); // after commit -- nothing else here
+      channel.basicAck(deliveryTag, false);
     } catch (Exception e) {
       boolean transientFailure = classifier.isTransient(e);
-      log.warn("command {} (messageId={}) failed, transient={}: {}", envelope.messageType(), envelope.messageId(), transientFailure, e.toString());
+      log.warn("command {} (messageId={}) failed, transient={}: {}",
+          envelope.messageType(), envelope.messageId(), transientFailure, e.toString());
       try {
         failureRouter.routeAfterFailure(message, FailureRouter.COMMAND_TOPOLOGY, e, transientFailure);
         channel.basicAck(deliveryTag, false);
@@ -92,6 +84,7 @@ public class CommandListener {
     return switch (outcome) {
       case CommandOutcome.Succeeded succeeded -> "succeeded, aggregateVersion=" + succeeded.aggregateVersion();
       case CommandOutcome.Rejected rejected -> "rejected, code=" + rejected.code();
+      case CommandOutcome.Deferred deferred -> "deferred, pendingReason=" + deferred.pendingReason();
       case CommandOutcome.Duplicate duplicate -> "duplicate";
     };
   }
