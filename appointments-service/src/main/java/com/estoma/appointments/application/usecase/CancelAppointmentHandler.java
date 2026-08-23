@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class CancelAppointmentHandler implements CancelAppointmentUseCase {
+public class CancelAppointmentHandler implements CancelAppointmentUseCase {
   private final AppointmentRepository appointments;
   private final AppointmentTimeSlotRepository slots;
   private final CommandIdempotencyRepository idempotency;
@@ -63,7 +63,9 @@ public final class CancelAppointmentHandler implements CancelAppointmentUseCase 
           } else {
             ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentCancelled",
                 cancelled.appointmentId(), cancelled.version(), "{\"appointmentId\":\""
-                    + cancelled.appointmentId() + "\",\"cancellationType\":\"STUDENT\"}", now);
+                    + cancelled.appointmentId() + "\",\"appointmentTimeSlotId\":\""
+                    + cancelled.appointmentTimeSlotId() + "\",\"status\":\"CANCELLED\","
+                    + "\"cancellationType\":\"STUDENT\"}", now);
             result = ApplicationResult.applied(cancelled.appointmentId(), cancelled.version(), "appointment cancelled");
           }
         }

@@ -61,13 +61,25 @@ public final class CreateAppointmentTimeSlotHandler implements CreateAppointment
       } else {
         result = validateAdministrativeSource(command);
         if (result == null) {
+          var schedule = administration.findSchedule(command.sourceScheduleId()).orElseThrow();
           AppointmentTimeSlot slot = AppointmentTimeSlot.create(command.slotId(), command.sourceScheduleId(),
-              command.serviceDate(), command.startsAt(), command.endsAt(), command.timezone(),
+              schedule.calendarId(), command.serviceDate(), command.startsAt(), command.endsAt(), command.timezone(),
               command.bookingDeadlineAt(), command.cancellationDeadlineAt(), command.arrivalToleranceUntil());
           slots.save(slot);
           ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentTimeSlotCreated",
               slot.appointmentTimeSlotId(), slot.version(),
-              "{\"slotId\":\"" + slot.appointmentTimeSlotId() + "\"}", now);
+              "{\"appointmentTimeSlotId\":\"" + slot.appointmentTimeSlotId()
+                  + "\",\"sourceScheduleId\":\"" + slot.sourceScheduleId()
+                  + "\",\"calendarId\":\"" + slot.calendarId()
+                  + "\",\"serviceDate\":\"" + slot.serviceDate()
+                  + "\",\"startsAt\":\"" + slot.startsAt()
+                  + "\",\"endsAt\":\"" + slot.endsAt()
+                  + "\",\"timezone\":\"" + slot.timezone().getId()
+                  + "\",\"bookingDeadlineAt\":\"" + slot.bookingDeadlineAt()
+                  + "\",\"cancellationDeadlineAt\":\"" + slot.cancellationDeadlineAt()
+                  + "\",\"arrivalToleranceUntil\":\"" + slot.arrivalToleranceUntil()
+                  + "\",\"status\":\"" + slot.status()
+                  + "\",\"version\":" + slot.version() + "}", now);
           String recalcPayload = "{\"sourceEventId\":\"" + command.metadata().messageId()
               + "\",\"slotId\":\"" + slot.appointmentTimeSlotId()
               + "\",\"expectedProjectionVersion\":0}";

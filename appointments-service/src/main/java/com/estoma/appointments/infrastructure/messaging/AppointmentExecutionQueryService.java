@@ -129,6 +129,7 @@ public final class AppointmentExecutionQueryService {
   private ObjectNode slotNode(AppointmentTimeSlot slot) {
     ObjectNode node = mapper.createObjectNode();
     node.put("appointmentTimeSlotId", slot.appointmentTimeSlotId().toString());
+    node.put("calendarId", slot.calendarId().toString());
     node.put("serviceDate", slot.serviceDate().toString());
     node.put("startsAt", slot.startsAt().toString());
     node.put("endsAt", slot.endsAt().toString());

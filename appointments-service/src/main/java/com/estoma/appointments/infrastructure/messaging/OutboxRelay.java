@@ -43,12 +43,18 @@ public final class OutboxRelay {
 
   public OutboxRelay(OutboxRepository outbox, ConfirmedRabbitPublisher publisher, EnvelopeJsonCodec codec,
       MessagingProperties properties, PlatformTransactionManager transactionManager, Clock clock) {
-    this.outbox = outbox; this.publisher = publisher; this.codec = codec; this.properties = properties;
-    this.transactions = new TransactionTemplate(transactionManager); this.clock = clock;
+    this.outbox = outbox;
+    this.publisher = publisher;
+    this.codec = codec;
+    this.properties = properties;
+    this.transactions = new TransactionTemplate(transactionManager);
+    this.clock = clock;
   }
 
   @Scheduled(fixedDelayString = "${estoma.messaging.outbox-poll-interval:1s}")
-  public void scheduledRelay() { if (properties.outboxRelayEnabled()) relay(); }
+  public void scheduledRelay() {
+    if (properties.outboxRelayEnabled()) relay();
+  }
 
   public void relay() {
     String worker = UUID.randomUUID().toString();
@@ -100,9 +106,9 @@ public final class OutboxRelay {
 
   static String commandIdempotencyKey(String messageType, JsonNode payload, UUID fallback) {
     return switch (messageType) {
-      case "RecalculateAppointmentCapacityForTimeSlot" -> required(payload,"sourceEventId") + ":" + required(payload,"slotId");
-      case "MarkAppointmentAsMissed" -> required(payload,"appointmentId") + ":" + requiredNumber(payload,"expectedVersion");
-      case "CreateAppointmentTimeSlot" -> required(payload,"slotId");
+      case "RecalculateAppointmentCapacityForTimeSlot" -> required(payload, "sourceEventId") + ":" + required(payload, "slotId");
+      case "MarkAppointmentAsMissed" -> required(payload, "appointmentId") + ":" + requiredNumber(payload, "expectedVersion");
+      case "CreateAppointmentTimeSlot" -> required(payload, "slotId");
       default -> fallback.toString();
     };
   }
@@ -123,8 +129,27 @@ public final class OutboxRelay {
         default -> throw new IllegalArgumentException("unknown Query destination for " + messageType);
       };
     }
-    String word = messageType.replaceAll("([a-z])([A-Z])", "$1-$2").toLowerCase();
-    return "appointments." + word;
+    return eventRoutingKey(messageType);
+  }
+
+  static String eventRoutingKey(String messageType) {
+    return switch (messageType) {
+      case "AppointmentTimeSlotCreated" -> "appointments.appointment-time-slot.created";
+      case "AppointmentTimeSlotCapacityRecalculated" -> "appointments.appointment-time-slot.capacity-recalculated";
+      case "AppointmentTimeSlotCapacityReduced" -> "appointments.appointment-time-slot.capacity-reduced";
+      case "AppointmentTimeSlotCancelled" -> "appointments.appointment-time-slot.cancelled";
+      case "AppointmentScheduled" -> "appointments.appointment.scheduled";
+      case "AppointmentCancelled" -> "appointments.appointment.cancelled";
+      case "AppointmentMissed" -> "appointments.appointment.missed";
+      case "AppointmentEntryRejected" -> "appointments.appointment.entry-rejected";
+      case "AppointmentStarted" -> "appointments.appointment.started";
+      case "AppointmentCompleted" -> "appointments.appointment.completed";
+      case "ExceptionalAppointmentAuthorizationGranted" ->
+          "appointments.exceptional-appointment-authorization.granted";
+      case "ExceptionalAppointmentAuthorizationCancelled" ->
+          "appointments.exceptional-appointment-authorization.cancelled";
+      default -> throw new IllegalArgumentException("unknown Event routing for " + messageType);
+    };
   }
 
   private static String required(JsonNode payload, String field) {
@@ -133,6 +158,7 @@ public final class OutboxRelay {
     }
     return payload.path(field).asText();
   }
+
   private static long requiredNumber(JsonNode payload, String field) {
     if (!payload.has(field) || !payload.path(field).isIntegralNumber()) {
       throw new IllegalArgumentException(field + " is required for internal command idempotency");
