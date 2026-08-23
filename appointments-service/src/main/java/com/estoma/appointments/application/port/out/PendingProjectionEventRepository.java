@@ -10,6 +10,7 @@ public interface PendingProjectionEventRepository {
       Instant now, Instant leaseUntil);
   boolean completeBySourceEvent(UUID sourceEventId, Instant completedAt);
   boolean fail(UUID pendingEventId, String workerId, String error, Instant availableAt);
+  boolean hasOpen(String projectionName);
 
   record PendingProjectionEvent(UUID pendingEventId, UUID sourceEventId, String projectionName,
       String messageType, Long aggregateVersion, String envelopeJson, String status, int attempts,
