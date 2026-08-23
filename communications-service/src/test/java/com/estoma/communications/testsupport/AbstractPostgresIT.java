@@ -8,6 +8,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
+/** Shared real-PostgreSQL base for DB-focused integration tests. */
 @SpringBootTest
 @Testcontainers
 @TestPropertySource(properties = {
@@ -29,7 +30,9 @@ public abstract class AbstractPostgresIT {
           .withUrlParam("socketTimeout", "10")
           .withUrlParam("connectTimeout", "10");
 
-  static { POSTGRES.start(); }
+  static {
+    POSTGRES.start();
+  }
 
   @DynamicPropertySource
   static void registerPostgresProperties(DynamicPropertyRegistry registry) {

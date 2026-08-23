@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class CommandConsumerHealthIndicator implements HealthIndicator {
+
   private final RabbitListenerEndpointRegistry registry;
   private final boolean listenersEnabled;
 
@@ -20,7 +21,9 @@ public class CommandConsumerHealthIndicator implements HealthIndicator {
 
   @Override
   public Health health() {
-    if (!listenersEnabled) return Health.up().withDetail("disabled", true).build();
+    if (!listenersEnabled) {
+      return Health.up().withDetail("disabled", true).build();
+    }
     var commands = registry.getListenerContainer("commandConsumer");
     var events = registry.getListenerContainer("eventConsumer");
     boolean running = commands != null && commands.isRunning() && events != null && events.isRunning();
