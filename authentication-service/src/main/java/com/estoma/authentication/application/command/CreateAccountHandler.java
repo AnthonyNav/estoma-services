@@ -1,5 +1,6 @@
 package com.estoma.authentication.application.command;
 
+import com.estoma.authentication.application.DeferredAcademicCommandException;
 import com.estoma.authentication.application.EventToAppend;
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.AccountStatusHistoryRepository;
@@ -18,12 +19,8 @@ import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
 
-/**
- * Handles {@code CreateAccount} (commands.md §4.1). Never transports a
- * password or any secret; the credential is configured exclusively through
- * the ephemeral security RPC flow.
- */
 @Component
 class CreateAccountHandler implements CommandHandler {
 
@@ -54,27 +51,62 @@ class CreateAccountHandler implements CommandHandler {
 
     var personStatus = personStatusProjectionRepository.findByPersonId(command.personId());
     if (personStatus.isEmpty()) {
-      throw new AuthenticationRejectedException(RejectionCode.PERSON_NOT_FOUND, "person " + command.personId() + " is not known to this service");
+      String pendingReason = academicPendingReason(envelope, command.personId());
+      if (pendingReason != null) {
+        throw new DeferredAcademicCommandException(pendingReason);
+      }
+      throw new AuthenticationRejectedException(
+          RejectionCode.PERSON_NOT_FOUND, "person " + command.personId() + " is not known to this service");
     }
     if (!"ACTIVE".equals(personStatus.get().status())) {
-      throw new AuthenticationRejectedException(RejectionCode.PERSON_INACTIVE, "person " + command.personId() + " is not active");
+      throw new AuthenticationRejectedException(
+          RejectionCode.PERSON_INACTIVE, "person " + command.personId() + " is not active");
     }
 
     Instant now = Instant.now();
     LoginIdentifier loginIdentifier = LoginIdentifier.of(command.loginType(), command.loginIdentifier());
     Account account = Account.createNew(command.accountId(), command.personId(), loginIdentifier, now);
-
-    // May itself throw AuthenticationRejectedException on a lost race against a concurrent writer.
     accountRepository.insert(account);
-    statusHistoryRepository.insert(
-        new AccountStatusChange(
-            UUID.randomUUID(), account.accountId(), null, account.status(), null, null, envelope.actor(), envelope.correlationId(), now,
-            account.version()));
+    statusHistoryRepository.insert(new AccountStatusChange(
+        UUID.randomUUID(), account.accountId(), null, account.status(), null, null,
+        envelope.actor(), envelope.correlationId(), now, account.version()));
 
-    AccountCreatedPayload eventPayload =
-        new AccountCreatedPayload(account.accountId(), account.personId(), account.loginIdentifier().type(), account.status().name(), account.createdAt());
-
+    AccountCreatedPayload eventPayload = new AccountCreatedPayload(
+        account.accountId(), account.personId(), account.loginIdentifier().type(),
+        account.status().name(), account.createdAt());
     return CommandHandlerResult.of(
-        account.accountId(), account.version(), new EventToAppend(AuthenticationEvent.ACCOUNT_CREATED.wireName(), eventPayload));
+        account.accountId(), account.version(),
+        new EventToAppend(AuthenticationEvent.ACCOUNT_CREATED.wireName(), eventPayload));
+  }
+
+  private static String academicPendingReason(MessageEnvelope envelope, UUID personId) {
+    if (!"academic".equals(envelope.producer())) {
+      return null;
+    }
+    JsonNode execution = envelope.payload().path("importExecution");
+    JsonNode dependencies = execution.path("causalDependencies");
+    if (dependencies.isArray()) {
+      for (JsonNode dependency : dependencies) {
+        String expectedEvent = dependency.path("expectedEventType").asString();
+        if ("SUCCEEDED".equals(dependency.path("priorResultStatus").asString())
+            && ("PersonCreated".equals(expectedEvent) || "PersonActivated".equals(expectedEvent))
+            && personId.toString().equals(dependency.path("expectedAggregateId").asString())) {
+          return "EVENT_PENDING";
+        }
+      }
+    }
+    JsonNode evidence = execution.path("authoritativeEvidence");
+    if (evidence.isArray()) {
+      for (JsonNode item : evidence) {
+        String sourceStatus = item.path("sourceResultStatus").asString();
+        if ("users".equals(item.path("sourceService").asString())
+            && ("FOUND".equals(sourceStatus) || "SUCCEEDED".equals(sourceStatus))
+            && "Person".equals(item.path("entityType").asString())
+            && personId.toString().equals(item.path("entityId").asString())) {
+          return "PROJECTION_RECONCILIATION";
+        }
+      }
+    }
+    return null;
   }
 }
