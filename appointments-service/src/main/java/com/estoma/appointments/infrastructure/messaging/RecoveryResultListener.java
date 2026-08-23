@@ -1,5 +1,6 @@
 package com.estoma.appointments.infrastructure.messaging;
 
+import com.estoma.appointments.contracts.MessageEnvelope;
 import com.estoma.appointments.contracts.MessageKind;
 import com.estoma.appointments.contracts.MessagingNames;
 import com.rabbitmq.client.Channel;
@@ -26,23 +27,47 @@ public final class RecoveryResultListener {
 
   public RecoveryResultListener(EnvelopeJsonCodec codec, EnvelopeValidator validator,
       ProjectionRecoveryResultProcessor processor, FailureRouter failures) {
-    this.codec=codec; this.validator=validator; this.processor=processor; this.failures=failures;
+    this.codec = codec;
+    this.validator = validator;
+    this.processor = processor;
+    this.failures = failures;
   }
 
-  @RabbitListener(id="appointmentsRecoveryResultConsumer",queues=MessagingNames.RESULT_QUEUE,
-      containerFactory="manualAckContainerFactory")
+  @RabbitListener(id = "appointmentsRecoveryResultConsumer", queues = MessagingNames.RESULT_QUEUE,
+      containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
-    long tag=message.getMessageProperties().getDeliveryTag();
+    long tag = message.getMessageProperties().getDeliveryTag();
     try {
-      var result=validator.validate(codec.readTree(message.getBody()),MessageKind.RESULT,RESULTS);
+      MessageEnvelope result = validator.validate(
+          codec.readTree(message.getBody()), MessageKind.RESULT, RESULTS);
+      validateProducer(result);
       processor.process(result);
-      channel.basicAck(tag,false);
-    } catch(InvalidMessageException|IllegalArgumentException invalid) {
-      failures.route(message,MessagingNames.RESULT_QUEUE,false);
-      channel.basicAck(tag,false);
-    } catch(RuntimeException technical) {
-      try { failures.route(message,MessagingNames.RESULT_QUEUE,true); channel.basicAck(tag,false); }
-      catch(RuntimeException routingFailure) { channel.basicNack(tag,false,true); }
+      channel.basicAck(tag, false);
+    } catch (InvalidMessageException | IllegalArgumentException invalid) {
+      failures.route(message, MessagingNames.RESULT_QUEUE, false);
+      channel.basicAck(tag, false);
+    } catch (RuntimeException technical) {
+      try {
+        failures.route(message, MessagingNames.RESULT_QUEUE, true);
+        channel.basicAck(tag, false);
+      } catch (RuntimeException routingFailure) {
+        channel.basicNack(tag, false, true);
+      }
+    }
+  }
+
+  static void validateProducer(MessageEnvelope result) {
+    String expected = switch (result.messageType()) {
+      case "GetAppointmentAcademicConfigurationResult",
+           "ListStudentAppointmentAcademicSnapshotsPageResult" -> "academic";
+      case "ListAccountAuthorizationSnapshotsPageResult" -> "authorization";
+      case "GetWashAdministrationConfigurationResult" -> "wash-administration";
+      case "ListWashExecutionIntegrationContextsPageResult" -> "wash-execution";
+      default -> throw new InvalidMessageException("unsupported recovery Result");
+    };
+    if (!expected.equals(result.producer())) {
+      throw new InvalidMessageException(
+          result.messageType() + " must be produced by " + expected);
     }
   }
 }
