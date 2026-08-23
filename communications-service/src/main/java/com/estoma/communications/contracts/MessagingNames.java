@@ -19,6 +19,7 @@ public final class MessagingNames {
   public static final String EVENT_RETRY_5S = "retry.events.communications.5s";
   public static final String EVENT_RETRY_30S = "retry.events.communications.30s";
   public static final String EVENT_RETRY_300S = "retry.events.communications.300s";
+  public static final String EVENT_RETRY_RETURN = "return.events.communications";
   public static final String EVENT_DLQ = "dlq.events.communications";
 
   public static final String HEADER_ATTEMPT = "x-estoma-attempt";
