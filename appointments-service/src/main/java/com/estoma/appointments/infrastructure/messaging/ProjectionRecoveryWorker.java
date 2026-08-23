@@ -13,7 +13,8 @@ import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /** Starts one durable authoritative rebuild per projection and never floods an in-flight job. */
 @Component
@@ -26,16 +27,19 @@ public class ProjectionRecoveryWorker {
   private final WashAdministrationProjectionRepository administration;
   private final OutboxRepository outbox;
   private final Clock clock;
+  private final TransactionTemplate transactions;
 
   public ProjectionRecoveryWorker(ProjectionRecoveryCoordinator recovery,
       ProjectionRecoveryJobRepository jobs, ProjectionResetRepository reset,
-      WashAdministrationProjectionRepository administration, OutboxRepository outbox, Clock clock) {
+      WashAdministrationProjectionRepository administration, OutboxRepository outbox, Clock clock,
+      PlatformTransactionManager transactionManager) {
     this.recovery = recovery;
     this.jobs = jobs;
     this.reset = reset;
     this.administration = administration;
     this.outbox = outbox;
     this.clock = clock;
+    this.transactions = new TransactionTemplate(transactionManager);
   }
 
   @Scheduled(fixedDelayString = "${estoma.messaging.recovery-poll-interval:30s}")
@@ -46,8 +50,12 @@ public class ProjectionRecoveryWorker {
     if (recovery.isReady("wash-administration")) startIfNeeded("wash-execution");
   }
 
-  @Transactional
+  /** Each owner rebuild starts atomically: state + reset + durable job + first Query Outbox. */
   public void startIfNeeded(String projection) {
+    transactions.executeWithoutResult(status -> startInCurrentTransaction(projection));
+  }
+
+  private void startInCurrentTransaction(String projection) {
     var state = recovery.state(projection);
     if ("READY".equals(state.status())) return;
     if ("REBUILDING".equals(state.status()) && jobs.find(projection).isPresent()) return;
