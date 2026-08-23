@@ -10,9 +10,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(prefix = "estoma.messaging", name = "listeners-enabled", havingValue = "true", matchIfMissing = true)
 public class EventListener {
 
   private static final Logger log = LoggerFactory.getLogger(EventListener.class);
@@ -24,11 +26,8 @@ public class EventListener {
 
   public EventListener(EnvelopeJsonCodec codec, EnvelopeValidator validator, ProjectionDispatcher dispatcher,
       TransientFailureClassifier classifier, FailureRouter failureRouter) {
-    this.codec = codec;
-    this.validator = validator;
-    this.dispatcher = dispatcher;
-    this.classifier = classifier;
-    this.failureRouter = failureRouter;
+    this.codec = codec; this.validator = validator; this.dispatcher = dispatcher;
+    this.classifier = classifier; this.failureRouter = failureRouter;
   }
 
   @RabbitListener(id = "eventConsumer", queues = MessagingNames.EVENT_QUEUE, containerFactory = "manualAckContainerFactory")
@@ -42,7 +41,6 @@ public class EventListener {
       routeThenAck(message, channel, tag, invalid, false);
       return;
     }
-
     try {
       ProjectionOutcome outcome = dispatcher.dispatch(envelope);
       log.info("event {} processed as {}", envelope.messageType(), outcome.getClass().getSimpleName());
