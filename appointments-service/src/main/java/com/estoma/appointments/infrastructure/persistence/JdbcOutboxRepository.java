@@ -13,7 +13,7 @@ public class JdbcOutboxRepository implements OutboxRepository {
   public JdbcOutboxRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
   @Override public void append(OutboxMessage m) {
-    jdbc.sql("INSERT INTO outbox_messages (message_id,message_type,message_version,message_kind,aggregate_id,aggregate_version,correlation_id,causation_id,operation_id,payload,occurred_at,available_at) VALUES (:id,:type,:version,:kind,:aggregate,:aggregateVersion,:correlation,:causation,:operation,CAST(:payload AS jsonb),:occurred,:available)")
+    jdbc.sql("INSERT INTO outbox_messages (message_id,message_type,message_version,message_kind,aggregate_id,aggregate_version,correlation_id,causation_id,operation_id,payload,occurred_at,available_at) VALUES (:id,:type,:version,:kind,:aggregate,:aggregateVersion,:correlation,:causation,:operation,CAST(:payload AS jsonb),:occurred,:available) ON CONFLICT (message_id) DO NOTHING")
       .param("id",m.messageId()).param("type",m.messageType()).param("version",m.messageVersion())
       .param("kind",m.messageKind()).param("aggregate",m.aggregateId()).param("aggregateVersion",m.aggregateVersion())
       .param("correlation",m.correlationId()).param("causation",m.causationId()).param("operation",m.operationId())
