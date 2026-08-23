@@ -14,7 +14,7 @@ class ProjectionPersistenceIT extends AbstractPostgresIT {
   @Autowired ProjectionRepositories.AuthorizationProjectionRepository authorization;
 
   @Test
-  void scheduledClosureBlocksAndCancelledClosureDoesNot() {
+  void scheduledClosuresAreReturnedByTemporalOverlapAndCancelledClosuresAreNot() {
     UUID calendarId = UUID.randomUUID();
     UUID cabinId = UUID.randomUUID();
     Instant start = Instant.parse("2026-08-23T10:00:00Z");
@@ -23,13 +23,13 @@ class ProjectionPersistenceIT extends AbstractPostgresIT {
 
     closures.upsert(new ProjectionRepositories.AdministrativeClosureProjection(
         closureId, calendarId, "CABIN", cabinId, null, start, end, "SCHEDULED", 1));
-    assertThat(closures.findOverlapping(cabinId, null, start.plusSeconds(60), end.minusSeconds(60)))
+    assertThat(closures.findScheduledOverlapping(start.plusSeconds(60), end.minusSeconds(60)))
         .extracting(ProjectionRepositories.AdministrativeClosureProjection::administrativeClosureId)
         .containsExactly(closureId);
 
     closures.upsert(new ProjectionRepositories.AdministrativeClosureProjection(
         closureId, calendarId, "CABIN", cabinId, null, start, end, "CANCELLED", 2));
-    assertThat(closures.findOverlapping(cabinId, null, start.plusSeconds(60), end.minusSeconds(60)))
+    assertThat(closures.findScheduledOverlapping(start.plusSeconds(60), end.minusSeconds(60)))
         .isEmpty();
   }
 
