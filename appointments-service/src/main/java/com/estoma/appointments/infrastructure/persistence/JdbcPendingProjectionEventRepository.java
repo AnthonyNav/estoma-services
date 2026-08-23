@@ -67,4 +67,9 @@ public class JdbcPendingProjectionEventRepository implements PendingProjectionEv
       .param("id",id).param("worker",worker).param("error",error)
       .param("available",Timestamps.toTimestamp(availableAt)).update()==1;
   }
+
+  @Override public boolean hasOpen(String projectionName) {
+    return jdbc.sql("SELECT count(*) FROM pending_projection_events WHERE projection_name=:projection AND status <> 'COMPLETED'")
+      .param("projection",projectionName).query(Long.class).single()>0;
+  }
 }
