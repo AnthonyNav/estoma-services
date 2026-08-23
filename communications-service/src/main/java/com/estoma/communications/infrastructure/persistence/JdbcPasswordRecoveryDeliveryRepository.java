@@ -116,15 +116,17 @@ public class JdbcPasswordRecoveryDeliveryRepository implements PasswordRecoveryD
   }
 
   @Override
-  public int releaseExpiredWaiting(UUID emailDeliveryId, Instant now) {
+  public int failWaiting(UUID emailDeliveryId, String code, Instant now) {
     return jdbc.sql("""
         UPDATE email_deliveries
-        SET status=CAST('PENDING' AS email_delivery_status),next_attempt_at=:now,updated_at=:now
+        SET status=CAST('FAILED' AS email_delivery_status),failed_at=:now,
+            last_error_code=:code,last_error_message='recovery expired before recipient projection became usable',
+            updated_at=:now
         WHERE email_delivery_id=:id
           AND status=CAST('WAITING_FOR_RECIPIENT' AS email_delivery_status)
-          AND recovery_expires_at <= :now
         """)
         .param("now", Timestamps.toTimestamp(now))
+        .param("code", code)
         .param("id", emailDeliveryId)
         .update();
   }
