@@ -56,7 +56,7 @@ public final class CancelAppointmentTimeSlotHandler implements CancelAppointment
         result = ApplicationResult.applied(cancelled.appointmentTimeSlotId(), cancelled.version(), "slot cancelled");
       }
     }
-    ApplicationSupport.appendResult(outbox, command.metadata(), result, now);
+    ApplicationSupport.appendResult(outbox, command.metadata(), "CancelAppointmentTimeSlot", result, now);
     ApplicationSupport.complete(idempotency, command.metadata(), "CancelAppointmentTimeSlot", result, now);
     return result;
   }
