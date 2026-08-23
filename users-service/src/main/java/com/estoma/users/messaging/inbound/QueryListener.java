@@ -20,26 +20,13 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-/**
- * The AMQP entry point for {@code ResolvePersonByInstitutionalEmail}
- * (queries.md §1) — structurally {@link CommandListener}'s twin, on
- * {@code queries.users-service} instead of {@code commands.users-service},
- * using {@link FailureRouter.RetryTopology#QUERIES} for its own DLQ/retry
- * tiers. The two differ where the contract itself differs: {@link
- * PersonQueryDispatcher#resolve} returns {@code void} (a Query has no
- * {@code CommandOutcome} — every well-formed request produces a
- * successful resolution, so there is no outcome to branch metrics/logging
- * on), and there is no Consumer Inbox context to seed.
- */
 @Component
 @ConditionalOnProperty(
-    prefix = "estoma.messaging",
-    name = "listeners-enabled",
-    havingValue = "true",
-    matchIfMissing = true)
+    prefix = "estoma.messaging", name = "listeners-enabled", havingValue = "true", matchIfMissing = true)
 public class QueryListener {
 
   private static final Logger log = LoggerFactory.getLogger(QueryListener.class);
+  private static final int PHYSICAL_RETRY_TIERS = 3;
 
   private final EnvelopeJsonCodec codec;
   private final QueryEnvelopeValidator validator;
@@ -67,28 +54,26 @@ public class QueryListener {
   }
 
   @RabbitListener(
-      id = "queryListener", // referenced by health/observability, mirroring commandListener
+      id = "queryListener",
       queues = AmqpNames.QUEUE_QUERIES,
       containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     metrics.received();
 
-    // (1) decode + structural validation. Any failure here is PERMANENT.
     MessageEnvelope envelope;
     try {
       envelope = codec.decode(message.getBody());
       validator.validate(envelope);
-    } catch (Exception e) {
-      log.error("invalid message on {}: {}", AmqpNames.QUEUE_QUERIES, e.toString());
+    } catch (Exception invalid) {
       metrics.invalidMessage();
       try {
-        failureRouter.toDlq(message, e, AmqpNames.ROUTING_KEY_QUERIES_DLQ);
+        failureRouter.toDlq(message, invalid, AmqpNames.ROUTING_KEY_QUERIES_DLQ);
         metrics.deadLettered();
         channel.basicAck(deliveryTag, false);
-      } catch (RabbitPublishException publishException) {
+      } catch (RabbitPublishException publishFailure) {
         metrics.technicalFailure();
-        nackRequeue(channel, deliveryTag);
+        channel.basicNack(deliveryTag, false, true);
       }
       return;
     }
@@ -96,34 +81,15 @@ public class QueryListener {
     LogContext.putEnvelopeContext(envelope, ConsumerNames.QUERIES);
     Instant start = Instant.now();
     try {
-      // (2) side-effect-free resolution: one SELECT, one Outbox INSERT,
-      // no Consumer Inbox, no domain mutation, no Event.
       dispatcher.resolve(envelope);
       metrics.resolved();
-      log.info("query {} resolved", envelope.messageType());
-      channel.basicAck(deliveryTag, false); // ◀ the ACK. After the Outbox row is durable.
-    } catch (Exception e) {
-      boolean transientFailure = classifier.isTransient(e);
-      log.warn(
-          "query {} (messageId={}) failed, transient={}: {}",
-          envelope.messageType(),
-          envelope.messageId(),
-          transientFailure,
-          e.toString());
-      try {
-        FailureRoute route =
-            failureRouter.routeAfterFailure(
-                message, e, transientFailure, FailureRouter.RetryTopology.QUERIES, properties.queryMaxAttempts());
-        if (route == FailureRoute.RETRY) {
-          metrics.technicalFailure();
-          metrics.retried();
-        } else {
-          metrics.deadLettered();
-        }
-        channel.basicAck(deliveryTag, false);
-      } catch (RabbitPublishException publishException) {
-        metrics.technicalFailure();
-        nackRequeue(channel, deliveryTag);
+      channel.basicAck(deliveryTag, false);
+    } catch (Exception failure) {
+      boolean transientFailure = classifier.isTransient(failure);
+      if (!transientFailure || isFinalAttempt(message)) {
+        terminalizeOrDlq(envelope, message, channel, deliveryTag, failure);
+      } else {
+        retryOrRequeue(message, channel, deliveryTag, failure);
       }
     } finally {
       metrics.recordProcessingTime(Duration.between(start, Instant.now()));
@@ -131,8 +97,46 @@ public class QueryListener {
     }
   }
 
-  /** Mirrors {@code CommandListener#nackRequeue} — see its Javadoc for the reasoning. */
-  private static void nackRequeue(Channel channel, long deliveryTag) throws IOException {
-    channel.basicNack(deliveryTag, false, true);
+  private void terminalizeOrDlq(
+      MessageEnvelope envelope,
+      Message message,
+      Channel channel,
+      long deliveryTag,
+      Exception originalFailure) throws IOException {
+    try {
+      dispatcher.fail(envelope, "TECHNICAL_FAILURE");
+      metrics.technicalFailure();
+      channel.basicAck(deliveryTag, false);
+    } catch (RuntimeException terminalPersistenceFailure) {
+      log.error("failed to persist terminal Query Result after {}: {}",
+          originalFailure.toString(), terminalPersistenceFailure.toString());
+      try {
+        failureRouter.toDlq(message, terminalPersistenceFailure, AmqpNames.ROUTING_KEY_QUERIES_DLQ);
+        metrics.deadLettered();
+        channel.basicAck(deliveryTag, false);
+      } catch (RabbitPublishException publishFailure) {
+        channel.basicNack(deliveryTag, false, true);
+      }
+    }
+  }
+
+  private void retryOrRequeue(
+      Message message, Channel channel, long deliveryTag, Exception failure) throws IOException {
+    try {
+      failureRouter.routeAfterFailure(
+          message, failure, true, FailureRouter.RetryTopology.QUERIES, properties.queryMaxAttempts());
+      metrics.technicalFailure();
+      metrics.retried();
+      channel.basicAck(deliveryTag, false);
+    } catch (RabbitPublishException publishFailure) {
+      channel.basicNack(deliveryTag, false, true);
+    }
+  }
+
+  private boolean isFinalAttempt(Message message) {
+    int effectiveMax = Math.min(properties.queryMaxAttempts(), PHYSICAL_RETRY_TIERS);
+    Object header = message.getMessageProperties().getHeaders().get(AmqpNames.HEADER_ATTEMPT);
+    int attempt = header instanceof Number number ? number.intValue() : 0;
+    return attempt >= effectiveMax;
   }
 }
