@@ -29,6 +29,9 @@ public class JdbcProjectionStatusRepository implements ProjectionStatusRepositor
           last_error_code = EXCLUDED.last_error_code,
           generation = EXCLUDED.generation,
           updated_at = EXCLUDED.updated_at
+        WHERE projection_status.generation < EXCLUDED.generation
+           OR (projection_status.generation = EXCLUDED.generation
+               AND projection_status.updated_at <= EXCLUDED.updated_at)
         """)
         .param("projectionName", state.projectionName())
         .param("status", state.status().name())

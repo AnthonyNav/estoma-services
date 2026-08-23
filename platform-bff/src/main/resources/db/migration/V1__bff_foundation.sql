@@ -56,6 +56,7 @@ CREATE TABLE outbox_messages (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT outbox_kind_ck CHECK (message_kind = 'COMMAND'),
+    CONSTRAINT outbox_exchange_ck CHECK (exchange_name = 'platform.commands'),
     CONSTRAINT outbox_status_ck CHECK (status IN ('PENDING', 'PUBLISHED', 'FAILED'))
 );
 
@@ -103,7 +104,11 @@ CREATE TABLE projection_recovery_jobs (
     updated_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ,
     last_error_code VARCHAR(160),
-    CONSTRAINT recovery_mode_ck CHECK (mode IN ('ENTITY', 'FULL'))
+    CONSTRAINT recovery_mode_ck CHECK (mode IN ('ENTITY', 'FULL')),
+    CONSTRAINT recovery_entity_scope_ck CHECK (
+        (mode = 'ENTITY' AND entity_id IS NOT NULL)
+        OR (mode = 'FULL' AND entity_id IS NULL)
+    )
 );
 
 CREATE TABLE account_person_projection (
@@ -129,7 +134,11 @@ CREATE TABLE account_session_revocation_cutoffs (
     reason_code VARCHAR(160) NOT NULL,
     source_message_id UUID NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
-    CONSTRAINT cutoff_kind_ck CHECK (cutoff_kind IN ('ALL', 'OTHER'))
+    CONSTRAINT cutoff_kind_ck CHECK (cutoff_kind IN ('ALL', 'OTHER')),
+    CONSTRAINT cutoff_exception_scope_ck CHECK (
+        (cutoff_kind = 'ALL' AND except_session_id IS NULL)
+        OR (cutoff_kind = 'OTHER' AND except_session_id IS NOT NULL)
+    )
 );
 
 CREATE TABLE person_session_revocation_cutoffs (
@@ -148,8 +157,9 @@ CREATE TABLE authorization_role_projection (
 );
 
 CREATE TABLE authorization_access_projection (
+    system_access_id UUID NOT NULL UNIQUE,
     account_id UUID NOT NULL,
-    system_id UUID,
+    system_id UUID NOT NULL,
     system_code VARCHAR(160) NOT NULL,
     status VARCHAR(32) NOT NULL,
     access_source_version BIGINT NOT NULL,

@@ -16,6 +16,12 @@ public record PlatformProperties(
   public record Jwt(String issuer, String audience, String jwkSet) {
   }
 
-  public record Retention(int operationDays, int idempotencyHours) {
+  public record Retention(
+      int operationDays,
+      int idempotencyHours,
+      int outboxPublishedDays,
+      int outboxFailedDays,
+      int inboxDays,
+      int recoveryJobDays) {
   }
 }

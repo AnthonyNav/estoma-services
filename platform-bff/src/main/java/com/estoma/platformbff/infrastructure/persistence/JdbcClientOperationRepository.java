@@ -63,6 +63,13 @@ public class JdbcClientOperationRepository implements ClientOperationRepository 
 
   @Override
   public boolean completeIfPending(UUID operationId, ClientOperation terminalOperation, Instant now) {
+    if (terminalOperation == null || !terminalOperation.status().terminal()) {
+      throw new IllegalArgumentException("client operation completion requires a terminal status");
+    }
+    if (!operationId.equals(terminalOperation.operationId())) {
+      throw new IllegalArgumentException("operation id does not match terminal operation");
+    }
+
     return jdbc.sql("""
         UPDATE client_operations
         SET status = :status,

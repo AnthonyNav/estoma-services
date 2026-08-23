@@ -9,7 +9,7 @@ spring:
       maximum-pool-size: ${BFF_DB_POOL_SIZE:10}
   flyway:
     enabled: ${BFF_FLYWAY_ENABLED:true}
-    baseline-on-migrate: true
+    baseline-on-migrate: false
   rabbitmq:
     addresses: ${BFF_RABBITMQ_ADDRESSES:amqp://localhost:5672}
     username: ${BFF_RABBITMQ_USERNAME:guest}
@@ -46,3 +46,7 @@ platform:
   retention:
     operation-days: ${BFF_OPERATION_RETENTION_DAYS:7}
     idempotency-hours: ${BFF_IDEMPOTENCY_RETENTION_HOURS:24}
+    outbox-published-days: ${BFF_OUTBOX_PUBLISHED_RETENTION_DAYS:7}
+    outbox-failed-days: ${BFF_OUTBOX_FAILED_RETENTION_DAYS:30}
+    inbox-days: ${BFF_INBOX_RETENTION_DAYS:30}
+    recovery-job-days: ${BFF_RECOVERY_JOB_RETENTION_DAYS:30}

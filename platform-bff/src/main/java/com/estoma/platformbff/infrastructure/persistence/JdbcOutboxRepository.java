@@ -66,8 +66,10 @@ public class JdbcOutboxRepository implements OutboxRepository {
         WITH candidates AS (
           SELECT message_id
           FROM outbox_messages
-          WHERE (status = 'PENDING' OR (status = 'FAILED' AND claim_until < :now))
-            AND (next_attempt_at IS NULL OR next_attempt_at <= :now)
+          WHERE (
+              (status = 'PENDING' AND (next_attempt_at IS NULL OR next_attempt_at <= :now))
+              OR (status = 'FAILED' AND next_attempt_at IS NOT NULL AND next_attempt_at <= :now)
+            )
             AND (claim_until IS NULL OR claim_until < :now)
           ORDER BY created_at
           FOR UPDATE SKIP LOCKED
@@ -95,7 +97,8 @@ public class JdbcOutboxRepository implements OutboxRepository {
     return jdbc.sql("""
         UPDATE outbox_messages
         SET status = 'PUBLISHED', published_at = :publishedAt, claim_token = NULL,
-            claim_until = NULL, updated_at = :publishedAt
+            claim_until = NULL, next_attempt_at = NULL, last_error_code = NULL,
+            updated_at = :publishedAt
         WHERE message_id = :messageId AND status IN ('PENDING', 'FAILED')
           AND claim_token = :claimToken
         """)
@@ -107,17 +110,19 @@ public class JdbcOutboxRepository implements OutboxRepository {
 
   @Override
   public boolean markFailed(UUID messageId, UUID claimToken, String errorCode, Instant nextAttemptAt) {
+    Instant updatedAt = Instant.now();
     return jdbc.sql("""
         UPDATE outbox_messages
         SET status = 'FAILED', last_error_code = :errorCode, next_attempt_at = :nextAttemptAt,
             claim_token = NULL, claim_until = NULL, updated_at = :updatedAt
-        WHERE message_id = :messageId AND claim_token = :claimToken
+        WHERE message_id = :messageId AND status IN ('PENDING', 'FAILED')
+          AND claim_token = :claimToken
         """)
         .param("messageId", messageId)
         .param("claimToken", claimToken)
         .param("errorCode", errorCode)
         .param("nextAttemptAt", nextAttemptAt)
-        .param("updatedAt", Instant.now())
+        .param("updatedAt", updatedAt)
         .update() == 1;
   }
 
