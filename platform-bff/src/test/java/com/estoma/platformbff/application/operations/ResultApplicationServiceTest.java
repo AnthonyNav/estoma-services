@@ -47,8 +47,10 @@ class ResultApplicationServiceTest {
     correlationId = UUID.randomUUID();
     commandMessageId = UUID.randomUUID();
     pending = operation(OperationStatus.PENDING, null, null, null);
-    when(operations.findById(operationId)).thenReturn(Optional.of(pending));
-    when(outbox.findMessageIdByOperationId(operationId)).thenReturn(Optional.of(commandMessageId));
+    org.mockito.Mockito.lenient().when(operations.findById(operationId))
+        .thenReturn(Optional.of(pending));
+    org.mockito.Mockito.lenient().when(outbox.findMessageIdByOperationId(operationId))
+        .thenReturn(Optional.of(commandMessageId));
   }
 
   @Test
