@@ -8,8 +8,8 @@ import com.estoma.appointments.contracts.MessageKind;
 import com.estoma.appointments.contracts.WireActor;
 import com.estoma.appointments.infrastructure.security.AppointmentQrTokenService;
 import java.time.Instant;
-import java.util.UUID;
 import java.util.Set;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
@@ -17,13 +17,16 @@ class MessagingContractTest {
   @Test
   void envelopeRoundTripKeepsRequiredIdentityAndPayload() {
     UUID messageId = UUID.randomUUID();
+    UUID operationId = UUID.randomUUID();
     EnvelopeJsonCodec codec = new EnvelopeJsonCodec(new ObjectMapper());
     MessageEnvelope input = new MessageEnvelope(messageId, "ScheduleAppointment", 1, MessageKind.COMMAND,
-        "bff", Instant.parse("2026-01-01T10:00:00Z"), UUID.randomUUID(), null, null, "key-1", null, null,
-        new WireActor("STUDENT", UUID.randomUUID(), null), codec.readTree("{\"ok\":true}"));
+        "bff", Instant.parse("2026-01-01T10:00:00Z"), UUID.randomUUID(), null, operationId, "key-1", null, null,
+        new WireActor("ACCOUNT", UUID.randomUUID(), null), codec.readTree("{\"ok\":true}"));
     MessageEnvelope output = codec.decode(codec.readTree(codec.encode(input)));
     assertThat(output.messageId()).isEqualTo(messageId);
     assertThat(output.messageKind()).isEqualTo(MessageKind.COMMAND);
+    assertThat(output.operationId()).isEqualTo(operationId);
+    assertThat(output.actor().type()).isEqualTo("ACCOUNT");
     assertThat(output.payload().path("ok").asBoolean()).isTrue();
   }
 
@@ -33,7 +36,7 @@ class MessagingContractTest {
     EnvelopeValidator validator = new EnvelopeValidator(codec);
     MessageEnvelope input = new MessageEnvelope(UUID.randomUUID(), "AcademicPeriodRegistered", 1, MessageKind.EVENT,
         "academic", Instant.now(), UUID.randomUUID(), null, null, null, null, null,
-        new WireActor("SERVICE", UUID.randomUUID(), "academic"), codec.readTree("{}"));
+        new WireActor("SYSTEM", null, "academic"), codec.readTree("{}"));
     assertThatThrownBy(() -> validator.validate(codec.readTree(codec.encode(input)), MessageKind.EVENT,
         Set.of("AcademicPeriodActivated"))).isInstanceOf(InvalidMessageException.class);
   }
