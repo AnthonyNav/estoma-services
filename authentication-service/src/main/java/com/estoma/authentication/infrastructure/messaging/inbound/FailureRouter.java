@@ -2,7 +2,6 @@ package com.estoma.authentication.infrastructure.messaging.inbound;
 
 import com.estoma.authentication.infrastructure.messaging.AmqpNames;
 import com.estoma.authentication.infrastructure.messaging.outbound.ConfirmedRabbitPublisher;
-import com.estoma.authentication.infrastructure.messaging.outbound.RabbitPublishException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,6 +37,10 @@ public class FailureRouter {
 
   public FailureRouter(ConfirmedRabbitPublisher publisher) {
     this.publisher = publisher;
+  }
+
+  public boolean retryAvailable(Message originalMessage, RetryTopology topology, boolean transientFailure) {
+    return transientFailure && currentAttempt(originalMessage) + 1 <= topology.maxAttempts();
   }
 
   public FailureRoute routeAfterFailure(

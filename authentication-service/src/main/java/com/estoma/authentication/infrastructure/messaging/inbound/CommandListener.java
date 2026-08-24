@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 public class CommandListener {
 
   private static final Logger log = LoggerFactory.getLogger(CommandListener.class);
+  private static final String TERMINAL_TECHNICAL_ERROR = "TECHNICAL_FAILURE";
 
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
@@ -67,8 +68,36 @@ public class CommandListener {
       boolean transientFailure = classifier.isTransient(e);
       log.warn("command {} (messageId={}) failed, transient={}: {}",
           envelope.messageType(), envelope.messageId(), transientFailure, e.toString());
+
+      if ("academic".equals(envelope.producer())
+          && !failureRouter.retryAvailable(message, FailureRouter.COMMAND_TOPOLOGY, transientFailure)) {
+        terminalizeAcademicFailure(message, channel, deliveryTag, envelope, e);
+        return;
+      }
+
       try {
         failureRouter.routeAfterFailure(message, FailureRouter.COMMAND_TOPOLOGY, e, transientFailure);
+        channel.basicAck(deliveryTag, false);
+      } catch (RabbitPublishException publishException) {
+        nackRequeue(channel, deliveryTag);
+      }
+    }
+  }
+
+  private void terminalizeAcademicFailure(
+      Message original,
+      Channel channel,
+      long deliveryTag,
+      MessageEnvelope envelope,
+      Exception originalFailure) throws IOException {
+    try {
+      dispatcher.fail(envelope, TERMINAL_TECHNICAL_ERROR);
+      channel.basicAck(deliveryTag, false);
+    } catch (Exception terminalPersistenceFailure) {
+      log.error("could not persist terminal FAILED Result for {} (messageId={}): {}",
+          envelope.messageType(), envelope.messageId(), terminalPersistenceFailure.toString());
+      try {
+        failureRouter.toDlq(original, FailureRouter.COMMAND_TOPOLOGY, terminalPersistenceFailure);
         channel.basicAck(deliveryTag, false);
       } catch (RabbitPublishException publishException) {
         nackRequeue(channel, deliveryTag);
