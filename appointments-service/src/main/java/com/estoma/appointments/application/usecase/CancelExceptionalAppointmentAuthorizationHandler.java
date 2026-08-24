@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class CancelExceptionalAppointmentAuthorizationHandler
+public class CancelExceptionalAppointmentAuthorizationHandler
     implements CancelExceptionalAppointmentAuthorizationUseCase {
   private final ExceptionalAppointmentAuthorizationRepository authorizations;
   private final AppointmentRepository appointments;
@@ -63,8 +63,7 @@ public final class CancelExceptionalAppointmentAuthorizationHandler
         } else {
           ApplicationSupport.appendEvent(outbox, command.metadata(),
               "ExceptionalAppointmentAuthorizationCancelled", cancelled.exceptionalAuthorizationId(),
-              cancelled.version(), "{\"authorizationId\":\""
-                  + cancelled.exceptionalAuthorizationId() + "\"}", now);
+              cancelled.version(), AppointmentEventPayloads.authorizationCancelled(cancelled), now);
           result = ApplicationResult.applied(cancelled.exceptionalAuthorizationId(),
               cancelled.version(), "authorization cancelled");
         }

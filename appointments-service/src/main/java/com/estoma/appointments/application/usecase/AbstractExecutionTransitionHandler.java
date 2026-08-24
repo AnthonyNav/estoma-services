@@ -83,10 +83,21 @@ abstract class AbstractExecutionTransitionHandler {
     pending.discardBySourceEventId(event.sourceEventId(), now);
 
     if (changed != current) {
-      ApplicationSupport.appendEvent(outbox, ApplicationSupport.inboundMetadata(event, now),
-          "AppointmentStatusChanged", changed.appointmentId(), changed.version(),
-          "{\"appointmentId\":\"" + changed.appointmentId() + "\",\"status\":\"" + changed.status()
-              + "\",\"executionVersion\":" + event.executionVersion() + "}", now);
+      var metadata = ApplicationSupport.inboundMetadata(event, now);
+      switch (kind) {
+        case ENTRY_REJECTED -> ApplicationSupport.appendEvent(outbox, metadata,
+            "AppointmentEntryRejected", changed.appointmentId(), changed.version(),
+            AppointmentEventPayloads.entryRejected(changed), now);
+        case STARTED -> ApplicationSupport.appendEvent(outbox, metadata,
+            "AppointmentStarted", changed.appointmentId(), changed.version(),
+            AppointmentEventPayloads.started(changed), now);
+        case COMPLETED -> ApplicationSupport.appendEvent(outbox, metadata,
+            "AppointmentCompleted", changed.appointmentId(), changed.version(),
+            AppointmentEventPayloads.completed(changed), now);
+        case CANCELLED -> ApplicationSupport.appendEvent(outbox, metadata,
+            "AppointmentCancelled", changed.appointmentId(), changed.version(),
+            AppointmentEventPayloads.cancelled(changed, event.washExecutionId(), event.sourceEventId()), now);
+      }
     }
     return ApplicationResult.applied(changed.appointmentId(), changed.version(), "execution transition applied");
   }

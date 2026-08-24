@@ -56,7 +56,7 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
   public ApplicationResult schedule(Command command) {
     Instant now = command.now();
     var metadata = command.metadata();
-    String fingerprint = ApplicationSupport.fingerprint(command.studentAccountId(),
+    String fingerprint = ApplicationSupport.fingerprint(command.appointmentId(), command.studentAccountId(),
         command.appointmentTimeSlotId(), command.courseSectionId(), command.appointmentType(),
         command.instrumentCount(), command.pieceType(), command.exceptionalAuthorizationId());
     Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox, metadata,
@@ -75,6 +75,12 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
   }
 
   private ApplicationResult validateAndSchedule(Command command) {
+    if (command.appointmentId() == null) {
+      return ApplicationResult.rejected("INVALID_APPOINTMENT_ID", "appointmentId is required");
+    }
+    if (appointments.findById(command.appointmentId()).isPresent()) {
+      return ApplicationResult.rejected("APPOINTMENT_ALREADY_EXISTS", "appointmentId already exists");
+    }
     if (!policy.canSchedule(command.metadata(), command.studentAccountId())) {
       return ApplicationResult.rejected("FORBIDDEN", "student is not authorized for appointments");
     }
@@ -145,20 +151,12 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
           "preventive cleaning reservation overlaps another immunocompromised appointment");
     }
 
-    Appointment appointment = Appointment.scheduled(UUID.randomUUID(), slot.appointmentTimeSlotId(),
+    Appointment appointment = Appointment.scheduled(command.appointmentId(), slot.appointmentTimeSlotId(),
         command.studentAccountId(), command.courseSectionId(), command.appointmentType(),
         command.instrumentCount(), command.pieceType(), authorizationId, command.now());
     appointments.save(appointment);
     ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentScheduled",
-        appointment.appointmentId(), appointment.version(), "{\"appointmentId\":\""
-            + appointment.appointmentId() + "\",\"studentAccountId\":\""
-            + appointment.studentAccountId() + "\",\"appointmentTimeSlotId\":\""
-            + appointment.appointmentTimeSlotId() + "\",\"courseSectionId\":\""
-            + appointment.courseSectionId() + "\",\"appointmentType\":\""
-            + appointment.appointmentType() + "\",\"instrumentCount\":"
-            + appointment.instrumentCount() + ",\"pieceType\":\""
-            + appointment.pieceType() + "\",\"status\":\"SCHEDULED\",\"version\":"
-            + appointment.version() + "}", command.now());
+        appointment.appointmentId(), appointment.version(), AppointmentEventPayloads.scheduled(appointment), command.now());
     return ApplicationResult.applied(appointment.appointmentId(), appointment.version(), "appointment scheduled");
   }
 

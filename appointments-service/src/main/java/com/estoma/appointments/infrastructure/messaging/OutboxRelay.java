@@ -5,6 +5,7 @@ import com.estoma.appointments.contracts.MessageEnvelope;
 import com.estoma.appointments.contracts.MessageKind;
 import com.estoma.appointments.contracts.MessagingNames;
 import com.estoma.appointments.contracts.WireActor;
+import com.estoma.appointments.infrastructure.observability.AppointmentOperationalMetrics;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -40,15 +41,18 @@ public final class OutboxRelay {
   private final MessagingProperties properties;
   private final TransactionTemplate transactions;
   private final Clock clock;
+  private final AppointmentOperationalMetrics metrics;
 
   public OutboxRelay(OutboxRepository outbox, ConfirmedRabbitPublisher publisher, EnvelopeJsonCodec codec,
-      MessagingProperties properties, PlatformTransactionManager transactionManager, Clock clock) {
+      MessagingProperties properties, PlatformTransactionManager transactionManager, Clock clock,
+      AppointmentOperationalMetrics metrics) {
     this.outbox = outbox;
     this.publisher = publisher;
     this.codec = codec;
     this.properties = properties;
     this.transactions = new TransactionTemplate(transactionManager);
     this.clock = clock;
+    this.metrics = metrics;
   }
 
   @Scheduled(fixedDelayString = "${estoma.messaging.outbox-poll-interval:1s}")
@@ -65,14 +69,19 @@ public final class OutboxRelay {
     for (var message : messages) {
       try {
         publish(message);
-        transactions.execute(status -> outbox.markPublished(message.messageId(), worker, clock.instant()));
+        boolean marked = Boolean.TRUE.equals(transactions.execute(
+            status -> outbox.markPublished(message.messageId(), worker, clock.instant())));
+        if (!marked) throw new IllegalStateException("outbox publish claim was lost before markPublished");
+        metrics.publisherConfirmed();
       } catch (RabbitPublishException exception) {
         int attempts = message.attempts() + 1;
         transactions.execute(status -> outbox.markFailed(message.messageId(), worker, exception.getMessage(),
             clock.instant().plusSeconds(Math.min(300L, 1L << Math.min(attempts, 8)))));
+        metrics.publisherFailed();
       } catch (RuntimeException permanent) {
         transactions.execute(status -> outbox.quarantine(message.messageId(), worker,
             "INVALID_OUTBOX_CONTRACT: " + permanent.getMessage(), clock.instant()));
+        metrics.publisherQuarantined();
       }
     }
   }
@@ -125,7 +134,7 @@ public final class OutboxRelay {
         case "GetAppointmentAcademicConfiguration", "ListStudentAppointmentAcademicSnapshotsPage" -> "academic";
         case "ListAccountAuthorizationSnapshotsPage" -> "authorization";
         case "GetWashAdministrationConfiguration" -> "wash-administration";
-        case "ListWashExecutionIntegrationContextsPage" -> "wash-execution";
+        case "GetWashExecutionIntegrationContext", "ListWashExecutionIntegrationContextsPage" -> "wash-execution";
         default -> throw new IllegalArgumentException("unknown Query destination for " + messageType);
       };
     }

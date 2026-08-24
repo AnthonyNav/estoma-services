@@ -1,16 +1,19 @@
 package com.estoma.appointments.application.usecase;
 
 import com.estoma.appointments.application.model.ApplicationResult;
+import com.estoma.appointments.application.model.OutboxIntent;
 import com.estoma.appointments.application.port.in.MarkAppointmentAsMissedUseCase;
 import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.AppointmentTimeSlotRepository;
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
+import com.estoma.appointments.application.port.out.MissedEvaluationRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
 import com.estoma.appointments.application.port.out.PendingWashExecutionEventRepository;
 import com.estoma.appointments.application.port.out.ProjectionRecoveryRepository;
 import com.estoma.appointments.application.port.out.WashExecutionEvidenceRepository;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,18 +24,21 @@ public class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMissedUs
   private final WashExecutionEvidenceRepository evidence;
   private final PendingWashExecutionEventRepository pending;
   private final ProjectionRecoveryRepository recovery;
+  private final MissedEvaluationRepository missedEvaluations;
   private final CommandIdempotencyRepository idempotency;
   private final OutboxRepository outbox;
 
   public MarkAppointmentAsMissedHandler(AppointmentRepository appointments,
       AppointmentTimeSlotRepository slots, WashExecutionEvidenceRepository evidence,
       PendingWashExecutionEventRepository pending, ProjectionRecoveryRepository recovery,
-      CommandIdempotencyRepository idempotency, OutboxRepository outbox) {
+      MissedEvaluationRepository missedEvaluations, CommandIdempotencyRepository idempotency,
+      OutboxRepository outbox) {
     this.appointments = appointments;
     this.slots = slots;
     this.evidence = evidence;
     this.pending = pending;
     this.recovery = recovery;
+    this.missedEvaluations = missedEvaluations;
     this.idempotency = idempotency;
     this.outbox = outbox;
   }
@@ -65,16 +71,22 @@ public class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMissedUs
       } else if (evidence.hasValidArrival(appointment.appointmentId(), slot.arrivalToleranceUntil())) {
         result = ApplicationResult.rejected("VALID_ARRIVAL_PRESENT", "valid arrival evidence protects the appointment");
       } else {
-        var missed = appointment.markMissed(now);
-        if (!appointments.updateIfVersion(missed, command.expectedVersion())) {
-          result = ApplicationResult.deferred("CONCURRENT_MODIFICATION",
-              "appointment changed while marking missed", appointment.appointmentId());
+        var confirmation = missedEvaluations.find(appointment.appointmentId(), appointment.version()).orElse(null);
+        if (confirmation == null || !confirmation.confirmedAfter(slot.arrivalToleranceUntil())) {
+          result = requestAuthoritativeConfirmation(command, appointment.appointmentId(), appointment.version(), now);
+        } else if (validArrival(confirmation.arrivedAt(), slot.startsAt(), slot.arrivalToleranceUntil())) {
+          result = ApplicationResult.rejected("VALID_ARRIVAL_PRESENT",
+              "authoritative Execution snapshot confirms a valid arrival");
         } else {
-          ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentMissed",
-              missed.appointmentId(), missed.version(), "{\"appointmentId\":\""
-                  + missed.appointmentId() + "\",\"appointmentTimeSlotId\":\""
-                  + missed.appointmentTimeSlotId() + "\",\"status\":\"MISSED\",\"points\":1}", now);
-          result = ApplicationResult.applied(missed.appointmentId(), missed.version(), "appointment marked missed");
+          var missed = appointment.markMissed(now);
+          if (!appointments.updateIfVersion(missed, command.expectedVersion())) {
+            result = ApplicationResult.deferred("CONCURRENT_MODIFICATION",
+                "appointment changed while marking missed", appointment.appointmentId());
+          } else {
+            ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentMissed",
+                missed.appointmentId(), missed.version(), AppointmentEventPayloads.missed(missed), now);
+            result = ApplicationResult.applied(missed.appointmentId(), missed.version(), "appointment marked missed");
+          }
         }
       }
     }
@@ -85,6 +97,25 @@ public class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMissedUs
       ApplicationSupport.complete(idempotency, command.metadata(), "MarkAppointmentAsMissed", result, now);
     }
     return result;
+  }
+
+  private ApplicationResult requestAuthoritativeConfirmation(Command command, UUID appointmentId,
+      long appointmentVersion, Instant now) {
+    UUID queryMessageId = UUID.randomUUID();
+    var decision = missedEvaluations.ensureQuery(appointmentId, appointmentVersion, queryMessageId, now);
+    if (decision.queryCreated()) {
+      String payload = "{\"appointmentId\":\"" + appointmentId + "\"}";
+      ApplicationSupport.append(outbox, queryMessageId, new OutboxIntent(
+          "GetWashExecutionIntegrationContext", "QUERY", appointmentId, appointmentVersion,
+          command.metadata().correlationId(), command.metadata().messageId(), payload, now));
+    }
+    return ApplicationResult.deferred("AUTHORITATIVE_EXECUTION_CONFIRMATION_PENDING",
+        "MISSED waits for authoritative Execution evidence", appointmentId);
+  }
+
+  private static boolean validArrival(Instant arrivedAt, Instant startsAt, Instant toleranceUntil) {
+    return arrivedAt != null && !arrivedAt.isBefore(startsAt.minusSeconds(15 * 60L))
+        && !arrivedAt.isAfter(toleranceUntil);
   }
 
   private boolean executionProjectionReady() {

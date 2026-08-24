@@ -6,7 +6,10 @@ import java.util.UUID;
 
 public interface ProjectionRecoveryJobRepository {
   Optional<RecoveryJob> find(String projectionName);
-  void start(RecoveryJob job);
+  boolean tryStart(RecoveryJob job);
+  default void start(RecoveryJob job) {
+    if (!tryStart(job)) throw new IllegalStateException("recovery job already exists for " + job.projectionName());
+  }
   boolean advance(String projectionName, UUID generationId, UUID expectedCurrentQueryMessageId,
       String phase, UUID nextQueryMessageId, String cursor, String contextJson, Instant updatedAt);
   boolean complete(String projectionName, UUID generationId, UUID expectedCurrentQueryMessageId);

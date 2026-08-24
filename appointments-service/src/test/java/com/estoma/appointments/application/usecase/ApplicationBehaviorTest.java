@@ -1,6 +1,7 @@
 package com.estoma.appointments.application.usecase;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import com.estoma.appointments.application.model.ApplicationResult;
 import com.estoma.appointments.application.model.ExecutionEvent;
@@ -117,6 +118,7 @@ class ApplicationBehaviorTest {
     final MemoryTransitions transitions = new MemoryTransitions();
     final MemoryEvidence evidence = new MemoryEvidence();
     final MemoryOutbox outbox = new MemoryOutbox();
+    final PendingCapacityResolutionCoordinator capacityResolution = mock(PendingCapacityResolutionCoordinator.class);
 
     UUID createAppointment() {
       UUID id = UUID.randomUUID();
@@ -125,7 +127,8 @@ class ApplicationBehaviorTest {
       return id;
     }
     HandleWashExecutionCompletedHandler completedHandler() {
-      return new HandleWashExecutionCompletedHandler(appointments, inbox, transitions, pending, outbox);
+      return new HandleWashExecutionCompletedHandler(appointments, inbox, transitions, pending, outbox,
+          capacityResolution);
     }
     HandleWashExecutionStartedHandler startedHandler() {
       return new HandleWashExecutionStartedHandler(appointments, inbox, transitions, pending, outbox);

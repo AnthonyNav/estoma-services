@@ -62,10 +62,7 @@ public class CancelAppointmentHandler implements CancelAppointmentUseCase {
             result = ApplicationResult.rejected("VERSION_CONFLICT", "appointment changed while cancelling");
           } else {
             ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentCancelled",
-                cancelled.appointmentId(), cancelled.version(), "{\"appointmentId\":\""
-                    + cancelled.appointmentId() + "\",\"appointmentTimeSlotId\":\""
-                    + cancelled.appointmentTimeSlotId() + "\",\"status\":\"CANCELLED\","
-                    + "\"cancellationType\":\"STUDENT\"}", now);
+                cancelled.appointmentId(), cancelled.version(), AppointmentEventPayloads.cancelled(cancelled), now);
             result = ApplicationResult.applied(cancelled.appointmentId(), cancelled.version(), "appointment cancelled");
           }
         }

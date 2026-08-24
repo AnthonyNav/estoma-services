@@ -8,5 +8,6 @@ import java.util.UUID;
 public interface CancelAppointmentTimeSlotUseCase {
   ApplicationResult cancel(Command command);
 
-  record Command(CommandMetadata metadata, UUID slotId, long expectedVersion, Instant now) {}
+  record Command(CommandMetadata metadata, UUID slotId, String reason, long expectedVersion,
+      Instant now) {}
 }

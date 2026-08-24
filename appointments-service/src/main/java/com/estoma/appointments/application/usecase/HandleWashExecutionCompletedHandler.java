@@ -12,15 +12,25 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class HandleWashExecutionCompletedHandler extends AbstractExecutionTransitionHandler
+public class HandleWashExecutionCompletedHandler extends AbstractExecutionTransitionHandler
     implements HandleWashExecutionCompletedUseCase {
+  private final PendingCapacityResolutionCoordinator capacityResolution;
+
   public HandleWashExecutionCompletedHandler(AppointmentRepository appointments, ProcessedMessageRepository inbox,
       WashExecutionTransitionRepository transitions, PendingWashExecutionEventRepository pending,
-      OutboxRepository outbox) {
+      OutboxRepository outbox, PendingCapacityResolutionCoordinator capacityResolution) {
     super(appointments, inbox, transitions, pending, outbox);
+    this.capacityResolution = capacityResolution;
   }
 
   @Override
   @Transactional
-  public ApplicationResult handle(ExecutionEvent event) { return apply(event, Kind.COMPLETED); }
+  public ApplicationResult handle(ExecutionEvent event) {
+    ApplicationResult result = apply(event, Kind.COMPLETED);
+    if (result.status() == ApplicationResult.Status.APPLIED) {
+      capacityResolution.resolve(event.washExecutionId(), "COMPLETED",
+          ApplicationSupport.inboundMetadata(event, event.occurredAt()), event.occurredAt());
+    }
+    return result;
+  }
 }

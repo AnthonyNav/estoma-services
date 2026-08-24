@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class HandleWashEntryRejectedHandler extends AbstractExecutionTransitionHandler
+public class HandleWashEntryRejectedHandler extends AbstractExecutionTransitionHandler
     implements HandleWashEntryRejectedUseCase {
   public HandleWashEntryRejectedHandler(AppointmentRepository appointments, ProcessedMessageRepository inbox,
       WashExecutionTransitionRepository transitions, PendingWashExecutionEventRepository pending,

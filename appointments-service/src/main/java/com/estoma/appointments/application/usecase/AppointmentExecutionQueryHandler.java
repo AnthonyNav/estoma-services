@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class AppointmentExecutionQueryHandler implements AppointmentExecutionQueryUseCase {
+public class AppointmentExecutionQueryHandler implements AppointmentExecutionQueryUseCase {
   private final AppointmentRepository appointments;
   private final AppointmentTimeSlotRepository slots;
 

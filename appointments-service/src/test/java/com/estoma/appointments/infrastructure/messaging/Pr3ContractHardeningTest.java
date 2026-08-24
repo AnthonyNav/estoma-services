@@ -25,6 +25,8 @@ class Pr3ContractHardeningTest {
         .isEqualTo("wash-administration");
     assertThat(OutboxRelay.routingKey(MessageKind.QUERY, "ListWashExecutionIntegrationContextsPage"))
         .isEqualTo("wash-execution");
+    assertThat(OutboxRelay.routingKey(MessageKind.QUERY, "GetWashExecutionIntegrationContext"))
+        .isEqualTo("wash-execution");
     assertThat(OutboxRelay.routingKey(MessageKind.RESULT, "ScheduleAppointmentSucceeded"))
         .isEqualTo("bff");
     assertThat(OutboxRelay.routingKey(MessageKind.RESULT, "GetAppointmentExecutionContextResult"))
