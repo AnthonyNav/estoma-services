@@ -156,9 +156,9 @@ public class ProjectionEventRuntime {
     register(entries, "communications", "InboxMessageCreated", Set.of("inboxMessageId", "communicationId", "recipientAccountId", "systemCode", "communicationType", "title", "body", "createdAt"),
         Set.of("inboxMessageId", "communicationId", "recipientAccountId", "systemCode", "communicationType", "title", "body", "createdAt", "expiresAt"), true);
     register(entries, "communications", "InboxMessageExpired", Set.of("inboxMessageId", "expiredAt"),
-        Set.of("inboxMessageId", "communicationId", "expiredAt"), true);
+        Set.of("inboxMessageId", "communicationId", "expiredAt"), false);
     register(entries, "communications", "InboxVisited", Set.of("accountId", "systemCode", "visitedAt"),
-        Set.of("accountId", "systemCode", "visitedAt"), true);
+        Set.of("accountId", "systemCode", "visitedAt"), false);
 
     registerWashAdministration(entries);
     registerAppointments(entries);
