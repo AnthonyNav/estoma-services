@@ -89,6 +89,10 @@ public final class Communication {
         now, null, null, List.of(), null, null, null, null, null);
   }
 
+  /**
+   * The durable key is canonical String on the wire/DB. Object is accepted only at this in-process
+   * compatibility boundary so older UUID-based fixtures/adapters can migrate without semantic loss.
+   */
   public static Communication requested(
       UUID communicationId,
       UUID recipientAccountId,
@@ -101,7 +105,7 @@ public final class Communication {
       UUID initiatedByAccountId,
       List<String> requestedChannels,
       UUID sourceMessageId,
-      String idempotencyKey,
+      Object idempotencyKey,
       String requestFingerprint,
       UUID correlationId,
       UUID causationId,
@@ -109,8 +113,8 @@ public final class Communication {
     return new Communication(
         communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
         sourceReferenceType, sourceReferenceId, initiatedByAccountId, CommunicationStatus.PROCESSING,
-        now, null, null, requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint,
-        correlationId, causationId);
+        now, null, null, requestedChannels, sourceMessageId, normalizeIdempotencyKey(idempotencyKey),
+        requestFingerprint, correlationId, causationId);
   }
 
   public static Communication reconstitute(
@@ -149,15 +153,15 @@ public final class Communication {
       Instant failedAt,
       List<String> requestedChannels,
       UUID sourceMessageId,
-      String idempotencyKey,
+      Object idempotencyKey,
       String requestFingerprint,
       UUID correlationId,
       UUID causationId) {
     return new Communication(
         communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
         sourceReferenceType, sourceReferenceId, initiatedByAccountId, status, createdAt, completedAt,
-        failedAt, requestedChannels, sourceMessageId, idempotencyKey, requestFingerprint, correlationId,
-        causationId);
+        failedAt, requestedChannels, sourceMessageId, normalizeIdempotencyKey(idempotencyKey),
+        requestFingerprint, correlationId, causationId);
   }
 
   public Communication completed(Instant now) {
@@ -166,7 +170,7 @@ public final class Communication {
           RejectionCode.COMMUNICATION_ALREADY_EXISTS,
           "communication " + communicationId + " is not in a completable state");
     }
-    return copyWith(CommunicationStatus.COMPLETED, now, failedAt, correlationId, now);
+    return copyWith(CommunicationStatus.COMPLETED, now, failedAt, correlationId);
   }
 
   public Communication failed(Instant now) {
@@ -175,12 +179,12 @@ public final class Communication {
           RejectionCode.COMMUNICATION_ALREADY_EXISTS,
           "communication " + communicationId + " is not in a failable state");
     }
-    return copyWith(CommunicationStatus.FAILED, completedAt, now, correlationId, now);
+    return copyWith(CommunicationStatus.FAILED, completedAt, now, correlationId);
   }
 
   public Communication withCorrelationId(UUID newCorrelationId) {
     if (correlationId != null) return this;
-    return copyWith(status, completedAt, failedAt, requireNonNull(newCorrelationId, "correlationId"), createdAt);
+    return copyWith(status, completedAt, failedAt, requireNonNull(newCorrelationId, "correlationId"));
   }
 
   public Communication reopenedForRetry(Instant now) {
@@ -189,22 +193,21 @@ public final class Communication {
           RejectionCode.COMMUNICATION_ALREADY_EXISTS,
           "communication " + communicationId + " is not FAILED");
     }
-    return copyWith(CommunicationStatus.PROCESSING, null, null, correlationId, now);
+    return copyWith(CommunicationStatus.PROCESSING, null, null, correlationId);
   }
 
   public Communication reopenForRetry(Instant now) {
     if (status != CommunicationStatus.FAILED) {
       throw new IllegalStateException("communication is not FAILED");
     }
-    return copyWith(CommunicationStatus.PROCESSING, null, null, correlationId, now);
+    return copyWith(CommunicationStatus.PROCESSING, null, null, correlationId);
   }
 
   private Communication copyWith(
       CommunicationStatus newStatus,
       Instant newCompletedAt,
       Instant newFailedAt,
-      UUID newCorrelationId,
-      Instant ignoredTransitionAt) {
+      UUID newCorrelationId) {
     return new Communication(
         communicationId, recipientAccountId, systemCode, communicationType, priority, sourceService,
         sourceReferenceType, sourceReferenceId, initiatedByAccountId, newStatus, createdAt,
@@ -231,6 +234,16 @@ public final class Communication {
   public String requestFingerprint() { return requestFingerprint; }
   public UUID correlationId() { return correlationId; }
   public UUID causationId() { return causationId; }
+
+  private static String normalizeIdempotencyKey(Object value) {
+    if (value == null) return null;
+    if (value instanceof String text) {
+      if (text.isBlank()) throw new IllegalArgumentException("idempotencyKey must not be blank");
+      return text;
+    }
+    if (value instanceof UUID uuid) return uuid.toString();
+    throw new IllegalArgumentException("idempotencyKey must be String or UUID");
+  }
 
   private static <T> T requireNonNull(T value, String fieldName) {
     if (value == null) throw new IllegalArgumentException(fieldName + " must not be null");
