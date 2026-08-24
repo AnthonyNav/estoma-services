@@ -20,21 +20,7 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-/**
- * The AMQP entry point for durable commands. Not transactional itself —
- * it validates, calls the dispatcher (which opens and closes the one
- * transaction), and then decides ACK / retry-tier / DLQ. Nothing it does
- * after the dispatcher returns can roll back the commit
- * (docs/system-contract.md §7).
- *
- * <p>The original delivery is ACKed only after its retry/DLQ
- * republication is itself confirmed by RabbitMQ (docs/system-contract.md
- * §7, Round 1) — never on a bare {@code send()}. If the republication
- * cannot be confirmed, the original is NACKed with requeue instead of
- * being silently dropped or acknowledged; if even that NACK fails (e.g.
- * the channel is already closed), the exception is allowed to escape so
- * the broker redelivers once the connection recovers.
- */
+/** AMQP entry point for durable Person commands. */
 @Component
 @ConditionalOnProperty(
     prefix = "estoma.messaging",
@@ -44,6 +30,7 @@ import org.springframework.stereotype.Component;
 public class CommandListener {
 
   private static final Logger log = LoggerFactory.getLogger(CommandListener.class);
+  private static final String TERMINAL_TECHNICAL_ERROR = "TECHNICAL_FAILURE";
 
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
@@ -68,26 +55,23 @@ public class CommandListener {
   }
 
   @RabbitListener(
-      id = "commandListener", // referenced by CommandConsumerHealthIndicator
+      id = "commandListener",
       queues = AmqpNames.QUEUE_COMMANDS,
       containerFactory = "manualAckContainerFactory")
   public void onMessage(Message message, Channel channel) throws IOException {
     long deliveryTag = message.getMessageProperties().getDeliveryTag();
     metrics.received();
 
-    // (1) decode + structural validation. Any failure here is PERMANENT.
     MessageEnvelope envelope;
     try {
       envelope = codec.decode(message.getBody());
       validator.validate(envelope);
     } catch (Exception e) {
       log.error("invalid message on {}: {}", AmqpNames.QUEUE_COMMANDS, e.toString());
-      // Counted the moment the message is classified invalid, even if the
-      // DLQ republication below cannot be confirmed.
       metrics.invalidMessage();
       try {
         failureRouter.toDlq(message, e);
-        metrics.deadLettered(); // only after the DLQ publication is confirmed
+        metrics.deadLettered();
         channel.basicAck(deliveryTag, false);
       } catch (RabbitPublishException publishException) {
         metrics.technicalFailure();
@@ -99,27 +83,32 @@ public class CommandListener {
     LogContext.putEnvelopeContext(envelope, ConsumerNames.COMMANDS);
     Instant start = Instant.now();
     try {
-      // (2) business processing: exactly one local transaction inside dispatch().
       CommandOutcome outcome = dispatcher.dispatch(envelope);
       recordOutcome(outcome);
       log.info("command {} processed: {}", envelope.messageType(), describe(outcome));
-      // (3) commit already happened; result + event rows are durable.
-      channel.basicAck(deliveryTag, false); // ◀ the ACK. After commit. Nothing else here.
+      channel.basicAck(deliveryTag, false);
     } catch (Exception e) {
       boolean transientFailure = classifier.isTransient(e);
       log.warn(
           "command {} (messageId={}) failed, transient={}: {}",
-          envelope.messageType(),
-          envelope.messageId(),
-          transientFailure,
-          e.toString());
+          envelope.messageType(), envelope.messageId(), transientFailure, e.toString());
+
+      // Coordinated Academic Commands have a canonical terminal Result contract.
+      // Once retry is impossible, persist FAILED through the Transactional Outbox
+      // instead of stranding the Process Manager behind a DLQ-only outcome.
+      if ("academic".equals(envelope.producer())
+          && !failureRouter.commandRetryAvailable(message, transientFailure)) {
+        terminalizeAcademicFailure(message, channel, deliveryTag, envelope, e);
+        return;
+      }
+
       try {
         FailureRoute route = failureRouter.routeAfterFailure(message, e, transientFailure);
         if (route == FailureRoute.RETRY) {
           metrics.technicalFailure();
-          metrics.retried(); // only after the retry-tier publication is confirmed
+          metrics.retried();
         } else {
-          metrics.deadLettered(); // only after the DLQ publication is confirmed
+          metrics.deadLettered();
         }
         channel.basicAck(deliveryTag, false);
       } catch (RabbitPublishException publishException) {
@@ -132,21 +121,31 @@ public class CommandListener {
     }
   }
 
-  /**
-   * The republication that would have justified acknowledging the
-   * original delivery could not be confirmed — conserve the original by
-   * NACKing it with requeue instead of ACKing or silently dropping it.
-   * If the channel is already closed and even this fails, the exception
-   * is allowed to escape uncaught: no ACK is attempted, and RabbitMQ
-   * redelivers once the connection recovers. No sleep, no local blocking
-   * retry.
-   *
-   * <p>Known limitation of this round: if retry/DLQ stays unroutable, the
-   * requeue can produce a tight redelivery loop. Conserving the message
-   * is prioritized over avoiding that loop; it is observable via {@code
-   * technical_failures} and the {@code PUBLISH_*} logs
-   * (docs/system-contract.md §7).
-   */
+  private void terminalizeAcademicFailure(
+      Message original,
+      Channel channel,
+      long deliveryTag,
+      MessageEnvelope envelope,
+      Exception originalFailure) throws IOException {
+    try {
+      dispatcher.fail(envelope, TERMINAL_TECHNICAL_ERROR);
+      metrics.technicalFailure();
+      channel.basicAck(deliveryTag, false);
+    } catch (Exception terminalPersistenceFailure) {
+      log.error(
+          "could not persist terminal FAILED Result for command {} (messageId={}): {}",
+          envelope.messageType(), envelope.messageId(), terminalPersistenceFailure.toString());
+      try {
+        failureRouter.toDlq(original, terminalPersistenceFailure);
+        metrics.deadLettered();
+        channel.basicAck(deliveryTag, false);
+      } catch (RabbitPublishException publishException) {
+        metrics.technicalFailure();
+        nackRequeue(channel, deliveryTag);
+      }
+    }
+  }
+
   private static void nackRequeue(Channel channel, long deliveryTag) throws IOException {
     channel.basicNack(deliveryTag, false, true);
   }

@@ -10,7 +10,6 @@ import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
 import com.estoma.users.contract.result.ResultPayload;
-import com.estoma.users.contract.result.ResultStatus;
 import com.estoma.users.contract.result.SucceededPayload;
 import com.estoma.users.domain.PersonRejectedException;
 import com.estoma.users.domain.RejectionCode;
@@ -105,6 +104,38 @@ public class PersonCommandDispatcher {
           envelope.producer(), envelope.idempotencyKey(), rejected.code().name(), Instant.now());
       return new CommandOutcome.Rejected(rejected.code());
     }
+  }
+
+  /**
+   * Persists the terminal technical outcome for a valid coordinated Academic Command.
+   * This runs in a fresh transaction after the failed business transaction rolled back.
+   */
+  @Transactional
+  public void fail(MessageEnvelope envelope, String errorCode) {
+    if (!"academic".equals(envelope.producer())) {
+      throw new IllegalArgumentException("terminal coordinated Result is only defined for academic Commands");
+    }
+    JsonNode execution = envelope.payload().path("importExecution");
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("importId", requiredUuid(execution, "importId"));
+    data.put("planItemId", requiredUuid(execution, "planItemId"));
+    int generation = execution.path("executionGeneration").asInt(-1);
+    if (generation < 1) {
+      throw new IllegalStateException("academic command is missing executionGeneration");
+    }
+    data.put("executionGeneration", generation);
+
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("status", "FAILED");
+    payload.put("data", data);
+    payload.put("error", Map.of("code", errorCode));
+
+    OutboxMetadata metadata = new OutboxMetadata(
+        envelope.producer(), envelope.operationId(), envelope.idempotencyKey(), envelope.actor());
+    outbox.append(new OutboxAppendRequest(
+        UUID.randomUUID(), envelope.messageType() + "Result", 1, MessageKind.RESULT.name(),
+        extractAttemptedPersonId(envelope), null, envelope.correlationId(), envelope.messageId(),
+        codec.writeValueAsString(payload), codec.writeValueAsString(metadata), Instant.now()));
   }
 
   private CommandOutcome reconstructOutcome(MessageEnvelope envelope, IdempotencyRecord claim) {
