@@ -27,10 +27,16 @@ public class HandleWashExecutionCompletedHandler extends AbstractExecutionTransi
   @Transactional
   public ApplicationResult handle(ExecutionEvent event) {
     ApplicationResult result = apply(event, Kind.COMPLETED);
-    if (result.status() == ApplicationResult.Status.APPLIED) {
+    if (result.status() == ApplicationResult.Status.APPLIED && hasTerminalState(event, "COMPLETED")) {
       capacityResolution.resolve(event.washExecutionId(), "COMPLETED",
           ApplicationSupport.inboundMetadata(event, event.occurredAt()), event.occurredAt());
     }
     return result;
+  }
+
+  private boolean hasTerminalState(ExecutionEvent event, String expectedStatus) {
+    return appointments.findById(event.appointmentId())
+        .map(appointment -> expectedStatus.equals(appointment.status().name()))
+        .orElse(false);
   }
 }
