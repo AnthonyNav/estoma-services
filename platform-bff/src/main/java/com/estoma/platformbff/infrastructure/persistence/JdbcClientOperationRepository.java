@@ -46,10 +46,10 @@ public class JdbcClientOperationRepository implements ClientOperationRepository 
         .param("resultData", operation.resultData())
         .param("errorCode", operation.errorCode())
         .param("errorDetails", operation.errorDetails())
-        .param("createdAt", operation.createdAt())
-        .param("updatedAt", operation.updatedAt())
-        .param("completedAt", operation.completedAt())
-        .param("expiresAt", operation.expiresAt())
+        .param("createdAt", JdbcTimes.timestamp(operation.createdAt()))
+        .param("updatedAt", JdbcTimes.timestamp(operation.updatedAt()))
+        .param("completedAt", JdbcTimes.timestamp(operation.completedAt()))
+        .param("expiresAt", JdbcTimes.timestamp(operation.expiresAt()))
         .update();
   }
 
@@ -91,8 +91,9 @@ public class JdbcClientOperationRepository implements ClientOperationRepository 
         .param("resultData", terminalOperation.resultData())
         .param("errorCode", terminalOperation.errorCode())
         .param("errorDetails", terminalOperation.errorDetails())
-        .param("updatedAt", now)
-        .param("completedAt", terminalOperation.completedAt() == null ? now : terminalOperation.completedAt())
+        .param("updatedAt", JdbcTimes.timestamp(now))
+        .param("completedAt", JdbcTimes.timestamp(
+            terminalOperation.completedAt() == null ? now : terminalOperation.completedAt()))
         .param("operationId", operationId)
         .update() == 1;
   }
@@ -118,7 +119,6 @@ public class JdbcClientOperationRepository implements ClientOperationRepository 
   }
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {
-    var timestamp = rs.getTimestamp(column);
-    return timestamp == null ? null : timestamp.toInstant();
+    return JdbcTimes.instant(rs, column);
   }
 }

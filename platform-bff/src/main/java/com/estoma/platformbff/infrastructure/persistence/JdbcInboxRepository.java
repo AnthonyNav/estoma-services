@@ -36,8 +36,8 @@ public class JdbcInboxRepository implements InboxRepository {
         .param("operationId", message.operationId())
         .param("aggregateId", message.aggregateId())
         .param("aggregateVersion", message.aggregateVersion())
-        .param("receivedAt", message.receivedAt())
-        .param("appliedAt", message.appliedAt())
+        .param("receivedAt", JdbcTimes.timestamp(message.receivedAt()))
+        .param("appliedAt", JdbcTimes.timestamp(message.appliedAt()))
         .update() == 1;
   }
 }

@@ -38,9 +38,9 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         .param("operationId", job.operationId())
         .param("cursorValue", job.cursor())
         .param("status", job.status())
-        .param("startedAt", job.startedAt())
-        .param("updatedAt", job.updatedAt())
-        .param("completedAt", job.completedAt())
+        .param("startedAt", JdbcTimes.timestamp(job.startedAt()))
+        .param("updatedAt", JdbcTimes.timestamp(job.updatedAt()))
+        .param("completedAt", JdbcTimes.timestamp(job.completedAt()))
         .param("lastErrorCode", job.lastErrorCode())
         .update();
   }
@@ -59,12 +59,7 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         rs.getObject("entity_id", UUID.class), rs.getLong("generation"),
         rs.getString("owner_logical_component_id"), rs.getString("query_type"),
         rs.getObject("operation_id", UUID.class), rs.getString("cursor_value"),
-        rs.getString("status"), instant(rs, "started_at"), instant(rs, "updated_at"),
-        instant(rs, "completed_at"), rs.getString("last_error_code"));
-  }
-
-  private static java.time.Instant instant(ResultSet rs, String column) throws SQLException {
-    var timestamp = rs.getTimestamp(column);
-    return timestamp == null ? null : timestamp.toInstant();
+        rs.getString("status"), JdbcTimes.instant(rs, "started_at"), JdbcTimes.instant(rs, "updated_at"),
+        JdbcTimes.instant(rs, "completed_at"), rs.getString("last_error_code"));
   }
 }

@@ -2,13 +2,16 @@ package com.estoma.platformbff;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
+import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
 import com.tngtech.archunit.lang.ArchRule;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.bind.annotation.RestController;
 
-@AnalyzeClasses(packages = "com.estoma.platformbff")
+@AnalyzeClasses(
+    packages = "com.estoma.platformbff",
+    importOptions = ImportOption.DoNotIncludeTests.class)
 class ArchitectureTest {
   @ArchTest
   static final ArchRule domain_is_framework_and_adapter_free = noClasses()

@@ -53,13 +53,13 @@ public class JdbcOutboxRepository implements OutboxRepository {
         .param("payloadJson", message.payloadJson())
         .param("status", message.status().name())
         .param("claimToken", message.claimToken())
-        .param("claimUntil", message.claimUntil())
+        .param("claimUntil", JdbcTimes.timestamp(message.claimUntil()))
         .param("attemptCount", message.attemptCount())
-        .param("nextAttemptAt", message.nextAttemptAt())
-        .param("publishedAt", message.publishedAt())
+        .param("nextAttemptAt", JdbcTimes.timestamp(message.nextAttemptAt()))
+        .param("publishedAt", JdbcTimes.timestamp(message.publishedAt()))
         .param("lastErrorCode", message.lastErrorCode())
-        .param("createdAt", message.createdAt())
-        .param("updatedAt", message.updatedAt())
+        .param("createdAt", JdbcTimes.timestamp(message.createdAt()))
+        .param("updatedAt", JdbcTimes.timestamp(message.updatedAt()))
         .update();
   }
 
@@ -96,10 +96,10 @@ public class JdbcOutboxRepository implements OutboxRepository {
         WHERE outbox.message_id = candidates.message_id
         RETURNING outbox.*
         """)
-        .param("now", now)
+        .param("now", JdbcTimes.timestamp(now))
         .param("limit", limit)
         .param("claimToken", claimToken)
-        .param("claimUntil", now.plus(CLAIM_DURATION))
+        .param("claimUntil", JdbcTimes.timestamp(now.plus(CLAIM_DURATION)))
         .query((rs, rowNum) -> map(rs))
         .list();
   }
@@ -116,7 +116,7 @@ public class JdbcOutboxRepository implements OutboxRepository {
         """)
         .param("messageId", messageId)
         .param("claimToken", claimToken)
-        .param("publishedAt", publishedAt)
+        .param("publishedAt", JdbcTimes.timestamp(publishedAt))
         .update() == 1;
   }
 
@@ -133,8 +133,8 @@ public class JdbcOutboxRepository implements OutboxRepository {
         .param("messageId", messageId)
         .param("claimToken", claimToken)
         .param("errorCode", errorCode)
-        .param("nextAttemptAt", nextAttemptAt)
-        .param("updatedAt", updatedAt)
+        .param("nextAttemptAt", JdbcTimes.timestamp(nextAttemptAt))
+        .param("updatedAt", JdbcTimes.timestamp(updatedAt))
         .update() == 1;
   }
 
@@ -166,7 +166,6 @@ public class JdbcOutboxRepository implements OutboxRepository {
   }
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {
-    var timestamp = rs.getTimestamp(column);
-    return timestamp == null ? null : timestamp.toInstant();
+    return JdbcTimes.instant(rs, column);
   }
 }
