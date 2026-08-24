@@ -32,6 +32,9 @@ public class AmqpTopologyConfig {
   @Bean Binding communicationsAuthenticationAccountBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
     return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with("authentication.account.*");
   }
+  @Bean Binding communicationsPasswordRecoveryBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
+    return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with("authentication.password-recovery.requested");
+  }
   @Bean Binding communicationsAppointmentBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
     return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with("appointments.appointment.cancelled");
   }

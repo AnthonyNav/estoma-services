@@ -18,14 +18,14 @@ class EnvelopeValidatorTest {
   @Test
   void acceptsCanonicalUsersPersonEvent() {
     UUID personId = UUID.randomUUID();
-    validator.validateEvent(event("PersonCreated", "users", personId,
+    validator.validateEvent(event("PersonCreated", "users", personId, 1,
         MAPPER.createObjectNode().put("personId", personId.toString()).put("status", "ACTIVE")));
   }
 
   @Test
   void rejectsSpoofedPersonProducer() {
     UUID personId = UUID.randomUUID();
-    assertThatThrownBy(() -> validator.validateEvent(event("PersonCreated", "authentication", personId,
+    assertThatThrownBy(() -> validator.validateEvent(event("PersonCreated", "authentication", personId, 1,
         MAPPER.createObjectNode().put("personId", personId.toString()).put("status", "ACTIVE"))))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -33,22 +33,42 @@ class EnvelopeValidatorTest {
   @Test
   void rejectsAggregatePayloadMismatch() {
     UUID personId = UUID.randomUUID();
-    assertThatThrownBy(() -> validator.validateEvent(event("PersonCreated", "users", UUID.randomUUID(),
+    assertThatThrownBy(() -> validator.validateEvent(event("PersonCreated", "users", UUID.randomUUID(), 1,
         MAPPER.createObjectNode().put("personId", personId.toString()).put("status", "ACTIVE"))))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
-  void rejectsPasswordRecoveryUntilTheSecureAdapterLands() {
+  void acceptsAuthenticationRecoveryFactWithoutAggregateIdentity() {
     UUID recoveryId = UUID.randomUUID();
-    assertThatThrownBy(() -> validator.validateEvent(event("PasswordRecoveryRequested", "authentication", recoveryId,
-        MAPPER.createObjectNode().put("recoveryId", recoveryId.toString()))))
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    validator.validateEvent(event("PasswordRecoveryRequested", "authentication", null, null,
+        MAPPER.createObjectNode()
+            .put("recoveryId", recoveryId.toString())
+            .put("accountId", accountId.toString())
+            .put("personId", personId.toString())
+            .put("expiresAt", Instant.now().plusSeconds(600).toString())
+            .put("requestedAt", Instant.now().toString())));
+  }
+
+  @Test
+  void rejectsSpoofedRecoveryProducer() {
+    UUID recoveryId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    assertThatThrownBy(() -> validator.validateEvent(event("PasswordRecoveryRequested", "users", null, null,
+        MAPPER.createObjectNode()
+            .put("recoveryId", recoveryId.toString())
+            .put("accountId", accountId.toString())
+            .put("personId", personId.toString()))))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
-  private static MessageEnvelope event(String type, String producer, UUID aggregateId, tools.jackson.databind.JsonNode payload) {
+  private static MessageEnvelope event(
+      String type, String producer, UUID aggregateId, Integer aggregateVersion, tools.jackson.databind.JsonNode payload) {
     return new MessageEnvelope(
         UUID.randomUUID(), type, 1, MessageKind.EVENT, producer, Instant.now(), UUID.randomUUID(), null,
-        null, null, aggregateId, 1, Actor.system(producer), payload);
+        null, null, aggregateId, aggregateVersion, Actor.system(producer), payload);
   }
 }

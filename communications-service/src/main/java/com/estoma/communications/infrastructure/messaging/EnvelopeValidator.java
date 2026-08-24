@@ -25,6 +25,7 @@ public class EnvelopeValidator {
       Map.entry(ConsumedEventTypes.ACCOUNT_CREATED, "authentication"),
       Map.entry(ConsumedEventTypes.ACCOUNT_ACTIVATED, "authentication"),
       Map.entry(ConsumedEventTypes.ACCOUNT_DEACTIVATED, "authentication"),
+      Map.entry(ConsumedEventTypes.PASSWORD_RECOVERY_REQUESTED, "authentication"),
       Map.entry(ConsumedEventTypes.APPOINTMENT_CANCELLED, "appointments"));
 
   public void validateCommand(MessageEnvelope envelope) {
@@ -39,16 +40,24 @@ public class EnvelopeValidator {
 
   public void validateEvent(MessageEnvelope envelope) {
     common(envelope);
-    if (envelope.messageKind() != MessageKind.EVENT) {
-      throw new IllegalArgumentException("expected EVENT envelope");
+    if (envelope.messageKind() != MessageKind.EVENT || envelope.payload() == null || !envelope.payload().isObject()) {
+      throw new IllegalArgumentException("expected canonical EVENT envelope");
     }
     String owner = EVENT_OWNERS.get(envelope.messageType());
     if (owner == null || !owner.equals(envelope.producer())) {
       throw new IllegalArgumentException("event producer does not own " + envelope.messageType());
     }
-    if (envelope.aggregateId() == null || envelope.aggregateVersion() == null || envelope.aggregateVersion() < 1
-        || envelope.payload() == null || !envelope.payload().isObject()) {
-      throw new IllegalArgumentException("event requires aggregate identity/version and object payload");
+
+    if (ConsumedEventTypes.PASSWORD_RECOVERY_REQUESTED.equals(envelope.messageType())) {
+      // Authentication intentionally emits this anti-enumeration fact without an aggregate identity.
+      uuid(envelope, "recoveryId");
+      uuid(envelope, "accountId");
+      uuid(envelope, "personId");
+      return;
+    }
+
+    if (envelope.aggregateId() == null || envelope.aggregateVersion() == null || envelope.aggregateVersion() < 1) {
+      throw new IllegalArgumentException("event requires aggregate identity/version");
     }
     UUID payloadAggregate = switch (envelope.messageType()) {
       case ConsumedEventTypes.PERSON_CREATED, ConsumedEventTypes.PERSON_UPDATED,
