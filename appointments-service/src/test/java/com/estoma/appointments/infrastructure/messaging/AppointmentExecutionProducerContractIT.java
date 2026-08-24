@@ -111,7 +111,7 @@ class AppointmentExecutionProducerContractIT extends AbstractPostgresIT {
     assertThat(payload.path("appointmentType").asString()).isEqualTo("NORMAL");
     assertThat(payload.path("instrumentCount").asInt()).isEqualTo(2);
     assertThat(payload.path("pieceType").asString()).isEqualTo("HIGH_SPEED");
-    assertThat(payload.path("status").asString()).isEqualTo("SCHEDULED");
+    assertThat(payload.has("status")).isFalse();
     assertThat(payload.path("version").asLong()).isEqualTo(1L);
     assertThat(OutboxRelay.eventRoutingKey("AppointmentScheduled"))
         .isEqualTo("appointments.appointment.scheduled");

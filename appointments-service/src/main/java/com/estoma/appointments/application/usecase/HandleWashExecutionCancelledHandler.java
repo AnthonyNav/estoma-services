@@ -27,10 +27,16 @@ public class HandleWashExecutionCancelledHandler extends AbstractExecutionTransi
   @Transactional
   public ApplicationResult handle(ExecutionEvent event) {
     ApplicationResult result = apply(event, Kind.CANCELLED);
-    if (result.status() == ApplicationResult.Status.APPLIED) {
+    if (result.status() == ApplicationResult.Status.APPLIED && hasTerminalState(event, "CANCELLED")) {
       capacityResolution.resolve(event.washExecutionId(), "CANCELLED",
           ApplicationSupport.inboundMetadata(event, event.occurredAt()), event.occurredAt());
     }
     return result;
+  }
+
+  private boolean hasTerminalState(ExecutionEvent event, String expectedStatus) {
+    return appointments.findById(event.appointmentId())
+        .map(appointment -> expectedStatus.equals(appointment.status().name()))
+        .orElse(false);
   }
 }
