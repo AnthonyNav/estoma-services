@@ -1,6 +1,6 @@
 # Platform BFF — PR3 Security / Authentication Edge Review Resolution
 
-**Status:** reconstructed after PR1 + PR2 merge; ready for final review only after executable verification.  
+**Status:** reconstructed after PR1 + PR2 merge; ready for final review only after executable verification.
 **Scope:** `platform-bff` Security RPC/JWT/revocation edge plus the minimum owner-contract corrections in `authentication-service`.
 
 ## Contract decision — RefreshSession

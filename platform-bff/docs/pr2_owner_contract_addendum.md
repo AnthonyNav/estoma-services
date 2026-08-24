@@ -1,6 +1,6 @@
 # Platform BFF — PR2 Owner Contract Addendum
 
-**Estado:** BLOCKER contractual complementario de `pr2_correction_gate.md`  
+**Estado:** BLOCKER contractual complementario de `pr2_correction_gate.md`
 **Aplica a:** `platform-bff/feat/pr2-durable-command-gateway`
 
 ## Hallazgo

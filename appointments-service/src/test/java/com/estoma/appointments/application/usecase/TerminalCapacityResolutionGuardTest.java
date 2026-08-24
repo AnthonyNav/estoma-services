@@ -3,6 +3,7 @@ package com.estoma.appointments.application.usecase;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -89,7 +90,7 @@ class TerminalCapacityResolutionGuardTest {
     final PendingCapacityResolutionCoordinator capacityResolution = mock(PendingCapacityResolutionCoordinator.class);
 
     void claim(UUID sourceEventId, String eventType) {
-      when(inbox.tryClaim(sourceEventId, eventType, any(Instant.class))).thenReturn(true);
+      when(inbox.tryClaim(eq(sourceEventId), eq(eventType), any(Instant.class))).thenReturn(true);
     }
 
     void latest(UUID executionId, UUID appointmentId, String eventType, long version, String state) {

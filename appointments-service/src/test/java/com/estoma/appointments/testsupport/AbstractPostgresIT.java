@@ -2,6 +2,7 @@ package com.estoma.appointments.testsupport;
 
 import org.junit.jupiter.api.Tag;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -11,6 +12,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 @SpringBootTest
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("integration")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class AbstractPostgresIT {
   @Container
   protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")

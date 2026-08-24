@@ -1,6 +1,6 @@
 # Platform BFF — PR2 Retention Addendum
 
-**Estado:** BLOCKER complementario de `pr2_correction_gate.md`  
+**Estado:** BLOCKER complementario de `pr2_correction_gate.md`
 **Aplica a:** `platform-bff/feat/pr2-durable-command-gateway`
 
 ## Motivo

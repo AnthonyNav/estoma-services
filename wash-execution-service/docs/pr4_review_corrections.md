@@ -1,7 +1,7 @@
 # Wash Execution — PR4 Review Corrections
 
-**Estado:** gate de corrección previo a PR4  
-**Base revisada:** `develop` después de PR3 (`67c7856caa4316df75f54e6ad886bc5fbcda06bf`)  
+**Estado:** gate de corrección previo a PR4
+**Base revisada:** `develop` después de PR3 (`67c7856caa4316df75f54e6ad886bc5fbcda06bf`)
 **PR auditado:** `#41 test(wash-execution): PR4 integration hardening`
 
 ## 1. Conclusión de la revisión

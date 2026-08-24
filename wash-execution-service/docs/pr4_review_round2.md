@@ -1,8 +1,8 @@
 # Wash Execution — PR4 Review Round 2
 
-**Estado:** requiere correcciones antes de verificación final  
-**PR revisado:** `#41 test(wash-execution): PR4 integration hardening`  
-**Head revisado:** `941301a31361d07dc7f24ad1b7fc48223b2aa56a`  
+**Estado:** requiere correcciones antes de verificación final
+**PR revisado:** `#41 test(wash-execution): PR4 integration hardening`
+**Head revisado:** `941301a31361d07dc7f24ad1b7fc48223b2aa56a`
 **Base real de la rama:** `develop@07337bd15176dc69d79faaf5c895d280c3a8b5d0`
 
 ## 1. Resultado general

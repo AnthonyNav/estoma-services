@@ -1,6 +1,6 @@
 # Wash Execution — AppointmentTimeSlot calendar context resolution
 
-**Estado:** RESOLVED_FOR_PR2_PR3  
+**Estado:** RESOLVED_FOR_PR2_PR3
 **Fuente canónica:** `AnthonyNav/estomatologia-platform-docs` / `wash-execution-service/calendar-context-resolution.md`
 
 ## Problema

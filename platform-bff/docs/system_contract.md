@@ -1,7 +1,7 @@
 # Platform BFF — System Contract V1
 
-**Ruta:** `platform-bff/docs/system_contract.md`  
-**Estado:** contrato local de implementación V1  
+**Ruta:** `platform-bff/docs/system_contract.md`
+**Estado:** contrato local de implementación V1
 **Logical Component ID:** `bff`
 
 ## 1. Propósito
