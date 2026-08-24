@@ -55,7 +55,7 @@ platform:
     retry-attempts: 0
   jwt:
     issuer: ${BFF_JWT_ISSUER:estoma-authentication}
-    audience: ${BFF_JWT_AUDIENCE:estoma-platform}
+    audience: ${BFF_JWT_AUDIENCE:estoma-clients}
     jwk-set: ${BFF_JWK_SET:}
   retention:
     operation-days: ${BFF_OPERATION_RETENTION_DAYS:7}

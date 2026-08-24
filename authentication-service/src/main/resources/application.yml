@@ -81,7 +81,7 @@ management:
         startup:
           include: db, schemaVersion
         readiness:
-          include: db, commandConsumer, queryConsumer, outboxRelay
+          include: db, commandConsumer, queryConsumer, rpcConsumer, outboxRelay
         liveness:
           include: livenessState
     info:

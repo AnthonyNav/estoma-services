@@ -29,6 +29,7 @@ Internal V1 business communication uses the canonical RabbitMQ contracts. Normal
 - [`docs/pr2_retention_addendum.md`](docs/pr2_retention_addendum.md) — PR2 idempotency retention correction: `expiresAt` starts at terminal state, not at submit.
 - [`docs/pr2_owner_contract_addendum.md`](docs/pr2_owner_contract_addendum.md) — owner-precedence correction for `CancelAppointmentTimeSlot` and its registry/wire gate.
 - [`docs/pr2_review_resolution.md`](docs/pr2_review_resolution.md) — applied PR2 corrections, regression coverage and remaining gates.
+- [`docs/pr3_review_resolution.md`](docs/pr3_review_resolution.md) — Security RPC, refresh, JWT, revocation and projection-event corrections applied for PR3.
 
 ## Initial operational endpoints
 

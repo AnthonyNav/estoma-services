@@ -54,7 +54,7 @@ public final class AmqpNames {
   public static final String ROUTING_KEY_OTHER_ACCOUNT_SESSIONS_REVOKED = "authentication.session.other-revoked";
   public static final String ROUTING_KEY_PASSWORD_RECOVERY_REQUESTED = "authentication.password-recovery.requested";
 
-  public static final long RPC_MESSAGE_TTL_MS = 5_000L;
+  public static final long RPC_MESSAGE_TTL_MS = 10_000L;
   public static final String HEADER_ATTEMPT = "x-estoma-attempt";
   public static final String PRODUCER = "authentication";
 }

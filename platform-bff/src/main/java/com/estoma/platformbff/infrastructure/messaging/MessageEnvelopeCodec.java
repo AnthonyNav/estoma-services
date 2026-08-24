@@ -4,6 +4,7 @@ import com.estoma.platformbff.application.operations.IncomingResult;
 import com.estoma.platformbff.application.port.MessageSerializer;
 import com.estoma.platformbff.contracts.messaging.ActorContext;
 import com.estoma.platformbff.contracts.messaging.CommandEnvelope;
+import com.estoma.platformbff.contracts.messaging.EventEnvelope;
 import com.estoma.platformbff.contracts.messaging.ResultEnvelope;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -22,6 +23,11 @@ public class MessageEnvelopeCodec implements MessageSerializer {
     return mapper.writeValueAsString(value);
   }
 
+  @Override
+  public <T> T read(String json, Class<T> type) {
+    return mapper.readValue(json, type);
+  }
+
   public JsonNode readTree(String json) {
     return mapper.readValue(json, JsonNode.class);
   }
@@ -32,6 +38,10 @@ public class MessageEnvelopeCodec implements MessageSerializer {
 
   public ResultEnvelope readResult(byte[] body) {
     return mapper.readValue(body, ResultEnvelope.class);
+  }
+
+  public EventEnvelope readEvent(byte[] body) {
+    return mapper.readValue(body, EventEnvelope.class);
   }
 
   public IncomingResult readIncomingResult(byte[] body) {
@@ -52,7 +62,8 @@ public class MessageEnvelopeCodec implements MessageSerializer {
         ? error.get("code").asText()
         : null;
     String errorDetails = error == null || error.isNull() ? null : mapper.writeValueAsString(error);
-    return new IncomingResult(result.messageId(), result.messageType(), result.messageVersion(),
+    return new IncomingResult(
+        result.messageId(), result.messageType(), result.messageVersion(),
         result.messageKind(), result.producer(), result.occurredAt(), result.correlationId(),
         result.causationId(), result.operationId(), result.aggregateId(), result.aggregateVersion(),
         status, data == null || data.isNull() ? null : mapper.writeValueAsString(data),
