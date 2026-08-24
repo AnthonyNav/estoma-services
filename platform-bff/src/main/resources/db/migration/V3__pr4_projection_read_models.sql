@@ -1,5 +1,5 @@
--- PR4 typed projection destination. Owner stream versions are used only where the owner
--- actually publishes one for that projection; Communications mailbox state uses native timestamps.
+-- PR4 typed projection destination. Every row carries the version of its owner stream;
+-- no global Event version is used.
 
 ALTER TABLE projection_recovery_jobs
   ADD COLUMN current_query_message_id UUID;
@@ -111,26 +111,15 @@ CREATE TABLE student_import_validation_error_read_model (
 );
 
 CREATE TABLE mailbox_messages_read_model (
-    inbox_message_id UUID PRIMARY KEY,
-    communication_id UUID,
-    recipient_account_id UUID,
-    system_code VARCHAR(160),
-    communication_type VARCHAR(160),
-    title TEXT,
-    body TEXT,
-    created_at TIMESTAMPTZ,
-    expires_at TIMESTAMPTZ,
-    expired_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ NOT NULL
+    inbox_message_id UUID PRIMARY KEY, communication_id UUID NOT NULL,
+    recipient_account_id UUID NOT NULL, system_code VARCHAR(160) NOT NULL,
+    communication_type VARCHAR(160) NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL, expires_at TIMESTAMPTZ, source_version BIGINT NOT NULL
 );
-
-CREATE INDEX mailbox_messages_visibility_idx
-  ON mailbox_messages_read_model(recipient_account_id, system_code, created_at)
-  WHERE communication_id IS NOT NULL AND expired_at IS NULL;
 
 CREATE TABLE mailbox_visits_read_model (
     account_id UUID NOT NULL, system_code VARCHAR(160) NOT NULL,
-    last_visited_at TIMESTAMPTZ NOT NULL,
+    last_visited_at TIMESTAMPTZ NOT NULL, source_version BIGINT NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (account_id, system_code)
 );
 
