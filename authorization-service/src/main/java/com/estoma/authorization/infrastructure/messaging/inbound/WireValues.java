@@ -26,10 +26,15 @@ final class WireValues {
       if (!allowed.contains(property.getKey())) {
         throw new InvalidMessageException("unknown field: " + property.getKey());
       }
-      rejectNulls(property.getValue(), property.getKey());
+      // Owner DTO serializers may materialize an optional property as JSON null.
+      // Treat that exactly like an omitted optional property, while required
+      // fields and all non-null nested values remain strict.
+      if (required.contains(property.getKey()) || !property.getValue().isNull()) {
+        rejectNulls(property.getValue(), property.getKey());
+      }
     }
     for (String field : required) {
-      if (!object.has(field)) {
+      if (!object.hasNonNull(field)) {
         throw new InvalidMessageException("missing required field: " + field);
       }
     }
@@ -60,10 +65,7 @@ final class WireValues {
   }
 
   static String optionalText(JsonNode object, String field) {
-    if (!object.has(field)) {
-      return null;
-    }
-    return text(object, field);
+    return object.hasNonNull(field) ? text(object, field) : null;
   }
 
   static UUID uuid(JsonNode object, String field) {
@@ -75,7 +77,7 @@ final class WireValues {
   }
 
   static UUID optionalUuid(JsonNode object, String field) {
-    return object.has(field) ? uuid(object, field) : null;
+    return object.hasNonNull(field) ? uuid(object, field) : null;
   }
 
   static Instant instant(JsonNode object, String field) {
@@ -95,7 +97,7 @@ final class WireValues {
   }
 
   static Integer optionalPositiveInt(JsonNode object, String field) {
-    return object.has(field) ? positiveInt(object, field) : null;
+    return object.hasNonNull(field) ? positiveInt(object, field) : null;
   }
 
   static boolean bool(JsonNode object, String field) {
@@ -115,7 +117,7 @@ final class WireValues {
   }
 
   static JsonNode optionalObject(JsonNode object, String field) {
-    return object.has(field) ? object(object.get(field), field) : null;
+    return object.hasNonNull(field) ? object(object.get(field), field) : null;
   }
 
   static <T extends Enum<T>> T enumValue(JsonNode object, String field, Class<T> type) {
@@ -138,13 +140,9 @@ final class WireValues {
   }
 
   private static JsonNode requiredNode(JsonNode object, String field) {
-    if (!object.has(field)) {
+    if (!object.hasNonNull(field)) {
       throw new InvalidMessageException("missing required field: " + field);
     }
-    JsonNode value = object.get(field);
-    if (value == null || value.isNull()) {
-      throw new InvalidMessageException(field + " must not be null");
-    }
-    return value;
+    return object.get(field);
   }
 }
