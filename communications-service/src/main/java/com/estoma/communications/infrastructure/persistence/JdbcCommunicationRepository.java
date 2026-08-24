@@ -12,16 +12,6 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-/**
- * JDBC implementation of {@link CommunicationRepository}. {@link #insert}
- * runs under {@code Propagation.NESTED} for the same reason {@code
- * authentication-service}'s {@code JdbcAccountRepository} does: a
- * constraint-violation-translated rejection must not abort the enclosing
- * dispatcher transaction, since both the durable command path (which
- * appends a Rejected result) and the {@code AppointmentCancelled} adapter
- * path (which treats the conflict as an idempotent no-op) need to keep
- * writing in the same transaction right after catching it.
- */
 @Repository
 class JdbcCommunicationRepository implements CommunicationRepository {
 
@@ -29,8 +19,8 @@ class JdbcCommunicationRepository implements CommunicationRepository {
       """
       communication_id, recipient_account_id, system_code, communication_type, priority,
       source_service, source_reference_type, source_reference_id, initiated_by_account_id,
-       status, created_at, completed_at, failed_at, requested_channels, source_message_id, idempotency_key,
-       request_fingerprint, correlation_id, causation_id
+      status, created_at, completed_at, failed_at, requested_channels, source_message_id, idempotency_key,
+      request_fingerprint, correlation_id, causation_id
       """;
 
   private final JdbcClient jdbc;
@@ -46,23 +36,35 @@ class JdbcCommunicationRepository implements CommunicationRepository {
         .query(CommunicationRowMapper.INSTANCE)
         .optional();
   }
-  @Override public Optional<Communication> findByIdForUpdate(UUID communicationId) {
+
+  @Override
+  public Optional<Communication> findByIdForUpdate(UUID communicationId) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE communication_id = :communicationId FOR UPDATE")
-        .param("communicationId", communicationId).query(CommunicationRowMapper.INSTANCE).optional();
+        .param("communicationId", communicationId)
+        .query(CommunicationRowMapper.INSTANCE)
+        .optional();
   }
 
   @Override
-  public Optional<Communication> findBySourceAndIdempotency(String sourceService, UUID idempotencyKey) {
+  public Optional<Communication> findBySourceAndIdempotency(String sourceService, String idempotencyKey) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE source_service = :sourceService AND idempotency_key = :idempotencyKey")
-        .param("sourceService", sourceService).param("idempotencyKey", idempotencyKey.toString()).query(CommunicationRowMapper.INSTANCE).optional();
+        .param("sourceService", sourceService)
+        .param("idempotencyKey", idempotencyKey)
+        .query(CommunicationRowMapper.INSTANCE)
+        .optional();
   }
 
   @Override
   public Optional<Communication> findLegacyByOrigin(Communication c) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM communications WHERE source_service = :sourceService AND source_reference_type = :sourceType AND source_reference_id = :sourceId AND recipient_account_id = :recipient AND system_code = :system AND communication_type = :type")
-        .param("sourceService", c.sourceService()).param("sourceType", c.sourceReferenceType()).param("sourceId", c.sourceReferenceId())
-        .param("recipient", c.recipientAccountId()).param("system", c.systemCode()).param("type", c.communicationType())
-        .query(CommunicationRowMapper.INSTANCE).optional();
+        .param("sourceService", c.sourceService())
+        .param("sourceType", c.sourceReferenceType())
+        .param("sourceId", c.sourceReferenceId())
+        .param("recipient", c.recipientAccountId())
+        .param("system", c.systemCode())
+        .param("type", c.communicationType())
+        .query(CommunicationRowMapper.INSTANCE)
+        .optional();
   }
 
   @Override
@@ -74,15 +76,15 @@ class JdbcCommunicationRepository implements CommunicationRepository {
               INSERT INTO communications (
                 communication_id, recipient_account_id, system_code, communication_type, priority,
                 source_service, source_reference_type, source_reference_id, initiated_by_account_id,
-                 status, created_at, completed_at, failed_at, requested_channels, source_message_id, idempotency_key,
-                 request_fingerprint, correlation_id, causation_id
+                status, created_at, completed_at, failed_at, requested_channels, source_message_id, idempotency_key,
+                request_fingerprint, correlation_id, causation_id
               ) VALUES (
                 :communicationId, :recipientAccountId, :systemCode, :communicationType, CAST(:priority AS communication_priority),
                 :sourceService, :sourceReferenceType, :sourceReferenceId, :initiatedByAccountId,
-                 CAST(:status AS communication_status), :createdAt, :completedAt, :failedAt, :requestedChannels,
-                 :sourceMessageId, :idempotencyKey, :requestFingerprint, :correlationId, :causationId
-               ) ON CONFLICT DO NOTHING
-               """)
+                CAST(:status AS communication_status), :createdAt, :completedAt, :failedAt, :requestedChannels,
+                :sourceMessageId, :idempotencyKey, :requestFingerprint, :correlationId, :causationId
+              ) ON CONFLICT DO NOTHING
+              """)
           .param("communicationId", communication.communicationId())
           .param("recipientAccountId", communication.recipientAccountId())
           .param("systemCode", communication.systemCode())
@@ -98,35 +100,36 @@ class JdbcCommunicationRepository implements CommunicationRepository {
           .param("failedAt", Timestamps.toTimestamp(communication.failedAt()))
           .param("requestedChannels", communication.requestedChannels().toArray(String[]::new))
           .param("sourceMessageId", communication.sourceMessageId())
-           .param("idempotencyKey", communication.idempotencyKey() == null ? null : communication.idempotencyKey().toString())
+          .param("idempotencyKey", communication.idempotencyKey())
           .param("requestFingerprint", communication.requestFingerprint())
           .param("correlationId", communication.correlationId())
-           .param("causationId", communication.causationId())
-            .update();
-      if (inserted == 0) {
-        if (communication.idempotencyKey() != null) {
-          Optional<Communication> existing = findBySourceAndIdempotency(communication.sourceService(), communication.idempotencyKey());
-          if (existing.isPresent() && java.util.Objects.equals(existing.get().requestFingerprint(), communication.requestFingerprint())) return existing.get();
-          if (existing.isEmpty() && findLegacyByOrigin(communication).isPresent())
-            throw new CommunicationsRejectedException(RejectionCode.COMMUNICATION_ALREADY_EXISTS, "communication origin already exists");
-          throw new CommunicationsRejectedException(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST,
-              "idempotency key was reused with a different request");
-        }
-        throw new CommunicationsRejectedException(RejectionCode.COMMUNICATION_ALREADY_EXISTS, "communication origin already exists");
-      }
+          .param("causationId", communication.causationId())
+          .update();
+      if (inserted == 0) return resolveConflict(communication);
       return communication;
     } catch (DuplicateKeyException e) {
-      if (communication.idempotencyKey() != null) {
-        Optional<Communication> existing = findBySourceAndIdempotency(communication.sourceService(), communication.idempotencyKey());
-        if (existing.isPresent() && java.util.Objects.equals(existing.get().requestFingerprint(), communication.requestFingerprint())) return existing.get();
-        if (existing.isEmpty() && findLegacyByOrigin(communication).isPresent())
-          throw new CommunicationsRejectedException(RejectionCode.COMMUNICATION_ALREADY_EXISTS, "communication origin already exists");
-        throw new CommunicationsRejectedException(RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST,
-            "idempotency key was reused with a different request");
+      return resolveConflict(communication);
+    }
+  }
+
+  private Communication resolveConflict(Communication communication) {
+    if (communication.idempotencyKey() != null) {
+      Optional<Communication> existing =
+          findBySourceAndIdempotency(communication.sourceService(), communication.idempotencyKey());
+      if (existing.isPresent()
+          && java.util.Objects.equals(existing.get().requestFingerprint(), communication.requestFingerprint())) {
+        return existing.get();
+      }
+      if (existing.isEmpty() && findLegacyByOrigin(communication).isPresent()) {
+        throw new CommunicationsRejectedException(
+            RejectionCode.COMMUNICATION_ALREADY_EXISTS, "communication origin already exists");
       }
       throw new CommunicationsRejectedException(
-          RejectionCode.COMMUNICATION_ALREADY_EXISTS, "communication origin already exists");
+          RejectionCode.IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST,
+          "idempotency key was reused with a different request");
     }
+    throw new CommunicationsRejectedException(
+        RejectionCode.COMMUNICATION_ALREADY_EXISTS, "communication origin already exists");
   }
 
   @Override

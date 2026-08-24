@@ -1,6 +1,5 @@
 package com.estoma.communications.infrastructure.messaging;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -85,6 +84,7 @@ class CommandListenerTest {
   private static MessageEnvelope envelope() {
     return new MessageEnvelope(
         UUID.randomUUID(), "RegisterInboxVisit", 1, MessageKind.COMMAND, "bff", Instant.now(), UUID.randomUUID(), null,
-        UUID.randomUUID(), UUID.randomUUID(), null, null, Actor.system("bff"), new ObjectMapper().createObjectNode());
+        UUID.randomUUID(), "bff:register-inbox:" + UUID.randomUUID(), null, null,
+        Actor.system("bff"), new ObjectMapper().createObjectNode());
   }
 }
