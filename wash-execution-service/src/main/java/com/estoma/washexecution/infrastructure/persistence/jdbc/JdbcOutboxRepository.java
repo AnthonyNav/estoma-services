@@ -20,8 +20,8 @@ public class JdbcOutboxRepository implements OutboxRepository {
           actor_json,payload_json,status,attempt_count,available_at,created_at)
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,CAST(? AS jsonb),CAST(? AS jsonb),'PENDING',0,?,?)
         """, m.messageId(), m.messageType(), m.messageVersion(), m.messageKind(), m.producer(),
-        m.routingKey(), m.occurredAt(), m.operationId(), m.idempotencyKey(), m.aggregateId(),
+        m.routingKey(), JdbcTemporal.timestamp(m.occurredAt()), m.operationId(), m.idempotencyKey(), m.aggregateId(),
         m.aggregateVersion(), m.correlationId(), m.causationId(), m.actorJson(), m.payloadJson(),
-        m.occurredAt(), Instant.now());
+        JdbcTemporal.timestamp(m.occurredAt()), JdbcTemporal.timestamp(Instant.now()));
   }
 }

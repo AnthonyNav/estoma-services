@@ -29,7 +29,7 @@ public class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepos
           producer,operation_type,idempotency_key,request_fingerprint,status,created_at)
         VALUES(?,?,?,?, 'IN_PROGRESS', ?)
         ON CONFLICT(producer,operation_type,idempotency_key) DO NOTHING
-        """, producer, operationType, idempotencyKey, requestFingerprint, now) == 1;
+        """, producer, operationType, idempotencyKey, requestFingerprint, JdbcTemporal.timestamp(now)) == 1;
   }
 
   @Override
@@ -54,7 +54,8 @@ public class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepos
         UPDATE command_idempotency_records
         SET status='SUCCEEDED',aggregate_id=?,aggregate_version=?,result_json=?,error_code=NULL,completed_at=?
         WHERE producer=? AND operation_type=? AND idempotency_key=? AND status='IN_PROGRESS'
-        """, aggregateId, aggregateVersion, resultJson, now, producer, operationType, idempotencyKey);
+        """, aggregateId, aggregateVersion, resultJson, JdbcTemporal.timestamp(now), producer,
+        operationType, idempotencyKey);
     if (updated != 1) throw new IllegalStateException("IDEMPOTENCY_STATE_CONFLICT");
   }
 
@@ -71,7 +72,8 @@ public class JdbcCommandIdempotencyRepository implements CommandIdempotencyRepos
         UPDATE command_idempotency_records
         SET status='REJECTED',aggregate_id=?,aggregate_version=NULL,result_json=?,error_code=?,completed_at=?
         WHERE producer=? AND operation_type=? AND idempotency_key=? AND status='IN_PROGRESS'
-        """, aggregateId, resultJson, errorCode, now, producer, operationType, idempotencyKey);
+        """, aggregateId, resultJson, errorCode, JdbcTemporal.timestamp(now), producer,
+        operationType, idempotencyKey);
     if (updated != 1) throw new IllegalStateException("IDEMPOTENCY_STATE_CONFLICT");
   }
 

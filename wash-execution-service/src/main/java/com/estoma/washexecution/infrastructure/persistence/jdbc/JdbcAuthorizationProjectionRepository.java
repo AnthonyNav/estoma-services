@@ -34,7 +34,7 @@ public class JdbcAuthorizationProjectionRepository implements ProjectionReposito
         ON CONFLICT(account_id) DO UPDATE SET role_code=excluded.role_code,
           role_source_version=excluded.role_source_version,updated_at=excluded.updated_at
         WHERE authorization_role_projection.role_source_version < excluded.role_source_version
-        """, role.accountId(), role.roleCode(), role.roleSourceVersion(), Instant.now());
+        """, role.accountId(), role.roleCode(), role.roleSourceVersion(), JdbcTemporal.timestamp(Instant.now()));
   }
 
   @Override
@@ -48,7 +48,7 @@ public class JdbcAuthorizationProjectionRepository implements ProjectionReposito
           updated_at=excluded.updated_at
         WHERE authorization_access_projection.access_source_version < excluded.access_source_version
         """, access.accountId(), access.systemId(), access.systemCode(), access.accessStatus(),
-        access.accessSourceVersion(), Instant.now());
+        access.accessSourceVersion(), JdbcTemporal.timestamp(Instant.now()));
   }
 
   private ProjectionRepositories.RoleProjection mapRole(ResultSet rs, int row) throws SQLException {

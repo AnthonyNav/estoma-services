@@ -29,7 +29,8 @@ public class JdbcEntryValidationRepository implements EntryValidationRepository 
           decision, rejection_reason, decided_by_account_id, decided_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, v.entryValidationId(), v.washExecutionId(), v.identityConfirmed(), v.requirementsSatisfied(), v.decision().name(),
-        v.rejectionReason(), v.decidedByAccountId(), v.decidedAt(), Instant.now());
+        v.rejectionReason(), v.decidedByAccountId(), JdbcTemporal.timestamp(v.decidedAt()),
+        JdbcTemporal.timestamp(Instant.now()));
   }
 
   private EntryValidation map(ResultSet rs, int row) throws SQLException {

@@ -56,7 +56,7 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
         INSERT INTO projection_recovery_jobs(
           recovery_job_id,projection_name,scope,service_date,status,created_at,updated_at)
         VALUES(?,?,'FULL',?,'PENDING',?,?)
-        """, id, projection, date, now, now);
+        """, id, projection, date, JdbcTemporal.timestamp(now), JdbcTemporal.timestamp(now));
     return find(id);
   }
 
@@ -67,7 +67,7 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
         INSERT INTO projection_recovery_jobs(
           recovery_job_id,projection_name,scope,entity_key,status,created_at,updated_at)
         VALUES(?,?,'ENTITY',?,'PENDING',?,?)
-        """, id, projection, key, now, now);
+        """, id, projection, key, JdbcTemporal.timestamp(now), JdbcTemporal.timestamp(now));
     return find(id);
   }
 
@@ -85,7 +85,8 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
         FROM candidate c
         WHERE j.recovery_job_id=c.recovery_job_id
         RETURNING j.*
-        """, this::map, now, limit, token, leaseUntil, now);
+        """, this::map, JdbcTemporal.timestamp(now), limit, token, JdbcTemporal.timestamp(leaseUntil),
+        JdbcTemporal.timestamp(now));
   }
 
   @Override
@@ -103,7 +104,7 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
           current_query_message_id=?,current_operation_id=?,current_correlation_id=?,
           claim_token=NULL,lease_until=NULL,updated_at=?
         WHERE recovery_job_id=? AND status='PENDING' AND claim_token=?
-        """, type, messageId, operationId, correlationId, now, id, token) == 1;
+        """, type, messageId, operationId, correlationId, JdbcTemporal.timestamp(now), id, token) == 1;
   }
 
   @Override
@@ -121,7 +122,7 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
         SET status='PENDING',cursor=?,current_query_type=NULL,current_query_message_id=NULL,
           current_operation_id=NULL,current_correlation_id=NULL,last_error_code=NULL,updated_at=?
         WHERE recovery_job_id=? AND status='WAITING_RESULT'
-        """, cursor, now, id);
+        """, cursor, JdbcTemporal.timestamp(now), id);
   }
 
   @Override
@@ -132,7 +133,7 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
           current_operation_id=NULL,current_correlation_id=NULL,last_error_code=NULL,
           completed_at=?,updated_at=?
         WHERE recovery_job_id=? AND status='WAITING_RESULT'
-        """, now, now, id);
+        """, JdbcTemporal.timestamp(now), JdbcTemporal.timestamp(now), id);
   }
 
   @Override
@@ -143,7 +144,7 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
           current_operation_id=NULL,current_correlation_id=NULL,claim_token=NULL,lease_until=NULL,
           last_error_code=?,updated_at=?
         WHERE recovery_job_id=? AND status IN ('PENDING','WAITING_RESULT')
-        """, error, now, id);
+        """, error, JdbcTemporal.timestamp(now), id);
   }
 
   @Override
@@ -153,7 +154,7 @@ public final class JdbcRecoveryJobStore implements RecoveryJobStore {
         SET status='PENDING',current_query_type=NULL,current_query_message_id=NULL,
           current_operation_id=NULL,current_correlation_id=NULL,last_error_code='RESULT_TIMEOUT',updated_at=?
         WHERE status='WAITING_RESULT' AND updated_at<=?
-        """, now, threshold);
+        """, JdbcTemporal.timestamp(now), JdbcTemporal.timestamp(threshold));
   }
 
   private Job find(UUID id) {

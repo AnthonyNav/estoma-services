@@ -84,7 +84,8 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
           cabin_type=excluded.cabin_type,status=excluded.status,source_version=excluded.source_version,
           updated_at=excluded.updated_at
         WHERE cabin_projection.source_version < excluded.source_version
-        """, c.cabinId(), c.code(), c.name(), c.type().name(), c.status(), c.sourceVersion(), Instant.now());
+        """, c.cabinId(), c.code(), c.name(), c.type().name(), c.status(), c.sourceVersion(),
+        JdbcTemporal.timestamp(Instant.now()));
   }
 
   @Override
@@ -97,7 +98,7 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
           source_version=excluded.source_version,updated_at=excluded.updated_at
         WHERE tank_projection.source_version < excluded.source_version
         """, t.tankId(), t.cabinId(), t.code(), t.name(), t.configuredCapacity(), t.status(),
-        t.sourceVersion(), Instant.now());
+        t.sourceVersion(), JdbcTemporal.timestamp(Instant.now()));
   }
 
   @Override
@@ -111,7 +112,7 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
           status=excluded.status,source_version=excluded.source_version,updated_at=excluded.updated_at
         WHERE resource_priority_projection.source_version < excluded.source_version
         """, p.resourcePriorityId(), p.appointmentType().name(), p.cabinType().name(), p.usageMode(),
-        p.priorityOrder(), p.status(), p.sourceVersion(), Instant.now());
+        p.priorityOrder(), p.status(), p.sourceVersion(), JdbcTemporal.timestamp(Instant.now()));
   }
 
   private ProjectionRepositories.ResourceCandidate mapCandidate(ResultSet rs, int row) throws SQLException {

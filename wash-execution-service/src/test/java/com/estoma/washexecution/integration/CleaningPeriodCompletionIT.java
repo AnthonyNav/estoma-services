@@ -1,4 +1,4 @@
-package com.estoma.washexecution.application;
+package com.estoma.washexecution.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

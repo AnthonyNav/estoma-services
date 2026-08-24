@@ -41,8 +41,8 @@ public class JdbcAppointmentProjectionRepository implements ProjectionRepositori
           updated_at=excluded.updated_at
         WHERE appointment_projection.source_version < excluded.source_version
         """, c.appointmentId(), c.studentAccountId(), c.appointmentTimeSlotId(), c.courseSectionId(),
-        c.appointmentType().name(), c.instrumentCount(), c.pieceType(), c.status(), c.entryAuthorizedAt(),
-        c.sourceVersion(), Instant.now());
+        c.appointmentType().name(), c.instrumentCount(), c.pieceType(), c.status(),
+        JdbcTemporal.timestamp(c.entryAuthorizedAt()), c.sourceVersion(), JdbcTemporal.timestamp(Instant.now()));
   }
 
   private ProjectionRepositories.AppointmentContext map(ResultSet rs, int row) throws SQLException {

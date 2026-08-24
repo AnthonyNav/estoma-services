@@ -1,4 +1,4 @@
-package com.estoma.washexecution.application;
+package com.estoma.washexecution.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,6 +20,7 @@ import com.estoma.washexecution.domain.execution.ResourceAssignment;
 import com.estoma.washexecution.domain.execution.UnavailabilityCauseType;
 import com.estoma.washexecution.domain.execution.WashExecution;
 import com.estoma.washexecution.domain.execution.WashExecutionStatus;
+import com.estoma.washexecution.infrastructure.persistence.jdbc.JdbcTemporal;
 import com.estoma.washexecution.testsupport.AbstractPostgresIT;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -384,8 +385,9 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
           appointment_time_slot_id,calendar_id,service_date,starts_at,ends_at,timezone,
           arrival_tolerance_until,status,source_version,updated_at)
         VALUES(?,?,?,?,?,'UTC',?,'ACTIVE',1,now())
-        """, slotId, calendarId, SERVICE_DATE, startsAt, startsAt.plusSeconds(60 * 60L),
-        startsAt.plusSeconds(10 * 60L));
+        """, slotId, calendarId, SERVICE_DATE, JdbcTemporal.timestamp(startsAt),
+        JdbcTemporal.timestamp(startsAt.plusSeconds(60 * 60L)),
+        JdbcTemporal.timestamp(startsAt.plusSeconds(10 * 60L)));
     return slotId;
   }
 
