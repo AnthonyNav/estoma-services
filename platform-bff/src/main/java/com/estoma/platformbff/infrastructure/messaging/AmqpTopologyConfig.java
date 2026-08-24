@@ -60,6 +60,21 @@ public class AmqpTopologyConfig {
         BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.revoked"),
         BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.all-revoked"),
         BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.other-revoked"),
-        BindingBuilder.bind(queue).to(eventsExchange).with("users.person.deactivated"));
+        BindingBuilder.bind(queue).to(eventsExchange).with("users.person.created"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("users.person.updated"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("users.person.activated"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("users.person.deactivated"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authorization.account-role.assigned"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authorization.account-role.changed"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authorization.system-access.granted"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authorization.system-access.suspended"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authorization.system-access.revoked"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authorization.system-access.restored"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("academic.#"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("communications.inbox-message.#"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("communications.inbox.visited"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("wash-administration.#"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("appointments.#"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("wash-execution.#"));
   }
 }

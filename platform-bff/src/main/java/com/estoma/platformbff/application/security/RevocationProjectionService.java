@@ -40,6 +40,13 @@ public class RevocationProjectionService {
       return true;
     }
 
+    projectTrusted(event);
+    return true;
+  }
+
+  /** Called by the single Event runtime after its own Inbox row is inserted. */
+  public void projectTrusted(RevocationProjectionEvent event) {
+    var metadata = event.metadata();
     switch (event) {
       case RevocationProjectionEvent.AccountCreated created ->
           projection.linkAccountToPerson(
@@ -66,6 +73,5 @@ public class RevocationProjectionService {
               deactivated.personId(), deactivated.revokedAtEpochSeconds(),
               deactivated.reasonCode(), metadata.messageId(), metadata.occurredAt());
     }
-    return true;
   }
 }

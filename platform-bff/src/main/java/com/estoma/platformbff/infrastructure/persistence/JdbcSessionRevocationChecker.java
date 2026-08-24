@@ -2,6 +2,8 @@ package com.estoma.platformbff.infrastructure.persistence;
 
 import com.estoma.platformbff.application.security.RevocationPolicy;
 import com.estoma.platformbff.application.security.SessionRevocationChecker;
+import com.estoma.platformbff.application.port.ProjectionStatusRepository;
+import com.estoma.platformbff.domain.projection.ProjectionStatus;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
@@ -9,14 +11,22 @@ import org.springframework.stereotype.Component;
 @Component
 public class JdbcSessionRevocationChecker implements SessionRevocationChecker {
   private final JdbcClient jdbc;
+  private final ProjectionStatusRepository statuses;
 
-  public JdbcSessionRevocationChecker(JdbcClient jdbc) {
+  public JdbcSessionRevocationChecker(JdbcClient jdbc, ProjectionStatusRepository statuses) {
     this.jdbc = jdbc;
+    this.statuses = statuses;
   }
 
   @Override
   public boolean isRevoked(
       UUID accountId, UUID personId, UUID sessionId, long issuedAtEpochSeconds) {
+    // Revocation is security-critical: an unavailable or rebuilding projection fails closed.
+    if (statuses.findByName("revocation")
+        .map(state -> state.status() != ProjectionStatus.READY)
+        .orElse(true)) {
+      return true;
+    }
     boolean sessionRevoked = jdbc.sql(
             "SELECT 1 FROM session_revocations WHERE session_id = :sessionId")
         .param("sessionId", sessionId)

@@ -5,7 +5,11 @@ import com.estoma.platformbff.application.port.MessageSerializer;
 import com.estoma.platformbff.contracts.messaging.ActorContext;
 import com.estoma.platformbff.contracts.messaging.CommandEnvelope;
 import com.estoma.platformbff.contracts.messaging.EventEnvelope;
+import com.estoma.platformbff.contracts.messaging.QueryEnvelope;
 import com.estoma.platformbff.contracts.messaging.ResultEnvelope;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -40,6 +44,10 @@ public class MessageEnvelopeCodec implements MessageSerializer {
     return mapper.readValue(body, ResultEnvelope.class);
   }
 
+  public QueryEnvelope readQuery(byte[] body) {
+    return mapper.readValue(body, QueryEnvelope.class);
+  }
+
   public EventEnvelope readEvent(byte[] body) {
     return mapper.readValue(body, EventEnvelope.class);
   }
@@ -67,7 +75,7 @@ public class MessageEnvelopeCodec implements MessageSerializer {
         result.messageKind(), result.producer(), result.occurredAt(), result.correlationId(),
         result.causationId(), result.operationId(), result.aggregateId(), result.aggregateVersion(),
         status, data == null || data.isNull() ? null : mapper.writeValueAsString(data),
-        errorCode, errorDetails);
+        errorCode, errorDetails, data == null || !data.isObject() ? null : object(data));
   }
 
   public String canonical(JsonNode value) {
@@ -76,5 +84,25 @@ public class MessageEnvelopeCodec implements MessageSerializer {
 
   public ActorContext readActor(String json) {
     return json == null ? ActorContext.anonymous() : mapper.readValue(json, ActorContext.class);
+  }
+
+  private static Map<String, Object> object(JsonNode node) {
+    Map<String, Object> result = new HashMap<>();
+    node.properties().forEach(entry -> result.put(entry.getKey(), value(entry.getValue())));
+    return result;
+  }
+
+  private static Object value(JsonNode node) {
+    if (node == null || node.isNull()) return null;
+    if (node.isObject()) return object(node);
+    if (node.isArray()) {
+      var result = new ArrayList<>();
+      node.forEach(child -> result.add(value(child)));
+      return result;
+    }
+    if (node.isBoolean()) return node.asBoolean();
+    if (node.isIntegralNumber()) return node.longValue();
+    if (node.isNumber()) return node.doubleValue();
+    return node.asText();
   }
 }
