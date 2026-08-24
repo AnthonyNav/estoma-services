@@ -110,6 +110,30 @@ public class CommandDispatcher {
     }
   }
 
+  /** Persists a canonical terminal FAILED Result for a coordinated Academic command. */
+  @Transactional
+  public void fail(MessageEnvelope envelope, String errorCode) {
+    if (!"academic".equals(envelope.producer())) {
+      throw new IllegalArgumentException("terminal coordinated Result is only defined for academic Commands");
+    }
+    CommandIdempotencyRepository.ClaimResult claim = idempotency.claim(
+        envelope.producer(), envelope.messageType(), envelope.idempotencyKey(),
+        fingerprint(envelope), envelope.aggregateId());
+    if (claim instanceof CommandIdempotencyRepository.ClaimResult.Conflict) {
+      throw new IllegalStateException("cannot terminalize a command whose idempotency intention conflicts");
+    }
+    if (claim instanceof CommandIdempotencyRepository.ClaimResult.Replay replay) {
+      appendResult(envelope, null, null, replay.resultPayloadJson());
+      return;
+    }
+
+    ResultPayload payload = new ResultPayload(
+        ResultStatus.FAILED, importCoordinates(envelope), ErrorPayload.of(errorCode));
+    String payloadJson = codec.writeValueAsString(payload);
+    complete(envelope, ResultStatus.FAILED, payloadJson);
+    appendResult(envelope, envelope.aggregateId(), null, payloadJson);
+  }
+
   private void appendRejectedResult(
       MessageEnvelope envelope, AuthenticationRejectedException rejected, boolean complete) {
     ResultPayload payload = rejectedPayload(envelope, rejected.code().name());
