@@ -304,17 +304,30 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
     Map<String, Object> p = event.payload();
     long version = aggregateVersion(event);
     switch (event.messageType()) {
-      case "WashResourceAssigned", "WashResourceReassigned" -> {
+      case "WashResourceAssigned" -> {
         UUID executionId = uuid(p, "washExecutionId");
         aggregate(event, executionId);
-        UUID assignmentId = uuid(p, event.messageType().equals("WashResourceAssigned")
-            ? "resourceAssignmentId" : "newResourceAssignmentId");
         readModels.upsert(new ProjectionReadModel.ResourceAssignment(
-            assignmentId, executionId, optionalUuid(p, "appointmentId"), optionalUuid(p, "appointmentTimeSlotId"),
-            optionalUuid(p, event.messageType().equals("WashResourceAssigned") ? "cabinId" : "newCabinId"),
-            optionalUuid(p, event.messageType().equals("WashResourceAssigned") ? "tankId" : "newTankId"),
-            optionalText(p, "assignmentType"), optionalInstant(p, "assignedAt"),
-            optionalInstant(p, "releasedAt"), event.messageId(), version, event.occurredAt()));
+            uuid(p, "resourceAssignmentId"), executionId, optionalUuid(p, "appointmentId"),
+            optionalUuid(p, "appointmentTimeSlotId"), optionalUuid(p, "cabinId"), optionalUuid(p, "tankId"),
+            optionalText(p, "assignmentType"), optionalInstant(p, "assignedAt"), null,
+            event.messageId(), version, event.occurredAt()));
+      }
+      case "WashResourceReassigned" -> {
+        UUID executionId = uuid(p, "washExecutionId");
+        aggregate(event, executionId);
+
+        readModels.upsert(new ProjectionReadModel.ResourceAssignment(
+            uuid(p, "previousResourceAssignmentId"), executionId, optionalUuid(p, "appointmentId"),
+            optionalUuid(p, "appointmentTimeSlotId"), optionalUuid(p, "previousCabinId"),
+            optionalUuid(p, "previousTankId"), null, null, optionalInstant(p, "releasedAt"),
+            event.messageId(), version, event.occurredAt()));
+
+        readModels.upsert(new ProjectionReadModel.ResourceAssignment(
+            uuid(p, "newResourceAssignmentId"), executionId, optionalUuid(p, "appointmentId"),
+            optionalUuid(p, "appointmentTimeSlotId"), optionalUuid(p, "newCabinId"), optionalUuid(p, "newTankId"),
+            optionalText(p, "assignmentType"), optionalInstant(p, "assignedAt"), null,
+            event.messageId(), version, event.occurredAt()));
       }
       case "OperationalResourceDisabled", "OperationalResourceRestored" -> {
         UUID id = uuid(p, "resourceUnavailabilityId");
