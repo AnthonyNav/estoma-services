@@ -220,11 +220,14 @@ public class ProjectionEventRuntime {
               "cancelledByAccountId", "completedByAccountId", "submittedByStudentAccountId", "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount",
               "finalPackageCount", "finalGreenPaperCassette8Count", "finalGreenPaperCassette10Count", "finalWitnessTapePortionCount"), true);
     }
-    for (String type : Set.of("WashResourceAssigned", "WashResourceReassigned")) {
-      register(entries, "wash-execution", type, Set.of("washExecutionId"),
-          Set.of("resourceAssignmentId", "washExecutionId", "appointmentId", "appointmentTimeSlotId", "cabinId", "tankId", "assignmentType", "assignedByAccountId", "assignedAt",
-              "previousResourceAssignmentId", "previousCabinId", "previousTankId", "releaseReason", "newResourceAssignmentId", "newCabinId", "newTankId", "releasedAt"), true);
-    }
+    register(entries, "wash-execution", "WashResourceAssigned",
+        Set.of("resourceAssignmentId", "washExecutionId", "cabinId", "tankId", "assignmentType", "assignedAt"),
+        Set.of("resourceAssignmentId", "washExecutionId", "appointmentId", "appointmentTimeSlotId", "cabinId", "tankId", "assignmentType", "assignedByAccountId", "assignedAt"), true);
+    register(entries, "wash-execution", "WashResourceReassigned",
+        Set.of("washExecutionId", "previousResourceAssignmentId", "previousCabinId", "previousTankId", "releasedAt",
+            "newResourceAssignmentId", "newCabinId", "newTankId", "assignmentType", "assignedAt"),
+        Set.of("washExecutionId", "appointmentId", "appointmentTimeSlotId", "previousResourceAssignmentId", "previousCabinId", "previousTankId",
+            "releaseReason", "releasedAt", "newResourceAssignmentId", "newCabinId", "newTankId", "assignmentType", "assignedByAccountId", "assignedAt"), true);
     for (String type : Set.of("OperationalResourceDisabled", "OperationalResourceRestored")) {
       register(entries, "wash-execution", type, Set.of("resourceUnavailabilityId"),
           Set.of("resourceUnavailabilityId", "cabinId", "tankId", "detectedDuringWashExecutionId", "causeType", "reason", "status", "disabledByAccountId", "disabledAt", "restoredByAccountId", "restoredAt", "resolution", "resourceUnavailabilityVersion"), true);
