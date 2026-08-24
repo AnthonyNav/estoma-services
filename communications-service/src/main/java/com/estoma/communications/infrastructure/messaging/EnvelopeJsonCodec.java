@@ -5,15 +5,7 @@ import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-/**
- * Encodes/decodes the platform message envelope. Uses the application's
- * shared {@link ObjectMapper} bean (Jackson 3, the default JSON stack as of
- * Spring Boot 4.1) rather than constructing a private one.
- *
- * <p>Must tolerate unknown fields on deserialization for forward
- * compatibility (messaging-architecture.md:499) -- enforced by the shared
- * mapper's default configuration, not by this class.
- */
+/** Shared Jackson codec for durable messaging contracts. */
 @Component
 public class EnvelopeJsonCodec {
 
@@ -31,14 +23,20 @@ public class EnvelopeJsonCodec {
     return mapper.writeValueAsBytes(envelope);
   }
 
-  /** Converts the envelope's raw {@code payload} into a specific payload type. */
   public <T> T convertPayload(MessageEnvelope envelope, Class<T> payloadType) {
     return mapper.treeToValue(envelope.payload(), payloadType);
   }
 
-  /** Converts an arbitrary value into a {@link JsonNode}, for building outbound payloads. */
+  public <T> T treeToValue(JsonNode value, Class<T> type) {
+    return mapper.treeToValue(value, type);
+  }
+
   public JsonNode toJsonNode(Object value) {
     return mapper.valueToTree(value);
+  }
+
+  public JsonNode node(String json) {
+    return json == null ? null : mapper.readTree(json);
   }
 
   public String writeValueAsString(Object value) {

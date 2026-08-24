@@ -29,7 +29,7 @@ class AppointmentCancelledAdapterIT extends AbstractPostgresIT {
     var outcome = dispatcher.dispatch(envelope);
 
     assertThat(outcome).isInstanceOf(ProjectionOutcome.Applied.class);
-    assertThat(communicationRepository.findBySourceAndIdempotency("appointments-service", appointmentId).orElseThrow().correlationId())
+    assertThat(communicationRepository.findBySourceAndIdempotency("appointments", appointmentId).orElseThrow().correlationId())
         .isEqualTo(envelope.correlationId());
   }
 
@@ -50,10 +50,9 @@ class AppointmentCancelledAdapterIT extends AbstractPostgresIT {
     UUID studentAccountId = activeRecipient();
     UUID appointmentId = UUID.randomUUID();
 
-    var outcome =
-        dispatcher.dispatch(
-            Envelopes.event(
-                ConsumedEventTypes.APPOINTMENT_CANCELLED, new AppointmentCancelledPayload(appointmentId, studentAccountId, "STUDENT", null), appointmentId, 1));
+    var outcome = dispatcher.dispatch(
+        Envelopes.event(ConsumedEventTypes.APPOINTMENT_CANCELLED,
+            new AppointmentCancelledPayload(appointmentId, studentAccountId, "STUDENT", null), appointmentId, 1));
 
     assertThat(outcome).isInstanceOf(ProjectionOutcome.Applied.class);
   }

@@ -5,12 +5,12 @@ import com.estoma.communications.contracts.CommunicationStatus;
 import com.estoma.communications.domain.communication.Communication;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.UUID;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.jdbc.core.RowMapper;
 
-/** Maps one row of {@code communications} back into a {@link Communication}. */
+/** Maps one row of communications back into the aggregate. */
 final class CommunicationRowMapper implements RowMapper<Communication> {
 
   static final CommunicationRowMapper INSTANCE = new CommunicationRowMapper();
@@ -33,9 +33,13 @@ final class CommunicationRowMapper implements RowMapper<Communication> {
         Timestamps.toInstant(rs, "created_at"),
         Timestamps.toInstant(rs, "completed_at"),
         Timestamps.toInstant(rs, "failed_at"),
-        rs.getArray("requested_channels") == null ? List.of() : Arrays.asList((String[]) rs.getArray("requested_channels").getArray()),
-         rs.getObject("source_message_id", UUID.class), uuid(rs.getString("idempotency_key")),
-        rs.getString("request_fingerprint"), rs.getObject("correlation_id", UUID.class), rs.getObject("causation_id", UUID.class));
+        rs.getArray("requested_channels") == null
+            ? List.of()
+            : Arrays.asList((String[]) rs.getArray("requested_channels").getArray()),
+        rs.getObject("source_message_id", UUID.class),
+        rs.getString("idempotency_key"),
+        rs.getString("request_fingerprint"),
+        rs.getObject("correlation_id", UUID.class),
+        rs.getObject("causation_id", UUID.class));
   }
-  private static UUID uuid(String value) { return value == null || value.isBlank() ? null : UUID.fromString(value); }
 }
