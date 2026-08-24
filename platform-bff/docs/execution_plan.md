@@ -1,7 +1,7 @@
 # Platform BFF — Execution Plan V1
 
-**Ruta:** `platform-bff/docs/execution_plan.md`
-**Estado:** gate local de implementación V1
+**Ruta:** `platform-bff/docs/execution_plan.md`  
+**Estado:** gate local de implementación V1  
 **Contrato local:** [`system_contract.md`](system_contract.md)
 
 ## 1. Objetivo

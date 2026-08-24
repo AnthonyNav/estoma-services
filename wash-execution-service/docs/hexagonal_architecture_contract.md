@@ -1,7 +1,7 @@
 # Wash Execution Service — Hexagonal Architecture Contract V1
 
-**Ruta:** `wash-execution-service/docs/hexagonal_architecture_contract.md`
-**Estado:** contrato arquitectónico obligatorio para PR1–PR4
+**Ruta:** `wash-execution-service/docs/hexagonal_architecture_contract.md`  
+**Estado:** contrato arquitectónico obligatorio para PR1–PR4  
 **Aplica a:** `wash-execution-service`
 
 ## 1. Propósito

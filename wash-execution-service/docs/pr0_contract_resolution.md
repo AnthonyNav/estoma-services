@@ -1,7 +1,7 @@
 # Wash Execution Service — PR0 Contract Resolution
 
-**Ruta:** `wash-execution-service/docs/pr0_contract_resolution.md`
-**Estado:** RESOLVED_FOR_PR1
+**Ruta:** `wash-execution-service/docs/pr0_contract_resolution.md`  
+**Estado:** RESOLVED_FOR_PR1  
 **Canonical baseline:** `AnthonyNav/estomatologia-platform-docs` branch `docs/wash-execution-pr0-contract-hardening`
 
 ## 1. Propósito

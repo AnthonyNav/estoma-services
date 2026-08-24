@@ -1,6 +1,6 @@
 # Platform BFF — PR2 Review Resolution
 
-**Estado:** PR2 reconstruido y corregido; revisión contractual/estática final cerrada
+**Estado:** PR2 reconstruido y corregido; revisión contractual/estática final cerrada  
 **Rama:** `platform-bff/feat/pr2-durable-command-gateway`
 
 ## Resoluciones aplicadas

@@ -1,7 +1,7 @@
 # Platform BFF — PR2 Correction Gate
 
-**Ruta:** `platform-bff/docs/pr2_correction_gate.md`
-**Estado:** correcciones obligatorias antes de revisar/mergear PR2
+**Ruta:** `platform-bff/docs/pr2_correction_gate.md`  
+**Estado:** correcciones obligatorias antes de revisar/mergear PR2  
 **Aplica a:** `platform-bff/feat/pr2-durable-command-gateway`
 
 ## 1. Propósito
