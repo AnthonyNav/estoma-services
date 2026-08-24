@@ -36,7 +36,9 @@ public final class WashExecutionIntegrationQueryService {
       payload.put("status", "SUCCEEDED");
       if (query instanceof WashExecutionIntegrationQuery.GetContext get) {
         if (get.appointmentId() == null) throw new QueryRejected("INVALID_APPOINTMENT_ID");
-        payload.put("data", entity(repository.get(get.appointmentId())));
+        Map<String, Object> data = entity(repository.get(get.appointmentId()));
+        data.put("snapshotGeneratedAt", clock.instant());
+        payload.put("data", data);
       } else if (query instanceof WashExecutionIntegrationQuery.ListPage page) {
         if (page.serviceDate() == null) throw new QueryRejected("INVALID_SERVICE_DATE");
         int size = page.pageSize() == null ? 100 : page.pageSize();
