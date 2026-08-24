@@ -61,7 +61,7 @@ class OutboxRelayTest {
     Instant now = Instant.now();
     return new JdbcOutboxRelayRepository.OutboxRow(
         UUID.randomUUID(), type, 1, kind, UUID.randomUUID(), 1,
-        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+        UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "test:" + UUID.randomUUID(),
         Actor.system("communications"), destination, new ObjectMapper().createObjectNode(), now, 1);
   }
 }
