@@ -1,6 +1,7 @@
 package com.estoma.appointments.infrastructure.messaging;
 
 import com.estoma.appointments.application.model.ActorContext;
+import com.estoma.appointments.application.model.CapacityCausalContext;
 import com.estoma.appointments.application.model.CommandMetadata;
 import com.estoma.appointments.application.model.ExecutionEvent;
 import com.estoma.appointments.application.port.in.HandleResourceCapacityEventUseCase;
@@ -287,7 +288,7 @@ public class ProjectionEventDispatcher {
               text(p,"usageMode"),intValue(p,"priorityOrder"),text(p,"status"),v,e.occurredAt()));
       default -> throw new InvalidMessageException("unsupported Wash Administration event " + e.messageType());
     }
-    requestCapacityRecalculation(e, from, until);
+    requestCapacityRecalculation(e, from, until, null);
   }
 
   private void applyExecutionOperational(MessageEnvelope e) {
@@ -295,6 +296,7 @@ public class ProjectionEventDispatcher {
     long v = version(e);
     Instant from;
     Instant until;
+    CapacityCausalContext causalContext = null;
     switch (e.messageType()) {
       case "OperationalResourceDisabled" -> {
         from = instant(p,"disabledAt"); until = null;
@@ -314,10 +316,13 @@ public class ProjectionEventDispatcher {
       }
       case "CleaningPeriodStarted" -> {
         from = instant(p,"startsAt"); until = instant(p,"expectedEndsAt");
+        UUID washExecutionId = id(p,"washExecutionId",null);
+        String trigger = text(p,"cleaningTrigger");
+        causalContext = new CapacityCausalContext(washExecutionId, id(p,"appointmentId",null), trigger);
         executionProjection.upsertCleaningPeriod(
             new WashExecutionOperationalProjectionRepository.CleaningPeriodProjection(
-                id(p,"cleaningPeriodId",e.aggregateId()),id(p,"washExecutionId",null),
-                id(p,"resourceAssignmentId",null),id(p,"cabinId",null),text(p,"cleaningTrigger"),
+                id(p,"cleaningPeriodId",e.aggregateId()),washExecutionId,
+                id(p,"resourceAssignmentId",null),id(p,"cabinId",null),trigger,
                 from,until,null,v,e.occurredAt()));
       }
       case "CleaningPeriodCompleted" -> {
@@ -333,7 +338,7 @@ public class ProjectionEventDispatcher {
       }
       default -> throw new InvalidMessageException("unsupported Wash Execution operational event " + e.messageType());
     }
-    requestCapacityRecalculation(e, from, until);
+    requestCapacityRecalculation(e, from, until, causalContext);
   }
 
   private void dispatchExecution(MessageEnvelope e) {
@@ -369,11 +374,12 @@ public class ProjectionEventDispatcher {
         e.correlationId());
   }
 
-  private void requestCapacityRecalculation(MessageEnvelope e, Instant from, Instant until) {
+  private void requestCapacityRecalculation(MessageEnvelope e, Instant from, Instant until,
+      CapacityCausalContext causalContext) {
     CommandMetadata metadata = new CommandMetadata(e.messageId(), "capacity-event:" + e.messageId(),
         e.correlationId(), e.messageId(), ActorContext.system("appointments"), e.occurredAt());
     capacityEvents.handle(new HandleResourceCapacityEventUseCase.Command(
-        metadata,e.messageId(),from,until,e.occurredAt()));
+        metadata,e.messageId(),from,until,causalContext,e.occurredAt()));
   }
 
   private String projectionName(String type) {

@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class GrantExceptionalAppointmentAuthorizationHandler
+public class GrantExceptionalAppointmentAuthorizationHandler
     implements GrantExceptionalAppointmentAuthorizationUseCase {
   private final ExceptionalAppointmentAuthorizationRepository authorizations;
   private final AcademicProjectionRepository academic;
@@ -69,10 +69,7 @@ public final class GrantExceptionalAppointmentAuthorizationHandler
         authorizations.save(authorization);
         ApplicationSupport.appendEvent(outbox, command.metadata(),
             "ExceptionalAppointmentAuthorizationGranted", authorization.exceptionalAuthorizationId(),
-            authorization.version(), "{\"authorizationId\":\""
-                + authorization.exceptionalAuthorizationId() + "\",\"studentAccountId\":\""
-                + authorization.studentAccountId() + "\",\"serviceDate\":\""
-                + authorization.serviceDate() + "\"}", now);
+            authorization.version(), AppointmentEventPayloads.authorizationGranted(authorization), now);
         result = ApplicationResult.applied(authorization.exceptionalAuthorizationId(),
             authorization.version(), "exceptional authorization granted");
       }

@@ -12,11 +12,12 @@ import com.estoma.appointments.domain.model.AppointmentTimeSlot;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class CreateAppointmentTimeSlotHandler implements CreateAppointmentTimeSlotUseCase {
+public class CreateAppointmentTimeSlotHandler implements CreateAppointmentTimeSlotUseCase {
   private final AppointmentTimeSlotRepository slots;
   private final WashAdministrationProjectionRepository administration;
   private final CommandIdempotencyRepository idempotency;
@@ -61,25 +62,16 @@ public final class CreateAppointmentTimeSlotHandler implements CreateAppointment
       } else {
         result = validateAdministrativeSource(command);
         if (result == null) {
-          var schedule = administration.findSchedule(command.sourceScheduleId()).orElseThrow();
-          AppointmentTimeSlot slot = AppointmentTimeSlot.create(command.slotId(), command.sourceScheduleId(),
-              schedule.calendarId(), command.serviceDate(), command.startsAt(), command.endsAt(), command.timezone(),
+          UUID calendarId = administration.findSchedule(command.sourceScheduleId())
+              .orElseThrow(() -> new IllegalStateException("validated schedule disappeared"))
+              .calendarId();
+          AppointmentTimeSlot slot = AppointmentTimeSlot.create(command.slotId(), command.sourceScheduleId(), calendarId,
+              command.serviceDate(), command.startsAt(), command.endsAt(), command.timezone(),
               command.bookingDeadlineAt(), command.cancellationDeadlineAt(), command.arrivalToleranceUntil());
           slots.save(slot);
           ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentTimeSlotCreated",
               slot.appointmentTimeSlotId(), slot.version(),
-              "{\"appointmentTimeSlotId\":\"" + slot.appointmentTimeSlotId()
-                  + "\",\"sourceScheduleId\":\"" + slot.sourceScheduleId()
-                  + "\",\"calendarId\":\"" + slot.calendarId()
-                  + "\",\"serviceDate\":\"" + slot.serviceDate()
-                  + "\",\"startsAt\":\"" + slot.startsAt()
-                  + "\",\"endsAt\":\"" + slot.endsAt()
-                  + "\",\"timezone\":\"" + slot.timezone().getId()
-                  + "\",\"bookingDeadlineAt\":\"" + slot.bookingDeadlineAt()
-                  + "\",\"cancellationDeadlineAt\":\"" + slot.cancellationDeadlineAt()
-                  + "\",\"arrivalToleranceUntil\":\"" + slot.arrivalToleranceUntil()
-                  + "\",\"status\":\"" + slot.status()
-                  + "\",\"version\":" + slot.version() + "}", now);
+              AppointmentEventPayloads.timeSlotCreated(slot), now);
           String recalcPayload = "{\"sourceEventId\":\"" + command.metadata().messageId()
               + "\",\"slotId\":\"" + slot.appointmentTimeSlotId()
               + "\",\"expectedProjectionVersion\":0}";

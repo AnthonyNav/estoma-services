@@ -72,11 +72,7 @@ public class CancelScheduledAppointmentsForCapacityLossHandler
       if (sharedOverflow) sharedDemand--; else immunoDemand--;
       cancelled++;
       ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentCancelled",
-          changed.appointmentId(), changed.version(), "{\"appointmentId\":\""
-              + changed.appointmentId() + "\",\"appointmentTimeSlotId\":\""
-              + changed.appointmentTimeSlotId() + "\",\"status\":\"CANCELLED\","
-              + "\"cancellationType\":\"CLINIC\","
-              + "\"cancellationSubreason\":\"CAPACITY_LOSS\"}", now);
+          changed.appointmentId(), changed.version(), AppointmentEventPayloads.cancelled(changed), now);
     }
 
     ApplicationResult result = ApplicationResult.applied(command.slotId(), projection.version(),

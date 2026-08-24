@@ -12,15 +12,25 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class HandleWashExecutionCancelledHandler extends AbstractExecutionTransitionHandler
+public class HandleWashExecutionCancelledHandler extends AbstractExecutionTransitionHandler
     implements HandleWashExecutionCancelledUseCase {
+  private final PendingCapacityResolutionCoordinator capacityResolution;
+
   public HandleWashExecutionCancelledHandler(AppointmentRepository appointments, ProcessedMessageRepository inbox,
       WashExecutionTransitionRepository transitions, PendingWashExecutionEventRepository pending,
-      OutboxRepository outbox) {
+      OutboxRepository outbox, PendingCapacityResolutionCoordinator capacityResolution) {
     super(appointments, inbox, transitions, pending, outbox);
+    this.capacityResolution = capacityResolution;
   }
 
   @Override
   @Transactional
-  public ApplicationResult handle(ExecutionEvent event) { return apply(event, Kind.CANCELLED); }
+  public ApplicationResult handle(ExecutionEvent event) {
+    ApplicationResult result = apply(event, Kind.CANCELLED);
+    if (result.status() == ApplicationResult.Status.APPLIED) {
+      capacityResolution.resolve(event.washExecutionId(), "CANCELLED",
+          ApplicationSupport.inboundMetadata(event, event.occurredAt()), event.occurredAt());
+    }
+    return result;
+  }
 }

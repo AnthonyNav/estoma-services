@@ -15,8 +15,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.JsonNode;
@@ -32,7 +32,7 @@ public class ProjectionRecoveryResultProcessor {
   private final WashAdministrationProjectionRepository administration;
   private final WashExecutionOperationalProjectionRepository execution;
   private final WashExecutionSnapshotReconciler executionReconciler;
-  private final Optional<PendingProjectionRecoveryWorker> pendingWorker;
+  private final ObjectProvider<PendingProjectionRecoveryWorker> pendingWorker;
   private final PendingProjectionEventRepository pending;
   private final OutboxRepository outbox;
   private final Clock clock;
@@ -43,7 +43,8 @@ public class ProjectionRecoveryResultProcessor {
       WashAdministrationProjectionRepository administration,
       WashExecutionOperationalProjectionRepository execution,
       WashExecutionSnapshotReconciler executionReconciler,
-      Optional<PendingProjectionRecoveryWorker> pendingWorker, PendingProjectionEventRepository pending,
+      ObjectProvider<PendingProjectionRecoveryWorker> pendingWorker,
+      PendingProjectionEventRepository pending,
       OutboxRepository outbox, Clock clock) {
     this.recovery=recovery; this.jobs=jobs; this.inbox=inbox; this.academic=academic;
     this.authorization=authorization; this.administration=administration; this.execution=execution;
@@ -75,6 +76,7 @@ public class ProjectionRecoveryResultProcessor {
       case "ListStudentAppointmentAcademicSnapshotsPageResult" -> applyAcademicPage(result,job,now);
       case "ListAccountAuthorizationSnapshotsPageResult" -> applyAuthorizationPage(result,job,now);
       case "GetWashAdministrationConfigurationResult" -> applyAdministration(result,job,now);
+      case "GetWashExecutionIntegrationContextResult" -> applyExecutionEntity(result,job,now);
       case "ListWashExecutionIntegrationContextsPageResult" -> applyExecutionPage(result,job,now);
       default -> throw new IllegalArgumentException("unsupported recovery Result "+result.messageType());
     }
@@ -202,24 +204,8 @@ public class ProjectionRecoveryResultProcessor {
     Instant generated=instant(data,"snapshotGeneratedAt"); long max=0;
     String expectedDate=contextString(job.contextJson(),"serviceDate");
     if(!expectedDate.equals(text(data,"serviceDate"))) throw new IllegalArgumentException("Execution recovery serviceDate mismatch");
-    for(JsonNode x:array(data,"executions")){
-      long v=positiveLong(x,"version"); max=Math.max(max,v);
-      executionReconciler.reconcile(new WashExecutionSnapshotReconciler.ExecutionSnapshot(
-          uuid(x,"washExecutionId"),uuid(x,"appointmentId"),text(x,"status"),v,
-          optionalInstant(x,"arrivedAt"),optionalInstant(x,"startedAt"),optionalInstant(x,"entryAuthorizedAt"),
-          optionalInstant(x,"rejectedAt"),optionalText(x,"rejectionReason"),optionalUuid(x,"rejectedByAccountId"),
-          optionalInstant(x,"completedAt"),optionalUuid(x,"completedByAccountId"),optionalInstant(x,"cancelledAt"),
-          optionalText(x,"cancellationType"),optionalText(x,"cancellationSubreason"),optionalText(x,"cancellationReason"),
-          optionalUuid(x,"cancelledByAccountId")),generated);
-    }
-    for(JsonNode x:array(data,"resourceUnavailabilities")){ long v=positiveLong(x,"version"); max=Math.max(max,v);
-      execution.upsertResourceUnavailability(new WashExecutionOperationalProjectionRepository.ResourceUnavailabilityProjection(
-          uuid(x,"resourceUnavailabilityId"),optionalUuid(x,"cabinId"),optionalUuid(x,"tankId"),instant(x,"disabledAt"),
-          optionalInstant(x,"restoredAt"),v,generated)); }
-    for(JsonNode x:array(data,"cleaningPeriods")){ long v=positiveLong(x,"version"); max=Math.max(max,v);
-      execution.upsertCleaningPeriod(new WashExecutionOperationalProjectionRepository.CleaningPeriodProjection(
-          uuid(x,"cleaningPeriodId"),uuid(x,"washExecutionId"),uuid(x,"resourceAssignmentId"),uuid(x,"cabinId"),
-          text(x,"cleaningTrigger"),instant(x,"startsAt"),instant(x,"expectedEndsAt"),optionalInstant(x,"completedAt"),v,generated)); }
+    for(JsonNode x:array(data,"executions")) max=Math.max(max,applyExecutionSnapshot(x,generated));
+    max=Math.max(max, applyExecutionOperationalCollections(data, generated));
     String cursor=optionalText(data,"nextPageToken");
     if(cursor!=null){ UUID next=UUID.randomUUID();
       if(!jobs.advance("wash-execution",job.generationId(),job.currentQueryMessageId(),"PAGE",next,cursor,job.contextJson(),now))
@@ -229,8 +215,45 @@ public class ProjectionRecoveryResultProcessor {
     }else finish("wash-execution",job,max,now);
   }
 
+  private void applyExecutionEntity(MessageEnvelope result,
+      ProjectionRecoveryJobRepository.RecoveryJob job,Instant now){
+    requireStatus(result,"SUCCEEDED"); JsonNode data=object(result.payload(),"data");
+    Instant generated=data.has("snapshotGeneratedAt") ? instant(data,"snapshotGeneratedAt") : result.occurredAt();
+    long max=0;
+    JsonNode snapshot=data.path("washExecution");
+    if(snapshot.isObject()) max=applyExecutionSnapshot(snapshot,generated);
+    max=Math.max(max, applyExecutionOperationalCollections(data, generated));
+    finish("wash-execution",job,max,now);
+  }
+
+  private long applyExecutionSnapshot(JsonNode x, Instant generated) {
+    long version=positiveLong(x,"version");
+    executionReconciler.reconcile(new WashExecutionSnapshotReconciler.ExecutionSnapshot(
+        uuid(x,"washExecutionId"),uuid(x,"appointmentId"),text(x,"status"),version,
+        optionalInstant(x,"arrivedAt"),optionalInstant(x,"startedAt"),optionalInstant(x,"entryAuthorizedAt"),
+        optionalInstant(x,"rejectedAt"),optionalText(x,"rejectionReason"),optionalUuid(x,"rejectedByAccountId"),
+        optionalInstant(x,"completedAt"),optionalUuid(x,"completedByAccountId"),optionalInstant(x,"cancelledAt"),
+        optionalText(x,"cancellationType"),optionalText(x,"cancellationSubreason"),optionalText(x,"cancellationReason"),
+        optionalUuid(x,"cancelledByAccountId")),generated);
+    return version;
+  }
+
+  private long applyExecutionOperationalCollections(JsonNode data, Instant generated) {
+    long max=0;
+    for(JsonNode x:array(data,"resourceUnavailabilities")){ long v=positiveLong(x,"version"); max=Math.max(max,v);
+      execution.upsertResourceUnavailability(new WashExecutionOperationalProjectionRepository.ResourceUnavailabilityProjection(
+          uuid(x,"resourceUnavailabilityId"),optionalUuid(x,"cabinId"),optionalUuid(x,"tankId"),instant(x,"disabledAt"),
+          optionalInstant(x,"restoredAt"),v,generated)); }
+    for(JsonNode x:array(data,"cleaningPeriods")){ long v=positiveLong(x,"version"); max=Math.max(max,v);
+      execution.upsertCleaningPeriod(new WashExecutionOperationalProjectionRepository.CleaningPeriodProjection(
+          uuid(x,"cleaningPeriodId"),uuid(x,"washExecutionId"),uuid(x,"resourceAssignmentId"),uuid(x,"cabinId"),
+          text(x,"cleaningTrigger"),instant(x,"startsAt"),instant(x,"expectedEndsAt"),optionalInstant(x,"completedAt"),v,generated)); }
+    return max;
+  }
+
   private void finish(String projection,ProjectionRecoveryJobRepository.RecoveryJob job,long sourceVersion,Instant now){
-    pendingWorker.ifPresent(worker -> worker.replay(projection));
+    PendingProjectionRecoveryWorker worker = pendingWorker.getIfAvailable();
+    if (worker != null) worker.replay(projection);
     if(pending.hasOpen(projection)){
       recovery.degraded(projection,"deferred projection Events remain unresolved after authoritative snapshot");
       jobs.delete(projection); return;
@@ -248,7 +271,7 @@ public class ProjectionRecoveryResultProcessor {
     case "GetAppointmentAcademicConfigurationResult","ListStudentAppointmentAcademicSnapshotsPageResult" -> "academic";
     case "ListAccountAuthorizationSnapshotsPageResult" -> "authorization";
     case "GetWashAdministrationConfigurationResult" -> "wash-administration";
-    case "ListWashExecutionIntegrationContextsPageResult" -> "wash-execution";
+    case "GetWashExecutionIntegrationContextResult","ListWashExecutionIntegrationContextsPageResult" -> "wash-execution";
     default -> throw new IllegalArgumentException("unknown recovery result "+type); }; }
   private static void requireStatus(MessageEnvelope result,String expected){ String actual=text(result.payload(),"status"); if(!expected.equals(actual)) throw new IllegalArgumentException("expected recovery status "+expected+" but got "+actual); }
   private static JsonNode object(JsonNode n,String f){ JsonNode v=n.path(f); if(!v.isObject()) throw new IllegalArgumentException(f+" must be object"); return v; }

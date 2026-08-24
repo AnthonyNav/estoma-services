@@ -113,11 +113,15 @@ final class ApplicationSupport {
   }
 
   static void append(OutboxRepository outbox, OutboxIntent intent) {
+    append(outbox, UUID.randomUUID(), intent);
+  }
+
+  static void append(OutboxRepository outbox, UUID messageId, OutboxIntent intent) {
     Instant occurred = Objects.requireNonNull(intent.occurredAt(), "occurredAt");
-    outbox.append(new OutboxRepository.OutboxMessage(UUID.randomUUID(), intent.messageType(), 1,
-        intent.messageKind(), intent.aggregateId(), intent.aggregateVersion(), intent.correlationId(),
-        intent.causationId(), intent.payloadJson() == null ? "{}" : intent.payloadJson(), occurred,
-        occurred, "PENDING", 0, null, null, intent.operationId()));
+    outbox.append(new OutboxRepository.OutboxMessage(Objects.requireNonNull(messageId, "messageId"),
+        intent.messageType(), 1, intent.messageKind(), intent.aggregateId(), intent.aggregateVersion(),
+        intent.correlationId(), intent.causationId(), intent.payloadJson() == null ? "{}" : intent.payloadJson(),
+        occurred, occurred, "PENDING", 0, null, null, intent.operationId()));
   }
 
   static String resultJson(ApplicationResult result) {

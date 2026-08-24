@@ -10,7 +10,15 @@ import java.util.UUID;
 public interface ScheduleAppointmentUseCase {
   ApplicationResult schedule(Command command);
 
-  record Command(CommandMetadata metadata, UUID studentAccountId, UUID appointmentTimeSlotId,
-      UUID courseSectionId, AppointmentType appointmentType, int instrumentCount,
-      PieceType pieceType, UUID exceptionalAuthorizationId, Instant now) {}
+  record Command(CommandMetadata metadata, UUID appointmentId, UUID studentAccountId,
+      UUID appointmentTimeSlotId, UUID courseSectionId, AppointmentType appointmentType,
+      int instrumentCount, PieceType pieceType, UUID exceptionalAuthorizationId, Instant now) {
+    /** Compatibility constructor for direct pre-wire application tests. */
+    public Command(CommandMetadata metadata, UUID studentAccountId, UUID appointmentTimeSlotId,
+        UUID courseSectionId, AppointmentType appointmentType, int instrumentCount,
+        PieceType pieceType, UUID exceptionalAuthorizationId, Instant now) {
+      this(metadata, UUID.randomUUID(), studentAccountId, appointmentTimeSlotId, courseSectionId,
+          appointmentType, instrumentCount, pieceType, exceptionalAuthorizationId, now);
+    }
+  }
 }

@@ -15,7 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class HandleWashEntryAuthorizedHandler implements HandleWashEntryAuthorizedUseCase {
+public class HandleWashEntryAuthorizedHandler implements HandleWashEntryAuthorizedUseCase {
   private final AppointmentRepository appointments;
   private final WashExecutionEvidenceRepository evidence;
   private final ProcessedMessageRepository inbox;

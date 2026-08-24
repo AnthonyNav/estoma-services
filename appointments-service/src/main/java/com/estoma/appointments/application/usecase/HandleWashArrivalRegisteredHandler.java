@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public final class HandleWashArrivalRegisteredHandler implements HandleWashArrivalRegisteredUseCase {
+public class HandleWashArrivalRegisteredHandler implements HandleWashArrivalRegisteredUseCase {
   private final AppointmentRepository appointments;
   private final AppointmentTimeSlotRepository slots;
   private final WashExecutionEvidenceRepository evidence;

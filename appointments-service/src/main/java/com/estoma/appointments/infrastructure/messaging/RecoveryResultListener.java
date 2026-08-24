@@ -18,18 +18,22 @@ public final class RecoveryResultListener {
       "ListStudentAppointmentAcademicSnapshotsPageResult",
       "ListAccountAuthorizationSnapshotsPageResult",
       "GetWashAdministrationConfigurationResult",
+      "GetWashExecutionIntegrationContextResult",
       "ListWashExecutionIntegrationContextsPageResult");
 
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
-  private final ProjectionRecoveryResultProcessor processor;
+  private final ProjectionRecoveryResultProcessor fullProcessor;
+  private final WashExecutionEntityRecoveryResultProcessor entityProcessor;
   private final FailureRouter failures;
 
   public RecoveryResultListener(EnvelopeJsonCodec codec, EnvelopeValidator validator,
-      ProjectionRecoveryResultProcessor processor, FailureRouter failures) {
+      ProjectionRecoveryResultProcessor fullProcessor,
+      WashExecutionEntityRecoveryResultProcessor entityProcessor, FailureRouter failures) {
     this.codec = codec;
     this.validator = validator;
-    this.processor = processor;
+    this.fullProcessor = fullProcessor;
+    this.entityProcessor = entityProcessor;
     this.failures = failures;
   }
 
@@ -41,7 +45,11 @@ public final class RecoveryResultListener {
       MessageEnvelope result = validator.validate(
           codec.readTree(message.getBody()), MessageKind.RESULT, RESULTS);
       validateProducer(result);
-      processor.process(result);
+      if ("GetWashExecutionIntegrationContextResult".equals(result.messageType())) {
+        entityProcessor.process(result);
+      } else {
+        fullProcessor.process(result);
+      }
       channel.basicAck(tag, false);
     } catch (InvalidMessageException | IllegalArgumentException invalid) {
       DeliveryFailureSupport.routeThenAck(
@@ -58,7 +66,8 @@ public final class RecoveryResultListener {
            "ListStudentAppointmentAcademicSnapshotsPageResult" -> "academic";
       case "ListAccountAuthorizationSnapshotsPageResult" -> "authorization";
       case "GetWashAdministrationConfigurationResult" -> "wash-administration";
-      case "ListWashExecutionIntegrationContextsPageResult" -> "wash-execution";
+      case "GetWashExecutionIntegrationContextResult",
+           "ListWashExecutionIntegrationContextsPageResult" -> "wash-execution";
       default -> throw new InvalidMessageException("unsupported recovery Result");
     };
     if (!expected.equals(result.producer())) {

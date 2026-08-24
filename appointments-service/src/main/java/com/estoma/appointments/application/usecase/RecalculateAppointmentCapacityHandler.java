@@ -1,17 +1,17 @@
 package com.estoma.appointments.application.usecase;
 
 import com.estoma.appointments.application.model.ApplicationResult;
+import com.estoma.appointments.application.model.CapacityCausalContext;
 import com.estoma.appointments.application.port.in.RecalculateAppointmentCapacityForTimeSlotUseCase;
 import com.estoma.appointments.application.port.out.AppointmentCapacityProjectionRepository;
 import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.AppointmentTimeSlotRepository;
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
+import com.estoma.appointments.application.port.out.PendingCapacityEvaluationRepository;
 import com.estoma.appointments.application.port.out.WashAdministrationProjectionRepository;
 import com.estoma.appointments.application.port.out.WashExecutionOperationalProjectionRepository;
-import com.estoma.appointments.domain.model.Appointment;
-import com.estoma.appointments.domain.model.CancellationSubreason;
-import com.estoma.appointments.domain.model.CancellationType;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,13 +24,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 /** Rebuilds usable slot capacity from local owner projections and reconciles excess demand. */
 @Service
-public final class RecalculateAppointmentCapacityHandler
+public class RecalculateAppointmentCapacityHandler
     implements RecalculateAppointmentCapacityForTimeSlotUseCase {
   private final AppointmentRepository appointments;
   private final AppointmentTimeSlotRepository slots;
   private final AppointmentCapacityProjectionRepository capacity;
   private final WashAdministrationProjectionRepository administration;
   private final WashExecutionOperationalProjectionRepository execution;
+  private final PendingCapacityEvaluationRepository pending;
+  private final CapacityMatchingCoordinator matching;
   private final CommandIdempotencyRepository idempotency;
   private final OutboxRepository outbox;
 
@@ -38,12 +40,15 @@ public final class RecalculateAppointmentCapacityHandler
       AppointmentTimeSlotRepository slots, AppointmentCapacityProjectionRepository capacity,
       WashAdministrationProjectionRepository administration,
       WashExecutionOperationalProjectionRepository execution,
+      PendingCapacityEvaluationRepository pending, CapacityMatchingCoordinator matching,
       CommandIdempotencyRepository idempotency, OutboxRepository outbox) {
     this.appointments = appointments;
     this.slots = slots;
     this.capacity = capacity;
     this.administration = administration;
     this.execution = execution;
+    this.pending = pending;
+    this.matching = matching;
     this.idempotency = idempotency;
     this.outbox = outbox;
   }
@@ -57,9 +62,28 @@ public final class RecalculateAppointmentCapacityHandler
             command.sourceEventId(), command.slotId(), command.expectedProjectionVersion()), now);
     if (gate.isPresent()) return gate.get();
 
+    CapacityCausalContext causal = command.causalContext();
+    com.estoma.appointments.domain.model.Appointment causalAppointment = null;
+    if (causal != null && causal.requiresTerminalAppointment()) {
+      causalAppointment = appointments.findByIdForUpdate(causal.appointmentId()).orElse(null);
+      if (causalAppointment == null) {
+        ApplicationResult deferred = ApplicationResult.deferred("CAUSAL_APPOINTMENT_PENDING",
+            "cleaning matching waits for its causal appointment", causal.appointmentId());
+        ApplicationSupport.releaseDeferred(idempotency, command.metadata(),
+            "RecalculateAppointmentCapacityForTimeSlot", deferred);
+        return deferred;
+      }
+      if (causalAppointment.isTerminal()
+          && !causal.expectedAppointmentStatus().equals(causalAppointment.status().name())) {
+        throw new IllegalStateException("cleaning terminal cause contradicts local Appointment state");
+      }
+    }
+
     var slot = slots.findByIdForUpdate(command.slotId()).orElse(null);
     if (slot == null) return terminal(command, ApplicationResult.rejected(
         "SLOT_NOT_FOUND", "slot capacity cannot be recalculated without its slot"), now);
+    if (!slot.isActive()) return terminal(command, ApplicationResult.rejected(
+        "SLOT_NOT_ACTIVE", "cancelled slots are not recalculated"), now);
     if (!administration.reliable() || !execution.reliable()) {
       ApplicationResult deferred = ApplicationResult.deferred("CAPACITY_PROJECTION_UNRELIABLE",
           "capacity source projections are not reliable", slot.appointmentTimeSlotId());
@@ -75,6 +99,9 @@ public final class RecalculateAppointmentCapacityHandler
           "capacity projection version changed"), now);
     }
 
+    CapacitySnapshot previous = current == null ? CapacitySnapshot.ZERO
+        : new CapacitySnapshot(current.normalCapacity(), current.journeyCapacity(),
+            current.immunocompromisedCapacity());
     CapacitySnapshot snapshot = derive(slot);
     long nextVersion = currentVersion + 1;
     var next = new AppointmentCapacityProjectionRepository.CapacityProjection(command.slotId(),
@@ -85,21 +112,71 @@ public final class RecalculateAppointmentCapacityHandler
           "capacity projection changed while recalculating"), now);
     }
 
-    int cancelled = cancelOverflow(command, snapshot, now);
+    boolean changed = !previous.equals(snapshot);
+    boolean reduced = snapshot.normal() < previous.normal()
+        || snapshot.journey() < previous.journey()
+        || snapshot.immuno() < previous.immuno();
+    if (changed) {
+      ApplicationSupport.appendEvent(outbox, command.metadata(),
+          "AppointmentTimeSlotCapacityRecalculated", slot.appointmentTimeSlotId(), nextVersion,
+          AppointmentEventPayloads.capacityRecalculated(slot.appointmentTimeSlotId(), snapshot.normal(),
+              snapshot.journey(), snapshot.immuno(), nextVersion), now);
+    }
+
+    boolean deferMatching = causal != null && causal.requiresTerminalAppointment()
+        && !causal.expectedAppointmentStatus().equals(causalAppointment.status().name());
+    int cancelled = 0;
+    if (deferMatching) {
+      pending.enqueue(new PendingCapacityEvaluationRepository.PendingEvaluation(
+          UUID.randomUUID(), command.sourceEventId(), slot.appointmentTimeSlotId(),
+          causal.washExecutionId(), causal.appointmentId(), "CLEANING_STARTED", causal.cleaningTrigger(),
+          previous.normal(), snapshot.normal(), previous.journey(), snapshot.journey(),
+          previous.immuno(), snapshot.immuno(), nextVersion,
+          "PENDING", 0, now, null, null));
+    } else {
+      cancelled = matching.reconcile(slot.appointmentTimeSlotId(), command.metadata(), now);
+      if (reduced) appendCapacityReduced(command, previous, snapshot, nextVersion, cancelled, now);
+    }
+
     ApplicationResult result = ApplicationResult.applied(slot.appointmentTimeSlotId(), nextVersion,
-        "capacity recalculated; clinic cancellations=" + cancelled);
+        deferMatching
+            ? "capacity recalculated; destructive matching deferred until causal terminal state"
+            : "capacity recalculated; clinic cancellations=" + cancelled);
     ApplicationSupport.complete(idempotency, command.metadata(),
         "RecalculateAppointmentCapacityForTimeSlot", result, now);
     return result;
   }
 
+  private void appendCapacityReduced(Command command, CapacitySnapshot previous, CapacitySnapshot current,
+      long projectionVersion, int cancelled, Instant now) {
+    ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentTimeSlotCapacityReduced",
+        command.slotId(), projectionVersion,
+        AppointmentEventPayloads.capacityReduced(command.slotId(), previous.normal(), current.normal(),
+            previous.journey(), current.journey(), previous.immuno(), current.immuno(), cancelled,
+            projectionVersion), now);
+  }
+
   private CapacitySnapshot derive(com.estoma.appointments.domain.model.AppointmentTimeSlot slot) {
     var schedule = administration.findSchedule(slot.sourceScheduleId()).orElse(null);
     if (schedule == null || !"ACTIVE".equals(schedule.status())) return CapacitySnapshot.ZERO;
-    var calendar = administration.findCalendar(schedule.calendarId()).orElse(null);
+    if (!schedule.calendarId().equals(slot.calendarId())) return CapacitySnapshot.ZERO;
+    var calendar = administration.findCalendar(slot.calendarId()).orElse(null);
     if (calendar == null || !"ACTIVE".equals(calendar.status())) return CapacitySnapshot.ZERO;
+    if (slot.serviceDate().isBefore(calendar.effectiveFrom())
+        || (calendar.effectiveUntil() != null && slot.serviceDate().isAfter(calendar.effectiveUntil()))) {
+      return CapacitySnapshot.ZERO;
+    }
+    if (slot.serviceDate().getDayOfWeek().getValue() != schedule.dayOfWeek()) return CapacitySnapshot.ZERO;
+    var localStart = slot.startsAt().atZone(slot.timezone()).toLocalTime();
+    var localEnd = slot.endsAt().atZone(slot.timezone()).toLocalTime();
+    if (localStart.isBefore(schedule.openingTime()) || localEnd.isAfter(schedule.closingTime())) {
+      return CapacitySnapshot.ZERO;
+    }
+    if (Duration.between(slot.startsAt(), slot.endsAt()).toMinutes() != schedule.slotDurationMinutes()) {
+      return CapacitySnapshot.ZERO;
+    }
 
-    var closures = administration.findClosuresOverlapping(calendar.calendarId(), slot.startsAt(), slot.endsAt());
+    var closures = administration.findClosuresOverlapping(slot.calendarId(), slot.startsAt(), slot.endsAt());
     if (closures.stream().anyMatch(c -> "SERVICE".equals(c.scope()))) return CapacitySnapshot.ZERO;
 
     Set<UUID> closedCabins = new HashSet<>();
@@ -135,37 +212,6 @@ public final class RecalculateAppointmentCapacityHandler
       }
     }
     return new CapacitySnapshot(normal, journey, immuno);
-  }
-
-  private int cancelOverflow(Command command, CapacitySnapshot snapshot, Instant now) {
-    var all = appointments.findForSlot(command.slotId(), true);
-    int sharedDemand = (int) all.stream().filter(Appointment::isActive)
-        .filter(a -> a.appointmentType().name().matches("NORMAL|JOURNEY")).count();
-    int immunoDemand = (int) all.stream().filter(Appointment::isActive)
-        .filter(a -> a.appointmentType().name().equals("IMMUNOCOMPROMISED")).count();
-    int sharedCapacity = snapshot.normal() + snapshot.journey();
-    int cancelled = 0;
-
-    for (Appointment candidate : all) {
-      boolean sharedOverflow = sharedDemand > sharedCapacity
-          && candidate.appointmentType().name().matches("NORMAL|JOURNEY");
-      boolean immunoOverflow = immunoDemand > snapshot.immuno()
-          && candidate.appointmentType().name().equals("IMMUNOCOMPROMISED");
-      if ((!sharedOverflow && !immunoOverflow) || !candidate.status().name().equals("SCHEDULED")
-          || candidate.entryAuthorizedAt() != null) continue;
-      var current = appointments.findByIdForUpdate(candidate.appointmentId()).orElse(candidate);
-      if (!current.status().name().equals("SCHEDULED") || current.entryAuthorizedAt() != null) continue;
-      var changed = current.cancel(CancellationType.CLINIC, CancellationSubreason.CAPACITY_LOSS,
-          "capacity loss", null, now);
-      if (!appointments.updateIfVersion(changed, current.version())) continue;
-      if (sharedOverflow) sharedDemand--; else immunoDemand--;
-      cancelled++;
-      ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentCancelled",
-          changed.appointmentId(), changed.version(), "{\"appointmentId\":\""
-              + changed.appointmentId() + "\",\"cancellationType\":\"CLINIC\","
-              + "\"cancellationSubreason\":\"CAPACITY_LOSS\"}", now);
-    }
-    return cancelled;
   }
 
   private ApplicationResult terminal(Command command, ApplicationResult result, Instant now) {

@@ -20,19 +20,17 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
           Timestamps.toInstant(rs,"started_at"),Timestamps.toInstant(rs,"updated_at"))).optional();
   }
 
-  @Override public void start(RecoveryJob job) {
-    jdbc.sql("""
+  @Override public boolean tryStart(RecoveryJob job) {
+    return jdbc.sql("""
       INSERT INTO projection_recovery_jobs
         (projection_name,generation_id,phase,current_query_message_id,cursor,context_json,started_at,updated_at)
       VALUES (:name,:generation,:phase,:query,:cursor,CAST(:context AS jsonb),:started,:updated)
-      ON CONFLICT (projection_name) DO UPDATE SET
-        generation_id=EXCLUDED.generation_id,phase=EXCLUDED.phase,
-        current_query_message_id=EXCLUDED.current_query_message_id,cursor=EXCLUDED.cursor,
-        context_json=EXCLUDED.context_json,started_at=EXCLUDED.started_at,updated_at=EXCLUDED.updated_at
+      ON CONFLICT (projection_name) DO NOTHING
       """)
       .param("name",job.projectionName()).param("generation",job.generationId()).param("phase",job.phase())
       .param("query",job.currentQueryMessageId()).param("cursor",job.cursor()).param("context",job.contextJson())
-      .param("started",Timestamps.toTimestamp(job.startedAt())).param("updated",Timestamps.toTimestamp(job.updatedAt())).update();
+      .param("started",Timestamps.toTimestamp(job.startedAt())).param("updated",Timestamps.toTimestamp(job.updatedAt()))
+      .update()==1;
   }
 
   @Override public boolean advance(String projectionName, UUID generationId, UUID expectedCurrentQueryMessageId,

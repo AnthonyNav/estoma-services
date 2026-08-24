@@ -50,7 +50,7 @@ public class ProjectionRecoveryWorker {
     if (recovery.isReady("wash-administration")) startIfNeeded("wash-execution");
   }
 
-  /** Each owner rebuild starts atomically: state + reset + durable job + first Query Outbox. */
+  /** Each owner rebuild starts atomically: claim + state + reset + first Query Outbox. */
   public void startIfNeeded(String projection) {
     transactions.executeWithoutResult(status -> startInCurrentTransaction(projection));
   }
@@ -58,7 +58,7 @@ public class ProjectionRecoveryWorker {
   private void startInCurrentTransaction(String projection) {
     var state = recovery.state(projection);
     if ("READY".equals(state.status())) return;
-    if ("REBUILDING".equals(state.status()) && jobs.find(projection).isPresent()) return;
+    if (jobs.find(projection).isPresent()) return;
 
     Instant now = clock.instant();
     UUID generation = UUID.randomUUID();
@@ -66,10 +66,12 @@ public class ProjectionRecoveryWorker {
     QuerySeed seed = seed(projection, now);
     if (seed == null) return;
 
+    var job = new ProjectionRecoveryJobRepository.RecoveryJob(projection, generation, seed.phase(),
+        queryId, null, seed.contextJson(), now, now);
+    if (!jobs.tryStart(job)) return; // another replica owns the generation
+
     recovery.rebuilding(projection);
     reset.reset(projection);
-    jobs.start(new ProjectionRecoveryJobRepository.RecoveryJob(projection, generation, seed.phase(),
-        queryId, null, seed.contextJson(), now, now));
     appendQuery(queryId, generation, seed.messageType(), seed.payloadJson(), now);
   }
 

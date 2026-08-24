@@ -1,6 +1,7 @@
 package com.estoma.appointments.infrastructure.messaging;
 
 import com.estoma.appointments.application.model.ActorContext;
+import com.estoma.appointments.application.model.CapacityCausalContext;
 import com.estoma.appointments.application.model.CommandMetadata;
 import com.estoma.appointments.application.port.in.CancelAppointmentTimeSlotUseCase;
 import com.estoma.appointments.application.port.in.CancelAppointmentUseCase;
@@ -34,10 +35,10 @@ public final class CommandMessageMapper {
     JsonNode p = envelope.payload();
     return switch (envelope.messageType()) {
       case "ScheduleAppointment" -> new MappedCommand(metadata, new ScheduleAppointmentUseCase.Command(metadata,
-          uuid(p, "studentAccountId"), uuid(p, "appointmentTimeSlotId"), uuid(p, "courseSectionId"),
-          enumValue(AppointmentType.class, text(p, "appointmentType")), intValue(p, "instrumentCount"),
-          enumValue(PieceType.class, text(p, "pieceType")), optionalUuid(p, "exceptionalAuthorizationId"),
-          envelope.occurredAt()));
+          uuid(p, "appointmentId"), uuid(p, "studentAccountId"), uuid(p, "appointmentTimeSlotId"),
+          uuid(p, "courseSectionId"), enumValue(AppointmentType.class, text(p, "appointmentType")),
+          intValue(p, "instrumentCount"), enumValue(PieceType.class, text(p, "pieceType")),
+          optionalUuid(p, "exceptionalAuthorizationId"), envelope.occurredAt()));
       case "CancelAppointment" -> new MappedCommand(metadata, new CancelAppointmentUseCase.Command(metadata,
           uuid(p, "appointmentId"), longValue(p, "expectedVersion"), optionalText(p, "reason"),
           envelope.occurredAt()));
@@ -55,16 +56,29 @@ public final class CommandMessageMapper {
               Instant.parse(text(p, "bookingDeadlineAt")), Instant.parse(text(p, "cancellationDeadlineAt")),
               Instant.parse(text(p, "arrivalToleranceUntil")), envelope.occurredAt()));
       case "CancelAppointmentTimeSlot" -> new MappedCommand(metadata,
-          new CancelAppointmentTimeSlotUseCase.Command(metadata, uuid(p, "slotId"),
+          new CancelAppointmentTimeSlotUseCase.Command(metadata, uuid(p, "slotId"), text(p, "reason"),
               longValue(p, "expectedVersion"), envelope.occurredAt()));
       case "MarkAppointmentAsMissed" -> new MappedCommand(metadata,
           new MarkAppointmentAsMissedUseCase.Command(metadata, uuid(p, "appointmentId"),
               longValue(p, "expectedVersion"), envelope.occurredAt()));
       case "RecalculateAppointmentCapacityForTimeSlot" -> new MappedCommand(metadata,
           new RecalculateAppointmentCapacityForTimeSlotUseCase.Command(metadata, uuid(p, "sourceEventId"),
-              uuid(p, "slotId"), longValueAllowZero(p, "expectedProjectionVersion"), envelope.occurredAt()));
+              uuid(p, "slotId"), longValueAllowZero(p, "expectedProjectionVersion"),
+              causalContext(p), envelope.occurredAt()));
       default -> throw new InvalidMessageException("unsupported command " + envelope.messageType());
     };
+  }
+
+  private static CapacityCausalContext causalContext(JsonNode payload) {
+    JsonNode node = payload.path("causalContext");
+    if (node.isMissingNode() || node.isNull()) return null;
+    if (!node.isObject()) throw new InvalidMessageException("causalContext must be an object");
+    try {
+      return new CapacityCausalContext(uuid(node, "washExecutionId"), uuid(node, "appointmentId"),
+          text(node, "cleaningTrigger"));
+    } catch (IllegalArgumentException exception) {
+      throw new InvalidMessageException("invalid causalContext", exception);
+    }
   }
 
   private static ActorContext actor(WireActor actor) {
