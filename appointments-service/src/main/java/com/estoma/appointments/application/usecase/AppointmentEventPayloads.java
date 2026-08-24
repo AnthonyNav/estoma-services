@@ -49,7 +49,6 @@ final class AppointmentEventPayloads {
       fields.put("exceptionalAuthorizationId", appointment.exceptionalAuthorizationId());
     }
     fields.put("createdAt", appointment.createdAt());
-    fields.put("status", appointment.status());
     fields.put("version", appointment.version());
     return object(fields);
   }
