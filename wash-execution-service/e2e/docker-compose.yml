@@ -1,0 +1,181 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: estoma
+      RABBITMQ_DEFAULT_PASS: estoma
+    ports:
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  appointments-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: appointments
+      POSTGRES_USER: appointments
+      POSTGRES_PASSWORD: appointments
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appointments -d appointments"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  wash-admin-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wash_administration
+      POSTGRES_USER: wash_administration
+      POSTGRES_PASSWORD: wash_administration
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wash_administration -d wash_administration"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  wash-execution-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wash_execution
+      POSTGRES_USER: wash_execution
+      POSTGRES_PASSWORD: wash_execution
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wash_execution -d wash_execution"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  authorization-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: authorization
+      POSTGRES_USER: authorization
+      POSTGRES_PASSWORD: authorization
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authorization -d authorization"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  appointments:
+    build:
+      context: ../../appointments-service
+    environment:
+      DB_HOST: appointments-db
+      DB_PORT: 5432
+      DB_NAME: appointments
+      DB_USERNAME: appointments
+      DB_PASSWORD: appointments
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: estoma
+      SPRING_RABBITMQ_PASSWORD: estoma
+      ESTOMA_MESSAGING_TOPOLOGY_DECLARE: "true"
+      ESTOMA_MESSAGING_LISTENERS_ENABLED: "true"
+      ESTOMA_MESSAGING_OUTBOX_RELAY_ENABLED: "true"
+      ESTOMA_MESSAGING_RECOVERY_WORKER_ENABLED: "false"
+      ESTOMA_MESSAGING_OUTBOX_POLL: 100ms
+      ESTOMA_MESSAGING_RETRY1_TTL: 100ms
+      ESTOMA_MESSAGING_RETRY2_TTL: 200ms
+      ESTOMA_QR_SECRET: pr4-e2e-secret-at-least-32-bytes-long
+    depends_on:
+      appointments-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  wash-administration:
+    build:
+      context: ../../wash-administration-service
+    environment:
+      WASH_ADMINISTRATION_DB_URL: jdbc:postgresql://wash-admin-db:5432/wash_administration
+      WASH_ADMINISTRATION_DB_RUNTIME_USER: wash_administration
+      WASH_ADMINISTRATION_DB_RUNTIME_PASSWORD: wash_administration
+      WASH_ADMINISTRATION_DB_MIGRATION_USER: wash_administration
+      WASH_ADMINISTRATION_DB_MIGRATION_PASSWORD: wash_administration
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: estoma
+      RABBITMQ_PASSWORD: estoma
+      ESTOMA_MESSAGING_TOPOLOGY_DECLARE: "true"
+      ESTOMA_OUTBOX_RELAY_ENABLED: "true"
+      ESTOMA_OUTBOX_POLL_INTERVAL: 100
+      ESTOMA_RECOVERY_WORKER_ENABLED: "false"
+    depends_on:
+      wash-admin-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  wash-execution:
+    build:
+      context: ..
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://wash-execution-db:5432/wash_execution
+      SPRING_DATASOURCE_USERNAME: wash_execution
+      SPRING_DATASOURCE_PASSWORD: wash_execution
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: estoma
+      SPRING_RABBITMQ_PASSWORD: estoma
+      ESTOMA_MESSAGING_OUTBOX_RELAY_ENABLED: "true"
+      ESTOMA_MESSAGING_OUTBOX_POLL_INTERVAL: 100
+      ESTOMA_MESSAGING_DEFERRED_REPLAY_ENABLED: "true"
+      ESTOMA_MESSAGING_DEFERRED_REPLAY_POLL_INTERVAL: 100
+      ESTOMA_MESSAGING_RECOVERY_WORKER_ENABLED: "false"
+      WASH_EXECUTION_CLEANING_WORKER_ENABLED: "true"
+      WASH_EXECUTION_CLEANING_WORKER_DELAY_MS: 100
+    depends_on:
+      wash-execution-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  authorization:
+    build:
+      context: ../../authorization-service
+    environment:
+      AUTHORIZATION_DB_URL: jdbc:postgresql://authorization-db:5432/authorization
+      AUTHORIZATION_DB_RUNTIME_USER: authorization
+      AUTHORIZATION_DB_RUNTIME_PASSWORD: authorization
+      AUTHORIZATION_DB_MIGRATION_USER: authorization
+      AUTHORIZATION_DB_MIGRATION_PASSWORD: authorization
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: estoma
+      RABBITMQ_PASSWORD: estoma
+      ESTOMA_MESSAGING_TOPOLOGY_DECLARE: "true"
+      ESTOMA_MESSAGING_LISTENERS_ENABLED: "true"
+      ESTOMA_OUTBOX_RELAY_ENABLED: "true"
+      ESTOMA_OUTBOX_POLL_INTERVAL: 100ms
+      ESTOMA_RECOVERY_WORKER_ENABLED: "false"
+    depends_on:
+      authorization-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  runner:
+    build:
+      context: ./runner
+    environment:
+      RABBIT_HOST: rabbitmq
+      RABBIT_USER: estoma
+      RABBIT_PASSWORD: estoma
+      APPOINTMENTS_DSN: postgresql://appointments:appointments@appointments-db:5432/appointments
+      WASH_ADMIN_DSN: postgresql://wash_administration:wash_administration@wash-admin-db:5432/wash_administration
+      WASH_EXECUTION_DSN: postgresql://wash_execution:wash_execution@wash-execution-db:5432/wash_execution
+      AUTHORIZATION_DSN: postgresql://authorization:authorization@authorization-db:5432/authorization
+    depends_on:
+      appointments:
+        condition: service_started
+      wash-administration:
+        condition: service_started
+      wash-execution:
+        condition: service_started
+      authorization:
+        condition: service_started
+    profiles: ["run"]

@@ -48,11 +48,14 @@ public class JdbcWashExecutionRepository implements WashExecutionRepository {
             completed_by_account_id, completed_at, cancellation_type, cancellation_subreason, cancellation_reason,
             cancelled_by_account_id, cancelled_at, version, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          """, e.washExecutionId(), e.appointmentId(), e.appointmentType().name(), e.status().name(), e.arrivedAt(),
-          e.startedAt(), e.exitSubmittedByAccountId(), e.exitSubmittedAt(), value(e.exitMaterials(), 0),
-          value(e.exitMaterials(), 1), value(e.exitMaterials(), 2), value(e.exitMaterials(), 3), e.completedByAccountId(),
-          e.completedAt(), name(e.cancellationType()), e.cancellationSubreason(), e.cancellationReason(),
-          e.cancelledByAccountId(), e.cancelledAt(), e.version(), now, now);
+          """, e.washExecutionId(), e.appointmentId(), e.appointmentType().name(), e.status().name(),
+          JdbcTemporal.timestamp(e.arrivedAt()), JdbcTemporal.timestamp(e.startedAt()),
+          e.exitSubmittedByAccountId(), JdbcTemporal.timestamp(e.exitSubmittedAt()), value(e.exitMaterials(), 0),
+          value(e.exitMaterials(), 1), value(e.exitMaterials(), 2), value(e.exitMaterials(), 3),
+          e.completedByAccountId(), JdbcTemporal.timestamp(e.completedAt()), name(e.cancellationType()),
+          e.cancellationSubreason(), e.cancellationReason(), e.cancelledByAccountId(),
+          JdbcTemporal.timestamp(e.cancelledAt()), e.version(), JdbcTemporal.timestamp(now),
+          JdbcTemporal.timestamp(now));
       return;
     }
     int updated = jdbc.update("""
@@ -61,10 +64,13 @@ public class JdbcWashExecutionRepository implements WashExecutionRepository {
           completed_by_account_id=?, completed_at=?, cancellation_type=?, cancellation_subreason=?, cancellation_reason=?,
           cancelled_by_account_id=?, cancelled_at=?, version=?, updated_at=?
         WHERE wash_execution_id=? AND version=?
-        """, e.status().name(), e.startedAt(), e.exitSubmittedByAccountId(), e.exitSubmittedAt(),
+        """, e.status().name(), JdbcTemporal.timestamp(e.startedAt()), e.exitSubmittedByAccountId(),
+        JdbcTemporal.timestamp(e.exitSubmittedAt()),
         value(e.exitMaterials(), 0), value(e.exitMaterials(), 1), value(e.exitMaterials(), 2), value(e.exitMaterials(), 3),
-        e.completedByAccountId(), e.completedAt(), name(e.cancellationType()), e.cancellationSubreason(), e.cancellationReason(),
-        e.cancelledByAccountId(), e.cancelledAt(), e.version(), now, e.washExecutionId(), expectedVersion);
+        e.completedByAccountId(), JdbcTemporal.timestamp(e.completedAt()), name(e.cancellationType()),
+        e.cancellationSubreason(), e.cancellationReason(), e.cancelledByAccountId(),
+        JdbcTemporal.timestamp(e.cancelledAt()), e.version(), JdbcTemporal.timestamp(now),
+        e.washExecutionId(), expectedVersion);
     if (updated != 1) throw new IllegalStateException("VERSION_CONFLICT");
   }
 

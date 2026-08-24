@@ -31,8 +31,12 @@ public class JdbcResourceAssignmentRepository implements ResourceAssignmentRepos
 
   @Override
   public List<ResourceAssignment> findActiveByResource(UUID cabinId, UUID tankId) {
-    return jdbc.query("SELECT * FROM resource_assignments WHERE released_at IS NULL AND (? IS NULL OR cabin_id = ?) AND (? IS NULL OR tank_id = ?)",
-        this::map, cabinId, cabinId, tankId, tankId);
+    return jdbc.query("""
+        SELECT * FROM resource_assignments
+        WHERE released_at IS NULL
+          AND (CAST(? AS uuid) IS NULL OR cabin_id = CAST(? AS uuid))
+          AND (CAST(? AS uuid) IS NULL OR tank_id = CAST(? AS uuid))
+        """, this::map, cabinId, cabinId, tankId, tankId);
   }
 
   @Override
@@ -50,15 +54,17 @@ public class JdbcResourceAssignmentRepository implements ResourceAssignmentRepos
           assignment_type, assigned_by_account_id, assigned_at, released_by_account_id, released_at, release_reason, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, a.resourceAssignmentId(), a.washExecutionId(), a.appointmentTimeSlotId(), a.cabinId(), a.tankId(),
-        a.assignmentType().name(), a.assignedByAccountId(), a.assignedAt(), a.releasedByAccountId(), a.releasedAt(),
-        name(a.releaseReason()), Instant.now());
+        a.assignmentType().name(), a.assignedByAccountId(), JdbcTemporal.timestamp(a.assignedAt()),
+        a.releasedByAccountId(), JdbcTemporal.timestamp(a.releasedAt()), name(a.releaseReason()),
+        JdbcTemporal.timestamp(Instant.now()));
   }
 
   @Override
   public void release(ResourceAssignment a) {
     int updated = jdbc.update(
         "UPDATE resource_assignments SET released_by_account_id=?, released_at=?, release_reason=? WHERE resource_assignment_id=? AND released_at IS NULL",
-        a.releasedByAccountId(), a.releasedAt(), name(a.releaseReason()), a.resourceAssignmentId());
+        a.releasedByAccountId(), JdbcTemporal.timestamp(a.releasedAt()), name(a.releaseReason()),
+        a.resourceAssignmentId());
     if (updated != 1) throw new IllegalStateException("RESOURCE_ASSIGNMENT_RELEASE_CONFLICT");
   }
 
