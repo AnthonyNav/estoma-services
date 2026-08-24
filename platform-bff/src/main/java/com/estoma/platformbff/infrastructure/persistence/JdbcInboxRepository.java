@@ -1,5 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
+import static com.estoma.platformbff.infrastructure.persistence.JdbcTemporalParameters.timestamptz;
+
 import com.estoma.platformbff.application.port.InboxRepository;
 import com.estoma.platformbff.domain.messaging.InboxMessage;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -36,8 +38,8 @@ public class JdbcInboxRepository implements InboxRepository {
         .param("operationId", message.operationId())
         .param("aggregateId", message.aggregateId())
         .param("aggregateVersion", message.aggregateVersion())
-        .param("receivedAt", message.receivedAt())
-        .param("appliedAt", message.appliedAt())
+        .param("receivedAt", timestamptz(message.receivedAt()))
+        .param("appliedAt", timestamptz(message.appliedAt()))
         .update() == 1;
   }
 }

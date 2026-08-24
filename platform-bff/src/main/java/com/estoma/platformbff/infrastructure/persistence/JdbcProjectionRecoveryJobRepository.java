@@ -1,5 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
+import static com.estoma.platformbff.infrastructure.persistence.JdbcTemporalParameters.timestamptz;
+
 import com.estoma.platformbff.application.port.ProjectionRecoveryJobRepository;
 import com.estoma.platformbff.domain.projection.RecoveryJob;
 import java.sql.ResultSet;
@@ -38,9 +40,9 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         .param("operationId", job.operationId())
         .param("cursorValue", job.cursor())
         .param("status", job.status())
-        .param("startedAt", job.startedAt())
-        .param("updatedAt", job.updatedAt())
-        .param("completedAt", job.completedAt())
+        .param("startedAt", timestamptz(job.startedAt()))
+        .param("updatedAt", timestamptz(job.updatedAt()))
+        .param("completedAt", timestamptz(job.completedAt()))
         .param("lastErrorCode", job.lastErrorCode())
         .update();
   }

@@ -1,5 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
+import static com.estoma.platformbff.infrastructure.persistence.JdbcTemporalParameters.timestamptz;
+
 import com.estoma.platformbff.application.port.IdempotencyRepository;
 import com.estoma.platformbff.domain.idempotency.IdempotencyRecord;
 import java.sql.ResultSet;
@@ -43,8 +45,8 @@ public class JdbcIdempotencyRepository implements IdempotencyRepository {
         .param("idempotencyKey", record.idempotencyKey())
         .param("requestFingerprint", record.requestFingerprint())
         .param("operationId", record.operationId())
-        .param("createdAt", record.createdAt())
-        .param("expiresAt", record.expiresAt())
+        .param("createdAt", timestamptz(record.createdAt()))
+        .param("expiresAt", timestamptz(record.expiresAt()))
         .update();
   }
 
@@ -84,7 +86,7 @@ public class JdbcIdempotencyRepository implements IdempotencyRepository {
           AND operation.status <> 'PENDING'
         """)
         .param("operationId", operationId)
-        .param("expiresAt", expiresAt)
+        .param("expiresAt", timestamptz(expiresAt))
         .update() == 1;
   }
 

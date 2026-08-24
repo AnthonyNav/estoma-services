@@ -1,5 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
+import static com.estoma.platformbff.infrastructure.persistence.JdbcTemporalParameters.timestamptz;
+
 import com.estoma.platformbff.application.port.QuarantineRepository;
 import java.time.Instant;
 import java.util.UUID;
@@ -26,7 +28,7 @@ public class JdbcQuarantineRepository implements QuarantineRepository {
         .param("messageId", messageId)
         .param("reasonCode", reasonCode)
         .param("bodySha256", bodySha256)
-        .param("receivedAt", receivedAt)
+        .param("receivedAt", timestamptz(receivedAt))
         .update();
   }
 }

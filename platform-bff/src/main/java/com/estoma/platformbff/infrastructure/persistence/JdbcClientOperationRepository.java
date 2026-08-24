@@ -1,5 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
+import static com.estoma.platformbff.infrastructure.persistence.JdbcTemporalParameters.timestamptz;
+
 import com.estoma.platformbff.application.port.ClientOperationRepository;
 import com.estoma.platformbff.domain.operation.ClientOperation;
 import com.estoma.platformbff.domain.operation.OperationStatus;
@@ -46,10 +48,10 @@ public class JdbcClientOperationRepository implements ClientOperationRepository 
         .param("resultData", operation.resultData())
         .param("errorCode", operation.errorCode())
         .param("errorDetails", operation.errorDetails())
-        .param("createdAt", operation.createdAt())
-        .param("updatedAt", operation.updatedAt())
-        .param("completedAt", operation.completedAt())
-        .param("expiresAt", operation.expiresAt())
+        .param("createdAt", timestamptz(operation.createdAt()))
+        .param("updatedAt", timestamptz(operation.updatedAt()))
+        .param("completedAt", timestamptz(operation.completedAt()))
+        .param("expiresAt", timestamptz(operation.expiresAt()))
         .update();
   }
 
@@ -91,8 +93,9 @@ public class JdbcClientOperationRepository implements ClientOperationRepository 
         .param("resultData", terminalOperation.resultData())
         .param("errorCode", terminalOperation.errorCode())
         .param("errorDetails", terminalOperation.errorDetails())
-        .param("updatedAt", now)
-        .param("completedAt", terminalOperation.completedAt() == null ? now : terminalOperation.completedAt())
+        .param("updatedAt", timestamptz(now))
+        .param("completedAt", timestamptz(
+            terminalOperation.completedAt() == null ? now : terminalOperation.completedAt()))
         .param("operationId", operationId)
         .update() == 1;
   }

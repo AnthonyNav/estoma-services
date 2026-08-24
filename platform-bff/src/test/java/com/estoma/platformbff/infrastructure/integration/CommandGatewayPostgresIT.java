@@ -1,7 +1,8 @@
-package com.estoma.platformbff.application.commands;
+package com.estoma.platformbff.infrastructure.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.estoma.platformbff.application.commands.CommandGatewayService;
 import com.estoma.platformbff.application.operations.IncomingResult;
 import com.estoma.platformbff.application.operations.ResultApplicationService;
 import com.estoma.platformbff.contracts.messaging.ActorContext;

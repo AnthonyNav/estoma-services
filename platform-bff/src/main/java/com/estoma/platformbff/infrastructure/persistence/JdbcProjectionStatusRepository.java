@@ -1,5 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
+import static com.estoma.platformbff.infrastructure.persistence.JdbcTemporalParameters.timestamptz;
+
 import com.estoma.platformbff.application.port.ProjectionStatusRepository;
 import com.estoma.platformbff.domain.projection.ProjectionState;
 import com.estoma.platformbff.domain.projection.ProjectionStatus;
@@ -35,10 +37,10 @@ public class JdbcProjectionStatusRepository implements ProjectionStatusRepositor
         """)
         .param("projectionName", state.projectionName())
         .param("status", state.status().name())
-        .param("lastAppliedAt", state.lastAppliedAt())
+        .param("lastAppliedAt", timestamptz(state.lastAppliedAt()))
         .param("lastErrorCode", state.lastErrorCode())
         .param("generation", state.generation())
-        .param("updatedAt", state.updatedAt())
+        .param("updatedAt", timestamptz(state.updatedAt()))
         .update();
   }
 

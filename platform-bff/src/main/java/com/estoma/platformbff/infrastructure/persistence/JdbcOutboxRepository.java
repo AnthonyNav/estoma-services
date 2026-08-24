@@ -1,5 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
+import static com.estoma.platformbff.infrastructure.persistence.JdbcTemporalParameters.timestamptz;
+
 import com.estoma.platformbff.application.port.OutboxRepository;
 import com.estoma.platformbff.domain.messaging.OutboxMessage;
 import com.estoma.platformbff.domain.messaging.OutboxStatus;
@@ -53,13 +55,13 @@ public class JdbcOutboxRepository implements OutboxRepository {
         .param("payloadJson", message.payloadJson())
         .param("status", message.status().name())
         .param("claimToken", message.claimToken())
-        .param("claimUntil", message.claimUntil())
+        .param("claimUntil", timestamptz(message.claimUntil()))
         .param("attemptCount", message.attemptCount())
-        .param("nextAttemptAt", message.nextAttemptAt())
-        .param("publishedAt", message.publishedAt())
+        .param("nextAttemptAt", timestamptz(message.nextAttemptAt()))
+        .param("publishedAt", timestamptz(message.publishedAt()))
         .param("lastErrorCode", message.lastErrorCode())
-        .param("createdAt", message.createdAt())
-        .param("updatedAt", message.updatedAt())
+        .param("createdAt", timestamptz(message.createdAt()))
+        .param("updatedAt", timestamptz(message.updatedAt()))
         .update();
   }
 
@@ -96,10 +98,10 @@ public class JdbcOutboxRepository implements OutboxRepository {
         WHERE outbox.message_id = candidates.message_id
         RETURNING outbox.*
         """)
-        .param("now", now)
+        .param("now", timestamptz(now))
         .param("limit", limit)
         .param("claimToken", claimToken)
-        .param("claimUntil", now.plus(CLAIM_DURATION))
+        .param("claimUntil", timestamptz(now.plus(CLAIM_DURATION)))
         .query((rs, rowNum) -> map(rs))
         .list();
   }
@@ -116,7 +118,7 @@ public class JdbcOutboxRepository implements OutboxRepository {
         """)
         .param("messageId", messageId)
         .param("claimToken", claimToken)
-        .param("publishedAt", publishedAt)
+        .param("publishedAt", timestamptz(publishedAt))
         .update() == 1;
   }
 
@@ -133,8 +135,8 @@ public class JdbcOutboxRepository implements OutboxRepository {
         .param("messageId", messageId)
         .param("claimToken", claimToken)
         .param("errorCode", errorCode)
-        .param("nextAttemptAt", nextAttemptAt)
-        .param("updatedAt", updatedAt)
+        .param("nextAttemptAt", timestamptz(nextAttemptAt))
+        .param("updatedAt", timestamptz(updatedAt))
         .update() == 1;
   }
 
