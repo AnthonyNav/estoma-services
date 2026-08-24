@@ -17,7 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 
 class WashExecutionIntegrationQueryServiceTest {
   @Test
-  void entitySnapshotCarriesOwnerGenerationTimestamp() {
+  void entitySnapshotCarriesOwnerGenerationTimestamp() throws Exception {
     Instant snapshotAt = Instant.parse("2026-08-23T18:30:00Z");
     UUID appointmentId = UUID.randomUUID();
     AtomicReference<OutboxRepository.OutboxMessage> published = new AtomicReference<>();
@@ -37,7 +37,11 @@ class WashExecutionIntegrationQueryServiceTest {
     JsonCodec json = new JsonCodec() {
       @Override
       public String write(Object value) {
-        return mapper.writeValueAsString(value);
+        try {
+          return mapper.writeValueAsString(value);
+        } catch (Exception exception) {
+          throw new IllegalStateException(exception);
+        }
       }
 
       @Override
