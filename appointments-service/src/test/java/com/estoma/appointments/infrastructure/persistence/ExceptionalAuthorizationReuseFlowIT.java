@@ -59,7 +59,7 @@ class ExceptionalAuthorizationReuseFlowIT extends AbstractPostgresIT {
   }
 
   @Test
-  void secondAppointmentRequiresAuthorizationAndClinicCancellationMakesSameAuthorizationReusable() {
+  void secondAppointmentRequiresAuthorizationClinicCancellationAllowsReuseButNeverAThirdCompletedAppointment() {
     UUID studentId = UUID.randomUUID();
     UUID courseSectionId = UUID.randomUUID();
     seedStudent(studentId, courseSectionId);
@@ -67,6 +67,7 @@ class ExceptionalAuthorizationReuseFlowIT extends AbstractPostgresIT {
     UUID firstSlotId = saveSlot(Instant.parse("2026-08-24T10:00:00Z"), 2);
     UUID secondSlotId = saveSlot(Instant.parse("2026-08-24T14:00:00Z"), 2);
     UUID reuseSlotId = saveSlot(Instant.parse("2026-08-24T15:00:00Z"), 2);
+    UUID limitSlotId = saveSlot(Instant.parse("2026-08-24T16:00:00Z"), 2);
 
     Appointment first = Appointment.scheduled(UUID.randomUUID(), firstSlotId, studentId,
         courseSectionId, AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, null,
@@ -108,14 +109,26 @@ class ExceptionalAuthorizationReuseFlowIT extends AbstractPostgresIT {
     var reused = schedule.schedule(command(studentId, reusedAppointmentId, reuseSlotId,
         courseSectionId, authorizationId, NOW.plusSeconds(3)));
     assertThat(reused.status().name()).isEqualTo("APPLIED");
-    assertThat(appointments.findById(reusedAppointmentId).orElseThrow().consumesExceptionalAuthorization())
-        .isTrue();
+    Appointment reusedAppointment = appointments.findById(reusedAppointmentId).orElseThrow();
+    assertThat(reusedAppointment.consumesExceptionalAuthorization()).isTrue();
 
     var history = appointments.findByExceptionalAuthorization(authorizationId);
     assertThat(history).hasSize(2);
     assertThat(history).extracting(Appointment::appointmentId)
         .containsExactlyInAnyOrder(secondAppointmentId, reusedAppointmentId);
     assertThat(history.stream().filter(Appointment::consumesExceptionalAuthorization).count()).isEqualTo(1);
+
+    Appointment completedSecond = reusedAppointment
+        .start(NOW.plusSeconds(4))
+        .complete(UUID.randomUUID(), NOW.plusSeconds(5));
+    assertThat(appointments.updateIfVersion(completedSecond, reusedAppointment.version())).isTrue();
+
+    UUID forbiddenThirdId = UUID.randomUUID();
+    var forbiddenThird = schedule.schedule(command(studentId, forbiddenThirdId, limitSlotId,
+        courseSectionId, authorizationId, NOW.plusSeconds(6)));
+    assertThat(forbiddenThird.status().name()).isEqualTo("REJECTED");
+    assertThat(forbiddenThird.code()).isEqualTo("DAILY_COMPLETED_LIMIT");
+    assertThat(appointments.findById(forbiddenThirdId)).isEmpty();
   }
 
   private ScheduleAppointmentUseCase.Command command(UUID studentId, UUID appointmentId,
