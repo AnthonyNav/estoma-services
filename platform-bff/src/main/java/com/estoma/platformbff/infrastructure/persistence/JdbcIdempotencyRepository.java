@@ -43,8 +43,8 @@ public class JdbcIdempotencyRepository implements IdempotencyRepository {
         .param("idempotencyKey", record.idempotencyKey())
         .param("requestFingerprint", record.requestFingerprint())
         .param("operationId", record.operationId())
-        .param("createdAt", record.createdAt())
-        .param("expiresAt", record.expiresAt())
+        .param("createdAt", JdbcTimes.timestamp(record.createdAt()))
+        .param("expiresAt", JdbcTimes.timestamp(record.expiresAt()))
         .update();
   }
 
@@ -84,7 +84,7 @@ public class JdbcIdempotencyRepository implements IdempotencyRepository {
           AND operation.status <> 'PENDING'
         """)
         .param("operationId", operationId)
-        .param("expiresAt", expiresAt)
+        .param("expiresAt", JdbcTimes.timestamp(expiresAt))
         .update() == 1;
   }
 
@@ -101,7 +101,6 @@ public class JdbcIdempotencyRepository implements IdempotencyRepository {
   }
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {
-    var timestamp = rs.getTimestamp(column);
-    return timestamp == null ? null : timestamp.toInstant();
+    return JdbcTimes.instant(rs, column);
   }
 }

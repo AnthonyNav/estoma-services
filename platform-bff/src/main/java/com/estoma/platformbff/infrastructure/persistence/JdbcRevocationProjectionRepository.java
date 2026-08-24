@@ -29,7 +29,7 @@ public class JdbcRevocationProjectionRepository implements RevocationProjectionP
         .param("accountId", accountId)
         .param("personId", personId)
         .param("sourceVersion", sourceVersion)
-        .param("updatedAt", updatedAt)
+        .param("updatedAt", JdbcTimes.timestamp(updatedAt))
         .update();
   }
 
@@ -55,7 +55,7 @@ public class JdbcRevocationProjectionRepository implements RevocationProjectionP
         .param("cutoff", revokedAtEpochSeconds)
         .param("reasonCode", reasonCode)
         .param("sourceMessageId", sourceMessageId)
-        .param("updatedAt", updatedAt)
+        .param("updatedAt", JdbcTimes.timestamp(updatedAt))
         .update();
   }
 
@@ -101,7 +101,7 @@ public class JdbcRevocationProjectionRepository implements RevocationProjectionP
         .param("exceptSessionId", exceptSessionId)
         .param("reasonCode", reasonCode)
         .param("sourceMessageId", sourceMessageId)
-        .param("updatedAt", updatedAt)
+        .param("updatedAt", JdbcTimes.timestamp(updatedAt))
         .update();
   }
 
@@ -128,7 +128,7 @@ public class JdbcRevocationProjectionRepository implements RevocationProjectionP
         .param("cutoff", cutoff)
         .param("reasonCode", reasonCode)
         .param("sourceMessageId", sourceMessageId)
-        .param("updatedAt", updatedAt)
+        .param("updatedAt", JdbcTimes.timestamp(updatedAt))
         .update();
   }
 }

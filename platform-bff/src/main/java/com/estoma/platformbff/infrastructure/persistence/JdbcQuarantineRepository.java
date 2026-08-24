@@ -26,7 +26,7 @@ public class JdbcQuarantineRepository implements QuarantineRepository {
         .param("messageId", messageId)
         .param("reasonCode", reasonCode)
         .param("bodySha256", bodySha256)
-        .param("receivedAt", receivedAt)
+        .param("receivedAt", JdbcTimes.timestamp(receivedAt))
         .update();
   }
 }

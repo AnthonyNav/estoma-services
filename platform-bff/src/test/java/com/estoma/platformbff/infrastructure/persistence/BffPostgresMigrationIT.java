@@ -355,7 +355,7 @@ class BffPostgresMigrationIT {
         .param("cutoff", now.getEpochSecond())
         .param("exceptSessionId", UUID.randomUUID())
         .param("messageId", UUID.randomUUID())
-        .param("updatedAt", now)
+        .param("updatedAt", JdbcTimes.timestamp(now))
         .update()).isInstanceOf(DataIntegrityViolationException.class);
 
     assertThatThrownBy(() -> jdbc.sql("""
@@ -369,8 +369,8 @@ class BffPostgresMigrationIT {
         """)
         .param("jobId", UUID.randomUUID())
         .param("entityId", UUID.randomUUID())
-        .param("startedAt", now)
-        .param("updatedAt", now)
+        .param("startedAt", JdbcTimes.timestamp(now))
+        .param("updatedAt", JdbcTimes.timestamp(now))
         .update()).isInstanceOf(DataIntegrityViolationException.class);
   }
 

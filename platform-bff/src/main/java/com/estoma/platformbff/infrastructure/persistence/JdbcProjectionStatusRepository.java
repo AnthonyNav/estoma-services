@@ -35,10 +35,10 @@ public class JdbcProjectionStatusRepository implements ProjectionStatusRepositor
         """)
         .param("projectionName", state.projectionName())
         .param("status", state.status().name())
-        .param("lastAppliedAt", state.lastAppliedAt())
+        .param("lastAppliedAt", JdbcTimes.timestamp(state.lastAppliedAt()))
         .param("lastErrorCode", state.lastErrorCode())
         .param("generation", state.generation())
-        .param("updatedAt", state.updatedAt())
+        .param("updatedAt", JdbcTimes.timestamp(state.updatedAt()))
         .update();
   }
 
@@ -51,10 +51,9 @@ public class JdbcProjectionStatusRepository implements ProjectionStatusRepositor
   }
 
   private static ProjectionState map(ResultSet rs) throws SQLException {
-    var lastApplied = rs.getTimestamp("last_applied_at");
     return new ProjectionState(rs.getString("projection_name"),
         ProjectionStatus.valueOf(rs.getString("status")),
-        lastApplied == null ? null : lastApplied.toInstant(), rs.getString("last_error_code"),
-        rs.getLong("generation"), rs.getTimestamp("updated_at").toInstant());
+        JdbcTimes.instant(rs, "last_applied_at"), rs.getString("last_error_code"),
+        rs.getLong("generation"), JdbcTimes.instant(rs, "updated_at"));
   }
 }
