@@ -59,6 +59,10 @@ public class StudentImportPlanBuilder {
     try {
       List<Student> students = students(importId);
       if (!supportedAndComplete(students, resolutions)) return false;
+      // A FOUND Users result proves identity, but UpdatePerson also requires the current
+      // optimistic-concurrency version. Do not freeze a plan until the local Person
+      // projection has converged far enough to provide that version.
+      if (!personProjectionsReady(resolutions)) return false;
       List<Plan> plans = plans(process, students, resolutions);
       if (jdbc.sql("SELECT count(*) FROM student_import_plan_items WHERE import_id=:importId")
           .param("importId", importId).query(Long.class).single() != 0) {
@@ -157,6 +161,15 @@ public class StudentImportPlanBuilder {
     return emails.size() == resolutions.size();
   }
 
+  private boolean personProjectionsReady(Map<String, Resolution> resolutions) {
+    for (Resolution resolution : resolutions.values()) {
+      if ("FOUND".equals(resolution.outcome) && person(resolution.personId) == null) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   private List<Plan> plans(Process process, List<Student> students, Map<String, Resolution> resolutions) {
     List<Plan> plans = new ArrayList<>();
     Ids ids = new Ids();
@@ -201,10 +214,11 @@ public class StudentImportPlanBuilder {
       }
       if ("FOUND".equals(resolution.outcome)) {
         Person person = person(personId);
+        if (person == null) throw new IllegalStateException("Person projection disappeared while building import plan");
         plans.add(plan(process.importId, "UPDATE_PERSON", key("personId", personId),
             key("personId", personId, "firstName", student.firstName, "paternalSurname", student.paternalSurname,
-                "maternalSurname", student.maternalSurname),
-            person == null ? Map.of() : versions("personVersion", person.version), null));
+                "maternalSurname", student.maternalSurname, "institutionalEmail", student.email),
+            versions("personVersion", person.version), null));
       } else {
         plans.add(plan(process.importId, "CREATE_PERSON", key("institutionalEmail", student.email),
             key("personId", personId, "firstName", student.firstName, "paternalSurname", student.paternalSurname,

@@ -3,6 +3,7 @@ package com.estoma.academic;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.estoma.academic.application.StudentImportPlanBuilder;
+import com.estoma.academic.application.StudentImportPlanConvergenceWorker;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,7 @@ class StudentImportPlanBuilderIT {
   @Autowired JdbcClient jdbc;
   @Autowired ObjectMapper mapper;
   @Autowired StudentImportPlanBuilder planBuilder;
+  @Autowired StudentImportPlanConvergenceWorker convergenceWorker;
 
   UUID period;
 
@@ -111,8 +113,29 @@ class StudentImportPlanBuilderIT {
     assertThat(jdbc.sql("SELECT count(*) FROM student_import_plan_items WHERE import_id=:id AND item_type IN ('CREATE_PERSON','CREATE_ACCOUNT') AND generated_entity_id IS NOT NULL")
         .param("id", importId).query(Long.class).single()).isEqualTo(2);
     assertThat(value("SELECT expected_versions->>'personVersion' FROM student_import_plan_items WHERE import_id=:id AND item_type='UPDATE_PERSON'", importId)).isEqualTo("7");
+    assertThat(value("SELECT planned_effect->>'institutionalEmail' FROM student_import_plan_items WHERE import_id=:id AND item_type='UPDATE_PERSON'", importId)).isEqualTo("bob@estoma.mx");
     assertThat(value("SELECT academic_status::text FROM student_academic_profiles WHERE student_academic_profile_id=:id", bobProfile)).isEqualTo("INACTIVE");
     assertThat(value("SELECT status::text FROM course_sections WHERE course_section_id=:id", oldSection)).isEqualTo("ACTIVE");
+  }
+
+  @Test
+  void authoritativeResultWaitsForPersonProjectionThenConvergesWithoutFreezingAnUnversionedUpdate() {
+    UUID importId = importWithRows();
+    UUID bob = UUID.randomUUID();
+    resolution(importId, "alice@estoma.mx", "{\"outcome\":\"NOT_FOUND\"}");
+    resolution(importId, "bob@estoma.mx", "{\"outcome\":\"FOUND\",\"personId\":\"" + bob + "\",\"status\":\"ACTIVE\"}");
+
+    assertThat(planBuilder.buildIfReady(importId)).isFalse();
+    assertThat(count("student_import_plan_items", importId)).isZero();
+    assertThat(value("SELECT status::text FROM student_import_processes WHERE import_id=:id", importId)).isEqualTo("VALIDATING");
+
+    jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:id,'ACTIVE',11,now())")
+        .param("id", bob).update();
+    convergenceWorker.convergeReadyPlans();
+
+    assertThat(value("SELECT status::text FROM student_import_processes WHERE import_id=:id", importId)).isEqualTo("VALIDATED");
+    assertThat(value("SELECT expected_versions->>'personVersion' FROM student_import_plan_items WHERE import_id=:id AND item_type='UPDATE_PERSON'", importId)).isEqualTo("11");
+    assertThat(value("SELECT planned_effect->>'institutionalEmail' FROM student_import_plan_items WHERE import_id=:id AND item_type='UPDATE_PERSON'", importId)).isEqualTo("bob@estoma.mx");
   }
 
   private UUID importWithRows() {
