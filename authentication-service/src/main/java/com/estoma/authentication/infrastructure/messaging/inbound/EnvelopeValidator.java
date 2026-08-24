@@ -6,6 +6,7 @@ import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -22,6 +23,11 @@ public class EnvelopeValidator {
       AuthenticationCommand.CREATE_ACCOUNT.wireName(),
       AuthenticationCommand.ACTIVATE_ACCOUNT.wireName(),
       AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName());
+  private static final Map<String, String> EVENT_OWNERS = Map.of(
+      "PersonCreated", "users",
+      "PersonActivated", "users",
+      "PersonDeactivated", "users",
+      "StudentNumberCorrected", "academic");
 
   public void validateCommand(MessageEnvelope envelope) {
     validateCommon(envelope);
@@ -61,6 +67,29 @@ public class EnvelopeValidator {
     if (envelope.messageKind() != MessageKind.EVENT) {
       throw new InvalidMessageException(
           "expected messageKind=EVENT on events.authentication, got " + envelope.messageKind());
+    }
+    String owner = EVENT_OWNERS.get(envelope.messageType());
+    if (owner == null) {
+      throw new InvalidMessageException("unrecognized external event messageType " + envelope.messageType());
+    }
+    if (!owner.equals(envelope.producer())) {
+      throw new InvalidMessageException(
+          "event " + envelope.messageType() + " must be produced by " + owner);
+    }
+    if (envelope.aggregateId() == null || envelope.aggregateVersion() == null || envelope.aggregateVersion() < 1) {
+      throw new InvalidMessageException("external event requires aggregateId and positive aggregateVersion");
+    }
+    if (envelope.payload() == null || !envelope.payload().isObject()) {
+      throw new InvalidMessageException("external event payload must be an object");
+    }
+
+    UUID payloadAggregate = switch (envelope.messageType()) {
+      case "PersonCreated", "PersonActivated", "PersonDeactivated" -> requireUuid(envelope.payload(), "personId");
+      case "StudentNumberCorrected" -> requireUuid(envelope.payload(), "studentAcademicProfileId");
+      default -> throw new InvalidMessageException("unrecognized external event messageType " + envelope.messageType());
+    };
+    if (!envelope.aggregateId().equals(payloadAggregate)) {
+      throw new InvalidMessageException("external event aggregateId does not match owner payload aggregate");
     }
   }
 
@@ -120,11 +149,11 @@ public class EnvelopeValidator {
     }
   }
 
-  private static void requireUuid(JsonNode node, String field) {
+  private static UUID requireUuid(JsonNode node, String field) {
     try {
-      UUID.fromString(node.path(field).asString());
+      return UUID.fromString(node.path(field).asString());
     } catch (RuntimeException exception) {
-      throw new InvalidMessageException("importExecution." + field + " must be a UUID");
+      throw new InvalidMessageException(field + " must be a UUID");
     }
   }
 
