@@ -10,14 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Component;
 
-/**
- * Consumes {@code PersonCreated}/{@code PersonUpdated}/{@code
- * PersonActivated}/{@code PersonDeactivated} to keep {@code
- * recipient_projection}'s person-derived columns current (events.md §5).
- * Updates every existing row for this {@code personId} -- see {@code
- * V7__recipient_projection.sql} for why a Person event cannot create a row
- * on its own.
- */
+/** Projects canonical Users Person events into the local recipient read model. */
 @Component
 class PersonRecipientProjectionHandler implements ProjectionHandler {
 
@@ -32,7 +25,10 @@ class PersonRecipientProjectionHandler implements ProjectionHandler {
   @Override
   public List<String> consumedMessageTypes() {
     return List.of(
-        ConsumedEventTypes.PERSON_CREATED, ConsumedEventTypes.PERSON_UPDATED, ConsumedEventTypes.PERSON_ACTIVATED, ConsumedEventTypes.PERSON_DEACTIVATED);
+        ConsumedEventTypes.PERSON_CREATED,
+        ConsumedEventTypes.PERSON_UPDATED,
+        ConsumedEventTypes.PERSON_ACTIVATED,
+        ConsumedEventTypes.PERSON_DEACTIVATED);
   }
 
   @Override
@@ -43,7 +39,19 @@ class PersonRecipientProjectionHandler implements ProjectionHandler {
   @Override
   public ProjectionHandlerResult handle(MessageEnvelope envelope) {
     PersonProjectionEventPayload payload = codec.convertPayload(envelope, PersonProjectionEventPayload.class);
-    repository.updatePersonIfNewer(payload.personId(), payload.displayName(), payload.institutionalEmail(), payload.status(), payload.sourceVersion(), Instant.now());
+    if (payload == null || payload.personId() == null || envelope.aggregateVersion() == null || envelope.aggregateVersion() < 1) {
+      throw new IllegalArgumentException("invalid canonical Person event for recipient projection");
+    }
+    Instant now = Instant.now();
+    switch (envelope.messageType()) {
+      case ConsumedEventTypes.PERSON_CREATED -> repository.updatePersonIfNewer(
+          payload.personId(), payload.displayName(), payload.institutionalEmail(), payload.status(), envelope.aggregateVersion(), now);
+      case ConsumedEventTypes.PERSON_UPDATED -> repository.updatePersonDetailsIfNewer(
+          payload.personId(), payload.displayName(), payload.institutionalEmail(), envelope.aggregateVersion(), now);
+      case ConsumedEventTypes.PERSON_ACTIVATED, ConsumedEventTypes.PERSON_DEACTIVATED -> repository.updatePersonStatusIfNewer(
+          payload.personId(), payload.status(), envelope.aggregateVersion(), now);
+      default -> throw new IllegalStateException("unsupported Person event " + envelope.messageType());
+    }
     return ProjectionHandlerResult.NONE;
   }
 }
