@@ -25,14 +25,7 @@ class ExternalEventMessageMapperTest {
   @Test
   void acceptsPersonCreatedWithoutOptionalMaternalSurnameOrPhone() {
     UUID personId = UUID.randomUUID();
-    var payload = mapper.createObjectNode()
-        .put("personId", personId.toString())
-        .put("firstName", "Ada")
-        .put("paternalSurname", "Lovelace")
-        .put("institutionalEmail", "ada@estoma.mx")
-        .put("status", "ACTIVE")
-        .put("version", 1)
-        .put("createdAt", NOW.toString());
+    var payload = personCreated(personId);
 
     var event = eventMapper.map(event(
         "PersonCreated", "users", personId, 1, new WireActor("SYSTEM", null, "users"), payload));
@@ -41,7 +34,20 @@ class ExternalEventMessageMapperTest {
   }
 
   @Test
-  void acceptsNonOtherDeactivationReasonWithOptionalDetail() {
+  void acceptsPersonCreatedWhenOwnerSerializerMaterializesOptionalFieldsAsNull() {
+    UUID personId = UUID.randomUUID();
+    var payload = personCreated(personId)
+        .putNull("maternalSurname")
+        .putNull("phone");
+
+    var event = eventMapper.map(event(
+        "PersonCreated", "users", personId, 1, new WireActor("SYSTEM", null, "users"), payload));
+
+    assertThat(event).isInstanceOf(PersonProjectionEvent.class);
+  }
+
+  @Test
+  void acceptsNonOtherDeactivationReasonWithNullOptionalDetail() {
     UUID accountId = UUID.randomUUID();
     var payload = mapper.createObjectNode()
         .put("accountId", accountId.toString())
@@ -49,18 +55,24 @@ class ExternalEventMessageMapperTest {
         .put("previousStatus", "ACTIVE")
         .put("status", "INACTIVE")
         .put("reasonCode", "ADMINISTRATIVE")
-        .put("reasonDetail", "administrative closure")
+        .putNull("reasonDetail")
         .put("deactivatedAt", NOW.toString());
 
     var event = eventMapper.map(event(
-        "AccountDeactivated",
-        "authentication",
-        accountId,
-        2,
-        new WireActor("SYSTEM", null, "authentication"),
-        payload));
+        "AccountDeactivated", "authentication", accountId, 2,
+        new WireActor("SYSTEM", null, "authentication"), payload));
 
     assertThat(event).isInstanceOf(AccountProjectionEvent.class);
+  }
+
+  @Test
+  void stillRejectsNullRequiredFields() {
+    UUID personId = UUID.randomUUID();
+    var payload = personCreated(personId).putNull("institutionalEmail");
+
+    assertThatThrownBy(() -> eventMapper.map(event(
+            "PersonCreated", "users", personId, 1, new WireActor("SYSTEM", null, "users"), payload)))
+        .isInstanceOf(InvalidMessageException.class);
   }
 
   @Test
@@ -78,14 +90,21 @@ class ExternalEventMessageMapperTest {
         .put("evaluatedAt", NOW.toString());
 
     assertThatThrownBy(() -> eventMapper.map(event(
-            "StudentAcademicEligibilityChanged",
-            "academic",
-            eligibilityId,
-            1,
-            new WireActor("SYSTEM", null, "academic"),
-            payload)))
+            "StudentAcademicEligibilityChanged", "academic", eligibilityId, 1,
+            new WireActor("SYSTEM", null, "academic"), payload)))
         .isInstanceOf(InvalidMessageException.class)
         .hasMessage("unsupported academic eligibility systemCode");
+  }
+
+  private tools.jackson.databind.node.ObjectNode personCreated(UUID personId) {
+    return mapper.createObjectNode()
+        .put("personId", personId.toString())
+        .put("firstName", "Ada")
+        .put("paternalSurname", "Lovelace")
+        .put("institutionalEmail", "ada@estoma.mx")
+        .put("status", "ACTIVE")
+        .put("version", 1)
+        .put("createdAt", NOW.toString());
   }
 
   private MessageEnvelope event(
@@ -96,19 +115,7 @@ class ExternalEventMessageMapperTest {
       WireActor actor,
       tools.jackson.databind.JsonNode payload) {
     return new MessageEnvelope(
-        UUID.randomUUID(),
-        type,
-        1,
-        MessageKind.EVENT,
-        producer,
-        NOW,
-        UUID.randomUUID(),
-        UUID.randomUUID(),
-        null,
-        null,
-        aggregateId,
-        aggregateVersion,
-        actor,
-        payload);
+        UUID.randomUUID(), type, 1, MessageKind.EVENT, producer, NOW, UUID.randomUUID(), UUID.randomUUID(),
+        null, null, aggregateId, aggregateVersion, actor, payload);
   }
 }
