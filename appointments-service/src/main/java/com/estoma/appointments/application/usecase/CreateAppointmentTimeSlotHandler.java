@@ -11,6 +11,7 @@ import com.estoma.appointments.application.port.out.WashAdministrationProjection
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -101,7 +102,7 @@ public class CreateAppointmentTimeSlotHandler implements CreateAppointmentTimeSl
     if (calendar == null || !"ACTIVE".equals(calendar.status())) {
       return ApplicationResult.rejected("CALENDAR_NOT_ACTIVE", "source calendar is not active");
     }
-    if (!calendar.timezone().equals(command.timezone().getId())) {
+    if (!ZoneId.of(calendar.timezone()).normalized().equals(command.timezone().normalized())) {
       return ApplicationResult.rejected("TIMEZONE_MISMATCH", "slot timezone differs from source calendar");
     }
     if (command.serviceDate().isBefore(calendar.effectiveFrom())

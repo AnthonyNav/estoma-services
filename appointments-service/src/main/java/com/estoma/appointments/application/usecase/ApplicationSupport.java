@@ -20,9 +20,6 @@ import java.util.regex.Pattern;
 
 /** Shared application-boundary mechanics; it contains no transport concerns. */
 final class ApplicationSupport {
-  private static final Pattern RESULT_PATTERN = Pattern.compile(
-      "\\{\\\"status\\\":\\\"([^\\\"]+)\\\",\\\"code\\\":\\\"([^\\\"]*)\\\",\\\"message\\\":\\\"([^\\\"]*)\\\"(?:,\\\"aggregateId\\\":\\\"([^\\\"]+)\\\")?,\\\"aggregateVersion\\\":([0-9]+)\\}");
-
   private ApplicationSupport() {}
 
   static String fingerprint(Object... values) {
@@ -145,16 +142,33 @@ final class ApplicationSupport {
 
   private static ApplicationResult replay(String outcomeJson) {
     if (outcomeJson == null) return ApplicationResult.duplicate();
-    Matcher matcher = RESULT_PATTERN.matcher(outcomeJson);
-    if (!matcher.matches()) return ApplicationResult.duplicate();
     try {
-      ApplicationResult.Status status = ApplicationResult.Status.valueOf(matcher.group(1));
-      UUID aggregateId = matcher.group(4) == null ? null : UUID.fromString(matcher.group(4));
-      return new ApplicationResult(status, matcher.group(2), unescape(matcher.group(3)), aggregateId,
-          Long.parseLong(matcher.group(5)), null);
+      String status = stringField(outcomeJson, "status");
+      String code = stringField(outcomeJson, "code");
+      String message = stringField(outcomeJson, "message");
+      String version = numberField(outcomeJson, "aggregateVersion");
+      if (status == null || code == null || message == null || version == null) {
+        return ApplicationResult.duplicate();
+      }
+      String aggregate = stringField(outcomeJson, "aggregateId");
+      UUID aggregateId = aggregate == null ? null : UUID.fromString(aggregate);
+      return new ApplicationResult(ApplicationResult.Status.valueOf(status), code, unescape(message),
+          aggregateId, Long.parseLong(version), null);
     } catch (RuntimeException ignored) {
       return ApplicationResult.duplicate();
     }
+  }
+
+  private static String stringField(String json, String field) {
+    Matcher matcher = Pattern.compile("\"" + Pattern.quote(field)
+        + "\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"").matcher(json);
+    return matcher.find() ? matcher.group(1) : null;
+  }
+
+  private static String numberField(String json, String field) {
+    Matcher matcher = Pattern.compile("\"" + Pattern.quote(field)
+        + "\"\\s*:\\s*([0-9]+)").matcher(json);
+    return matcher.find() ? matcher.group(1) : null;
   }
 
   static String escape(String value) {

@@ -71,8 +71,8 @@ class BoundedContextE2EIT extends AbstractPostgresIT {
 
   @BeforeEach
   void cleanAndBindObservationQueues() {
-    admin.declareQueue(new Queue(BFF_RESULTS, false, false, true));
-    admin.declareQueue(new Queue(APPOINTMENTS_EVENTS, false, false, true));
+    admin.declareQueue(new Queue(BFF_RESULTS, false, false, false));
+    admin.declareQueue(new Queue(APPOINTMENTS_EVENTS, false, false, false));
     admin.declareBinding(new Binding(BFF_RESULTS, Binding.DestinationType.QUEUE,
         MessagingNames.RESULTS_EXCHANGE, "bff", null));
     admin.declareBinding(new Binding(APPOINTMENTS_EVENTS, Binding.DestinationType.QUEUE,
