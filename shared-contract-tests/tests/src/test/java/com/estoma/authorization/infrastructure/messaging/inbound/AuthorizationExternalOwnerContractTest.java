@@ -2,6 +2,7 @@ package com.estoma.authorization.infrastructure.messaging.inbound;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.estoma.authorization.application.projection.AcademicEligibilityProjectionEvent;
 import com.estoma.authorization.application.projection.AccountProjectionEvent;
 import com.estoma.authorization.application.projection.PersonProjectionEvent;
 import com.estoma.authorization.contracts.MessageEnvelope;
@@ -61,6 +62,33 @@ class AuthorizationExternalOwnerContractTest {
     assertThat(createdProjection.status().name()).isEqualTo("INACTIVE");
     assertThat(activeProjection.status().name()).isEqualTo("ACTIVE");
     assertThat(inactiveProjection.status().name()).isEqualTo("INACTIVE");
+  }
+
+  @Test
+  void academicEligibilityShapeMapsWithEligibilityVersionAsAggregateVersion() {
+    UUID eligibilityId = UUID.randomUUID();
+    UUID profileId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    int eligibilityVersion = 4;
+    var payload = mapper.createObjectNode()
+        .put("eligibilityId", eligibilityId.toString())
+        .put("studentAcademicProfileId", profileId.toString())
+        .put("accountId", accountId.toString())
+        .put("systemCode", "PRACTICAS_PROFESIONALES")
+        .put("eligible", true)
+        .put("policyVersion", 1)
+        .put("eligibilityVersion", eligibilityVersion)
+        .put("academicProfileVersion", 9)
+        .put("evaluatedAt", Instant.now().toString());
+
+    AcademicEligibilityProjectionEvent projected = (AcademicEligibilityProjectionEvent) mapping.map(
+        event("StudentAcademicEligibilityChanged", "academic", eligibilityId, eligibilityVersion, payload));
+
+    assertThat(projected.eligibilityId()).isEqualTo(eligibilityId);
+    assertThat(projected.studentAcademicProfileId()).isEqualTo(profileId);
+    assertThat(projected.accountId()).isEqualTo(accountId);
+    assertThat(projected.eligibilityVersion()).isEqualTo(eligibilityVersion);
+    assertThat(projected.eligible()).isTrue();
   }
 
   private static MessageEnvelope event(
