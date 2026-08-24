@@ -1,0 +1,66 @@
+name: shared-contract-tests
+
+on:
+  pull_request:
+    paths:
+      - "shared-contract-tests/**"
+      - "users-service/src/main/java/**"
+      - "authentication-service/src/main/java/**"
+      - "academic-service/src/main/java/**"
+      - "authorization-service/src/main/java/**"
+      - "communications-service/src/main/java/**"
+      - "users-service/pom.xml"
+      - "authentication-service/pom.xml"
+      - "academic-service/pom.xml"
+      - "authorization-service/pom.xml"
+      - "communications-service/pom.xml"
+      - ".github/workflows/shared-contract-tests.yaml"
+  push:
+    branches: [develop]
+    paths:
+      - "shared-contract-tests/**"
+      - "users-service/src/main/java/**"
+      - "authentication-service/src/main/java/**"
+      - "academic-service/src/main/java/**"
+      - "authorization-service/src/main/java/**"
+      - "communications-service/src/main/java/**"
+      - "users-service/pom.xml"
+      - "authentication-service/pom.xml"
+      - "academic-service/pom.xml"
+      - "authorization-service/pom.xml"
+      - "communications-service/pom.xml"
+      - ".github/workflows/shared-contract-tests.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          cache-dependency-path: |
+            users-service/pom.xml
+            authentication-service/pom.xml
+            academic-service/pom.xml
+            authorization-service/pom.xml
+            communications-service/pom.xml
+            shared-contract-tests/tests/pom.xml
+
+      - name: Compile and install shared service artifacts
+        run: >-
+          mvn -B -f shared-contract-tests/reactor/pom.xml
+          -Dmaven.test.skip=true
+          -Dspring-boot.repackage.skip=true
+          install
+
+      - name: Run cross-service contract tests
+        run: mvn -B -f shared-contract-tests/tests/pom.xml test
