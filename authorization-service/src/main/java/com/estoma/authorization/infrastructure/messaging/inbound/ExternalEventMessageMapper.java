@@ -24,18 +24,9 @@ final class ExternalEventMessageMapper {
 
   ProjectionEvent map(MessageEnvelope envelope) {
     ProjectionEventMetadata metadata = new ProjectionEventMetadata(
-        envelope.messageId(),
-        envelope.messageType(),
-        envelope.messageVersion(),
-        envelope.producer(),
-        envelope.occurredAt(),
-        envelope.correlationId(),
-        envelope.causationId(),
-        envelope.operationId(),
-        envelope.idempotencyKey(),
-        WireValues.actor(envelope.actor()),
-        envelope.aggregateId(),
-        envelope.aggregateVersion());
+        envelope.messageId(), envelope.messageType(), envelope.messageVersion(), envelope.producer(),
+        envelope.occurredAt(), envelope.correlationId(), envelope.causationId(), envelope.operationId(),
+        envelope.idempotencyKey(), WireValues.actor(envelope.actor()), envelope.aggregateId(), envelope.aggregateVersion());
     return switch (envelope.messageType()) {
       case "PersonCreated" -> person(metadata, envelope.payload(), "ACTIVE", Set.of(
           "personId", "firstName", "paternalSurname", "maternalSurname", "institutionalEmail", "phone", "status", "version", "createdAt"));
@@ -72,13 +63,9 @@ final class ExternalEventMessageMapper {
     if ("PersonCreated".equals(metadata.messageType())) {
       WireValues.text(payload, "firstName");
       WireValues.text(payload, "paternalSurname");
-      if (payload.has("maternalSurname")) {
-        WireValues.text(payload, "maternalSurname");
-      }
+      WireValues.optionalText(payload, "maternalSurname");
       WireValues.text(payload, "institutionalEmail");
-      if (payload.has("phone")) {
-        WireValues.text(payload, "phone");
-      }
+      WireValues.optionalText(payload, "phone");
       WireValues.instant(payload, "createdAt");
     } else if ("PersonActivated".equals(metadata.messageType())) {
       WireValues.instant(payload, "activatedAt");
@@ -96,11 +83,7 @@ final class ExternalEventMessageMapper {
         || metadata.aggregateVersion() != WireValues.positiveInt(payload, "version")) {
       throw new InvalidMessageException("invalid Person Event owner or aggregate metadata");
     }
-    return new PersonProjectionEvent(
-        metadata,
-        WireValues.uuid(payload, "personId"),
-        status,
-        codec.write(payload));
+    return new PersonProjectionEvent(metadata, WireValues.uuid(payload, "personId"), status, codec.write(payload));
   }
 
   private AccountProjectionEvent accountCreated(ProjectionEventMetadata metadata, JsonNode payload) {
@@ -119,12 +102,8 @@ final class ExternalEventMessageMapper {
       throw new InvalidMessageException("invalid Account Event owner or aggregate metadata");
     }
     return new AccountProjectionEvent(
-        metadata,
-        WireValues.uuid(payload, "accountId"),
-        WireValues.uuid(payload, "personId"),
-        WireValues.enumValue(payload, "loginType", LoginType.class),
-        status,
-        codec.write(payload));
+        metadata, WireValues.uuid(payload, "accountId"), WireValues.uuid(payload, "personId"),
+        WireValues.enumValue(payload, "loginType", LoginType.class), status, codec.write(payload));
   }
 
   private AccountProjectionEvent accountTransition(
@@ -156,26 +135,14 @@ final class ExternalEventMessageMapper {
       throw new InvalidMessageException("invalid Account Event owner or aggregate metadata");
     }
     return new AccountProjectionEvent(
-        metadata,
-        WireValues.uuid(payload, "accountId"),
-        WireValues.uuid(payload, "personId"),
-        null,
-        status,
-        codec.write(payload));
+        metadata, WireValues.uuid(payload, "accountId"), WireValues.uuid(payload, "personId"),
+        null, status, codec.write(payload));
   }
 
-  private AcademicEligibilityProjectionEvent eligibility(
-      ProjectionEventMetadata metadata, JsonNode payload) {
+  private AcademicEligibilityProjectionEvent eligibility(ProjectionEventMetadata metadata, JsonNode payload) {
     Set<String> fields = Set.of(
-        "eligibilityId",
-        "studentAcademicProfileId",
-        "accountId",
-        "systemCode",
-        "eligible",
-        "policyVersion",
-        "eligibilityVersion",
-        "academicProfileVersion",
-        "evaluatedAt");
+        "eligibilityId", "studentAcademicProfileId", "accountId", "systemCode", "eligible",
+        "policyVersion", "eligibilityVersion", "academicProfileVersion", "evaluatedAt");
     WireValues.fields(payload, fields, fields);
     WireValues.uuid(payload, "eligibilityId");
     WireValues.uuid(payload, "studentAcademicProfileId");
@@ -195,16 +162,10 @@ final class ExternalEventMessageMapper {
       throw new InvalidMessageException("invalid eligibility Event owner or aggregate metadata");
     }
     return new AcademicEligibilityProjectionEvent(
-        metadata,
-        WireValues.uuid(payload, "eligibilityId"),
-        WireValues.uuid(payload, "studentAcademicProfileId"),
-        systemCode,
-        WireValues.uuid(payload, "accountId"),
-        WireValues.bool(payload, "eligible"),
-        WireValues.positiveInt(payload, "policyVersion"),
-        WireValues.positiveInt(payload, "eligibilityVersion"),
-        WireValues.positiveInt(payload, "academicProfileVersion"),
-        WireValues.instant(payload, "evaluatedAt"),
+        metadata, WireValues.uuid(payload, "eligibilityId"), WireValues.uuid(payload, "studentAcademicProfileId"),
+        systemCode, WireValues.uuid(payload, "accountId"), WireValues.bool(payload, "eligible"),
+        WireValues.positiveInt(payload, "policyVersion"), WireValues.positiveInt(payload, "eligibilityVersion"),
+        WireValues.positiveInt(payload, "academicProfileVersion"), WireValues.instant(payload, "evaluatedAt"),
         codec.write(payload));
   }
 }
