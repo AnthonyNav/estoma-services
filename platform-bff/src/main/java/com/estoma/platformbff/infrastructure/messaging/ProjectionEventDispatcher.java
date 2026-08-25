@@ -1,167 +1,63 @@
 package com.estoma.platformbff.infrastructure.messaging;
 
-import com.estoma.platformbff.application.security.RevocationProjectionEvent;
-import com.estoma.platformbff.application.security.RevocationProjectionEvent.AccountSessionsRevoked;
-import com.estoma.platformbff.application.security.RevocationProjectionEvent.CutoffKind;
-import com.estoma.platformbff.application.security.RevocationProjectionEvent.Metadata;
-import com.estoma.platformbff.application.security.RevocationProjectionService;
+import com.estoma.platformbff.application.projection.ProjectionEvent;
+import com.estoma.platformbff.application.projection.ProjectionEventRuntime;
 import com.estoma.platformbff.contracts.messaging.EventEnvelope;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
-import java.time.Instant;
-import java.util.Set;
-import java.util.UUID;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
+/** Infrastructure adapter: decodes the wire tree and delegates to the application trust boundary. */
 @Component
 public class ProjectionEventDispatcher {
   public enum DispatchOutcome { APPLIED, UNSUPPORTED, UNTRUSTED }
 
-  private static final Set<String> AUTHENTICATION_TYPES = Set.of(
-      "AccountCreated",
-      "SessionRevoked",
-      "AllAccountSessionsRevoked",
-      "OtherAccountSessionsRevoked",
-      "AccountDeactivated");
+  private final ProjectionEventRuntime runtime;
 
-  private final RevocationProjectionService revocations;
-
-  public ProjectionEventDispatcher(RevocationProjectionService revocations) {
-    this.revocations = revocations;
+  public ProjectionEventDispatcher(ProjectionEventRuntime runtime) {
+    this.runtime = runtime;
   }
 
   public DispatchOutcome dispatch(EventEnvelope event) {
-    RevocationProjectionEvent mapped;
-    try {
-      mapped = map(event);
-    } catch (IllegalArgumentException invalidContract) {
+    if (event == null || event.messageKind() != MessageKind.EVENT || event.payload() == null
+        || !event.payload().isObject()) {
       return DispatchOutcome.UNTRUSTED;
     }
-    if (mapped == null) return DispatchOutcome.UNSUPPORTED;
-    revocations.apply(mapped);
-    return DispatchOutcome.APPLIED;
-  }
-
-  private static RevocationProjectionEvent map(EventEnvelope event) {
-    validateEnvelope(event);
-    String type = event.messageType();
-    if (!AUTHENTICATION_TYPES.contains(type) && !"PersonDeactivated".equals(type)) {
-      return null;
-    }
-    if (AUTHENTICATION_TYPES.contains(type) && !"authentication".equals(event.producer())) {
-      throw new IllegalArgumentException("authentication event producer mismatch");
-    }
-    if ("PersonDeactivated".equals(type) && !"users".equals(event.producer())) {
-      throw new IllegalArgumentException("person event producer mismatch");
-    }
-
-    JsonNode payload = event.payload();
-    Metadata metadata = new Metadata(
-        event.messageId(), event.messageType(), event.messageVersion(), event.producer(),
-        event.occurredAt(), event.correlationId(), event.causationId(),
-        event.aggregateId(), event.aggregateVersion());
-
-    return switch (type) {
-      case "AccountCreated" -> {
-        UUID accountId = uuid(payload, "accountId");
-        UUID personId = uuid(payload, "personId");
-        assertAggregate(event, accountId);
-        yield new RevocationProjectionEvent.AccountCreated(
-            metadata, accountId, personId, positiveVersion(event), instant(payload, "createdAt"));
-      }
-      case "SessionRevoked" -> new RevocationProjectionEvent.SessionRevoked(
-          metadata,
-          uuid(payload, "sessionId"),
-          instant(payload, "revokedAt").getEpochSecond(),
-          text(payload, "reasonCode"));
-      case "AllAccountSessionsRevoked" -> {
-        UUID accountId = uuid(payload, "accountId");
-        assertAggregateIfPresent(event, accountId);
-        yield new AccountSessionsRevoked(
-            metadata, accountId, instant(payload, "revokedAt").getEpochSecond(),
-            CutoffKind.ALL, null, text(payload, "reasonCode"));
-      }
-      case "OtherAccountSessionsRevoked" -> {
-        UUID accountId = uuid(payload, "accountId");
-        UUID currentSessionId = uuid(payload, "currentSessionId");
-        assertAggregateIfPresent(event, accountId);
-        yield new AccountSessionsRevoked(
-            metadata, accountId, instant(payload, "revokedAt").getEpochSecond(),
-            CutoffKind.OTHER, currentSessionId, text(payload, "reasonCode"));
-      }
-      case "AccountDeactivated" -> {
-        UUID accountId = uuid(payload, "accountId");
-        UUID personId = uuid(payload, "personId");
-        Instant deactivatedAt = instant(payload, "deactivatedAt");
-        assertAggregate(event, accountId);
-        yield new RevocationProjectionEvent.AccountDeactivated(
-            metadata, accountId, personId, positiveVersion(event),
-            deactivatedAt.getEpochSecond(), text(payload, "reasonCode"), deactivatedAt);
-      }
-      case "PersonDeactivated" -> {
-        UUID personId = uuid(payload, "personId");
-        assertAggregate(event, personId);
-        yield new RevocationProjectionEvent.PersonDeactivated(
-            metadata, personId, instant(payload, "deactivatedAt").getEpochSecond(),
-            text(payload, "reasonCode"));
-      }
-      default -> null;
-    };
-  }
-
-  private static void validateEnvelope(EventEnvelope event) {
-    if (event == null
-        || event.messageId() == null
-        || event.messageKind() != MessageKind.EVENT
-        || event.messageType() == null || event.messageType().isBlank()
-        || event.messageVersion() != 1
-        || event.producer() == null || event.producer().isBlank()
-        || event.occurredAt() == null
-        || event.payload() == null || !event.payload().isObject()) {
-      throw new IllegalArgumentException("invalid projection event envelope");
-    }
-  }
-
-  private static void assertAggregate(EventEnvelope event, UUID expected) {
-    if (event.aggregateId() == null || !expected.equals(event.aggregateId())) {
-      throw new IllegalArgumentException("event aggregateId mismatch");
-    }
-  }
-
-  private static void assertAggregateIfPresent(EventEnvelope event, UUID expected) {
-    if (event.aggregateId() != null && !expected.equals(event.aggregateId())) {
-      throw new IllegalArgumentException("event aggregateId mismatch");
-    }
-  }
-
-  private static int positiveVersion(EventEnvelope event) {
-    if (event.aggregateVersion() == null || event.aggregateVersion() <= 0) {
-      throw new IllegalArgumentException("event aggregateVersion is required");
-    }
-    return event.aggregateVersion();
-  }
-
-  private static UUID uuid(JsonNode node, String field) {
     try {
-      return UUID.fromString(text(node, field));
-    } catch (RuntimeException invalid) {
-      throw new IllegalArgumentException("invalid UUID field: " + field, invalid);
+      var outcome = runtime.dispatch(new ProjectionEvent(
+          event.messageId(), event.messageType(), event.messageVersion(), event.producer(),
+          event.occurredAt(), event.correlationId(), event.causationId(), event.aggregateId(),
+          event.aggregateVersion(), object(event.payload())));
+      return switch (outcome) {
+        case APPLIED -> DispatchOutcome.APPLIED;
+        case UNSUPPORTED -> DispatchOutcome.UNSUPPORTED;
+        case UNTRUSTED -> DispatchOutcome.UNTRUSTED;
+      };
+    } catch (IllegalArgumentException invalid) {
+      return DispatchOutcome.UNTRUSTED;
     }
   }
 
-  private static Instant instant(JsonNode node, String field) {
-    try {
-      return Instant.parse(text(node, field));
-    } catch (RuntimeException invalid) {
-      throw new IllegalArgumentException("invalid timestamp field: " + field, invalid);
-    }
+  private static Map<String, Object> object(JsonNode node) {
+    Map<String, Object> result = new HashMap<>();
+    node.properties().forEach(entry -> result.put(entry.getKey(), value(entry.getValue())));
+    return result;
   }
 
-  private static String text(JsonNode node, String field) {
-    if (node == null || !node.hasNonNull(field) || !node.get(field).isTextual()
-        || node.get(field).asText().isBlank()) {
-      throw new IllegalArgumentException("missing textual field: " + field);
+  private static Object value(JsonNode node) {
+    if (node == null || node.isNull()) return null;
+    if (node.isObject()) return object(node);
+    if (node.isArray()) {
+      var values = new ArrayList<>();
+      node.forEach(child -> values.add(value(child)));
+      return values;
     }
-    return node.get(field).asText();
+    if (node.isBoolean()) return node.asBoolean();
+    if (node.isIntegralNumber()) return node.longValue();
+    if (node.isNumber()) return node.doubleValue();
+    return node.asText();
   }
 }

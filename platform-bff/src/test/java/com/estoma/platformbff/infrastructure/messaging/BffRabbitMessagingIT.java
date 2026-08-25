@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.platformbff.domain.messaging.OutboxMessage;
 import com.estoma.platformbff.domain.messaging.OutboxStatus;
+import com.estoma.platformbff.contracts.messaging.EventEnvelope;
+import com.estoma.platformbff.contracts.messaging.MessageKind;
 import com.estoma.platformbff.infrastructure.config.MessagingTopology;
 import java.time.Instant;
 import java.util.UUID;
@@ -59,8 +61,28 @@ class BffRabbitMessagingIT {
   @Test
   void declaresOnlyBffOwnedResultsQueue() {
     assertThat(admin.getQueueInfo(MessagingTopology.RESULTS_QUEUE)).isNotNull();
+    assertThat(admin.getQueueInfo(MessagingTopology.PROJECTION_EVENTS_QUEUE)).isNotNull();
     assertThat(admin.getQueueInfo("commands.users")).isNull();
     assertThat(admin.getQueueInfo("commands.authentication")).isNull();
+  }
+
+  @Test
+  void routesDifferentOwnerEventsToTheSingleProjectionQueue() {
+    UUID executionId = UUID.randomUUID();
+    var event = new EventEnvelope(
+        UUID.randomUUID(), "WashExecutionStarted", 1, MessageKind.EVENT, "wash-execution",
+        Instant.now(), UUID.randomUUID(), UUID.randomUUID(), null, null, executionId, 7,
+        com.estoma.platformbff.contracts.messaging.ActorContext.anonymous(),
+        codec.readTree("{\"washExecutionId\":\"" + executionId + "\",\"executionStatus\":\"STARTED\"}"));
+    var properties = new org.springframework.amqp.core.MessageProperties();
+    properties.setContentType(org.springframework.amqp.core.MessageProperties.CONTENT_TYPE_JSON);
+    properties.setMessageId(event.messageId().toString());
+    rabbit.send(MessagingTopology.EVENTS_EXCHANGE, "wash-execution.execution.started",
+        new Message(codec.write(event).getBytes(java.nio.charset.StandardCharsets.UTF_8), properties));
+
+    Message received = rabbit.receive(MessagingTopology.PROJECTION_EVENTS_QUEUE, 5_000);
+    assertThat(received).isNotNull();
+    assertThat(codec.readEvent(received.getBody()).messageType()).isEqualTo("WashExecutionStarted");
   }
 
   @Test

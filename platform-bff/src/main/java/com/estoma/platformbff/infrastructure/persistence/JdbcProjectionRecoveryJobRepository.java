@@ -23,10 +23,10 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         INSERT INTO projection_recovery_jobs (
           recovery_job_id, projection_name, mode, entity_id, generation,
           owner_logical_component_id, query_type, operation_id, cursor_value,
-          status, started_at, updated_at, completed_at, last_error_code
+          status, started_at, updated_at, completed_at, last_error_code, current_query_message_id
         ) VALUES (:recoveryJobId, :projectionName, :mode, :entityId, :generation,
           :ownerLogicalComponentId, :queryType, :operationId, :cursorValue,
-          :status, :startedAt, :updatedAt, :completedAt, :lastErrorCode)
+          :status, :startedAt, :updatedAt, :completedAt, :lastErrorCode, :currentQueryMessageId)
         """)
         .param("recoveryJobId", job.recoveryJobId())
         .param("projectionName", job.projectionName())
@@ -42,7 +42,28 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         .param("updatedAt", JdbcTimes.timestamp(job.updatedAt()))
         .param("completedAt", JdbcTimes.timestamp(job.completedAt()))
         .param("lastErrorCode", job.lastErrorCode())
+        .param("currentQueryMessageId", job.currentQueryMessageId())
         .update();
+  }
+
+  @Override
+  public void update(RecoveryJob job) {
+    jdbc.sql("""
+        UPDATE projection_recovery_jobs SET cursor_value = :cursorValue, status = :status,
+          updated_at = :updatedAt, completed_at = :completedAt, last_error_code = :lastErrorCode,
+          current_query_message_id = :currentQueryMessageId
+        WHERE recovery_job_id = :recoveryJobId AND generation = :generation
+        """)
+        .param("cursorValue", job.cursor()).param("status", job.status())
+        .param("updatedAt", JdbcTimes.timestamp(job.updatedAt())).param("completedAt", JdbcTimes.timestamp(job.completedAt()))
+        .param("lastErrorCode", job.lastErrorCode()).param("currentQueryMessageId", job.currentQueryMessageId())
+        .param("recoveryJobId", job.recoveryJobId()).param("generation", job.generation()).update();
+  }
+
+  @Override
+  public long nextGeneration(String projectionName) {
+    return jdbc.sql("SELECT COALESCE(MAX(generation), 0) + 1 FROM projection_recovery_jobs WHERE projection_name = :projectionName")
+        .param("projectionName", projectionName).query(Long.class).single();
   }
 
   @Override
@@ -60,6 +81,7 @@ public class JdbcProjectionRecoveryJobRepository implements ProjectionRecoveryJo
         rs.getString("owner_logical_component_id"), rs.getString("query_type"),
         rs.getObject("operation_id", UUID.class), rs.getString("cursor_value"),
         rs.getString("status"), JdbcTimes.instant(rs, "started_at"), JdbcTimes.instant(rs, "updated_at"),
-        JdbcTimes.instant(rs, "completed_at"), rs.getString("last_error_code"));
+        JdbcTimes.instant(rs, "completed_at"), rs.getString("last_error_code"),
+        rs.getObject("current_query_message_id", UUID.class));
   }
 }
