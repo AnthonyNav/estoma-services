@@ -69,6 +69,38 @@ class CommandGatewayServiceTest {
   }
 
   @Test
+  void fingerprintsStableHttpIntentButPublishesServerEnrichedOwnerPayload() {
+    UUID accountId = UUID.randomUUID();
+    UUID generatedAggregateId = UUID.randomUUID();
+    when(idempotency.findByLogicalScope(accountId, "wash-schedule-appointment", "key-1"))
+        .thenReturn(Optional.empty());
+    when(idempotency.insertIfAbsent(any())).thenReturn(true);
+    when(serializer.write(any())).thenReturn("{}");
+    when(fingerprints.normalize(any(), any(), any(), any(), any(), any()))
+        .thenReturn(
+            new RequestFingerprintPort.NormalizedRequest(
+                "{\"appointmentId\":\"server-generated\"}", "owner-fingerprint"),
+            new RequestFingerprintPort.NormalizedRequest(
+                "{\"appointmentTimeSlotId\":\"stable\"}", "stable-fingerprint"));
+
+    gateway.submit(new CommandSubmission(
+        "wash-schedule-appointment", "ScheduleAppointment",
+        "{\"appointmentId\":\"server-generated\"}",
+        "{\"appointmentTimeSlotId\":\"stable\"}",
+        "key-1", accountId, ActorContext.account(accountId, "GLOBAL", null),
+        generatedAggregateId, null, null, null));
+
+    var record = ArgumentCaptor.forClass(IdempotencyRecord.class);
+    verify(idempotency).insertIfAbsent(record.capture());
+    assertThat(record.getValue().requestFingerprint()).isEqualTo("stable-fingerprint");
+
+    var message = ArgumentCaptor.forClass(OutboxMessage.class);
+    verify(outbox).insert(message.capture());
+    assertThat(message.getValue().aggregateId()).isEqualTo(generatedAggregateId);
+    assertThat(message.getValue().payloadJson()).isEqualTo("{\"appointmentId\":\"server-generated\"}");
+  }
+
+  @Test
   void passwordRecoveryAllowsOnlyCanonicalAnonymousActor() {
     when(idempotency.findByLogicalScope(any(), any(), any())).thenReturn(Optional.empty());
     when(idempotency.insertIfAbsent(any())).thenReturn(true);
