@@ -38,8 +38,10 @@ POST /api/v1/mailbox/visits
 Las lecturas quedan scoped a la Cuenta autenticada. Los mensajes tombstone/expirados por Event no
 son visibles. El conteo de nuevos usa `createdAt > lastVisitedAt`.
 
-`POST /visits` recibe `systemCode` y `visitedAt`; `accountId` siempre se deriva del JWT y la
-escritura mapea a `RegisterInboxVisit`.
+`POST /visits` recibe únicamente `systemCode`. `accountId` se deriva del JWT y `visitedAt` se genera
+con el reloj del BFF para cumplir el requisito owner de una fecha confiable. La escritura mapea a
+`RegisterInboxVisit` sin inventar aggregate metadata para esta operación. El timestamp server-side
+queda fuera del fingerprint de idempotencia.
 
 ## Wash
 
