@@ -7,6 +7,6 @@ import java.util.UUID;
 public record AcceptedOperationResponse(
     UUID operationId,
     String status,
-    String operationUrl,
-    Instant acceptedAt,
+    String pollPath,
+    Instant submittedAt,
     boolean reused) {}
