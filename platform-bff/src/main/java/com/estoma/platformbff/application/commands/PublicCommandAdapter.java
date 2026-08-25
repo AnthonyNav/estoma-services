@@ -1,10 +1,10 @@
 package com.estoma.platformbff.application.commands;
 
+import com.estoma.platformbff.application.port.MessageSerializer;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.messaging.ActorContext;
 import com.estoma.platformbff.contracts.messaging.CommandSubmission;
 import com.estoma.platformbff.contracts.messaging.CommandSubmissionResult;
-import com.estoma.platformbff.application.port.MessageSerializer;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -25,9 +25,22 @@ public class PublicCommandAdapter {
   public AcceptedOperationResponse submit(UUID actorAccountId, String publicOperation,
       String commandType, Map<String, ?> payload, String idempotencyKey, UUID aggregateId,
       Integer aggregateVersion) {
+    return submitEnriched(actorAccountId, publicOperation, commandType, payload, payload,
+        idempotencyKey, aggregateId, aggregateVersion, aggregateId, aggregateVersion);
+  }
+
+  /**
+   * Submits a command whose owner wire payload contains server-derived data (ids/timestamps) that
+   * must not change the fingerprint of the original HTTP intention.
+   */
+  public AcceptedOperationResponse submitEnriched(UUID actorAccountId, String publicOperation,
+      String commandType, Map<String, ?> ownerPayload, Map<String, ?> idempotencyPayload,
+      String idempotencyKey, UUID aggregateId, Integer aggregateVersion,
+      UUID idempotencyAggregateId, Integer idempotencyAggregateVersion) {
     CommandSubmissionResult submitted = gateway.submit(new CommandSubmission(
-        publicOperation, commandType, write(payload), idempotencyKey, actorAccountId,
-        ActorContext.account(actorAccountId, ACCOUNT_SCOPE, null), aggregateId, aggregateVersion));
+        publicOperation, commandType, write(ownerPayload), write(idempotencyPayload), idempotencyKey,
+        actorAccountId, ActorContext.account(actorAccountId, ACCOUNT_SCOPE, null), aggregateId,
+        aggregateVersion, idempotencyAggregateId, idempotencyAggregateVersion));
     return new AcceptedOperationResponse(submitted.operationId(), submitted.status(),
         submitted.pollPath(), submitted.submittedAt(), submitted.reused());
   }
