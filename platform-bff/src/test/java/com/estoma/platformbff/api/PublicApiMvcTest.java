@@ -63,12 +63,13 @@ class PublicApiMvcTest {
     when(mailboxQueries.messages()).thenReturn(new MailboxMessagesResponse(List.of()));
     when(mailboxQueries.summary()).thenReturn(new MailboxSummaryResponse(0, 0, List.of()));
     when(supervision.pendingReassignments()).thenReturn(new PendingReassignmentsResponse(List.of()));
+    Clock clock = Clock.fixed(Instant.parse("2026-08-01T10:00:00Z"), java.time.ZoneOffset.UTC);
     mailboxMvc = MockMvcBuilders.standaloneSetup(
-        new MailboxController(mailboxQueries, authorization, commands))
+        new MailboxController(mailboxQueries, authorization, commands, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
     washMvc = MockMvcBuilders.standaloneSetup(
-        new WashController(commands, authorization, supervision, Clock.systemUTC()))
+        new WashController(commands, authorization, supervision, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
@@ -81,12 +82,12 @@ class PublicApiMvcTest {
         .andExpect(status().isOk());
     mailboxMvc.perform(post("/api/v1/mailbox/visits")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\",\"visitedAt\":\"2026-08-01T10:00:00Z\"}"))
+            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
     mailboxMvc.perform(post("/api/v1/mailbox/visits").header("Idempotency-Key", KEY)
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\",\"visitedAt\":\"2026-08-01T10:00:00Z\"}"))
+            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\"}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.pollPath").value("/api/v1/operations/x"))
         .andExpect(jsonPath("$.submittedAt").value("2026-08-01T10:00:00Z"))
