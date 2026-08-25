@@ -1,10 +1,12 @@
 package com.estoma.platformbff.application.projection;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.platformbff.application.security.ProjectionEventQuarantineService;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
@@ -54,6 +56,7 @@ class ProjectionEventRuntimePostgresIT {
     jdbc.sql("""
         TRUNCATE TABLE inbox_messages, person_presentation_read_model,
           authorization_role_projection, authorization_access_projection,
+          mailbox_messages_read_model, mailbox_visits_read_model,
           wash_execution_read_model, wash_resource_assignment_read_model CASCADE
         """).update();
   }
@@ -132,6 +135,90 @@ class ProjectionEventRuntimePostgresIT {
   }
 
   @Test
+  void communicationsVisitUsesVisitedAtAsMonotonicFenceWithoutAggregateMetadata() {
+    UUID accountId = UUID.randomUUID();
+    Instant newer = Instant.parse("2026-08-23T21:00:00Z");
+    Instant older = Instant.parse("2026-08-23T20:00:00Z");
+
+    assertThat(runtime.dispatch(communicationsEvent("InboxVisited",
+        Map.of("accountId", accountId.toString(), "systemCode", "LAVADO_ULTRASONICO",
+            "visitedAt", newer.toString())))).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(communicationsEvent("InboxVisited",
+        Map.of("accountId", accountId.toString(), "systemCode", "LAVADO_ULTRASONICO",
+            "visitedAt", older.toString())))).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+
+    OffsetDateTime stored = jdbc.sql("""
+        SELECT last_visited_at FROM mailbox_visits_read_model
+        WHERE account_id = :accountId AND system_code = 'LAVADO_ULTRASONICO'
+        """).param("accountId", accountId).query(OffsetDateTime.class).single();
+    assertThat(stored.toInstant()).isEqualTo(newer);
+  }
+
+  @Test
+  void expirationBeforeCreationCreatesTombstoneAndLateCreationCannotReviveMessage() {
+    UUID inboxMessageId = UUID.randomUUID();
+    UUID communicationId = UUID.randomUUID();
+    UUID recipientId = UUID.randomUUID();
+    Instant expiredAt = Instant.parse("2026-08-23T21:00:00Z");
+    Instant createdAt = Instant.parse("2026-08-23T19:00:00Z");
+
+    assertThat(runtime.dispatch(communicationsEvent("InboxMessageExpired",
+        Map.of("inboxMessageId", inboxMessageId.toString(), "communicationId", communicationId.toString(),
+            "expiredAt", expiredAt.toString())))).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+
+    assertThat(jdbc.sql("SELECT communication_id FROM mailbox_messages_read_model WHERE inbox_message_id = :id")
+        .param("id", inboxMessageId).query(UUID.class).optional()).isEmpty();
+
+    ProjectionEvent created = event("InboxMessageCreated", "communications", UUID.randomUUID(), communicationId, 1,
+        Map.of("inboxMessageId", inboxMessageId.toString(), "communicationId", communicationId.toString(),
+            "recipientAccountId", recipientId.toString(), "systemCode", "LAVADO_ULTRASONICO",
+            "communicationType", "APPOINTMENT", "title", "Cita", "body", "Mensaje",
+            "createdAt", createdAt.toString()));
+    assertThat(runtime.dispatch(created)).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+
+    assertThat(jdbc.sql("SELECT communication_id FROM mailbox_messages_read_model WHERE inbox_message_id = :id")
+        .param("id", inboxMessageId).query(UUID.class).single()).isEqualTo(communicationId);
+    OffsetDateTime storedExpiredAt = jdbc.sql("SELECT expired_at FROM mailbox_messages_read_model WHERE inbox_message_id = :id")
+        .param("id", inboxMessageId).query(OffsetDateTime.class).single();
+    assertThat(storedExpiredAt.toInstant()).isEqualTo(expiredAt);
+  }
+
+  @Test
+  void staleExpirationCannotMoveExpiredAtBackwards() {
+    UUID inboxMessageId = UUID.randomUUID();
+    Instant newer = Instant.parse("2026-08-23T22:00:00Z");
+    Instant older = Instant.parse("2026-08-23T21:00:00Z");
+
+    runtime.dispatch(communicationsEvent("InboxMessageExpired",
+        Map.of("inboxMessageId", inboxMessageId.toString(), "expiredAt", newer.toString())));
+    runtime.dispatch(communicationsEvent("InboxMessageExpired",
+        Map.of("inboxMessageId", inboxMessageId.toString(), "expiredAt", older.toString())));
+
+    OffsetDateTime stored = jdbc.sql("SELECT expired_at FROM mailbox_messages_read_model WHERE inbox_message_id = :id")
+        .param("id", inboxMessageId).query(OffsetDateTime.class).single();
+    assertThat(stored.toInstant()).isEqualTo(newer);
+  }
+
+  @Test
+  void inboxMessageCreatedAggregateMustIdentifyCommunicationAndRollsBackInboxOnMismatch() {
+    UUID inboxMessageId = UUID.randomUUID();
+    UUID communicationId = UUID.randomUUID();
+    UUID wrongAggregateId = UUID.randomUUID();
+    UUID messageId = UUID.randomUUID();
+    ProjectionEvent created = event("InboxMessageCreated", "communications", messageId, wrongAggregateId, 1,
+        Map.of("inboxMessageId", inboxMessageId.toString(), "communicationId", communicationId.toString(),
+            "recipientAccountId", UUID.randomUUID().toString(), "systemCode", "LAVADO_ULTRASONICO",
+            "communicationType", "APPOINTMENT", "title", "Cita", "body", "Mensaje",
+            "createdAt", now()));
+
+    assertThatThrownBy(() -> runtime.dispatch(created)).isInstanceOf(IllegalArgumentException.class);
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :id")
+        .param("id", messageId).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM mailbox_messages_read_model WHERE inbox_message_id = :id")
+        .param("id", inboxMessageId).query(Long.class).single()).isZero();
+  }
+
+  @Test
   void unknownProducerIsRejectedBeforeInboxMutation() {
     ProjectionEvent event = event("PersonCreated", "untrusted-owner", UUID.randomUUID(), UUID.randomUUID(), 1,
         Map.of("personId", UUID.randomUUID().toString(), "firstName", "Ada", "paternalSurname", "Nav",
@@ -179,6 +266,11 @@ class ProjectionEventRuntimePostgresIT {
       int version, Map<String, Object> payload) {
     return new ProjectionEvent(messageId, type, 1, producer, Instant.parse(now()), UUID.randomUUID(),
         UUID.randomUUID(), aggregateId, version, payload);
+  }
+
+  private static ProjectionEvent communicationsEvent(String type, Map<String, Object> payload) {
+    return new ProjectionEvent(UUID.randomUUID(), type, 1, "communications", Instant.parse(now()),
+        UUID.randomUUID(), UUID.randomUUID(), null, null, payload);
   }
 
   private static String now() {

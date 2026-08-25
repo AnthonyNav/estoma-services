@@ -154,13 +154,13 @@ public sealed interface ProjectionReadModel permits
       String body,
       Instant createdAt,
       Instant expiresAt,
-      long sourceVersion) implements ProjectionReadModel {}
+      Instant expiredAt,
+      Instant updatedAt) implements ProjectionReadModel {}
 
   record MailboxVisit(
       UUID accountId,
       String systemCode,
       Instant lastVisitedAt,
-      long sourceVersion,
       Instant updatedAt) implements ProjectionReadModel {}
 
   record WashCalendar(

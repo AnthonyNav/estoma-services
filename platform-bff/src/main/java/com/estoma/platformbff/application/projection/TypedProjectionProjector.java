@@ -184,26 +184,27 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
 
   private void projectCommunications(ProjectionEvent event) {
     Map<String, Object> p = event.payload();
-    long version = aggregateVersion(event);
     switch (event.messageType()) {
       case "InboxMessageCreated" -> {
         UUID id = uuid(p, "inboxMessageId");
-        aggregate(event, id);
+        UUID communicationId = uuid(p, "communicationId");
+        // The owner envelope, when present, belongs to Communication; it is not an InboxMessage version.
+        aggregate(event, communicationId);
         readModels.upsert(new ProjectionReadModel.MailboxMessage(
-            id, uuid(p, "communicationId"), uuid(p, "recipientAccountId"), text(p, "systemCode"),
+            id, communicationId, uuid(p, "recipientAccountId"), text(p, "systemCode"),
             text(p, "communicationType"), text(p, "title"), text(p, "body"), instant(p, "createdAt"),
-            optionalInstant(p, "expiresAt"), version));
+            optionalInstant(p, "expiresAt"), null, event.occurredAt()));
       }
       case "InboxMessageExpired" -> {
         UUID id = uuid(p, "inboxMessageId");
-        aggregate(event, id);
         readModels.upsert(new ProjectionReadModel.MailboxMessage(
-            id, null, null, null, null, null, null, null, instant(p, "expiredAt"), version));
+            id, null, null, null, null, null, null, null, null, instant(p, "expiredAt"),
+            event.occurredAt()));
       }
       case "InboxVisited" -> {
         UUID accountId = uuid(p, "accountId");
         readModels.upsert(new ProjectionReadModel.MailboxVisit(
-            accountId, text(p, "systemCode"), instant(p, "visitedAt"), version, event.occurredAt()));
+            accountId, text(p, "systemCode"), instant(p, "visitedAt"), event.occurredAt()));
       }
       default -> throw new IllegalArgumentException("communications Event is not registered");
     }

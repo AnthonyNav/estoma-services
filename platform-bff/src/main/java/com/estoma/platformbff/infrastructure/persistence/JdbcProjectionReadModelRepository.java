@@ -251,34 +251,59 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   private void mailboxMessage(ProjectionReadModel.MailboxMessage v) {
     if (v.createdAt() == null) {
       jdbc.sql("""
-          UPDATE mailbox_messages_read_model SET expires_at = :expiresAt, source_version = source_version + 1
-          WHERE inbox_message_id = :id AND source_version <= :version
-          """).param("id", v.inboxMessageId()).param("expiresAt", JdbcTimes.timestamp(v.expiresAt()))
-          .param("version", v.sourceVersion()).update();
+          INSERT INTO mailbox_messages_read_model(inbox_message_id, expired_at, updated_at)
+          VALUES (:id, :expiredAt, :updatedAt)
+          ON CONFLICT (inbox_message_id) DO UPDATE SET
+            expired_at = CASE
+              WHEN mailbox_messages_read_model.expired_at IS NULL THEN EXCLUDED.expired_at
+              ELSE GREATEST(mailbox_messages_read_model.expired_at, EXCLUDED.expired_at)
+            END,
+            updated_at = GREATEST(mailbox_messages_read_model.updated_at, EXCLUDED.updated_at)
+          """)
+          .param("id", v.inboxMessageId())
+          .param("expiredAt", JdbcTimes.timestamp(v.expiredAt()))
+          .param("updatedAt", JdbcTimes.timestamp(v.updatedAt()))
+          .update();
       return;
     }
     jdbc.sql("""
         INSERT INTO mailbox_messages_read_model
-          (inbox_message_id, communication_id, recipient_account_id, system_code, communication_type, title, body, created_at, expires_at, source_version)
-        VALUES (:id, :communicationId, :recipient, :systemCode, :type, :title, :body, :createdAt, :expiresAt, :version)
-        ON CONFLICT (inbox_message_id) DO UPDATE SET expires_at = COALESCE(EXCLUDED.expires_at, mailbox_messages_read_model.expires_at),
-          source_version = EXCLUDED.source_version
-        WHERE mailbox_messages_read_model.source_version <= EXCLUDED.source_version
+          (inbox_message_id, communication_id, recipient_account_id, system_code, communication_type,
+           title, body, created_at, expires_at, expired_at, updated_at)
+        VALUES (:id, :communicationId, :recipient, :systemCode, :type, :title, :body,
+          :createdAt, :expiresAt, :expiredAt, :updatedAt)
+        ON CONFLICT (inbox_message_id) DO UPDATE SET
+          communication_id = COALESCE(mailbox_messages_read_model.communication_id, EXCLUDED.communication_id),
+          recipient_account_id = COALESCE(mailbox_messages_read_model.recipient_account_id, EXCLUDED.recipient_account_id),
+          system_code = COALESCE(mailbox_messages_read_model.system_code, EXCLUDED.system_code),
+          communication_type = COALESCE(mailbox_messages_read_model.communication_type, EXCLUDED.communication_type),
+          title = COALESCE(mailbox_messages_read_model.title, EXCLUDED.title),
+          body = COALESCE(mailbox_messages_read_model.body, EXCLUDED.body),
+          created_at = COALESCE(mailbox_messages_read_model.created_at, EXCLUDED.created_at),
+          expires_at = COALESCE(mailbox_messages_read_model.expires_at, EXCLUDED.expires_at),
+          expired_at = COALESCE(mailbox_messages_read_model.expired_at, EXCLUDED.expired_at),
+          updated_at = GREATEST(mailbox_messages_read_model.updated_at, EXCLUDED.updated_at)
         """)
-        .param("id", v.inboxMessageId()).param("communicationId", v.communicationId()).param("recipient", v.recipientAccountId())
-        .param("systemCode", v.systemCode()).param("type", v.communicationType()).param("title", v.title()).param("body", v.body())
-        .param("createdAt", JdbcTimes.timestamp(v.createdAt())).param("expiresAt", JdbcTimes.timestamp(v.expiresAt())).param("version", v.sourceVersion()).update();
+        .param("id", v.inboxMessageId()).param("communicationId", v.communicationId())
+        .param("recipient", v.recipientAccountId()).param("systemCode", v.systemCode())
+        .param("type", v.communicationType()).param("title", v.title()).param("body", v.body())
+        .param("createdAt", JdbcTimes.timestamp(v.createdAt())).param("expiresAt", JdbcTimes.timestamp(v.expiresAt()))
+        .param("expiredAt", JdbcTimes.timestamp(v.expiredAt())).param("updatedAt", JdbcTimes.timestamp(v.updatedAt()))
+        .update();
   }
 
   private void mailboxVisit(ProjectionReadModel.MailboxVisit v) {
     jdbc.sql("""
-        INSERT INTO mailbox_visits_read_model(account_id, system_code, last_visited_at, source_version, updated_at)
-        VALUES (:accountId, :systemCode, :visitedAt, :version, :updatedAt)
-        ON CONFLICT (account_id, system_code) DO UPDATE SET last_visited_at = EXCLUDED.last_visited_at,
-          source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
-        WHERE mailbox_visits_read_model.source_version <= EXCLUDED.source_version
-        """).param("accountId", v.accountId()).param("systemCode", v.systemCode()).param("visitedAt", JdbcTimes.timestamp(v.lastVisitedAt()))
-        .param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+        INSERT INTO mailbox_visits_read_model(account_id, system_code, last_visited_at, updated_at)
+        VALUES (:accountId, :systemCode, :visitedAt, :updatedAt)
+        ON CONFLICT (account_id, system_code) DO UPDATE SET
+          last_visited_at = EXCLUDED.last_visited_at,
+          updated_at = GREATEST(mailbox_visits_read_model.updated_at, EXCLUDED.updated_at)
+        WHERE mailbox_visits_read_model.last_visited_at < EXCLUDED.last_visited_at
+        """)
+        .param("accountId", v.accountId()).param("systemCode", v.systemCode())
+        .param("visitedAt", JdbcTimes.timestamp(v.lastVisitedAt())).param("updatedAt", JdbcTimes.timestamp(v.updatedAt()))
+        .update();
   }
 
   private void washCalendar(ProjectionReadModel.WashCalendar v) {
