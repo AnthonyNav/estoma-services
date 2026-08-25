@@ -42,7 +42,7 @@ public class PublicCommandAdapter {
         actorAccountId, ActorContext.account(actorAccountId, ACCOUNT_SCOPE, null), aggregateId,
         aggregateVersion, idempotencyAggregateId, idempotencyAggregateVersion));
     return new AcceptedOperationResponse(submitted.operationId(), submitted.status(),
-        submitted.pollPath(), submitted.submittedAt(), submitted.reused());
+        submitted.pollPath(), submitted.submittedAt());
   }
 
   private String write(Map<String, ?> payload) {
