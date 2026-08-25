@@ -21,7 +21,19 @@ public class ProjectionReadinessService {
 
   public void requireAuthorizationReady() {
     if (!authorizationReady()) {
-      throw new IllegalStateException("authorization projection is not READY; fail closed");
+      throw new ProjectionUnavailableException("authorization projection is not READY; fail closed");
+    }
+  }
+
+  public void requireReady(String... projectionNames) {
+    for (String projectionName : projectionNames) {
+      boolean ready = statuses.findByName(projectionName)
+          .map(state -> state.status() == ProjectionStatus.READY)
+          .orElse(false);
+      if (!ready) {
+        throw new ProjectionUnavailableException(
+            projectionName + " projection is not READY; endpoint is temporarily unavailable");
+      }
     }
   }
 }

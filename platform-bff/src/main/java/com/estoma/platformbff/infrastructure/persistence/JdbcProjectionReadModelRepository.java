@@ -1,14 +1,22 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
-import com.estoma.platformbff.application.port.ProjectionReadModelPort;
 import com.estoma.platformbff.application.port.AuthorizationRecoveryPort;
+import com.estoma.platformbff.application.port.ProjectionQueryPort;
+import com.estoma.platformbff.application.port.ProjectionReadModelPort;
 import com.estoma.platformbff.application.projection.ProjectionReadModel;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /** JDBC adapter for the typed PR4 read models. Fencing is local to each row/stream. */
 @Repository
-public class JdbcProjectionReadModelRepository implements ProjectionReadModelPort, AuthorizationRecoveryPort {
+public class JdbcProjectionReadModelRepository implements ProjectionReadModelPort, AuthorizationRecoveryPort,
+    ProjectionQueryPort {
   private final JdbcClient jdbc;
 
   public JdbcProjectionReadModelRepository(JdbcClient jdbc) {
@@ -66,6 +74,157 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
       java.util.List<ProjectionReadModel.AuthorizationAccess> accesses) {
     if (role != null) role(role);
     for (var access : accesses) access(access);
+  }
+
+  @Override
+  public List<MailboxMessage> findVisibleMailboxMessages(UUID recipientAccountId) {
+    return jdbc.sql("""
+        SELECT inbox_message_id, communication_id, system_code, communication_type, title, body,
+               created_at, expires_at
+        FROM mailbox_messages_read_model
+        WHERE recipient_account_id = :accountId
+          AND communication_id IS NOT NULL
+          AND expired_at IS NULL
+        ORDER BY created_at DESC, inbox_message_id ASC
+        """)
+        .param("accountId", recipientAccountId)
+        .query((rs, rowNum) -> new MailboxMessage(
+            uuid(rs, "inbox_message_id"), uuid(rs, "communication_id"), rs.getString("system_code"),
+            rs.getString("communication_type"), rs.getString("title"), rs.getString("body"),
+            instant(rs, "created_at"), instant(rs, "expires_at")))
+        .list();
+  }
+
+  @Override
+  public List<MailboxSummary> summarizeMailbox(UUID recipientAccountId) {
+    return jdbc.sql("""
+        SELECT m.system_code,
+               COUNT(*) AS message_count,
+               SUM(CASE WHEN v.last_visited_at IS NULL OR m.created_at > v.last_visited_at
+                        THEN 1 ELSE 0 END) AS new_message_count,
+               v.last_visited_at
+        FROM mailbox_messages_read_model m
+        LEFT JOIN mailbox_visits_read_model v
+          ON v.account_id = m.recipient_account_id AND v.system_code = m.system_code
+        WHERE m.recipient_account_id = :accountId
+          AND m.communication_id IS NOT NULL
+          AND m.expired_at IS NULL
+        GROUP BY m.system_code, v.last_visited_at
+        ORDER BY m.system_code ASC
+        """)
+        .param("accountId", recipientAccountId)
+        .query((rs, rowNum) -> new MailboxSummary(
+            rs.getString("system_code"), rs.getLong("message_count"),
+            rs.getLong("new_message_count"), instant(rs, "last_visited_at")))
+        .list();
+  }
+
+  @Override
+  public Optional<String> findRoleCode(UUID accountId) {
+    return jdbc.sql("""
+        SELECT role_code FROM authorization_role_projection WHERE account_id = :accountId
+        """)
+        .param("accountId", accountId)
+        .query(String.class)
+        .optional();
+  }
+
+  @Override
+  public boolean hasActiveSystemAccess(UUID accountId, String systemCode) {
+    return jdbc.sql("""
+        SELECT EXISTS(
+          SELECT 1 FROM authorization_access_projection
+          WHERE account_id = :accountId AND system_code = :systemCode AND status = 'ACTIVE')
+        """)
+        .param("accountId", accountId)
+        .param("systemCode", systemCode)
+        .query(Boolean.class)
+        .single();
+  }
+
+  @Override
+  public Optional<UUID> findAppointmentStudentAccountId(UUID appointmentId) {
+    return jdbc.sql("""
+        SELECT student_account_id FROM appointment_read_model WHERE appointment_id = :appointmentId
+        """)
+        .param("appointmentId", appointmentId)
+        .query(UUID.class)
+        .optional();
+  }
+
+  @Override
+  public Optional<UUID> findWashExecutionStudentAccountId(UUID washExecutionId) {
+    return jdbc.sql("""
+        SELECT a.student_account_id
+        FROM wash_execution_read_model e
+        JOIN appointment_read_model a ON a.appointment_id = e.appointment_id
+        WHERE e.wash_execution_id = :washExecutionId
+        """)
+        .param("washExecutionId", washExecutionId)
+        .query(UUID.class)
+        .optional();
+  }
+
+  @Override
+  public List<PendingReassignment> findPendingReassignments() {
+    return jdbc.sql("""
+        SELECT e.wash_execution_id, e.status AS execution_status, e.authorized_at,
+               e.execution_version,
+               a.appointment_id, a.appointment_time_slot_id, a.appointment_type,
+               a.status AS appointment_status, a.course_section_id,
+               c.nrc AS course_nrc, c.name AS course_name,
+               a.student_account_id,
+               sp.person_id, p.first_name, p.paternal_surname, p.maternal_surname,
+               sp.student_number, sp.current_semester, sp.academic_status,
+               ra.resource_assignment_id, ra.assignment_type, ra.assigned_at,
+               ra.cabin_id, cabin.code AS cabin_code, cabin.name AS cabin_name,
+               ra.tank_id, tank.code AS tank_code, tank.name AS tank_name
+        FROM wash_execution_read_model e
+        LEFT JOIN appointment_read_model a ON a.appointment_id = e.appointment_id
+        LEFT JOIN student_academic_profile_read_model sp ON sp.account_id = a.student_account_id
+        LEFT JOIN person_presentation_read_model p ON p.person_id = sp.person_id
+        LEFT JOIN course_section_read_model c ON c.course_section_id = a.course_section_id
+        LEFT JOIN LATERAL (
+          SELECT resource_assignment_id, assignment_type, assigned_at, cabin_id, tank_id
+          FROM wash_resource_assignment_read_model
+          WHERE wash_execution_id = e.wash_execution_id AND released_at IS NULL
+          ORDER BY assigned_at DESC NULLS LAST, resource_assignment_id ASC
+          LIMIT 1
+        ) ra ON TRUE
+        LEFT JOIN wash_cabin_read_model cabin ON cabin.cabin_id = ra.cabin_id
+        LEFT JOIN wash_tank_read_model tank ON tank.tank_id = ra.tank_id
+        WHERE e.status = 'PENDING_REASSIGNMENT'
+        ORDER BY e.authorized_at ASC NULLS LAST, e.wash_execution_id ASC
+        """)
+        .query((rs, rowNum) -> pendingReassignment(rs))
+        .list();
+  }
+
+  private static PendingReassignment pendingReassignment(ResultSet rs) throws SQLException {
+    return new PendingReassignment(
+        uuid(rs, "wash_execution_id"), rs.getString("execution_status"),
+        instant(rs, "authorized_at"), rs.getLong("execution_version"),
+        uuid(rs, "appointment_id"), uuid(rs, "appointment_time_slot_id"),
+        rs.getString("appointment_type"), rs.getString("appointment_status"),
+        uuid(rs, "course_section_id"), rs.getString("course_nrc"), rs.getString("course_name"),
+        uuid(rs, "student_account_id"), uuid(rs, "person_id"), rs.getString("first_name"),
+        rs.getString("paternal_surname"), rs.getString("maternal_surname"),
+        rs.getString("student_number"), integer(rs, "current_semester"), rs.getString("academic_status"),
+        uuid(rs, "resource_assignment_id"), rs.getString("assignment_type"), instant(rs, "assigned_at"),
+        uuid(rs, "cabin_id"), rs.getString("cabin_code"), rs.getString("cabin_name"),
+        uuid(rs, "tank_id"), rs.getString("tank_code"), rs.getString("tank_name"));
+  }
+
+  private static UUID uuid(ResultSet rs, String column) throws SQLException {
+    return rs.getObject(column, UUID.class);
+  }
+
+  private static Integer integer(ResultSet rs, String column) throws SQLException {
+    return rs.getObject(column, Integer.class);
+  }
+
+  private static Instant instant(ResultSet rs, String column) throws SQLException {
+    return JdbcTimes.instant(rs, column);
   }
 
   private void person(ProjectionReadModel.Person v) {

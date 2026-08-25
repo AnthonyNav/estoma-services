@@ -35,6 +35,8 @@ final class ProjectionPayloads {
   }
 
   static UUID uuid(Map<String, Object> payload, String name) {
+    Object value = required(payload, name);
+    if (value instanceof UUID uuid) return uuid;
     try {
       return UUID.fromString(text(payload, name));
     } catch (RuntimeException invalid) {
@@ -43,16 +45,19 @@ final class ProjectionPayloads {
   }
 
   static UUID optionalUuid(Map<String, Object> payload, String name) {
-    String value = optionalText(payload, name);
-    if (value == null) return null;
+    Object raw = payload.get(name);
+    if (raw == null) return null;
+    if (raw instanceof UUID uuid) return uuid;
     try {
-      return UUID.fromString(value);
+      return UUID.fromString(optionalText(payload, name));
     } catch (RuntimeException invalid) {
       throw new IllegalArgumentException("invalid projection UUID field: " + name, invalid);
     }
   }
 
   static Instant instant(Map<String, Object> payload, String name) {
+    Object value = required(payload, name);
+    if (value instanceof Instant instant) return instant;
     try {
       return Instant.parse(text(payload, name));
     } catch (RuntimeException invalid) {
@@ -61,10 +66,11 @@ final class ProjectionPayloads {
   }
 
   static Instant optionalInstant(Map<String, Object> payload, String name) {
-    String value = optionalText(payload, name);
-    if (value == null) return null;
+    Object raw = payload.get(name);
+    if (raw == null) return null;
+    if (raw instanceof Instant instant) return instant;
     try {
-      return Instant.parse(value);
+      return Instant.parse(optionalText(payload, name));
     } catch (RuntimeException invalid) {
       throw new IllegalArgumentException("invalid projection timestamp field: " + name, invalid);
     }

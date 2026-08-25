@@ -1,0 +1,240 @@
+package com.estoma.platformbff.api.wash;
+
+import com.estoma.platformbff.application.commands.PublicCommandAdapter;
+import com.estoma.platformbff.application.security.LocalAuthorizationService;
+import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
+import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
+import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelAppointmentRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelExceptionalAuthorizationRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ClinicCancelRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CompleteWashExecutionRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.DisableOperationalResourceRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryDecisionRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.GrantExceptionalAuthorizationRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ReassignmentRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.RegisterArrivalRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.RestoreOperationalResourceRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ScheduleAppointmentRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.SubmitExitRequest;
+import jakarta.validation.Valid;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/v1/wash")
+public class WashController {
+  private final PublicCommandAdapter commands;
+  private final LocalAuthorizationService authorization;
+  private final WashSupervisionQueryService supervision;
+  private final Clock clock;
+
+  public WashController(PublicCommandAdapter commands, LocalAuthorizationService authorization,
+      WashSupervisionQueryService supervision, Clock clock) {
+    this.commands = commands;
+    this.authorization = authorization;
+    this.supervision = supervision;
+    this.clock = clock;
+  }
+
+  @PostMapping("/appointments")
+  public ResponseEntity<AcceptedOperationResponse> scheduleAppointment(
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody ScheduleAppointmentRequest request) {
+    UUID studentId = authorization.requireStudent();
+    UUID appointmentId = UUID.randomUUID();
+    return accepted(commands.submit(studentId, "wash-schedule-appointment", "ScheduleAppointment",
+        payload("appointmentId", appointmentId, "studentAccountId", studentId,
+            "appointmentTimeSlotId", request.appointmentTimeSlotId(), "courseSectionId", request.courseSectionId(),
+            "appointmentType", request.appointmentType(), "instrumentCount", request.instrumentCount(),
+            "pieceType", request.pieceType(), "exceptionalAuthorizationId", request.exceptionalAuthorizationId()),
+        idempotencyKey, appointmentId, null));
+  }
+
+  @PostMapping("/appointments/{appointmentId}/cancel")
+  public ResponseEntity<AcceptedOperationResponse> cancelAppointment(@PathVariable UUID appointmentId,
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody CancelAppointmentRequest request) {
+    authorization.requireStudentOwnsAppointment(appointmentId);
+    UUID studentId = authorization.requireAuthenticatedAccount();
+    return accepted(commands.submit(studentId, "wash-cancel-appointment", "CancelAppointment",
+        payload("appointmentId", appointmentId, "expectedVersion", request.expectedVersion(),
+            "reason", request.reason()), idempotencyKey, appointmentId, null));
+  }
+
+  @PostMapping("/exceptional-authorizations")
+  public ResponseEntity<AcceptedOperationResponse> grantExceptionalAuthorization(
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody GrantExceptionalAuthorizationRequest request) {
+    UUID supervisorId = authorization.requireWashSupervisor();
+    UUID authorizationId = UUID.randomUUID();
+    return accepted(commands.submit(supervisorId, "wash-grant-exceptional-authorization",
+        "GrantExceptionalAppointmentAuthorization",
+        payload("authorizationId", authorizationId, "studentAccountId", request.studentAccountId(),
+            "serviceDate", request.serviceDate(), "reason", request.reason(), "expiresAt", request.expiresAt()),
+        idempotencyKey, authorizationId, null));
+  }
+
+  @PostMapping("/exceptional-authorizations/{authorizationId}/cancel")
+  public ResponseEntity<AcceptedOperationResponse> cancelExceptionalAuthorization(
+      @PathVariable UUID authorizationId, @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody CancelExceptionalAuthorizationRequest request) {
+    UUID supervisorId = authorization.requireWashSupervisor();
+    return accepted(commands.submit(supervisorId, "wash-cancel-exceptional-authorization",
+        "CancelExceptionalAppointmentAuthorization",
+        payload("authorizationId", authorizationId, "reason", request.reason()),
+        idempotencyKey, authorizationId, null));
+  }
+
+  @PostMapping("/executions/arrivals")
+  public ResponseEntity<AcceptedOperationResponse> registerArrival(
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody RegisterArrivalRequest request) {
+    UUID supervisorId = authorization.requireWashSupervisor();
+    UUID washExecutionId = UUID.randomUUID();
+    return accepted(commands.submit(supervisorId, "wash-register-arrival", "RegisterWashArrival",
+        payload("washExecutionId", washExecutionId, "appointmentId", request.appointmentId(),
+            "arrivedAt", request.arrivedAt()), idempotencyKey, washExecutionId, null));
+  }
+
+  @PostMapping("/executions/{washExecutionId}/entry-decision")
+  public ResponseEntity<AcceptedOperationResponse> decideEntry(@PathVariable UUID washExecutionId,
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody EntryDecisionRequest request) {
+    UUID supervisorId = authorization.requireWashSupervisor();
+    Instant now = clock.instant();
+    return accepted(commands.submit(supervisorId, "wash-decide-entry", "DecideWashEntry",
+        payload("washExecutionId", washExecutionId, "identityConfirmed", request.identityConfirmed(),
+            "requirementsSatisfied", request.requirementsSatisfied(), "decision", request.decision(),
+            "rejectionReason", request.rejectionReason(), "decidedByAccountId", supervisorId,
+            "decidedAt", now, "expectedVersion", request.expectedVersion()),
+        idempotencyKey, washExecutionId, request.expectedVersion()));
+  }
+
+  @PostMapping("/executions/{washExecutionId}/reassignment")
+  public ResponseEntity<AcceptedOperationResponse> resolveReassignment(@PathVariable UUID washExecutionId,
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody ReassignmentRequest request) {
+    UUID supervisorId = authorization.requireWashSupervisor();
+    Instant now = clock.instant();
+    return accepted(commands.submit(supervisorId, "wash-resolve-reassignment", "ResolvePendingReassignment",
+        payload("washExecutionId", washExecutionId, "cabinId", request.cabinId(), "tankId", request.tankId(),
+            "resolvedByAccountId", supervisorId, "resolvedAt", now,
+            "expectedVersion", request.expectedVersion()),
+        idempotencyKey, washExecutionId, request.expectedVersion()));
+  }
+
+  @PostMapping("/executions/{washExecutionId}/exit")
+  public ResponseEntity<AcceptedOperationResponse> submitExit(@PathVariable UUID washExecutionId,
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody SubmitExitRequest request) {
+    if (request.materials().isEmpty()) throw new IllegalArgumentException("exit materials cannot be empty");
+    authorization.requireStudentOwnsWashExecution(washExecutionId);
+    UUID studentId = authorization.requireAuthenticatedAccount();
+    Instant now = clock.instant();
+    return accepted(commands.submit(studentId, "wash-submit-exit", "SubmitWashExit",
+        payload("washExecutionId", washExecutionId, "submittedByStudentAccountId", studentId,
+            "materials", materials(request.materials()), "submittedAt", now,
+            "expectedVersion", request.expectedVersion()),
+        idempotencyKey, washExecutionId, request.expectedVersion()));
+  }
+
+  @PostMapping("/executions/{washExecutionId}/complete")
+  public ResponseEntity<AcceptedOperationResponse> completeWashExecution(@PathVariable UUID washExecutionId,
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody CompleteWashExecutionRequest request) {
+    if (request.finalMaterials().isEmpty()) throw new IllegalArgumentException("final materials cannot be empty");
+    UUID supervisorId = authorization.requireWashSupervisor();
+    Instant now = clock.instant();
+    return accepted(commands.submit(supervisorId, "wash-complete-execution", "CompleteWashExecution",
+        payload("washExecutionId", washExecutionId, "completedByAccountId", supervisorId,
+            "finalMaterials", materials(request.finalMaterials()), "completedAt", now,
+            "expectedVersion", request.expectedVersion()),
+        idempotencyKey, washExecutionId, request.expectedVersion()));
+  }
+
+  @PostMapping("/executions/{washExecutionId}/clinic-cancel")
+  public ResponseEntity<AcceptedOperationResponse> cancelByClinic(@PathVariable UUID washExecutionId,
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody ClinicCancelRequest request) {
+    UUID supervisorId = authorization.requireWashSupervisor();
+    Instant now = clock.instant();
+    return accepted(commands.submit(supervisorId, "wash-clinic-cancel-execution",
+        "CancelWashExecutionByClinic",
+        payload("washExecutionId", washExecutionId, "cancellationSubreason", request.cancellationSubreason(),
+            "cancellationReason", request.cancellationReason(), "cancelledByAccountId", supervisorId,
+            "cancelledAt", now, "expectedVersion", request.expectedVersion()),
+        idempotencyKey, washExecutionId, request.expectedVersion()));
+  }
+
+  @PostMapping("/operational-resources/disable")
+  public ResponseEntity<AcceptedOperationResponse> disableOperationalResource(
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody DisableOperationalResourceRequest request) {
+    if ((request.cabinId() == null) == (request.tankId() == null)) {
+      throw new IllegalArgumentException("exactly one operational resource is required");
+    }
+    UUID supervisorId = authorization.requireWashSupervisor();
+    UUID resourceUnavailabilityId = UUID.randomUUID();
+    Instant now = clock.instant();
+    return accepted(commands.submit(supervisorId, "wash-disable-operational-resource",
+        "DisableOperationalResource",
+        payload("resourceUnavailabilityId", resourceUnavailabilityId, "cabinId", request.cabinId(),
+            "tankId", request.tankId(), "causeType", request.causeType(), "reason", request.reason(),
+            "disabledByAccountId", supervisorId,
+            "detectedDuringWashExecutionId", request.detectedDuringWashExecutionId(), "disabledAt", now),
+        idempotencyKey, resourceUnavailabilityId, null));
+  }
+
+  @PostMapping("/operational-resources/restore")
+  public ResponseEntity<AcceptedOperationResponse> restoreOperationalResource(
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @Valid @RequestBody RestoreOperationalResourceRequest request) {
+    UUID supervisorId = authorization.requireWashSupervisor();
+    Instant now = clock.instant();
+    return accepted(commands.submit(supervisorId, "wash-restore-operational-resource",
+        "RestoreOperationalResource",
+        payload("resourceUnavailabilityId", request.resourceUnavailabilityId(), "resolution", request.resolution(),
+            "restoredByAccountId", supervisorId, "restoredAt", now,
+            "expectedVersion", request.expectedVersion()),
+        idempotencyKey, request.resourceUnavailabilityId(), request.expectedVersion()));
+  }
+
+  @GetMapping("/supervision/pending-reassignments")
+  public PendingReassignmentsResponse pendingReassignments() {
+    return supervision.pendingReassignments();
+  }
+
+  private static ResponseEntity<AcceptedOperationResponse> accepted(AcceptedOperationResponse response) {
+    return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+  }
+
+  private static Map<String, Object> materials(
+      com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ExitMaterialsRequest values) {
+    return Map.of("packageCount", values.packageCount(),
+        "greenPaperCassette8Count", values.greenPaperCassette8Count(),
+        "greenPaperCassette10Count", values.greenPaperCassette10Count(),
+        "witnessTapePortionCount", values.witnessTapePortionCount());
+  }
+
+  private static Map<String, Object> payload(Object... values) {
+    if (values.length % 2 != 0) throw new IllegalArgumentException("payload entries must be pairs");
+    Map<String, Object> payload = new LinkedHashMap<>();
+    for (int index = 0; index < values.length; index += 2) {
+      payload.put((String) values[index], values[index + 1]);
+    }
+    return payload;
+  }
+}

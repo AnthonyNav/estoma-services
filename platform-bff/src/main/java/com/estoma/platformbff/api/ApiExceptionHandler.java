@@ -1,6 +1,8 @@
 package com.estoma.platformbff.api;
 
 import com.estoma.platformbff.application.commands.CommandGatewayService.IdempotencyConflictException;
+import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
+import com.estoma.platformbff.application.security.LocalAuthorizationService.AuthorizationDeniedException;
 import com.estoma.platformbff.application.security.AuthenticationRejectedException;
 import com.estoma.platformbff.application.security.AuthenticationRequiredException;
 import com.estoma.platformbff.application.security.SecurityRpcUnavailableException;
@@ -29,6 +31,17 @@ public class ApiExceptionHandler {
   ResponseEntity<ProblemResponse> unavailable() {
     return problem(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable",
         "Authentication is temporarily unavailable.");
+  }
+
+  @ExceptionHandler(ProjectionUnavailableException.class)
+  ResponseEntity<ProblemResponse> projectionUnavailable() {
+    return problem(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable",
+        "The required local projection is temporarily unavailable.");
+  }
+
+  @ExceptionHandler(AuthorizationDeniedException.class)
+  ResponseEntity<ProblemResponse> forbidden() {
+    return problem(HttpStatus.FORBIDDEN, "Forbidden", "The authenticated account is not authorized.");
   }
 
   @ExceptionHandler(IdempotencyConflictException.class)
