@@ -12,11 +12,9 @@ operationId
 status
 pollPath
 submittedAt
-reused
 ```
 
-`pollPath` y `submittedAt` preservan los nombres cerrados por el contrato canónico. `reused` es una
-señal adicional del borde y no cambia la semántica de la operación.
+La señal interna de reutilización de idempotencia no se expone como campo HTTP adicional.
 
 Cuando el BFF agrega al wire datos server-side (por ejemplo ids de agregado o timestamps
 operacionales), el fingerprint de idempotencia se calcula sobre la intención HTTP estable; el
@@ -25,7 +23,7 @@ payload enriquecido se conserva únicamente como payload owner. Por tanto, repet
 generar nuevos valores efímeros durante el segundo intento.
 
 Errores inmediatos de validación, autorización y projection-readiness usan
-`application/problem+json`.
+`application/problem+json` con `type`, `title`, `status`, `code`, `detail` y `traceId`.
 
 ## Mailbox
 
