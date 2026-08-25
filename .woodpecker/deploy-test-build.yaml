@@ -1,0 +1,38 @@
+when:
+  - event: push
+    branch: [develop, main]
+    path:
+      include:
+        - deploy-test/**
+        - .woodpecker/deploy-test-test.yaml
+        - .woodpecker/deploy-test-build.yaml
+        - .woodpecker/deploy-test-gitops.yaml
+        - .woodpecker/scripts/**
+
+depends_on:
+  - deploy-test-test
+
+steps:
+  - name: build-and-push
+    image: woodpeckerci/plugin-kaniko:2.3.2
+    settings:
+      registry: ghcr.io
+      repo: anthonynav/deploy-test
+      context: deploy-test
+      dockerfile: deploy-test/Dockerfile
+      username:
+        from_secret: GHCR_USERNAME
+      password:
+        from_secret: GHCR_TOKEN
+      tags:
+        - ${CI_COMMIT_BRANCH}-${CI_COMMIT_SHA:0:7}
+        - ${CI_COMMIT_BRANCH}
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
