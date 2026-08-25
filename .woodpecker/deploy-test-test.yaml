@@ -1,0 +1,34 @@
+when:
+  - event: pull_request
+    path:
+      include:
+        - deploy-test/**
+        - .woodpecker/deploy-test-test.yaml
+        - .woodpecker/deploy-test-build.yaml
+        - .woodpecker/deploy-test-gitops.yaml
+        - .woodpecker/scripts/**
+  - event: push
+    branch: [develop, main]
+    path:
+      include:
+        - deploy-test/**
+        - .woodpecker/deploy-test-test.yaml
+        - .woodpecker/deploy-test-build.yaml
+        - .woodpecker/deploy-test-gitops.yaml
+        - .woodpecker/scripts/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: deploy-test
+    commands:
+      - ./mvnw -B clean verify
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
