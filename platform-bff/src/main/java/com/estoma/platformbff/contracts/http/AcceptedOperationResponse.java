@@ -8,5 +8,4 @@ public record AcceptedOperationResponse(
     UUID operationId,
     String status,
     String pollPath,
-    Instant submittedAt,
-    boolean reused) {}
+    Instant submittedAt) {}
