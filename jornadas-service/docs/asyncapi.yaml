@@ -1,0 +1,493 @@
+asyncapi: 3.0.0
+
+info:
+  title: jornadas-service V1 messaging contract
+  version: 1.0.0
+  description: >
+    Executable V1 contract for the Jornadas catalog: durable Commands accepted
+    from the BFF, correlated Results, domain Events published on
+    platform.events, and the external Events consumed to keep the local
+    documentacion-general/semestre projections current. Normative prose
+    remains in estomatologia-platform-docs/main
+    (03-services/domains/practicas-profesionales/jornadas/).
+
+defaultContentType: application/json
+
+channels:
+  commands.jornadas:
+    address: commands.jornadas
+    description: Durable command queue bound to platform.commands with routing key jornadas.
+    messages:
+      publicarJornada:
+        $ref: '#/components/messages/PublicarJornada'
+      editarJornada:
+        $ref: '#/components/messages/EditarJornada'
+      cancelarJornada:
+        $ref: '#/components/messages/CancelarJornada'
+      configurarTipoJornada:
+        $ref: '#/components/messages/ConfigurarTipoJornada'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: commands.jornadas
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: dlq.commands.jornadas
+
+  events.jornadas:
+    address: events.jornadas
+    description: >
+      Durable consumer queue bound to platform.events. Feeds the local,
+      read-only projections used to resolve which Jornadas a student can
+      query (data-model.md §5) — never a source of truth.
+    messages:
+      documentacionGeneralValidada:
+        $ref: '#/components/messages/DocumentacionGeneralValidada'
+      documentacionGeneralRechazada:
+        $ref: '#/components/messages/DocumentacionGeneralRechazada'
+      documentacionGeneralVencida:
+        $ref: '#/components/messages/DocumentacionGeneralVencida'
+      studentSemesterChanged:
+        $ref: '#/components/messages/StudentSemesterChanged'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: events.jornadas
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: dlq.events.jornadas
+
+  platform.results:
+    address: platform.results
+    description: Direct exchange used by jornadas to return correlated Results to the requester (results.bff).
+    messages:
+      publicarJornadaResult:
+        $ref: '#/components/messages/PublicarJornadaResult'
+      editarJornadaResult:
+        $ref: '#/components/messages/EditarJornadaResult'
+      cancelarJornadaResult:
+        $ref: '#/components/messages/CancelarJornadaResult'
+      configurarTipoJornadaResult:
+        $ref: '#/components/messages/ConfigurarTipoJornadaResult'
+
+  platform.events:
+    address: platform.events
+    description: Topic exchange used by jornadas to publish confirmed facts about the Jornada catalog.
+    messages:
+      jornadaPublicada:
+        $ref: '#/components/messages/JornadaPublicada'
+      jornadaEditada:
+        $ref: '#/components/messages/JornadaEditada'
+      jornadaCancelada:
+        $ref: '#/components/messages/JornadaCancelada'
+      jornadaFinalizada:
+        $ref: '#/components/messages/JornadaFinalizada'
+
+operations:
+  receiveJornadasCommands:
+    action: receive
+    channel:
+      $ref: '#/channels/commands.jornadas'
+  receiveExternalProjectionEvents:
+    action: receive
+    channel:
+      $ref: '#/channels/events.jornadas'
+  sendCommandResults:
+    action: send
+    channel:
+      $ref: '#/channels/platform.results'
+  sendJornadaEvents:
+    action: send
+    channel:
+      $ref: '#/channels/platform.events'
+
+components:
+  messages:
+    PublicarJornada:
+      name: PublicarJornada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CommandEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/PublicarJornadaPayload'
+
+    EditarJornada:
+      name: EditarJornada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CommandEnvelope'
+          - type: object
+            required: [aggregateId, aggregateVersion]
+            properties:
+              payload:
+                $ref: '#/components/schemas/EditarJornadaPayload'
+
+    CancelarJornada:
+      name: CancelarJornada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CommandEnvelope'
+          - type: object
+            required: [aggregateId]
+            properties:
+              payload:
+                $ref: '#/components/schemas/CancelarJornadaPayload'
+
+    ConfigurarTipoJornada:
+      name: ConfigurarTipoJornada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CommandEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/ConfigurarTipoJornadaPayload'
+
+    PublicarJornadaResult:
+      name: PublicarJornadaResult
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/JornadaResultPayload'
+
+    EditarJornadaResult:
+      name: EditarJornadaResult
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/JornadaResultPayload'
+
+    CancelarJornadaResult:
+      name: CancelarJornadaResult
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/JornadaResultPayload'
+
+    ConfigurarTipoJornadaResult:
+      name: ConfigurarTipoJornadaResult
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/ResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/TipoJornadaResultPayload'
+
+    JornadaPublicada:
+      name: JornadaPublicada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JornadaEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/JornadaPublicadaPayload'
+
+    JornadaEditada:
+      name: JornadaEditada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JornadaEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/JornadaEditadaPayload'
+
+    JornadaCancelada:
+      name: JornadaCancelada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JornadaEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/JornadaCanceladaPayload'
+
+    JornadaFinalizada:
+      name: JornadaFinalizada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/JornadaEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/JornadaFinalizadaPayload'
+
+    DocumentacionGeneralValidada:
+      name: DocumentacionGeneralValidada
+      description: >
+        Consumed from cumplimiento-documental. Payload shape is this
+        consumer's expectation of that service's contract — authoritative
+        once cumplimiento-documental-service defines its own asyncapi.yaml.
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CumplimientoDocumentalEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/DocumentacionGeneralEstadoPayload'
+
+    DocumentacionGeneralRechazada:
+      name: DocumentacionGeneralRechazada
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CumplimientoDocumentalEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/DocumentacionGeneralEstadoPayload'
+
+    DocumentacionGeneralVencida:
+      name: DocumentacionGeneralVencida
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CumplimientoDocumentalEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/DocumentacionGeneralEstadoPayload'
+
+    StudentSemesterChanged:
+      name: StudentSemesterChanged
+      description: Consumed from academic-service. Routing key academic.student.semester-changed.
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/AcademicEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/StudentSemesterChangedPayload'
+
+  schemas:
+    BaseEnvelope:
+      type: object
+      required:
+        [messageId, messageType, messageVersion, messageKind, producer,
+         occurredAt, correlationId, actor, payload]
+      properties:
+        messageId: {type: string, format: uuid}
+        messageType: {type: string}
+        messageVersion: {type: integer, const: 1}
+        messageKind: {type: string}
+        producer: {type: string}
+        occurredAt: {type: string, format: date-time}
+        correlationId: {type: string, format: uuid}
+        causationId: {type: ['string', 'null'], format: uuid}
+        operationId: {type: ['string', 'null'], format: uuid}
+        idempotencyKey: {type: ['string', 'null']}
+        aggregateId: {type: ['string', 'null'], format: uuid}
+        aggregateVersion: {type: ['integer', 'null']}
+        actor: {type: object}
+        payload: {type: object}
+
+    CommandEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          required: [operationId, idempotencyKey]
+          properties:
+            messageKind: {type: string, const: COMMAND}
+            producer: {type: string, const: bff}
+
+    ResultEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          required: [causationId, operationId]
+          properties:
+            messageKind: {type: string, const: RESULT}
+            producer: {type: string, const: jornadas}
+            actor: {type: object, required: [type, service], properties: {type: {type: string, const: SYSTEM}, service: {type: string, const: jornadas}}}
+
+    JornadaEventEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          required: [aggregateId, aggregateVersion]
+          properties:
+            messageKind: {type: string, const: EVENT}
+            producer: {type: string, const: jornadas}
+            actor: {type: object, required: [type, service], properties: {type: {type: string, const: SYSTEM}, service: {type: string, const: jornadas}}}
+
+    CumplimientoDocumentalEventEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            messageKind: {type: string, const: EVENT}
+            producer: {type: string, const: cumplimiento-documental}
+
+    AcademicEventEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            messageKind: {type: string, const: EVENT}
+            producer: {type: string, const: academic}
+
+    Error:
+      type: object
+      required: [code]
+      properties:
+        code: {type: string}
+        details: {type: object}
+
+    RejectedOrFailedPayload:
+      type: object
+      required: [status, error]
+      properties:
+        status: {type: string, enum: [REJECTED, FAILED, EXPIRED]}
+        error: {$ref: '#/components/schemas/Error'}
+
+    PublicarJornadaPayload:
+      type: object
+      description: >
+        semestresPermitidos NO se envía aquí: se deriva de tipoJornadaId
+        (tipo_jornada_semestre_permitido) en el momento de publicar y se
+        copia como snapshot al payload de JornadaPublicada.
+      required:
+        [tipoJornadaId, nombre, fecha, horaInicio, horaFin, lugar, cupoTotal,
+         fechaLimiteDocumentos]
+      properties:
+        tipoJornadaId: {type: string, format: uuid}
+        nombre: {type: string, maxLength: 160}
+        fecha: {type: string, format: date}
+        horaInicio: {type: string}
+        horaFin: {type: string}
+        lugar: {type: string, maxLength: 200}
+        cupoTotal: {type: integer, minimum: 0}
+        fechaLimiteDocumentos: {type: string, format: date}
+        descripcion: {type: ['string', 'null']}
+
+    EditarJornadaPayload:
+      type: object
+      description: >
+        Todos los campos son opcionales salvo jornadaId (llevado en
+        aggregateId del envelope, no repetido aquí); solo se validan y
+        aplican los campos presentes. Los semestres permitidos no se editan
+        aquí — se reconfiguran a nivel de tipo con ConfigurarTipoJornada.
+      properties:
+        nombre: {type: string, maxLength: 160}
+        fecha: {type: string, format: date}
+        horaInicio: {type: string}
+        horaFin: {type: string}
+        lugar: {type: string, maxLength: 200}
+        cupoTotal: {type: integer, minimum: 0}
+        fechaLimiteDocumentos: {type: string, format: date}
+        descripcion: {type: ['string', 'null']}
+
+    CancelarJornadaPayload:
+      type: object
+      required: [motivo]
+      properties:
+        motivo: {type: string, minLength: 1, maxLength: 500}
+
+    ConfigurarTipoJornadaPayload:
+      type: object
+      required: [nombre, semestresPermitidos]
+      properties:
+        tipoJornadaId: {type: ['string', 'null'], format: uuid, description: 'Ausente = alta; presente = edición.'}
+        nombre: {type: string, maxLength: 120}
+        semestresPermitidos:
+          type: array
+          minItems: 1
+          items: {type: integer, minimum: 1, maximum: 14}
+
+    JornadaResultPayload:
+      oneOf:
+        - type: object
+          required: [status, data]
+          properties:
+            status: {type: string, const: SUCCEEDED}
+            data:
+              type: object
+              required: [jornadaId, version, estado]
+              properties:
+                jornadaId: {type: string, format: uuid}
+                version: {type: integer}
+                estado: {type: string, enum: [PUBLICADA, CANCELADA, FINALIZADA]}
+        - $ref: '#/components/schemas/RejectedOrFailedPayload'
+
+    TipoJornadaResultPayload:
+      oneOf:
+        - type: object
+          required: [status, data]
+          properties:
+            status: {type: string, const: SUCCEEDED}
+            data:
+              type: object
+              required: [tipoJornadaId, version]
+              properties:
+                tipoJornadaId: {type: string, format: uuid}
+                version: {type: integer}
+        - $ref: '#/components/schemas/RejectedOrFailedPayload'
+
+    JornadaPublicadaPayload:
+      type: object
+      required: [jornadaId, tipoJornadaId, fecha, cupoTotal, semestresPermitidos]
+      properties:
+        jornadaId: {type: string, format: uuid}
+        tipoJornadaId: {type: string, format: uuid}
+        fecha: {type: string, format: date}
+        cupoTotal: {type: integer, minimum: 0}
+        fechaLimiteDocumentos: {type: string, format: date}
+        semestresPermitidos:
+          type: array
+          items: {type: integer}
+
+    JornadaEditadaPayload:
+      type: object
+      required: [jornadaId, camposModificados]
+      properties:
+        jornadaId: {type: string, format: uuid}
+        camposModificados:
+          type: array
+          description: Nombres de los campos que cambiaron en esta edición.
+          items: {type: string}
+
+    JornadaCanceladaPayload:
+      type: object
+      required: [jornadaId, motivo]
+      properties:
+        jornadaId: {type: string, format: uuid}
+        motivo: {type: string}
+
+    JornadaFinalizadaPayload:
+      type: object
+      required: [jornadaId]
+      properties:
+        jornadaId: {type: string, format: uuid}
+
+    DocumentacionGeneralEstadoPayload:
+      type: object
+      required: [alumnoId, estadoVigencia]
+      properties:
+        alumnoId: {type: string, format: uuid}
+        estadoVigencia: {type: string, enum: [VIGENTE, VENCIDA, RECHAZADA, PENDIENTE]}
+
+    StudentSemesterChangedPayload:
+      type: object
+      required: [personId, semester]
+      properties:
+        personId: {type: string, format: uuid}
+        semester: {type: integer, minimum: 1, maximum: 14}
