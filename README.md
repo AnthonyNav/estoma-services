@@ -8,12 +8,13 @@ Monorepo for Estoma microservices.
 - No shared `libs/` or cross-service imports.
 - Each microservice owns its dependencies, tests, and Dockerfile.
 - Spring Boot services use Java 25 and keep their own Maven Wrapper inside the service directory.
-- GitHub Actions live under `.github/workflows/` and are scoped by path.
+- GitHub remains the forge and GitHub Actions remain the active CI until Woodpecker parity is demonstrated.
+- Woodpecker pilot workflows live under `.woodpecker/` and are scoped by path.
 - Deployment manifests live in `estoma-infra`, not in this repository.
 
 ## Branches
 
-- `develop`: integration branch. Pushes here build changed service images and automatically update the matching `develop` overlay in `estoma-infra`.
+- `develop`: integration branch. During the CI migration, only services explicitly cut over to Woodpecker may publish/promote from Woodpecker; the rest keep their existing GitHub Actions behavior.
 - `main`: stable production-ready code. Pushes here build stable images but do not deploy directly to production.
 - `feature/<service>/<description>`: feature work.
 - `fix/<service>/<description>`: bug fixes.
@@ -33,8 +34,6 @@ Monorepo for Estoma microservices.
 - `appointments-service`: Lavado Ultrasonico appointments, QR, capacity, and points service.
 - `wash-execution-service`: Lavado Ultrasonico arrival, assignment, incident, and exit service.
 - `platform-bff`: client-facing API gateway and composition layer.
-
-The domain services and BFF currently have Spring Boot code skeletons only. Add path-scoped workflows and GitOps manifests when each service is ready to deploy.
 
 ## Local Development
 
@@ -60,24 +59,37 @@ docker build -t <service-name> ./<service-name>
 
 ## CI/CD Automation
 
-Service workflows are scoped by path. A change under one service directory should only trigger that service workflow.
+The target delivery path is:
 
-On pushes to `develop`, each service workflow:
+```text
+GitHub
+-> Woodpecker CI
+-> GHCR
+-> estoma-infra Pull Request
+-> Argo CD
+-> K3s
+```
 
-1. Runs that service's tests.
-2. Builds and pushes only that service image to GHCR.
-3. Updates only that service's `develop` overlay tag in `estoma-infra`.
-4. Lets Argo CD deploy the updated image.
+The migration is incremental. GitHub Actions are removed only after the equivalent Woodpecker gate has executed successfully on a real commit.
 
-The cross-repository update requires repository secret `ESTOMA_INFRA_TOKEN` in this repository. The token must allow `contents: write` on `AnthonyNav/estoma-infra`.
+### Current Woodpecker pilot
 
-Pushes to `main` build stable images but do not automatically update `staging` or `production` overlays. Those environments should be promoted explicitly from `estoma-infra`.
+Only `deploy-test` is allowed to exercise the Woodpecker publishing path initially:
 
-Recommended promotion flow:
+1. `deploy-test-test` runs `./mvnw -B clean verify` for pull requests and pushes.
+2. `deploy-test-build` uses `woodpeckerci/plugin-kaniko:2.3.2` to publish `develop-<short-sha>` / `main-<short-sha>` plus the convenience branch tag without Docker-in-Docker or a host Docker socket.
+3. On `develop`, `deploy-test-gitops` opens a Pull Request that changes only `apps/deploy-test/overlays/develop/kustomization.yaml` in `estoma-infra`.
+4. Argo CD deploys only after that infrastructure Pull Request is reviewed and merged.
 
-1. Merge service changes into `develop`.
-2. Let CI deploy the changed service automatically to the `develop` overlay in `estoma-infra`.
-3. Validate the service in the `develop` environment.
-4. Merge the stable service code into `main`.
-5. Build a `main-<sha>` image from `estoma-services/main`.
-6. Promote that immutable image tag through `staging` and `production` by changing overlays in `estoma-infra`.
+Woodpecker repository secrets are provisioned in Woodpecker, never committed here:
+
+- `GHCR_USERNAME` and `GHCR_TOKEN` are available only to trusted push publication workflows.
+- `ESTOMA_INFRA_TOKEN` is available only to the trusted `develop` GitOps workflow and is limited to `contents: write` plus `pull-requests: write` on `AnthonyNav/estoma-infra`.
+
+Pull-request workflows receive no publishing credentials. Woodpecker receives no kubeconfig and does not execute `kubectl apply`.
+
+Before activating the `deploy-test` publisher in Woodpecker, disable the equivalent GitHub Actions publisher for `deploy-test`. Do not run both publishers for the same deployment intent concurrently.
+
+After the pilot proves tests, GHCR publication, infrastructure PR creation, Argo CD `Synced Healthy`, and deployed smoke validation, migrate services one by one in the order defined by the infrastructure migration runbook.
+
+Pushes to `main` build stable candidates but do not automatically update `staging` or `production` overlays. Those environments are promoted explicitly from `estoma-infra`.

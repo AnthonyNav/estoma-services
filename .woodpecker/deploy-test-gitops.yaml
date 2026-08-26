@@ -1,0 +1,35 @@
+when:
+  - event: push
+    branch: develop
+    path:
+      include:
+        - deploy-test/**
+        - .woodpecker/deploy-test-test.yaml
+        - .woodpecker/deploy-test-build.yaml
+        - .woodpecker/deploy-test-gitops.yaml
+        - .woodpecker/scripts/**
+
+depends_on:
+  - deploy-test-build
+
+concurrency:
+  limit: 1
+  group: estoma-infra-develop-update
+
+steps:
+  - name: update-develop-gitops
+    image: python:3.13-alpine
+    environment:
+      ESTOMA_INFRA_TOKEN:
+        from_secret: ESTOMA_INFRA_TOKEN
+    commands:
+      - sh .woodpecker/scripts/update-develop-infra.sh deploy-test ghcr.io/anthonynav/deploy-test apps/deploy-test/overlays/develop/kustomization.yaml
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
