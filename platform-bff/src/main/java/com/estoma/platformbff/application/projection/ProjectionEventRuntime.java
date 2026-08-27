@@ -163,7 +163,16 @@ public class ProjectionEventRuntime {
     registerWashAdministration(entries);
     registerAppointments(entries);
     registerWashExecution(entries);
+    registerJornadas(entries);
     return Map.copyOf(entries);
+  }
+
+  private static void registerJornadas(Map<EventKey, Contract> entries) {
+    register(entries, "jornadas", "JornadaPublicada",
+        Set.of("jornadaId", "tipoJornadaId", "nombre", "fecha", "horaInicio", "horaFin", "lugar", "cupoTotal", "semestresPermitidos"),
+        Set.of("jornadaId", "tipoJornadaId", "nombre", "fecha", "horaInicio", "horaFin", "lugar", "cupoTotal", "fechaLimiteDocumentos", "descripcion", "semestresPermitidos"), true);
+    register(entries, "jornadas", "JornadaCancelada", Set.of("jornadaId", "motivo"),
+        Set.of("jornadaId", "motivo"), true);
   }
 
   private static void registerWashAdministration(Map<EventKey, Contract> entries) {

@@ -37,6 +37,7 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
       case "appointments" -> projectAppointments(event);
       case "wash-execution" -> projectWashExecution(event);
       case "authentication" -> projectAuthentication(event);
+      case "jornadas" -> projectJornadas(event);
       default -> throw new IllegalArgumentException("projection producer is not registered");
     }
   }
@@ -358,6 +359,24 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
             optionalInstant(p, "submittedAt"), optionalInstant(p, "completedAt"), optionalInstant(p, "cancelledAt"),
             optionalText(p, "cancellationType"), version, event.occurredAt()));
       }
+    }
+  }
+
+  private void projectJornadas(ProjectionEvent event) {
+    Map<String, Object> p = event.payload();
+    long version = aggregateVersion(event);
+    UUID id = uuid(p, "jornadaId");
+    aggregate(event, id);
+    switch (event.messageType()) {
+      case "JornadaPublicada" -> readModels.upsert(new ProjectionReadModel.Jornada(
+          id, optionalUuid(p, "tipoJornadaId"), optionalText(p, "nombre"), optionalDate(p, "fecha"),
+          optionalTime(p, "horaInicio"), optionalTime(p, "horaFin"), optionalText(p, "lugar"),
+          optionalInteger(p, "cupoTotal"), optionalDate(p, "fechaLimiteDocumentos"),
+          optionalText(p, "descripcion"), "PUBLICADA", version, event.occurredAt()));
+      case "JornadaCancelada" -> readModels.upsert(new ProjectionReadModel.Jornada(
+          id, null, null, null, null, null, null, null, null, null, "CANCELADA", version,
+          event.occurredAt()));
+      default -> throw new IllegalArgumentException("jornadas Event is not registered");
     }
   }
 
