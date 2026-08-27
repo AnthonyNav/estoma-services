@@ -41,6 +41,8 @@ class ProjectionQueriesPostgresIT {
 
   @Autowired JdbcClient jdbc;
   @Autowired JdbcProjectionReadModelRepository projections;
+  @Autowired JdbcWashExitMaterialsProjectionRepository exitMaterials;
+  @Autowired JdbcWashSupervisionQueryRepository supervision;
 
   @BeforeEach
   void clearReadModels() {
@@ -95,6 +97,32 @@ class ProjectionQueriesPostgresIT {
     assertThat(projections.findPendingReassignments())
         .extracting(item -> item.washExecutionId())
         .containsExactly(firstId, secondId, laterId);
+    assertThat(supervision.findPendingReassignments())
+        .extracting(item -> item.washExecutionId())
+        .containsExactly(firstId, secondId, laterId);
+  }
+
+  @Test
+  void submittedExitMaterialsUseAnIndependentMonotonicFence() {
+    UUID executionId = UUID.randomUUID();
+    Instant authorizedAt = Instant.parse("2026-08-01T10:00:00Z");
+    projections.upsert(execution(executionId, authorizedAt));
+
+    exitMaterials.projectSubmittedExitMaterials(
+        executionId, 1, 2, 3, 4, 7, authorizedAt.plusSeconds(30));
+    exitMaterials.projectSubmittedExitMaterials(
+        executionId, 9, 9, 9, 9, 6, authorizedAt.plusSeconds(20));
+
+    var item = supervision.findPendingReassignments().getFirst();
+    assertThat(item.washExecutionId()).isEqualTo(executionId);
+    assertThat(item.submittedPackageCount()).isEqualTo(1);
+    assertThat(item.submittedGreenPaperCassette8Count()).isEqualTo(2);
+    assertThat(item.submittedGreenPaperCassette10Count()).isEqualTo(3);
+    assertThat(item.submittedWitnessTapePortionCount()).isEqualTo(4);
+    assertThat(jdbc.sql("""
+        SELECT submitted_exit_version FROM wash_execution_read_model
+        WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query(Long.class).single()).isEqualTo(7L);
   }
 
   private static ProjectionReadModel.MailboxMessage message(UUID id, UUID accountId, Instant createdAt) {

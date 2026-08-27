@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.estoma.platformbff.api.mailbox.MailboxController;
@@ -56,16 +57,19 @@ class PublicApiMvcTest {
         Instant.parse("2026-08-01T10:00:00Z"), false);
     when(commands.submit(any(), anyString(), anyString(), anyMap(), anyString(), any(), any()))
         .thenReturn(accepted);
+    when(commands.submitEnriched(any(), anyString(), anyString(), anyMap(), anyMap(), anyString(),
+        any(), any(), any(), any())).thenReturn(accepted);
     when(authorization.requireAuthenticatedAccount()).thenReturn(UUID.randomUUID());
     when(mailboxQueries.messages()).thenReturn(new MailboxMessagesResponse(List.of()));
     when(mailboxQueries.summary()).thenReturn(new MailboxSummaryResponse(0, 0, List.of()));
     when(supervision.pendingReassignments()).thenReturn(new PendingReassignmentsResponse(List.of()));
+    Clock clock = Clock.fixed(Instant.parse("2026-08-01T10:00:00Z"), java.time.ZoneOffset.UTC);
     mailboxMvc = MockMvcBuilders.standaloneSetup(
-        new MailboxController(mailboxQueries, authorization, commands))
+        new MailboxController(mailboxQueries, authorization, commands, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
     washMvc = MockMvcBuilders.standaloneSetup(
-        new WashController(commands, authorization, supervision, Clock.systemUTC()))
+        new WashController(commands, authorization, supervision, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
@@ -78,19 +82,23 @@ class PublicApiMvcTest {
         .andExpect(status().isOk());
     mailboxMvc.perform(post("/api/v1/mailbox/visits")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\",\"visitedAt\":\"2026-08-01T10:00:00Z\"}"))
+            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
     mailboxMvc.perform(post("/api/v1/mailbox/visits").header("Idempotency-Key", KEY)
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\",\"visitedAt\":\"2026-08-01T10:00:00Z\"}"))
-        .andExpect(status().isAccepted());
+            .content("{\"systemCode\":\"LAVADO_ULTRASONICO\"}"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.pollPath").value("/api/v1/operations/x"))
+        .andExpect(jsonPath("$.submittedAt").value("2026-08-01T10:00:00Z"))
+        .andExpect(jsonPath("$.operationUrl").doesNotExist())
+        .andExpect(jsonPath("$.acceptedAt").doesNotExist());
   }
 
   @Test
   void everyAllowedWashWriteAcknowledgesTheSingleDurableOperation() throws Exception {
     assertAccepted(post("/api/v1/wash/appointments"),
-        "{\"appointmentTimeSlotId\":\"00000000-0000-0000-0000-000000000001\",\"courseSectionId\":\"00000000-0000-0000-0000-000000000002\",\"appointmentType\":\"NORMAL\",\"instrumentCount\":1,\"pieceType\":\"HIGH_SPEED\"}");
+        "{\"appointmentTimeSlotId\":\"00000000-0000-0000-0000-000000000001\",\"courseSectionId\":\"00000000-0000-0000-0000-000000000002\",\"appointmentType\":\"NORMAL\",\"instrumentCount\":1,\"pieceType\":\"HIGH_SPEED\",\"regulationAccepted\":true}");
     assertAccepted(post("/api/v1/wash/appointments/00000000-0000-0000-0000-000000000001/cancel"),
         "{\"expectedVersion\":1}");
     assertAccepted(post("/api/v1/wash/exceptional-authorizations"),
@@ -98,7 +106,7 @@ class PublicApiMvcTest {
     assertAccepted(post("/api/v1/wash/exceptional-authorizations/00000000-0000-0000-0000-000000000001/cancel"),
         "{\"reason\":\"No longer required\"}");
     assertAccepted(post("/api/v1/wash/executions/arrivals"),
-        "{\"appointmentId\":\"00000000-0000-0000-0000-000000000001\",\"arrivedAt\":\"2026-08-01T10:00:00Z\"}");
+        "{\"appointmentId\":\"00000000-0000-0000-0000-000000000001\"}");
     assertAccepted(post("/api/v1/wash/executions/00000000-0000-0000-0000-000000000001/entry-decision"),
         "{\"identityConfirmed\":true,\"requirementsSatisfied\":true,\"decision\":\"AUTHORIZED\",\"expectedVersion\":1}");
     assertAccepted(post("/api/v1/wash/executions/00000000-0000-0000-0000-000000000001/reassignment"),
@@ -114,18 +122,26 @@ class PublicApiMvcTest {
     assertAccepted(post("/api/v1/wash/operational-resources/restore"),
         "{\"resourceUnavailabilityId\":\"00000000-0000-0000-0000-000000000001\",\"expectedVersion\":1}");
 
-    verifyOwnerCommand("wash-schedule-appointment", "ScheduleAppointment");
+    verifyEnrichedOwnerCommand("wash-schedule-appointment", "ScheduleAppointment");
     verifyOwnerCommand("wash-cancel-appointment", "CancelAppointment");
-    verifyOwnerCommand("wash-grant-exceptional-authorization", "GrantExceptionalAppointmentAuthorization");
+    verifyEnrichedOwnerCommand("wash-grant-exceptional-authorization", "GrantExceptionalAppointmentAuthorization");
     verifyOwnerCommand("wash-cancel-exceptional-authorization", "CancelExceptionalAppointmentAuthorization");
-    verifyOwnerCommand("wash-register-arrival", "RegisterWashArrival");
-    verifyOwnerCommand("wash-decide-entry", "DecideWashEntry");
-    verifyOwnerCommand("wash-resolve-reassignment", "ResolvePendingReassignment");
-    verifyOwnerCommand("wash-submit-exit", "SubmitWashExit");
-    verifyOwnerCommand("wash-complete-execution", "CompleteWashExecution");
-    verifyOwnerCommand("wash-clinic-cancel-execution", "CancelWashExecutionByClinic");
-    verifyOwnerCommand("wash-disable-operational-resource", "DisableOperationalResource");
-    verifyOwnerCommand("wash-restore-operational-resource", "RestoreOperationalResource");
+    verifyEnrichedOwnerCommand("wash-register-arrival", "RegisterWashArrival");
+    verifyEnrichedOwnerCommand("wash-decide-entry", "DecideWashEntry");
+    verifyEnrichedOwnerCommand("wash-resolve-reassignment", "ResolvePendingReassignment");
+    verifyEnrichedOwnerCommand("wash-submit-exit", "SubmitWashExit");
+    verifyEnrichedOwnerCommand("wash-complete-execution", "CompleteWashExecution");
+    verifyEnrichedOwnerCommand("wash-clinic-cancel-execution", "CancelWashExecutionByClinic");
+    verifyEnrichedOwnerCommand("wash-disable-operational-resource", "DisableOperationalResource");
+    verifyEnrichedOwnerCommand("wash-restore-operational-resource", "RestoreOperationalResource");
+  }
+
+  @Test
+  void scheduleAppointmentRequiresExplicitRegulationAcceptance() throws Exception {
+    washMvc.perform(post("/api/v1/wash/appointments").header("Idempotency-Key", KEY)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"appointmentTimeSlotId\":\"00000000-0000-0000-0000-000000000001\",\"courseSectionId\":\"00000000-0000-0000-0000-000000000002\",\"appointmentType\":\"NORMAL\",\"instrumentCount\":1,\"pieceType\":\"HIGH_SPEED\",\"regulationAccepted\":false}"))
+        .andExpect(status().isBadRequest());
   }
 
   @Test
@@ -150,5 +166,10 @@ class PublicApiMvcTest {
   private void verifyOwnerCommand(String publicOperation, String commandType) {
     verify(commands).submit(any(), eq(publicOperation), eq(commandType), anyMap(), eq(KEY), any(),
         nullable(Integer.class));
+  }
+
+  private void verifyEnrichedOwnerCommand(String publicOperation, String commandType) {
+    verify(commands).submitEnriched(any(), eq(publicOperation), eq(commandType), anyMap(), anyMap(),
+        eq(KEY), any(), nullable(Integer.class), any(), nullable(Integer.class));
   }
 }

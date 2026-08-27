@@ -38,7 +38,8 @@ public final class CommandMessageMapper {
           uuid(p, "appointmentId"), uuid(p, "studentAccountId"), uuid(p, "appointmentTimeSlotId"),
           uuid(p, "courseSectionId"), enumValue(AppointmentType.class, text(p, "appointmentType")),
           intValue(p, "instrumentCount"), enumValue(PieceType.class, text(p, "pieceType")),
-          optionalUuid(p, "exceptionalAuthorizationId"), envelope.occurredAt()));
+          optionalUuid(p, "exceptionalAuthorizationId"), booleanValue(p, "regulationAccepted"),
+          envelope.occurredAt()));
       case "CancelAppointment" -> new MappedCommand(metadata, new CancelAppointmentUseCase.Command(metadata,
           uuid(p, "appointmentId"), longValue(p, "expectedVersion"), optionalText(p, "reason"),
           envelope.occurredAt()));
@@ -121,6 +122,12 @@ public final class CommandMessageMapper {
   private static String optionalText(JsonNode node, String field) {
     return !node.has(field) || node.path(field).isNull() || !node.path(field).isTextual()
         ? null : node.path(field).asText();
+  }
+  private static boolean booleanValue(JsonNode node, String field) {
+    if (!node.has(field) || !node.path(field).isBoolean()) {
+      throw new InvalidMessageException(field + " must be a boolean");
+    }
+    return node.path(field).asBoolean();
   }
   private static int intValue(JsonNode node, String field) {
     if (!node.has(field) || !node.path(field).canConvertToInt())
