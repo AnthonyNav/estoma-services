@@ -33,6 +33,7 @@ Monorepo for Estoma microservices.
 - `wash-administration-service`: Lavado Ultrasonico schedule and resource configuration service.
 - `appointments-service`: Lavado Ultrasonico appointments, QR, capacity, and points service.
 - `wash-execution-service`: Lavado Ultrasonico arrival, assignment, incident, and exit service.
+- `registros-service`: Prácticas Profesionales pre-registro to a Jornada — cupo, confirmation, rejection, and cancellation.
 - `platform-bff`: client-facing API gateway and composition layer.
 
 ## Local Development
