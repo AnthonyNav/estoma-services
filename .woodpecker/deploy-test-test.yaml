@@ -1,4 +1,6 @@
 when:
+  - event: manual
+    branch: [develop, main]
   - event: pull_request
     path:
       include:
