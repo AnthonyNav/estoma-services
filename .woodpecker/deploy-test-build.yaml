@@ -7,7 +7,7 @@ when:
         - .woodpecker/deploy-test-test.yaml
         - .woodpecker/deploy-test-build.yaml
         - .woodpecker/deploy-test-gitops.yaml
-        - .woodpecker/scripts/**
+        - scripts/woodpecker/**
 
 depends_on:
   - deploy-test-test

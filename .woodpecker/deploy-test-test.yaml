@@ -8,7 +8,7 @@ when:
         - .woodpecker/deploy-test-test.yaml
         - .woodpecker/deploy-test-build.yaml
         - .woodpecker/deploy-test-gitops.yaml
-        - .woodpecker/scripts/**
+        - scripts/woodpecker/**
   - event: push
     branch: [develop, main]
     path:
@@ -17,7 +17,7 @@ when:
         - .woodpecker/deploy-test-test.yaml
         - .woodpecker/deploy-test-build.yaml
         - .woodpecker/deploy-test-gitops.yaml
-        - .woodpecker/scripts/**
+        - scripts/woodpecker/**
 
 steps:
   - name: test
