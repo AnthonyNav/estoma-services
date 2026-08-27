@@ -444,13 +444,23 @@ components:
 
     JornadaPublicadaPayload:
       type: object
-      required: [jornadaId, tipoJornadaId, fecha, cupoTotal, semestresPermitidos]
+      description: >
+        nombre/horaInicio/horaFin/lugar/descripcion son una foto denormalizada
+        de la Jornada al momento de publicarse, para que consumidores como el
+        BFF puedan proyectar una vista de solo lectura sin una Query
+        adicional a jornadas-service.
+      required: [jornadaId, tipoJornadaId, nombre, fecha, horaInicio, horaFin, lugar, cupoTotal, semestresPermitidos]
       properties:
         jornadaId: {type: string, format: uuid}
         tipoJornadaId: {type: string, format: uuid}
+        nombre: {type: string}
         fecha: {type: string, format: date}
+        horaInicio: {type: string}
+        horaFin: {type: string}
+        lugar: {type: string}
         cupoTotal: {type: integer, minimum: 0}
         fechaLimiteDocumentos: {type: string, format: date}
+        descripcion: {type: ['string', 'null']}
         semestresPermitidos:
           type: array
           items: {type: integer}
