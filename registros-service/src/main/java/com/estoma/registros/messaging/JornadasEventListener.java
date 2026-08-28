@@ -20,8 +20,9 @@ import tools.jackson.databind.JsonNode;
 
 /**
  * Keeps the local, read-only Jornada projection current — registros never
- * joins across service databases (data-model.md §2 de registros). Consumes
- * only the 3 events this V1 needs; JornadaFinalizada -> RegistroCompletado is
+ * joins across service databases (data-model.md §2 de registros).
+ * JornadaFinalizada marks the projection FINALIZADA (blocking new
+ * CrearRegistro); transitioning existing registros to RegistroCompletado is
  * an explicit V1 simplification, not implemented yet (see README).
  */
 @Component
@@ -54,7 +55,7 @@ public class JornadasEventListener {
       case "JornadaPublicada" -> onJornadaPublicada(envelope);
       case "JornadaEditada" -> onJornadaEditada(envelope);
       case "JornadaCancelada" -> onJornadaCancelada(envelope);
-      case "JornadaFinalizada" -> log.info("JornadaFinalizada ignorado en V1 (sin RegistroCompletado todavía)");
+      case "JornadaFinalizada" -> onJornadaFinalizada(envelope);
       default -> throw new IllegalArgumentException("messageType desconocido en events.registros: " + envelope.messageType());
     }
   }
@@ -77,10 +78,25 @@ public class JornadasEventListener {
   private void onJornadaEditada(MessageEnvelope envelope) {
     UUID jornadaId = envelope.aggregateId();
     int sourceVersion = envelope.aggregateVersion() != null ? envelope.aggregateVersion() : 1;
-    // JornadaEditada's payload only lists which fields changed (camposModificados) — this V1
-    // projection re-derives fecha/cupoTotal from jornada-owned data is out of scope without a
-    // Query; it simply bumps source_version so downstream reconciliation is at least visible.
-    jornadaProyeccionRepository.applyEditada(jornadaId, null, null, null, sourceVersion);
+    JsonNode payload = envelope.payload();
+    LocalDate fecha = optionalDate(payload, "fecha");
+    Integer cupoTotal = payload.path("cupoTotal").isMissingNode() || payload.path("cupoTotal").isNull()
+        ? null : payload.path("cupoTotal").asInt();
+    LocalDate fechaLimiteDocumentos = optionalDate(payload, "fechaLimiteDocumentos");
+    jornadaProyeccionRepository.applyEditada(jornadaId, fecha, cupoTotal, fechaLimiteDocumentos, sourceVersion);
+  }
+
+  private void onJornadaFinalizada(MessageEnvelope envelope) {
+    UUID jornadaId = envelope.aggregateId();
+    int sourceVersion = envelope.aggregateVersion() != null ? envelope.aggregateVersion() : 1;
+    // Blocks new CrearRegistro (RegistroCommandService only accepts estado PUBLICADA).
+    // RegistroCompletado for ya-registrados is an explicit V1 simplification (see README).
+    jornadaProyeccionRepository.marcarFinalizada(jornadaId, sourceVersion);
+  }
+
+  private static LocalDate optionalDate(JsonNode payload, String field) {
+    JsonNode node = payload.path(field);
+    return node.isMissingNode() || node.isNull() ? null : LocalDate.parse(node.asString());
   }
 
   private void onJornadaCancelada(MessageEnvelope envelope) {

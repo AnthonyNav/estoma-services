@@ -30,9 +30,8 @@ Business operations are durable RabbitMQ commands on `commands.registros`: `Crea
 - **No lista de espera.** `CrearRegistro` is rejected outright (`REGISTROS.SIN_CUPO_DISPONIBLE`) when there is no cupo, instead of queueing the Alumno and auto-assigning later. `RegistroIngresoListaEspera`/`RegistroAsignadoDesdeListaEspera` are not implemented.
 - **No `cumplimiento-documental` validation.** That service does not exist yet — `CrearRegistro` does not check the Alumno's documentación general vigente.
 - **No `academic-service` semester projection.** `semestreAlumno` travels explicit in the `CrearRegistro` payload instead of being resolved from a local projection fed by `StudentSemesterChanged` — the BFF is expected to fill it from the session in the meantime.
-- **No `JornadaFinalizada` handling.** `RegistroCompletado` is not implemented; `JornadaFinalizada` is logged and ignored by `JornadasEventListener`.
+- **`JornadaFinalizada` blocks new `CrearRegistro`** (projection moves to `FINALIZADA`), but `RegistroCompletado` for already-registered Alumnos is not implemented — an explicit V1 simplification.
 - **No Transactional Outbox / Consumer Inbox / idempotency records**, same simplification as `jornadas-service` — the schema has `outbox_messages`/`processed_messages`/`idempotency_records` sized for it, unused in V1.
-- **`JornadaEditada` only bumps `source_version`** in the local projection — it does not re-derive `fecha`/`cupoTotal` from the event payload (which only lists `camposModificados`, not the new values) or via a Query to `jornadas`. A cupo change made via `EditarJornada` will not be reflected here in V1.
 
 ## Local Development
 

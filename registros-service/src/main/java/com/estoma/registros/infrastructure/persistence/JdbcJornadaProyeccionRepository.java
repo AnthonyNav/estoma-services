@@ -82,6 +82,13 @@ public class JdbcJornadaProyeccionRepository {
         sourceVersion, Timestamp.from(Instant.now()), jornadaId);
   }
 
+  @Transactional
+  public void marcarFinalizada(UUID jornadaId, int sourceVersion) {
+    jdbc.update(
+        "UPDATE jornada_proyeccion SET estado = 'FINALIZADA', source_version = ?, updated_at = ? WHERE jornada_id = ?",
+        sourceVersion, Timestamp.from(Instant.now()), jornadaId);
+  }
+
   /** Atomic check-and-decrement: returns true only if a cupo was actually available and reserved. */
   public boolean reservarCupo(UUID jornadaId) {
     int updated =
