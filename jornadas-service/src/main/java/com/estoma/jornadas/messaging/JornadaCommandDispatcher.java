@@ -119,6 +119,17 @@ public class JornadaCommandDispatcher {
 
     Map<String, Object> eventPayload = new LinkedHashMap<>();
     eventPayload.put("jornadaId", jornada.jornadaId().toString());
+    eventPayload.put("tipoJornadaId", jornada.tipoJornadaId().toString());
+    eventPayload.put("nombre", jornada.nombre());
+    eventPayload.put("fecha", jornada.fecha().toString());
+    eventPayload.put("horaInicio", jornada.horaInicio().toString());
+    eventPayload.put("horaFin", jornada.horaFin().toString());
+    eventPayload.put("lugar", jornada.lugar());
+    eventPayload.put("cupoTotal", jornada.cupoTotal());
+    eventPayload.put("fechaLimiteDocumentos", jornada.fechaLimiteDocumentos().toString());
+    if (jornada.descripcion() != null) {
+      eventPayload.put("descripcion", jornada.descripcion());
+    }
     eventPayload.put("camposModificados", fields.camposPresentes());
     publisher.publishEvent(
         "JornadaEditada",

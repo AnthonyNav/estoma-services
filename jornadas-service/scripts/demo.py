@@ -130,11 +130,19 @@ def main():
     version = results[0]["payload"]["data"]["version"]
 
     results, events = run(
-        "3) EditarJornada -> sube el cupo a 25",
-        envelope("EditarJornada", {"cupoTotal": 25}, aggregate_id=jornada_id, aggregate_version=version),
+        "3) EditarJornada -> sube el cupo a 25 y mueve la fecha al 2026-09-27",
+        envelope("EditarJornada", {"cupoTotal": 25, "fecha": "2026-09-27"},
+                 aggregate_id=jornada_id, aggregate_version=version),
         expect_events=1,
     )
     version = results[0]["payload"]["data"]["version"]
+    edited_payload = events[0]["payload"]
+    assert edited_payload["cupoTotal"] == 25, \
+        f"JornadaEditada debe llevar el cupoTotal nuevo, no solo camposModificados: {edited_payload}"
+    assert edited_payload["fecha"] == "2026-09-27", \
+        f"JornadaEditada debe llevar la fecha nueva, no solo camposModificados: {edited_payload}"
+    print("  OK: JornadaEditada trae la fotografia completa (cupoTotal y fecha nuevos), "
+          "no solo los nombres de los campos modificados -- Registros/BFF pueden proyectarla sin Query adicional.")
 
     run(
         "3b) EditarJornada otra vez con la MISMA version -> debe rechazarse (conflicto de concurrencia)",

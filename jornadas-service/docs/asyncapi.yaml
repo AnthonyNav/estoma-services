@@ -467,9 +467,25 @@ components:
 
     JornadaEditadaPayload:
       type: object
-      required: [jornadaId, camposModificados]
+      description: >
+        Fotografía inmutable completa de la Jornada tras la edición (mismo
+        shape que JornadaPublicadaPayload, sin semestresPermitidos porque
+        EditarJornada no lo modifica). Los consumidores no hacen una consulta
+        síncrona a jornadas-service: deben reemplazar su proyección con estos
+        valores en vez de aplicar solo los campos listados en
+        camposModificados.
+      required: [jornadaId, tipoJornadaId, nombre, fecha, horaInicio, horaFin, lugar, cupoTotal, fechaLimiteDocumentos, camposModificados]
       properties:
         jornadaId: {type: string, format: uuid}
+        tipoJornadaId: {type: string, format: uuid}
+        nombre: {type: string}
+        fecha: {type: string, format: date}
+        horaInicio: {type: string}
+        horaFin: {type: string}
+        lugar: {type: string}
+        cupoTotal: {type: integer, minimum: 0}
+        fechaLimiteDocumentos: {type: string, format: date}
+        descripcion: {type: ['string', 'null']}
         camposModificados:
           type: array
           description: Nombres de los campos que cambiaron en esta edición.
