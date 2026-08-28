@@ -272,8 +272,21 @@ public sealed interface ProjectionReadModel permits
       Instant completedAt,
       Instant cancelledAt,
       String cancellationType,
+      Integer submittedPackageCount,
+      Integer submittedGreenPaperCassette8Count,
+      Integer submittedGreenPaperCassette10Count,
+      Integer submittedWitnessTapePortionCount,
       long executionVersion,
-      Instant updatedAt) implements ProjectionReadModel {}
+      Instant updatedAt) implements ProjectionReadModel {
+    public WashExecution(UUID washExecutionId, UUID appointmentId, String appointmentType,
+        String status, Instant arrivedAt, Instant authorizedAt, Instant startedAt,
+        Instant exitSubmittedAt, Instant completedAt, Instant cancelledAt, String cancellationType,
+        long executionVersion, Instant updatedAt) {
+      this(washExecutionId, appointmentId, appointmentType, status, arrivedAt, authorizedAt,
+          startedAt, exitSubmittedAt, completedAt, cancelledAt, cancellationType,
+          null, null, null, null, executionVersion, updatedAt);
+    }
+  }
 
   record ResourceAssignment(
       UUID resourceAssignmentId,

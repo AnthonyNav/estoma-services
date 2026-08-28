@@ -48,10 +48,13 @@ public class CommandGatewayService {
     ActorContext actor = submission.actor() == null ? ActorContext.anonymous() : submission.actor();
     validateActor(submission, route, actor);
 
-    var normalized = fingerprints.normalize(
+    var ownerPayload = fingerprints.normalize(
         submission.publicOperation(), submission.messageType(), submission.payloadJson(),
         submission.aggregateId(), submission.aggregateVersion(), actor);
-    String fingerprint = normalized.fingerprint();
+    var idempotencyIntent = fingerprints.normalize(
+        submission.publicOperation(), submission.messageType(), submission.idempotencyPayloadJson(),
+        submission.idempotencyAggregateId(), submission.idempotencyAggregateVersion(), actor);
+    String fingerprint = idempotencyIntent.fingerprint();
 
     var existing = idempotency.findByLogicalScope(
         submission.actorAccountId(), submission.publicOperation(), submission.idempotencyKey());
@@ -115,7 +118,7 @@ public class CommandGatewayService {
         submission.aggregateVersion(),
         submission.idempotencyKey(),
         serializer.write(actor),
-        normalized.canonicalPayloadJson(),
+        ownerPayload.canonicalPayloadJson(),
         OutboxStatus.PENDING,
         null,
         null,
@@ -143,7 +146,8 @@ public class CommandGatewayService {
   }
 
   private static void validateShape(CommandSubmission submission) {
-    if (submission == null || isBlank(submission.payloadJson())) {
+    if (submission == null || isBlank(submission.payloadJson())
+        || isBlank(submission.idempotencyPayloadJson())) {
       throw new IllegalArgumentException("command submission and payload are required");
     }
     if (isBlank(submission.publicOperation()) || submission.publicOperation().length() > 160) {
@@ -157,6 +161,10 @@ public class CommandGatewayService {
     }
     if (submission.aggregateVersion() != null && submission.aggregateVersion() < 0) {
       throw new IllegalArgumentException("aggregateVersion cannot be negative");
+    }
+    if (submission.idempotencyAggregateVersion() != null
+        && submission.idempotencyAggregateVersion() < 0) {
+      throw new IllegalArgumentException("idempotencyAggregateVersion cannot be negative");
     }
   }
 

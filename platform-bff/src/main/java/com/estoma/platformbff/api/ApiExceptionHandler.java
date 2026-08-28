@@ -6,6 +6,8 @@ import com.estoma.platformbff.application.security.LocalAuthorizationService.Aut
 import com.estoma.platformbff.application.security.AuthenticationRejectedException;
 import com.estoma.platformbff.application.security.AuthenticationRequiredException;
 import com.estoma.platformbff.application.security.SecurityRpcUnavailableException;
+import java.util.UUID;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -19,34 +21,38 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 public class ApiExceptionHandler {
   @ExceptionHandler(AuthenticationRejectedException.class)
   ResponseEntity<ProblemResponse> rejected() {
-    return problem(HttpStatus.UNAUTHORIZED, "Unauthorized", "The authentication request was rejected.");
+    return problem(HttpStatus.UNAUTHORIZED, "BFF.AUTHENTICATION_INVALID", "Unauthorized",
+        "The authentication request was rejected.");
   }
 
   @ExceptionHandler(AuthenticationRequiredException.class)
   ResponseEntity<ProblemResponse> required() {
-    return problem(HttpStatus.UNAUTHORIZED, "Unauthorized", "Authentication is required.");
+    return problem(HttpStatus.UNAUTHORIZED, "BFF.AUTHENTICATION_REQUIRED", "Unauthorized",
+        "Authentication is required.");
   }
 
   @ExceptionHandler(SecurityRpcUnavailableException.class)
   ResponseEntity<ProblemResponse> unavailable() {
-    return problem(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable",
-        "Authentication is temporarily unavailable.");
+    return problem(HttpStatus.SERVICE_UNAVAILABLE, "BFF.SECURITY_RPC_UNAVAILABLE",
+        "Service Unavailable", "Authentication is temporarily unavailable.");
   }
 
   @ExceptionHandler(ProjectionUnavailableException.class)
   ResponseEntity<ProblemResponse> projectionUnavailable() {
-    return problem(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable",
-        "The required local projection is temporarily unavailable.");
+    return problem(HttpStatus.SERVICE_UNAVAILABLE, "BFF.PROJECTION_UNAVAILABLE",
+        "Service Unavailable", "The required local projection is temporarily unavailable.");
   }
 
   @ExceptionHandler(AuthorizationDeniedException.class)
   ResponseEntity<ProblemResponse> forbidden() {
-    return problem(HttpStatus.FORBIDDEN, "Forbidden", "The authenticated account is not authorized.");
+    return problem(HttpStatus.FORBIDDEN, "BFF.ACCESS_DENIED", "Forbidden",
+        "The authenticated account is not authorized.");
   }
 
   @ExceptionHandler(IdempotencyConflictException.class)
   ResponseEntity<ProblemResponse> conflict() {
-    return problem(HttpStatus.CONFLICT, "Conflict", "Idempotency-Key conflicts with a prior request.");
+    return problem(HttpStatus.CONFLICT, "BFF.IDEMPOTENCY_CONFLICT", "Conflict",
+        "Idempotency-Key conflicts with a prior request.");
   }
 
   @ExceptionHandler({
@@ -56,15 +62,24 @@ public class ApiExceptionHandler {
       HttpMessageNotReadableException.class
   })
   ResponseEntity<ProblemResponse> invalidRequest() {
-    return problem(HttpStatus.BAD_REQUEST, "Bad Request", "The request is invalid.");
+    return problem(HttpStatus.BAD_REQUEST, "BFF.INVALID_REQUEST", "Bad Request",
+        "The request is invalid.");
   }
 
   private static ResponseEntity<ProblemResponse> problem(
-      HttpStatus status, String title, String detail) {
+      HttpStatus status, String code, String title, String detail) {
+    String traceId = MDC.get("traceId");
+    if (traceId == null || traceId.isBlank()) traceId = UUID.randomUUID().toString();
     return ResponseEntity.status(status)
         .contentType(MediaType.APPLICATION_PROBLEM_JSON)
-        .body(new ProblemResponse("about:blank", title, status.value(), detail));
+        .body(new ProblemResponse("urn:estoma:error:" + code, title, status.value(), code, detail, traceId));
   }
 
-  public record ProblemResponse(String type, String title, int status, String detail) {}
+  public record ProblemResponse(
+      String type,
+      String title,
+      int status,
+      String code,
+      String detail,
+      String traceId) {}
 }

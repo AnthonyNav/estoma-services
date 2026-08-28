@@ -7,7 +7,7 @@ when:
         - .woodpecker/deploy-test-test.yaml
         - .woodpecker/deploy-test-build.yaml
         - .woodpecker/deploy-test-gitops.yaml
-        - .woodpecker/scripts/**
+        - scripts/woodpecker/**
 
 depends_on:
   - deploy-test-test
@@ -34,5 +34,5 @@ steps:
             cpu: 250m
             memory: 512Mi
           limits:
-            cpu: "1"
-            memory: 2Gi
+            cpu: 750m
+            memory: 1Gi

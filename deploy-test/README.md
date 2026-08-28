@@ -29,3 +29,8 @@ Minimal Spring Boot service used to validate path-scoped CI/CD and GitOps deploy
 docker build -t deploy-test .
 docker run --rm -p 8080:8080 deploy-test
 ```
+
+## CI/CD
+
+Trusted pushes to `develop` publish an immutable GHCR image and open a GitOps
+pull request that updates the development deployment through Argo CD.

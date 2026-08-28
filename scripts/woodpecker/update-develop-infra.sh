@@ -87,13 +87,29 @@ payload="$(jq -n \
   --arg body "Automated image tag update for ${service_name}." \
   '{title: $title, head: $head, base: "main", body: $body}')"
 
-curl --fail-with-body --silent --show-error --output /dev/null \
+pull_request="$(curl --fail-with-body --silent --show-error \
   --request POST \
   --header "Accept: application/vnd.github+json" \
   --header "Authorization: Bearer ${ESTOMA_INFRA_TOKEN}" \
   --header "X-GitHub-Api-Version: 2022-11-28" \
   --header "Content-Type: application/json" \
   --data "$payload" \
-  "https://api.github.com/repos/${repo}/pulls"
+  "https://api.github.com/repos/${repo}/pulls")"
 
-echo "Created the infrastructure pull request for ${service_name}:${image_tag}."
+pull_number="$(printf '%s' "$pull_request" | jq -er '.number')"
+head_sha="$(git rev-parse HEAD)"
+merge_payload="$(jq -n \
+  --arg sha "$head_sha" \
+  --arg title "chore(deploy): promote ${service_name} ${image_tag}" \
+  '{sha: $sha, commit_title: $title, merge_method: "squash"}')"
+
+curl --fail-with-body --silent --show-error --output /dev/null \
+  --request PUT \
+  --header "Accept: application/vnd.github+json" \
+  --header "Authorization: Bearer ${ESTOMA_INFRA_TOKEN}" \
+  --header "X-GitHub-Api-Version: 2022-11-28" \
+  --header "Content-Type: application/json" \
+  --data "$merge_payload" \
+  "https://api.github.com/repos/${repo}/pulls/${pull_number}/merge"
+
+echo "Auto-merged the infrastructure pull request for ${service_name}:${image_tag}."
