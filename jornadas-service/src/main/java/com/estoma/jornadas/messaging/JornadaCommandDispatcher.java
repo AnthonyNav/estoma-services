@@ -83,7 +83,9 @@ public class JornadaCommandDispatcher {
     eventPayload.put("lugar", jornada.lugar());
     eventPayload.put("cupoTotal", jornada.cupoTotal());
     eventPayload.put("fechaLimiteDocumentos", jornada.fechaLimiteDocumentos().toString());
-    eventPayload.put("descripcion", jornada.descripcion());
+    if (jornada.descripcion() != null) {
+      eventPayload.put("descripcion", jornada.descripcion());
+    }
     eventPayload.put("semestresPermitidos", service.semestresPermitidos(jornada.tipoJornadaId()));
     publisher.publishEvent(
         "JornadaPublicada",
