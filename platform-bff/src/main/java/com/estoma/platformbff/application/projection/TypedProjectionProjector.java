@@ -368,13 +368,16 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
     UUID id = uuid(p, "jornadaId");
     aggregate(event, id);
     switch (event.messageType()) {
-      case "JornadaPublicada" -> readModels.upsert(new ProjectionReadModel.Jornada(
+      case "JornadaPublicada", "JornadaEditada" -> readModels.upsert(new ProjectionReadModel.Jornada(
           id, optionalUuid(p, "tipoJornadaId"), optionalText(p, "nombre"), optionalDate(p, "fecha"),
           optionalTime(p, "horaInicio"), optionalTime(p, "horaFin"), optionalText(p, "lugar"),
           optionalInteger(p, "cupoTotal"), optionalDate(p, "fechaLimiteDocumentos"),
           optionalText(p, "descripcion"), "PUBLICADA", version, event.occurredAt()));
       case "JornadaCancelada" -> readModels.upsert(new ProjectionReadModel.Jornada(
           id, null, null, null, null, null, null, null, null, null, "CANCELADA", version,
+          event.occurredAt()));
+      case "JornadaFinalizada" -> readModels.upsert(new ProjectionReadModel.Jornada(
+          id, null, null, null, null, null, null, null, null, null, "FINALIZADA", version,
           event.occurredAt()));
       default -> throw new IllegalArgumentException("jornadas Event is not registered");
     }
