@@ -59,7 +59,7 @@ public class ProjectionEventListener {
     } catch (RuntimeException technicalFailure) {
       log.warn(
           "projection event processing failed before safe isolation messageId={} category=technical",
-          transportMessageId);
+          transportMessageId, technicalFailure);
       channel.basicNack(deliveryTag, false, true);
     }
   }
