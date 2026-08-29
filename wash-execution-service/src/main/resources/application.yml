@@ -8,9 +8,20 @@ spring:
       simple:
         acknowledge-mode: manual
         default-requeue-rejected: false
+        observation-enabled: true
+    template:
+      observation-enabled: true
 server:
   port: 8080
 management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces
   endpoint:
     health:
       probes:

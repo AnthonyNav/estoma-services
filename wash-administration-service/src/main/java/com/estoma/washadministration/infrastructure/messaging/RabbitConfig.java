@@ -20,6 +20,7 @@ public class RabbitConfig {
   @Primary
   RabbitTemplate requiredRouteRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(true);
     installCallbacks(template);
     return template;
@@ -28,6 +29,7 @@ public class RabbitConfig {
   @Bean
   RabbitTemplate eventRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(false);
     installCallbacks(template);
     return template;
@@ -39,6 +41,7 @@ public class RabbitConfig {
       @Value("${spring.rabbitmq.listener.simple.auto-startup:true}") boolean autoStartup) {
     SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
+    factory.setObservationEnabled(true);
     factory.setAutoStartup(autoStartup);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
     factory.setPrefetchCount(10);

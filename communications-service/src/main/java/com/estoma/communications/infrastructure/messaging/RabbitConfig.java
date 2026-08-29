@@ -14,6 +14,7 @@ public class RabbitConfig {
   SimpleRabbitListenerContainerFactory manualAckContainerFactory(ConnectionFactory connectionFactory) {
     SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
+    factory.setObservationEnabled(true);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
     factory.setDefaultRequeueRejected(false);
     factory.setPrefetchCount(20);
@@ -23,6 +24,7 @@ public class RabbitConfig {
   @Bean
   RabbitTemplate communicationsRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(true);
     return template;
   }

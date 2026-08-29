@@ -11,6 +11,7 @@ public class RecoverySecurityRpcConfig {
   @Bean("recoverySecurityRpcTemplate")
   RabbitTemplate recoverySecurityRpcTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(true);
     template.setReplyTimeout(3_000L);
     return template;
