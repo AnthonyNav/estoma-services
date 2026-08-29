@@ -4,6 +4,7 @@ when:
     path:
       include:
         - platform-bff/**
+        - .woodpecker/platform-bff-test.yaml
         - .woodpecker/platform-bff-build.yaml
         - .woodpecker/platform-bff-gitops.yaml
         - scripts/woodpecker/**
