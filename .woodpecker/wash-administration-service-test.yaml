@@ -29,4 +29,4 @@ steps:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:
-      - ./mvnw -B clean verify
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify

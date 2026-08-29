@@ -4,6 +4,7 @@ set -eu
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
+maven_settings="$repo_root/.woodpecker/maven-settings.xml"
 
 : "${CI_COMMIT_TARGET_BRANCH:?CI_COMMIT_TARGET_BRANCH is required for pull-request validation}"
 
@@ -31,10 +32,10 @@ for service_dir in */; do
   if ! git diff --quiet "$merge_base" HEAD -- "$service_dir"; then
     changed_services=1
     service_dir="${service_dir%/}"
-    printf 'Running %s/./mvnw -B clean verify\n' "$service_dir"
+    printf 'Running %s/mvn -s %s -B clean verify\n' "$service_dir" "$maven_settings"
     if ! (
       cd "$service_dir"
-      ./mvnw -B clean verify
+      mvn -s "$maven_settings" -B clean verify
     ); then
       printf 'Validation failed for %s.\n' "$service_dir" >&2
       exit 1

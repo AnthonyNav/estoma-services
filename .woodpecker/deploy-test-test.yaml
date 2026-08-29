@@ -24,7 +24,7 @@ steps:
     image: maven:3.9.16-eclipse-temurin-25
     directory: deploy-test
     commands:
-      - ./mvnw -B clean verify
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify
     backend_options:
       kubernetes:
         resources:
