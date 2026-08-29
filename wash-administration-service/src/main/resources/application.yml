@@ -38,6 +38,9 @@ spring:
         retry:
           enabled: false
         default-requeue-rejected: false
+        observation-enabled: true
+    template:
+      observation-enabled: true
 
 server:
   port: 8080
@@ -48,6 +51,14 @@ logging:
       console: ecs
 
 management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces
   endpoints:
     access:
       default: none

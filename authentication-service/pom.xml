@@ -61,6 +61,10 @@
       <artifactId>spring-boot-starter-amqp</artifactId>
     </dependency>
     <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-opentelemetry</artifactId>
+    </dependency>
+    <dependency>
       <!-- Argon2PasswordEncoder delegates to Bouncy Castle's Argon2 implementation; not pulled in
            transitively by spring-security-crypto. -->
       <groupId>org.bouncycastle</groupId>

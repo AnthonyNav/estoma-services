@@ -36,8 +36,11 @@ spring:
     listener:
       simple:
         default-requeue-rejected: false
+        observation-enabled: true
         retry:
           enabled: false
+    template:
+      observation-enabled: true
 
 server:
   port: 8080
@@ -64,6 +67,14 @@ estoma:
     retry-2-ttl: ${ESTOMA_MESSAGING_RETRY_2_TTL:30s}
 
 management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces
   endpoints:
     access:
       default: none

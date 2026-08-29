@@ -35,6 +35,7 @@ public class RabbitConfig {
   @Primary
   public RabbitTemplate requiredRouteRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(true);
     installObservabilityCallbacks(template);
     return template;
@@ -43,6 +44,7 @@ public class RabbitConfig {
   @Bean
   public RabbitTemplate eventRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(false);
     installObservabilityCallbacks(template);
     return template;
@@ -71,6 +73,7 @@ public class RabbitConfig {
   public SimpleRabbitListenerContainerFactory manualAckContainerFactory(ConnectionFactory connectionFactory) {
     SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
+    factory.setObservationEnabled(true);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
     factory.setPrefetchCount(10);
     factory.setConcurrentConsumers(2);
@@ -89,6 +92,7 @@ public class RabbitConfig {
   public SimpleRabbitListenerContainerFactory rpcContainerFactory(ConnectionFactory connectionFactory) {
     SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
+    factory.setObservationEnabled(true);
     factory.setAcknowledgeMode(AcknowledgeMode.AUTO);
     factory.setPrefetchCount(20);
     factory.setConcurrentConsumers(2);

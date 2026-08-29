@@ -20,6 +20,8 @@ spring:
     password: ${COMM_RABBITMQ_PASSWORD:guest}
     publisher-confirm-type: correlated
     publisher-returns: true
+    template:
+      observation-enabled: true
 
   flyway:
     enabled: true
@@ -60,6 +62,14 @@ logging:
       console: com.estoma.communications.infrastructure.observability.EstomaJsonLogFormatter
 
 management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces
   endpoints:
     access:
       default: none

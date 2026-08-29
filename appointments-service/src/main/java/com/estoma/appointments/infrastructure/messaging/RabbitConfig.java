@@ -14,6 +14,7 @@ public class RabbitConfig {
   @Qualifier("requiredRouteRabbitTemplate")
   RabbitTemplate requiredRouteRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(true);
     return template;
   }
@@ -22,6 +23,7 @@ public class RabbitConfig {
   @Qualifier("eventRabbitTemplate")
   RabbitTemplate eventRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(false);
     return template;
   }
@@ -31,6 +33,7 @@ public class RabbitConfig {
       MessagingProperties properties) {
     SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
+    factory.setObservationEnabled(true);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
     factory.setDefaultRequeueRejected(false);
     factory.setPrefetchCount(10);
