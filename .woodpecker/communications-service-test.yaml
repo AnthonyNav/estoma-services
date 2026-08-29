@@ -9,6 +9,8 @@ when:
       include:
         - communications-service/**
         - .woodpecker/communications-service-test.yaml
+        - .woodpecker/communications-service-build.yaml
+        - .woodpecker/communications-service-gitops.yaml
         - scripts/woodpecker/**
   - event: push
     branch: develop
@@ -16,6 +18,8 @@ when:
       include:
         - communications-service/**
         - .woodpecker/communications-service-test.yaml
+        - .woodpecker/communications-service-build.yaml
+        - .woodpecker/communications-service-gitops.yaml
         - scripts/woodpecker/**
 
 steps:

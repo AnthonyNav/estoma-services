@@ -9,6 +9,8 @@ when:
       include:
         - authentication-service/**
         - .woodpecker/authentication-service-test.yaml
+        - .woodpecker/authentication-service-build.yaml
+        - .woodpecker/authentication-service-gitops.yaml
         - scripts/woodpecker/**
   - event: push
     branch: develop
@@ -16,6 +18,8 @@ when:
       include:
         - authentication-service/**
         - .woodpecker/authentication-service-test.yaml
+        - .woodpecker/authentication-service-build.yaml
+        - .woodpecker/authentication-service-gitops.yaml
         - scripts/woodpecker/**
 
 steps:
