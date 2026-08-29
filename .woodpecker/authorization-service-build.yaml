@@ -1,4 +1,5 @@
 when:
+  # Touching this workflow rebuilds the immutable develop image after GitOps changes.
   - event: manual
     branch: develop
   - event: push
