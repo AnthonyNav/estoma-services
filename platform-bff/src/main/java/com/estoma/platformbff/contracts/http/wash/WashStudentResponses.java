@@ -1,5 +1,7 @@
 package com.estoma.platformbff.contracts.http.wash;
 
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -9,22 +11,22 @@ import java.util.UUID;
 public final class WashStudentResponses {
   private WashStudentResponses() {}
 
-  public record StudentHomeResponse(StudentHomeStudent student, LocalDate serviceDate,
+  public record StudentHomeResponse(@NotNull StudentHomeStudent student, @NotNull LocalDate serviceDate,
                                     StudentHomeAppointment appointment) {}
 
-  public record StudentHomeStudent(String firstName, String fullName, String studentEnrollment,
+  public record StudentHomeStudent(@NotNull String firstName, @NotNull String fullName, @NotNull String studentEnrollment,
                                   Integer currentSemester) {}
 
   public record StudentHomeAppointment(
-      UUID appointmentId,
-      String appointmentStatus,
-      String appointmentType,
+      @NotNull UUID appointmentId,
+      @NotNull @Pattern(regexp = "SCHEDULED|CANCELLED|MISSED|ENTRY_REJECTED|IN_PROGRESS|COMPLETED") String appointmentStatus,
+      @NotNull @Pattern(regexp = "NORMAL|JOURNEY|IMMUNOCOMPROMISED") String appointmentType,
       Integer instrumentCount,
-      String pieceType,
+      @Pattern(regexp = "HIGH_SPEED|LOW_SPEED|CONTRA_ANGLE") String pieceType,
       CourseSection courseSection,
       AppointmentTimeSlot timeSlot,
       WashExecution washExecution,
-      String qrUsageContext,
+      @NotNull @Pattern(regexp = "ENTRY|STUDENT_EXIT|SUPERVISOR_EXIT_REVIEW|NONE") String qrUsageContext,
       String qrRepresentation) {}
 
   public record CourseSection(UUID courseSectionId, String nrc, String name) {}
@@ -32,12 +34,36 @@ public final class WashStudentResponses {
   public record AppointmentTimeSlot(UUID appointmentTimeSlotId, Instant startsAt, Instant endsAt,
                                     String timezone) {}
 
-  public record WashExecution(UUID washExecutionId, String status) {}
+  /** Execution state intentionally matches the student and supervisor front-end read models. */
+  public record WashExecution(
+      @NotNull UUID washExecutionId,
+      @NotNull @Pattern(regexp = "PENDING_ENTRY|ENTRY_REJECTED|PENDING_REASSIGNMENT|IN_PROGRESS|EXIT_SUBMITTED|COMPLETED|CANCELLED") String status,
+      Long version,
+      Instant arrivedAt,
+      String rejectionReason,
+      ActiveResourceAssignment activeResourceAssignment) {}
 
-  /** Flat shape is the canonical WASH-STU-02 contract. */
+  public record ActiveResourceAssignment(
+      UUID resourceAssignmentId,
+      UUID cabinId,
+      String cabinCode,
+      String cabinName,
+      UUID tankId,
+      String tankCode,
+      String tankName) {}
+
+  /** Canonical WASH-STU-02 shape consumed by estoma-app. */
   public record AppointmentFormContextResponse(
-      String studentFullName,
-      String studentEnrollment,
-      Integer currentSemester,
+      FormStudent student,
       List<CourseSection> availableCourseSections) {}
+
+  public record FormStudent(@NotNull String fullName, @NotNull String studentEnrollment,
+                            @NotNull Integer currentSemester) {}
+
+  /** Side-effect-free WASH-STU-03 manual supervisor lookup response. */
+  public record SupervisorEntryLookupResponse(
+      LocalDate serviceDate,
+      FormStudent student,
+      StudentHomeAppointment appointment,
+      WashExecution washExecution) {}
 }

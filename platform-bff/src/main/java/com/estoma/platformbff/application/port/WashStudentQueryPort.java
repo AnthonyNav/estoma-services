@@ -10,6 +10,8 @@ import java.util.UUID;
 public interface WashStudentQueryPort {
   Optional<Student> findStudent(UUID accountId);
 
+  Optional<UUID> findAccountIdByStudentEnrollment(String studentEnrollment);
+
   Optional<Appointment> findPrimaryAppointment(UUID accountId, LocalDate serviceDate);
 
   List<CourseSection> findAvailableCourseSections(UUID accountId);
@@ -32,7 +34,17 @@ public interface WashStudentQueryPort {
       String timezone,
       Instant arrivalToleranceUntil,
       UUID washExecutionId,
-      String washExecutionStatus) {}
+      String washExecutionStatus,
+      Long washExecutionVersion,
+      Instant washExecutionArrivedAt,
+      String washExecutionRejectionReason,
+      UUID resourceAssignmentId,
+      UUID cabinId,
+      String cabinCode,
+      String cabinName,
+      UUID tankId,
+      String tankCode,
+      String tankName) {}
 
   record CourseSection(UUID courseSectionId, String nrc, String name) {}
 }

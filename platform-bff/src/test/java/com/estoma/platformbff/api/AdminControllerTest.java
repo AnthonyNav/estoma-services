@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.estoma.platformbff.api.admin.AdminController;
 import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.commands.CommandRegistry;
+import com.estoma.platformbff.application.security.AuthenticationEdgeService;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import java.time.Instant;
@@ -33,6 +34,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class AdminControllerTest {
   @Mock PublicCommandAdapter commands;
   @Mock LocalAuthorizationService authorization;
+  @Mock AuthenticationEdgeService authentication;
   private MockMvc mvc;
 
   @BeforeEach
@@ -42,20 +44,20 @@ class AdminControllerTest {
     when(commands.submit(any(), any(), any(), anyMap(), any(), isNull(), isNull()))
         .thenReturn(new AcceptedOperationResponse(UUID.randomUUID(), "PENDING", "/api/v1/operations/x",
             Instant.parse("2026-08-27T12:00:00Z")));
-    mvc = MockMvcBuilders.standaloneSetup(new AdminController(commands, authorization))
+    mvc = MockMvcBuilders.standaloneSetup(new AdminController(commands, authorization, authentication))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
 
   @Test
   void fixedPersonRoutePublishesOnlyItsAllowlistedOwnerIntent() throws Exception {
-    mvc.perform(post("/api/v1/admin/persons/00000000-0000-0000-0000-000000000001/activate")
+    mvc.perform(post("/api/v1/admin/people/00000000-0000-0000-0000-000000000001/activate")
             .header("Idempotency-Key", "key-1")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"expectedVersion\":1}"))
         .andExpect(status().isAccepted());
 
-    verify(commands).submit(any(), eq("admin-activate-person"), eq("ActivatePerson"), anyMap(),
+    verify(commands).submit(any(), eq("admin.people.activate"), eq("ActivatePerson"), anyMap(),
         eq("key-1"), isNull(), isNull());
     verify(authorization).requireSuperAdministrator();
   }
@@ -65,10 +67,10 @@ class AdminControllerTest {
     mvc.perform(post("/api/v1/admin/wash/calendars")
             .header("Idempotency-Key", "key-1")
             .contentType(MediaType.APPLICATION_JSON)
-            .content("{\"code\":\"2026-A\"}"))
+            .content("{\"calendarId\":\"00000000-0000-0000-0000-000000000001\",\"code\":\"2026-A\",\"name\":\"2026 A\",\"timezone\":\"America/Mexico_City\",\"effectiveFrom\":\"2026-01-01\"}"))
         .andExpect(status().isAccepted());
 
-    verify(commands).submit(any(), eq("admin-create-wash-calendar"),
+    verify(commands).submit(any(), eq("admin.wash.calendars.create"),
         eq("CreateServiceCalendar"), anyMap(), eq("key-1"), isNull(), isNull());
     verify(authorization).requireWashAdministrator();
   }
@@ -78,10 +80,11 @@ class AdminControllerTest {
     var registry = new CommandRegistry();
 
     assertThat(AdminController.routeMatrix()).hasSize(51);
-    AdminController.routeMatrix().forEach((path, route) -> {
-      assertThat(route.publicOperation()).startsWith("admin-");
+    AdminController.routeMatrix().forEach((key, route) -> {
+      assertThat(route.publicOperation()).startsWith("admin.");
       assertThat(registry.require(route.messageType()).logicalComponentId()).isEqualTo(route.owner());
-      assertThat(route.washScoped()).isEqualTo(path.startsWith("/api/v1/admin/wash/"));
+      assertThat(route.washScoped()).isEqualTo(route.path().startsWith("/api/v1/admin/wash/"));
+      assertThat(key).isEqualTo(route.method() + " " + route.path());
     });
   }
 

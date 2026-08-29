@@ -6,11 +6,15 @@ import com.estoma.platformbff.application.projection.ProjectionUnavailableExcept
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentTimeSlot;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.ActiveResourceAssignment;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSection;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.FormStudent;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeAppointment;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeStudent;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.SupervisorEntryLookupResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.WashExecution;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryLookupRequest;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -53,8 +57,30 @@ public class WashStudentQueryService {
     List<CourseSection> sections = projections.findAvailableCourseSections(accountId).stream()
         .map(value -> new CourseSection(value.courseSectionId(), value.nrc(), value.name()))
         .toList();
-    return new AppointmentFormContextResponse(fullName(student), student.studentEnrollment(),
-        student.currentSemester(), sections);
+    return new AppointmentFormContextResponse(new FormStudent(fullName(student), student.studentEnrollment(),
+        student.currentSemester()), sections);
+  }
+
+  /**
+   * Composes the manual student-enrollment lookup entirely from local read models. QR remains
+   * intentionally unavailable until its owner-backed lookup projection exists.
+   */
+  public SupervisorEntryLookupResponse entryLookup(EntryLookupRequest request) {
+    authorization.requireWashSupervisor();
+    readiness.requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
+    if ("QR".equals(request.lookupType())) {
+      throw new ProjectionUnavailableException("QR entry lookup is gated pending its local projection");
+    }
+    UUID accountId = projections.findAccountIdByStudentEnrollment(request.studentEnrollment())
+        .orElseThrow(EntryLookupNotFoundException::new);
+    var student = requireStudent(accountId);
+    LocalDate serviceDate = clock.instant().atZone(SERVICE_ZONE).toLocalDate();
+    var appointment = projections.findPrimaryAppointment(accountId, serviceDate)
+        .map(value -> appointment(value, clock))
+        .orElseThrow(EntryLookupNotFoundException::new);
+    return new SupervisorEntryLookupResponse(serviceDate,
+        new FormStudent(fullName(student), student.studentEnrollment(), student.currentSemester()),
+        appointment, appointment.washExecution());
   }
 
   private WashStudentQueryPort.Student requireStudent(UUID accountId) {
@@ -72,8 +98,13 @@ public class WashStudentQueryService {
         : new CourseSection(value.courseSectionId(), value.courseNrc(), value.courseName());
     AppointmentTimeSlot slot = value.appointmentTimeSlotId() == null ? null
         : new AppointmentTimeSlot(value.appointmentTimeSlotId(), value.startsAt(), value.endsAt(), value.timezone());
+    ActiveResourceAssignment assignment = value.resourceAssignmentId() == null ? null
+        : new ActiveResourceAssignment(value.resourceAssignmentId(), value.cabinId(), value.cabinCode(),
+            value.cabinName(), value.tankId(), value.tankCode(), value.tankName());
     WashExecution execution = value.washExecutionId() == null ? null
-        : new WashExecution(value.washExecutionId(), value.washExecutionStatus());
+        : new WashExecution(value.washExecutionId(), value.washExecutionStatus(),
+            value.washExecutionVersion(), value.washExecutionArrivedAt(),
+            value.washExecutionRejectionReason(), assignment);
     return new StudentHomeAppointment(value.appointmentId(), value.appointmentStatus(),
         value.appointmentType(), value.instrumentCount(), value.pieceType(), course, slot, execution,
         qrUsageContext(value, clock), null);
@@ -103,5 +134,9 @@ public class WashStudentQueryService {
         .filter(value -> value != null && !value.isBlank())
         .reduce((left, right) -> left + " " + right)
         .orElse("");
+  }
+
+  public static class EntryLookupNotFoundException extends RuntimeException {
+    public EntryLookupNotFoundException() { super("No appointment was found for today."); }
   }
 }

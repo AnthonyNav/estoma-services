@@ -158,6 +158,33 @@ public class AuthenticationEdgeService {
         response.refreshToken(), response.authState());
   }
 
+  /** Administrative Security RPC: the returned secret is intentionally never persisted or logged. */
+  public TemporaryPassword setTemporaryPassword(UUID administratorAccountId, UUID accountId,
+      String idempotencyKey) {
+    return temporaryPassword("SetTemporaryPassword", administratorAccountId, accountId, idempotencyKey);
+  }
+
+  /** Administrative Security RPC: the returned secret is intentionally never persisted or logged. */
+  public TemporaryPassword regenerateTemporaryPassword(UUID administratorAccountId, UUID accountId,
+      String idempotencyKey) {
+    return temporaryPassword("RegenerateTemporaryPassword", administratorAccountId, accountId, idempotencyKey);
+  }
+
+  private TemporaryPassword temporaryPassword(String operation, UUID administratorAccountId, UUID accountId,
+      String idempotencyKey) {
+    if (administratorAccountId == null || accountId == null || blank(idempotencyKey)) {
+      throw new IllegalArgumentException("administrator, account and Idempotency-Key are required");
+    }
+    TemporaryPassword response = requireSuccess(operation,
+        rpc.call(operation, ActorContext.account(administratorAccountId, "ADMIN", null), accountId,
+            idempotencyKey, serializer.write(new TemporaryPasswordRequest(accountId, administratorAccountId,
+                idempotencyKey))), TemporaryPassword.class);
+    if (blank(response.temporaryPassword()) || response.expiresAt() == null) {
+      throw new SecurityRpcUnavailableException(operation + " returned an incomplete response");
+    }
+    return response;
+  }
+
   private CurrentSecurityPrincipal.Principal requirePrincipal() {
     return principal.current().orElseThrow(AuthenticationRequiredException::new);
   }
@@ -228,4 +255,6 @@ public class AuthenticationEdgeService {
   private record ChangePasswordRpcRequest(UUID sessionId, String currentPassword, String newPassword) {}
   private record ChangePasswordRpcResponse(
       UUID sessionId, String accessToken, String refreshToken, String authState) {}
+  private record TemporaryPasswordRequest(UUID accountId, UUID requestedByAccountId, String idempotencyKey) {}
+  public record TemporaryPassword(String temporaryPassword, Instant expiresAt) {}
 }

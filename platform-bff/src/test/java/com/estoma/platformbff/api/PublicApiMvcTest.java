@@ -26,6 +26,7 @@ import com.estoma.platformbff.contracts.http.mailbox.MailboxSummaryResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSection;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.FormStudent;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeStudent;
 import java.time.Clock;
@@ -166,7 +167,7 @@ class PublicApiMvcTest {
         new StudentHomeStudent("Ana", "Ana García Reyes", "201945678", 7),
         LocalDate.of(2026, 8, 1), null));
     when(studentQueries.formContext()).thenReturn(new AppointmentFormContextResponse(
-        "Ana García Reyes", "201945678", 7,
+        new FormStudent("Ana García Reyes", "201945678", 7),
         List.of(new CourseSection(courseSectionId, "12345", "Cirugía"))));
 
     washMvc.perform(get("/api/v1/wash/student/home"))
@@ -176,10 +177,10 @@ class PublicApiMvcTest {
         .andExpect(jsonPath("$.serviceDate").value("2026-08-01"));
     washMvc.perform(get("/api/v1/wash/appointments/form-context"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.studentFullName").value("Ana García Reyes"))
-        .andExpect(jsonPath("$.studentEnrollment").value("201945678"))
+        .andExpect(jsonPath("$.student.fullName").value("Ana García Reyes"))
+        .andExpect(jsonPath("$.student.studentEnrollment").value("201945678"))
         .andExpect(jsonPath("$.availableCourseSections[0].courseSectionId").value(courseSectionId.toString()))
-        .andExpect(jsonPath("$.student").doesNotExist());
+        .andExpect(jsonPath("$.student.currentSemester").value(7));
   }
 
   private void assertAccepted(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request,

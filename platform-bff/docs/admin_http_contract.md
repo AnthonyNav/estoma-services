@@ -1,37 +1,49 @@
 # Platform BFF — Admin HTTP Contract V1
 
-This document closes the concrete `/api/v1/admin/**` surface implemented by PR6. Every route is
-`POST`, requires a normal authenticated JWT and `Idempotency-Key`, sends one durable owner Command,
-and returns the canonical `202 Accepted` operation response. The JSON body contains only the
-owner-defined functional fields; path identifiers are injected by the BFF and override any body
-duplicate. No route exposes AMQP metadata or chains multiple Commands.
+This is the BFF-side copy of the canonical Admin HTTP Contract V1 in
+`estomatologia-platform-docs#51`. The executable source of truth is
+`AdminController.routeMatrix()`: it owns the method/path → public operation → owner command
+mapping, its client-oriented request schema and its authorization scope. The provider test checks
+every route against `CommandRegistry` to prevent route-to-owner drift.
 
-The BFF authorizes this surface against its local authorization projection before accepting a
-Command: routes outside `/admin/wash/**` require `SUPERADMIN`; wash-administration routes require
-`ADMINISTRADOR_LAVADO` (or `SUPERADMIN`) plus an active `LAVADO_ULTRASONICO` access. The owner is
-still the authority for the specific static `wash.admin.*` permission and its domain invariants.
+Every listed route is a durable command: it requires `Bearer` authorization and
+`Idempotency-Key`, returns `202 Accepted`, and persists only one owner command. Non-wash routes
+require `SUPERADMIN`; wash administration requires `ADMINISTRADOR_LAVADO` (or `SUPERADMIN`) plus
+active `LAVADO_ULTRASONICO` access. The BFF rejects undeclared request fields before it injects
+path IDs into the owner payload.
 
-| Route | Command | Owner |
-| --- | --- | --- |
-| `/persons` | CreatePerson | users |
-| `/persons/{personId}/update`, `/activate`, `/deactivate` | UpdatePerson, ActivatePerson, DeactivatePerson | users |
-| `/accounts` | CreateAccount | authentication |
-| `/accounts/{accountId}/activate`, `/deactivate`, `/login-identifier`, `/revoke-sessions` | ActivateAccount, DeactivateAccount, ChangeLoginIdentifier, RevokeAllAccountSessions | authentication |
-| `/accounts/{accountId}/roles`, `/role` | AssignAccountRole, ChangeAccountRole | authorization |
-| `/accounts/{accountId}/accesses` | GrantSystemAccess | authorization |
-| `/accounts/{accountId}/accesses/{systemAccessId}/suspend`, `/revoke`, `/restore` | SuspendSystemAccess, RevokeSystemAccess, RestoreSystemAccess | authorization |
-| `/students` | CreateStudentAcademicProfile | academic |
-| `/students/{accountId}/student-number`, `/semester`, `/activate`, `/deactivate` | CorrectStudentNumber, ChangeStudentSemester, ActivateStudentAcademicProfile, DeactivateStudentAcademicProfile | academic |
-| `/academic-periods` | CreateAndActivateAcademicPeriod | academic |
-| `/course-sections`, `/{courseSectionId}/update`, `/{courseSectionId}/activate`, `/{courseSectionId}/deactivate` | RegisterCourseSection, UpdateCourseSection, ActivateCourseSection, DeactivateCourseSection | academic |
-| `/students/{accountId}/enrollments`, `/{courseSectionId}/reactivate`, `/{courseSectionId}/remove` | AddStudentEnrollment, ReactivateStudentEnrollment, RemoveStudentEnrollment | academic |
-| `/student-imports`, `/{importId}/resume` | StartStudentImport, ResumeStudentImport | academic |
-| `/mail-deliveries/{emailDeliveryId}/retry`, `/resolve` | RetryEmailDelivery, ResolveIndeterminateEmailDelivery | communications |
-| `/wash/calendars`, `/{calendarId}/update`, `/{calendarId}/activate`, `/{calendarId}/deactivate` | CreateServiceCalendar, UpdateServiceCalendar, ActivateServiceCalendar, DeactivateServiceCalendar | wash-administration |
-| `/wash/schedules`, `/{scheduleId}/update`, `/{scheduleId}/deactivate` | ConfigureServiceSchedule, UpdateServiceSchedule, DeactivateServiceSchedule | wash-administration |
-| `/wash/closures`, `/{closureId}/cancel` | ScheduleAdministrativeClosure, CancelAdministrativeClosure | wash-administration |
-| `/wash/cabins`, `/{cabinId}/update`, `/{cabinId}/activate`, `/{cabinId}/deactivate`, `/{cabinId}/retire` | RegisterCabin, UpdateCabin, ActivateCabin, DeactivateCabin, RetireCabin | wash-administration |
-| `/wash/tanks`, `/{tankId}/update`, `/{tankId}/activate`, `/{tankId}/deactivate`, `/{tankId}/retire` | RegisterTank, UpdateTank, ActivateTank, DeactivateTank, RetireTank | wash-administration |
+| Area | Method and path | publicOperation | Owner operation |
+| --- | --- | --- | --- |
+| Users | `POST /people` | `admin.people.create` | CreatePerson |
+| Users | `PATCH /people/{personId}` | `admin.people.update` | UpdatePerson |
+| Users | `POST /people/{personId}/activate`, `/deactivate` | `admin.people.activate`, `admin.people.deactivate` | ActivatePerson, DeactivatePerson |
+| Authentication | `POST /accounts` | `admin.accounts.create` | CreateAccount |
+| Authentication | `POST /accounts/{accountId}/activate`, `/deactivate` | `admin.accounts.activate`, `admin.accounts.deactivate` | ActivateAccount, DeactivateAccount |
+| Authentication | `PATCH /accounts/{accountId}/login-identifier` | `admin.accounts.change-login-identifier` | ChangeLoginIdentifier |
+| Authentication | `POST /accounts/{accountId}/sessions/revoke-all` | `admin.accounts.revoke-all-sessions` | RevokeAllAccountSessions |
+| Authorization | `POST /authorization/accounts/{accountId}/role` | `admin.authorization.assign-role` | AssignAccountRole |
+| Authorization | `PATCH /authorization/accounts/{accountId}/role` | `admin.authorization.change-role` | ChangeAccountRole |
+| Authorization | `POST /authorization/accounts/{accountId}/system-accesses` | `admin.authorization.grant-system-access` | GrantSystemAccess |
+| Authorization | `POST /authorization/system-accesses/{systemAccessId}/suspend`, `/revoke`, `/restore` | `admin.authorization.suspend-system-access`, `admin.authorization.revoke-system-access`, `admin.authorization.restore-system-access` | SuspendSystemAccess, RevokeSystemAccess, RestoreSystemAccess |
+| Academic | `POST /academic/students` | `admin.academic.students.create` | CreateStudentAcademicProfile |
+| Academic | `PATCH /academic/students/{studentAcademicProfileId}/student-number`, `/semester` | `admin.academic.students.correct-number`, `admin.academic.students.change-semester` | CorrectStudentNumber, ChangeStudentSemester |
+| Academic | `POST /academic/students/{studentAcademicProfileId}/activate`, `/deactivate` | `admin.academic.students.activate`, `admin.academic.students.deactivate` | ActivateStudentAcademicProfile, DeactivateStudentAcademicProfile |
+| Academic | `POST /academic/periods` | `admin.academic.periods.create-and-activate` | CreateAndActivateAcademicPeriod |
+| Academic | `POST /academic/course-sections`; `PATCH /academic/course-sections/{courseSectionId}` | `admin.academic.course-sections.register`, `admin.academic.course-sections.update` | RegisterCourseSection, UpdateCourseSection |
+| Academic | `POST /academic/course-sections/{courseSectionId}/activate`, `/deactivate` | `admin.academic.course-sections.activate`, `admin.academic.course-sections.deactivate` | ActivateCourseSection, DeactivateCourseSection |
+| Academic | `POST /academic/students/{studentAcademicProfileId}/enrollments`; `POST /academic/enrollments/{studentEnrollmentId}/reactivate`; `DELETE /academic/enrollments/{studentEnrollmentId}` | `admin.academic.enrollments.add`, `admin.academic.enrollments.reactivate`, `admin.academic.enrollments.remove` | AddStudentEnrollment, ReactivateStudentEnrollment, RemoveStudentEnrollment |
+| Academic | `POST /academic/imports`, `/academic/imports/{importId}/resume` | `admin.academic.imports.start`, `admin.academic.imports.resume` | StartStudentImport, ResumeStudentImport |
+| Communications | `POST /communications/email-deliveries/{emailDeliveryId}/retry`, `/resolve-indeterminate` | `admin.communications.email-deliveries.retry`, `admin.communications.email-deliveries.resolve-indeterminate` | RetryEmailDelivery, ResolveIndeterminateEmailDelivery |
+| Wash admin | `POST /wash/calendars`; `PATCH /wash/calendars/{serviceCalendarId}`; `POST /activate`, `/deactivate` | `admin.wash.calendars.*` | Create/Update/Activate/DeactivateServiceCalendar |
+| Wash admin | `POST /wash/calendars/{serviceCalendarId}/schedules`; `PATCH /wash/schedules/{serviceScheduleId}`; `POST /deactivate` | `admin.wash.schedules.*` | Configure/Update/DeactivateServiceSchedule |
+| Wash admin | `POST /wash/administrative-closures`, `/{administrativeClosureId}/cancel` | `admin.wash.closures.*` | ScheduleAdministrativeClosure, CancelAdministrativeClosure |
+| Wash admin | `POST /wash/cabins`; `PATCH /wash/cabins/{cabinId}`; `POST /activate`, `/deactivate`, `/retire` | `admin.wash.cabins.*` | Register/Update/Activate/Deactivate/RetireCabin |
+| Wash admin | `POST /wash/cabins/{cabinId}/tanks`; `PATCH /wash/tanks/{tankId}`; `POST /activate`, `/deactivate`, `/retire` | `admin.wash.tanks.*` | Register/Update/Activate/Deactivate/RetireTank |
 
-`RequestPasswordRecovery` and `RegisterInboxVisit` retain their dedicated Auth/Mailbox routes;
-they are not duplicated under Admin. Commands internal to owners remain absent.
+## Security RPC exceptions
+
+`POST /accounts/{accountId}/temporary-password` and
+`POST /accounts/{accountId}/temporary-password/regenerate` require `SUPERADMIN` and
+`Idempotency-Key`, but are deliberately not durable operations: they call the allowlisted
+Authentication Security RPC synchronously. Responses use `Cache-Control: no-store` and
+`Pragma: no-cache`; the temporary secret is neither persisted nor logged by the BFF.

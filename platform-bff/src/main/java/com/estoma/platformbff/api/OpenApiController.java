@@ -1,6 +1,15 @@
 package com.estoma.platformbff.api;
 
+import com.estoma.platformbff.api.admin.AdminController;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
+import jakarta.validation.constraints.Size;
 import java.lang.reflect.Parameter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
@@ -89,10 +98,8 @@ public class OpenApiController {
 
   private static Map<String, Object> operation(String path, RequestMethod method,
       HandlerMethod handler) {
-    boolean accepted = method == RequestMethod.POST && (handler.getBeanType().getPackageName()
-        .contains(".api.admin") || handler.getBeanType().getPackageName().contains(".api.wash")
-        || handler.getMethod().getName().equals("requestRecovery")
-        || handler.getMethod().getName().equals("registerVisit"));
+    AdminController.RouteContract admin = AdminController.routeFor(method.name(), path);
+    boolean accepted = acceptedResponse(handler);
     Map<String, Object> operation = new LinkedHashMap<>();
     operation.put("operationId", handler.getBeanType().getSimpleName() + "_"
         + handler.getMethod().getName() + "_" + method.name().toLowerCase() + "_"
@@ -101,9 +108,20 @@ public class OpenApiController {
       operation.put("security", List.of(Map.of("bearerAuth", List.of())));
     }
     Type requestType = requestType(handler);
-    if (requestType != null) {
+    if (admin != null) {
+      operation.put("requestBody", Map.of("required", true, "content", Map.of(
+          MediaType.APPLICATION_JSON_VALUE, Map.of("schema", admin.requestSchema().openApi()))));
+      operation.put("summary", admin.publicOperation());
+      operation.put("description", "Owner: " + admin.owner() + "; owner operation: "
+          + admin.messageType() + ".");
+    } else if (requestType != null) {
       operation.put("requestBody", Map.of("required", true, "content", Map.of(
           MediaType.APPLICATION_JSON_VALUE, Map.of("schema", schemaFor(requestType)))));
+    }
+    if (handler.getMethod().getName().equals("entryLookup")) {
+      operation.put("description", "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is "
+          + "explicitly gated until the owner-backed QR projection is available and returns 503.");
+      operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
     }
     List<Map<String, Object>> parameters = new ArrayList<>();
     if (accepted) {
@@ -148,6 +166,10 @@ public class OpenApiController {
     return result;
   }
 
+  private static boolean acceptedResponse(HandlerMethod handler) {
+    return rawClass(responseType(handler)) == AcceptedOperationResponse.class;
+  }
+
   private static Map<String, Object> schemaFor(Type type) {
     if (type == null) return Map.of();
     Class<?> raw = rawClass(type);
@@ -186,11 +208,55 @@ public class OpenApiController {
     Map<String, Object> properties = new TreeMap<>();
     List<String> required = new ArrayList<>();
     for (RecordComponent component : recordType.getRecordComponents()) {
-      properties.put(component.getName(), schemaFor(component.getGenericType()));
-      required.add(component.getName());
+      Map<String, Object> property = new LinkedHashMap<>(schemaFor(component.getGenericType()));
+      applyValidation(component, property);
+      boolean mandatory = component.getType().isPrimitive()
+          || component.isAnnotationPresent(NotNull.class)
+          || component.isAnnotationPresent(NotBlank.class)
+          || component.isAnnotationPresent(NotEmpty.class);
+      properties.put(component.getName(), mandatory ? property : nullable(property));
+      if (mandatory) required.add(component.getName());
     }
-    return Map.of("type", "object", "additionalProperties", false, "required", required,
-        "properties", properties);
+    Map<String, Object> schema = new LinkedHashMap<>();
+    schema.put("type", "object");
+    schema.put("additionalProperties", false);
+    if (!required.isEmpty()) schema.put("required", required);
+    schema.put("properties", properties);
+    return schema;
+  }
+
+  private static Map<String, Object> nullable(Map<String, Object> schema) {
+    Object type = schema.get("type");
+    if (type instanceof String stringType) {
+      schema.put("type", List.of(stringType, "null"));
+      return schema;
+    }
+    return Map.of("anyOf", List.of(schema, Map.of("type", "null")));
+  }
+
+  private static void applyValidation(RecordComponent component, Map<String, Object> schema) {
+    if (component.isAnnotationPresent(NotBlank.class)) schema.put("minLength", 1);
+    Size size = component.getAnnotation(Size.class);
+    if (size != null) {
+      boolean collection = Collection.class.isAssignableFrom(component.getType()) || component.getType().isArray();
+      if (size.min() > 0) schema.put(collection ? "minItems" : "minLength", size.min());
+      if (size.max() < Integer.MAX_VALUE) schema.put(collection ? "maxItems" : "maxLength", size.max());
+    }
+    Min min = component.getAnnotation(Min.class);
+    if (min != null) schema.put("minimum", min.value());
+    Max max = component.getAnnotation(Max.class);
+    if (max != null) schema.put("maximum", max.value());
+    if (component.isAnnotationPresent(Positive.class)) schema.put("exclusiveMinimum", 0);
+    if (component.isAnnotationPresent(PositiveOrZero.class)) schema.put("minimum", 0);
+    jakarta.validation.constraints.Pattern pattern = component.getAnnotation(jakarta.validation.constraints.Pattern.class);
+    if (pattern != null) {
+      String expression = pattern.regexp();
+      if (expression.matches("[A-Z0-9_]+(\\|[A-Z0-9_]+)+")) {
+        schema.put("enum", List.of(expression.split("\\|")));
+      } else {
+        schema.put("pattern", expression);
+      }
+    }
   }
 
   private static Type typeArgument(Type type, int index) {

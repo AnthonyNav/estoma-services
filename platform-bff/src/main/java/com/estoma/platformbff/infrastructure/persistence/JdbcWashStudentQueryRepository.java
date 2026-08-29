@@ -36,24 +36,49 @@ public class JdbcWashStudentQueryRepository implements WashStudentQueryPort {
   }
 
   @Override
+  public Optional<UUID> findAccountIdByStudentEnrollment(String studentEnrollment) {
+    return jdbc.sql("""
+        SELECT account_id
+        FROM student_academic_profile_read_model
+        WHERE student_number = :studentEnrollment AND academic_status = 'ACTIVE'
+        """)
+        .param("studentEnrollment", studentEnrollment)
+        .query(UUID.class)
+        .optional();
+  }
+
+  @Override
   public Optional<Appointment> findPrimaryAppointment(UUID accountId, LocalDate serviceDate) {
     return jdbc.sql("""
         SELECT a.appointment_id, a.status AS appointment_status, a.appointment_type,
                a.instrument_count, a.piece_type, a.course_section_id, c.nrc AS course_nrc,
                c.name AS course_name, a.appointment_time_slot_id, ats.starts_at, ats.ends_at,
                ats.timezone, ats.arrival_tolerance_until, e.wash_execution_id,
-               e.status AS wash_execution_status
+               e.status AS wash_execution_status, e.execution_version AS wash_execution_version,
+               e.arrived_at AS wash_execution_arrived_at,
+               e.rejection_reason AS wash_execution_rejection_reason,
+               ra.resource_assignment_id, ra.cabin_id, cabin.code AS cabin_code,
+               cabin.name AS cabin_name, ra.tank_id, tank.code AS tank_code, tank.name AS tank_name
         FROM appointment_read_model a
         JOIN appointment_time_slot_read_model ats
           ON ats.appointment_time_slot_id = a.appointment_time_slot_id
         LEFT JOIN course_section_read_model c ON c.course_section_id = a.course_section_id
         LEFT JOIN LATERAL (
-          SELECT wash_execution_id, status
+          SELECT wash_execution_id, status, execution_version, arrived_at, rejection_reason
           FROM wash_execution_read_model
           WHERE appointment_id = a.appointment_id
           ORDER BY updated_at DESC, wash_execution_id ASC
           LIMIT 1
         ) e ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT resource_assignment_id, cabin_id, tank_id
+          FROM wash_resource_assignment_read_model
+          WHERE wash_execution_id = e.wash_execution_id AND released_at IS NULL
+          ORDER BY assigned_at DESC NULLS LAST, resource_assignment_id ASC
+          LIMIT 1
+        ) ra ON TRUE
+        LEFT JOIN wash_cabin_read_model cabin ON cabin.cabin_id = ra.cabin_id
+        LEFT JOIN wash_tank_read_model tank ON tank.tank_id = ra.tank_id
         WHERE a.student_account_id = :accountId AND ats.service_date = :serviceDate
         ORDER BY CASE
           WHEN a.status = 'IN_PROGRESS' THEN 0
@@ -70,7 +95,11 @@ public class JdbcWashStudentQueryRepository implements WashStudentQueryPort {
             uuid(rs, "course_section_id"), rs.getString("course_nrc"), rs.getString("course_name"),
             uuid(rs, "appointment_time_slot_id"), instant(rs, "starts_at"), instant(rs, "ends_at"),
             rs.getString("timezone"), instant(rs, "arrival_tolerance_until"),
-            uuid(rs, "wash_execution_id"), rs.getString("wash_execution_status")))
+            uuid(rs, "wash_execution_id"), rs.getString("wash_execution_status"),
+            longObject(rs, "wash_execution_version"), instant(rs, "wash_execution_arrived_at"),
+            rs.getString("wash_execution_rejection_reason"), uuid(rs, "resource_assignment_id"),
+            uuid(rs, "cabin_id"), rs.getString("cabin_code"), rs.getString("cabin_name"),
+            uuid(rs, "tank_id"), rs.getString("tank_code"), rs.getString("tank_name")))
         .optional();
   }
 
@@ -102,6 +131,10 @@ public class JdbcWashStudentQueryRepository implements WashStudentQueryPort {
 
   private static Integer integer(ResultSet rs, String column) throws SQLException {
     return rs.getObject(column, Integer.class);
+  }
+
+  private static Long longObject(ResultSet rs, String column) throws SQLException {
+    return rs.getObject(column, Long.class);
   }
 
   private static Instant instant(ResultSet rs, String column) throws SQLException {

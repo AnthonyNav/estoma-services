@@ -271,6 +271,7 @@ public sealed interface ProjectionReadModel permits
       Instant completedAt,
       Instant cancelledAt,
       String cancellationType,
+      String rejectionReason,
       Integer submittedPackageCount,
       Integer submittedGreenPaperCassette8Count,
       Integer submittedGreenPaperCassette10Count,
@@ -282,7 +283,7 @@ public sealed interface ProjectionReadModel permits
         Instant exitSubmittedAt, Instant completedAt, Instant cancelledAt, String cancellationType,
         long executionVersion, Instant updatedAt) {
       this(washExecutionId, appointmentId, appointmentType, status, arrivedAt, authorizedAt,
-          startedAt, exitSubmittedAt, completedAt, cancelledAt, cancellationType,
+          startedAt, exitSubmittedAt, completedAt, cancelledAt, cancellationType, null,
           null, null, null, null, executionVersion, updatedAt);
     }
   }
