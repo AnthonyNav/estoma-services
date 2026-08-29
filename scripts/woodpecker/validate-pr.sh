@@ -13,21 +13,9 @@ if ! git check-ref-format --branch "$target_branch" >/dev/null 2>&1; then
   exit 1
 fi
 
-target_ref="refs/remotes/origin/$target_branch"
-git fetch --no-tags origin "+refs/heads/$target_branch:$target_ref"
-
-if ! merge_base="$(git merge-base "$target_ref" HEAD)"; then
-  shallow_file="$(git rev-parse --git-path shallow)"
-  if [ ! -f "$shallow_file" ]; then
-    printf 'Could not find a common ancestor with target branch %s.\n' "$target_branch" >&2
-    exit 1
-  fi
-
-  git fetch --no-tags --unshallow origin "+refs/heads/$target_branch:$target_ref"
-  if ! merge_base="$(git merge-base "$target_ref" HEAD)"; then
-    printf 'Could not find a common ancestor with target branch %s after fetching its history.\n' "$target_branch" >&2
-    exit 1
-  fi
+if ! merge_base="$(git rev-parse --verify HEAD^1)"; then
+  printf 'Pull-request merge ref has no target-branch parent for %s.\n' "$target_branch" >&2
+  exit 1
 fi
 
 changed_services=0
