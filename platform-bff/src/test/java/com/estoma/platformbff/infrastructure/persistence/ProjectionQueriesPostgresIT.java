@@ -43,6 +43,7 @@ class ProjectionQueriesPostgresIT {
   @Autowired JdbcProjectionReadModelRepository projections;
   @Autowired JdbcWashExitMaterialsProjectionRepository exitMaterials;
   @Autowired JdbcWashSupervisionQueryRepository supervision;
+  @Autowired JdbcWashStudentQueryRepository studentQueries;
 
   @BeforeEach
   void clearReadModels() {
@@ -125,6 +126,26 @@ class ProjectionQueriesPostgresIT {
         """).param("executionId", executionId).query(Long.class).single()).isEqualTo(7L);
   }
 
+  @Test
+  void studentPrimaryAppointmentPrefersOperationalStatusesThenTheNewestTerminalState() {
+    UUID accountId = UUID.randomUUID();
+    Instant base = Instant.parse("2026-08-01T10:00:00Z");
+    UUID scheduled = appointment(accountId, "SCHEDULED", base);
+    UUID completed = appointment(accountId, "COMPLETED", base.plusSeconds(120));
+
+    assertThat(studentQueries.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 1)))
+        .map(item -> item.appointmentId()).contains(scheduled);
+
+    jdbc.sql("UPDATE appointment_read_model SET status = 'CANCELLED' WHERE appointment_id = :id")
+        .param("id", scheduled).update();
+    assertThat(studentQueries.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 1)))
+        .map(item -> item.appointmentId()).contains(completed);
+
+    UUID inProgress = appointment(accountId, "IN_PROGRESS", base.minusSeconds(60));
+    assertThat(studentQueries.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 1)))
+        .map(item -> item.appointmentId()).contains(inProgress);
+  }
+
   private static ProjectionReadModel.MailboxMessage message(UUID id, UUID accountId, Instant createdAt) {
     return new ProjectionReadModel.MailboxMessage(id, UUID.randomUUID(), accountId,
         "LAVADO_ULTRASONICO", "APPOINTMENT", "A title", "A body", createdAt, null, null, createdAt);
@@ -133,5 +154,33 @@ class ProjectionQueriesPostgresIT {
   private static ProjectionReadModel.WashExecution execution(UUID id, Instant authorizedAt) {
     return new ProjectionReadModel.WashExecution(id, null, null, "PENDING_REASSIGNMENT", null,
         authorizedAt, null, null, null, null, null, 1, authorizedAt);
+  }
+
+  private UUID appointment(UUID accountId, String status, Instant updatedAt) {
+    UUID appointmentId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO appointment_time_slot_read_model (
+          appointment_time_slot_id, service_date, starts_at, ends_at, timezone, status, updated_at)
+        VALUES (:id, :serviceDate, :startsAt, :endsAt, 'America/Mexico_City', 'ACTIVE', :updatedAt)
+        """)
+        .param("id", slotId)
+        .param("serviceDate", java.time.LocalDate.of(2026, 8, 1))
+        .param("startsAt", java.sql.Timestamp.from(updatedAt))
+        .param("endsAt", java.sql.Timestamp.from(updatedAt.plusSeconds(1800)))
+        .param("updatedAt", java.sql.Timestamp.from(updatedAt))
+        .update();
+    jdbc.sql("""
+        INSERT INTO appointment_read_model (
+          appointment_id, appointment_time_slot_id, student_account_id, status, source_version, updated_at)
+        VALUES (:id, :slotId, :accountId, :status, 1, :updatedAt)
+        """)
+        .param("id", appointmentId)
+        .param("slotId", slotId)
+        .param("accountId", accountId)
+        .param("status", status)
+        .param("updatedAt", java.sql.Timestamp.from(updatedAt))
+        .update();
+    return appointmentId;
   }
 }

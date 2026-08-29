@@ -3,8 +3,11 @@ package com.estoma.platformbff.api.wash;
 import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
+import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelAppointmentRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelExceptionalAuthorizationRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ClinicCancelRequest;
@@ -39,13 +42,15 @@ public class WashController {
   private final PublicCommandAdapter commands;
   private final LocalAuthorizationService authorization;
   private final WashSupervisionQueryService supervision;
+  private final WashStudentQueryService studentQueries;
   private final Clock clock;
 
   public WashController(PublicCommandAdapter commands, LocalAuthorizationService authorization,
-      WashSupervisionQueryService supervision, Clock clock) {
+      WashSupervisionQueryService supervision, WashStudentQueryService studentQueries, Clock clock) {
     this.commands = commands;
     this.authorization = authorization;
     this.supervision = supervision;
+    this.studentQueries = studentQueries;
     this.clock = clock;
   }
 
@@ -249,6 +254,16 @@ public class WashController {
   @GetMapping("/supervision/pending-reassignments")
   public PendingReassignmentsResponse pendingReassignments() {
     return supervision.pendingReassignments();
+  }
+
+  @GetMapping("/student/home")
+  public StudentHomeResponse studentHome() {
+    return studentQueries.home();
+  }
+
+  @GetMapping("/appointments/form-context")
+  public AppointmentFormContextResponse appointmentFormContext() {
+    return studentQueries.formContext();
   }
 
   private static ResponseEntity<AcceptedOperationResponse> accepted(AcceptedOperationResponse response) {

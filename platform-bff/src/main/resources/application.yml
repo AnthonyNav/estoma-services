@@ -75,3 +75,6 @@ platform:
     outbox-failed-days: ${BFF_OUTBOX_FAILED_RETENTION_DAYS:30}
     inbox-days: ${BFF_INBOX_RETENTION_DAYS:30}
     recovery-job-days: ${BFF_RECOVERY_JOB_RETENTION_DAYS:30}
+  genesis:
+    enabled: ${BFF_GENESIS_ENABLED:false}
+    environment-fresh: ${BFF_GENESIS_ENVIRONMENT_FRESH:false}
