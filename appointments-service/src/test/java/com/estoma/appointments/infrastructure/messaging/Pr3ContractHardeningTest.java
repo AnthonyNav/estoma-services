@@ -59,6 +59,12 @@ class Pr3ContractHardeningTest {
   }
 
   @Test
+  void omitsZeroExpectedProjectionVersionFromInternalCommandEnvelope() {
+    assertThat(OutboxRelay.envelopeAggregateVersion(MessageKind.COMMAND, 0L)).isNull();
+    assertThat(OutboxRelay.envelopeAggregateVersion(MessageKind.EVENT, 0L)).isZero();
+  }
+
+  @Test
   void executionContextPageTokenIsOpaqueAndRoundTripsAppointmentId() {
     UUID id = UUID.randomUUID();
     String token = AppointmentExecutionQueryService.encodeToken(id);

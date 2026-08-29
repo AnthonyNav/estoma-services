@@ -106,7 +106,7 @@ public final class OutboxRelay {
     MessageEnvelope envelope = new MessageEnvelope(message.messageId(), message.messageType(),
         message.messageVersion(), kind, MessagingNames.LOGICAL_COMPONENT_ID, message.occurredAt(),
         message.correlationId(), message.causationId(), message.operationId(), idempotencyKey,
-        message.aggregateId(), message.aggregateVersion() == null ? null : Math.toIntExact(message.aggregateVersion()),
+        message.aggregateId(), envelopeAggregateVersion(kind, message.aggregateVersion()),
         new WireActor("SYSTEM", null, MessagingNames.LOGICAL_COMPONENT_ID), payload);
     Message wire = new Message(codec.encode(envelope), wireProperties);
     if (kind == MessageKind.EVENT) publisher.publishEvent(exchange, route, wire);
@@ -120,6 +120,14 @@ public final class OutboxRelay {
       case "CreateAppointmentTimeSlot" -> required(payload, "slotId");
       default -> fallback.toString();
     };
+  }
+
+  static Integer envelopeAggregateVersion(MessageKind kind, Long aggregateVersion) {
+    if (aggregateVersion == null) return null;
+    int version = Math.toIntExact(aggregateVersion);
+    // Internal commands can use zero as their expected projection version. It is not an
+    // aggregate version and must therefore be absent from the wire envelope.
+    return kind == MessageKind.COMMAND && version == 0 ? null : version;
   }
 
   static String routingKey(MessageKind kind, String messageType) {
