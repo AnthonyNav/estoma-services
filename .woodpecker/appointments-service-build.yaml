@@ -7,9 +7,13 @@ when:
     path:
       include:
         - appointments-service/**
+        - .woodpecker/appointments-service-test.yaml
         - .woodpecker/appointments-service-build.yaml
         - .woodpecker/appointments-service-gitops.yaml
         - scripts/woodpecker/**
+
+depends_on:
+  - appointments-service-test
 
 steps:
   - name: build-and-push

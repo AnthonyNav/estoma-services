@@ -4,6 +4,7 @@ when:
     path:
       include:
         - authorization-service/**
+        - .woodpecker/authorization-service-test.yaml
         - .woodpecker/authorization-service-build.yaml
         - .woodpecker/authorization-service-gitops.yaml
         - scripts/woodpecker/**

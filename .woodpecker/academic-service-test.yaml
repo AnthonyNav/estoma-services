@@ -1,0 +1,32 @@
+labels:
+  testcontainers: victus
+
+when:
+  - event: manual
+    branch: develop
+  - event: pull_request
+    path:
+      include:
+        - academic-service/**
+        - .woodpecker/academic-service-test.yaml
+        - .woodpecker/academic-service-build.yaml
+        - .woodpecker/academic-service-gitops.yaml
+        - scripts/woodpecker/**
+  - event: push
+    branch: develop
+    path:
+      include:
+        - academic-service/**
+        - .woodpecker/academic-service-test.yaml
+        - .woodpecker/academic-service-build.yaml
+        - .woodpecker/academic-service-gitops.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: academic-service
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - ./mvnw -B clean verify

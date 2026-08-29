@@ -4,6 +4,7 @@ when:
     path:
       include:
         - wash-administration-service/**
+        - .woodpecker/wash-administration-service-test.yaml
         - .woodpecker/wash-administration-service-build.yaml
         - .woodpecker/wash-administration-service-gitops.yaml
         - scripts/woodpecker/**

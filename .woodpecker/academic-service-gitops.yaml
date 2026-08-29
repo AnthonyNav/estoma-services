@@ -4,6 +4,7 @@ when:
     path:
       include:
         - academic-service/**
+        - .woodpecker/academic-service-test.yaml
         - .woodpecker/academic-service-build.yaml
         - .woodpecker/academic-service-gitops.yaml
         - scripts/woodpecker/**

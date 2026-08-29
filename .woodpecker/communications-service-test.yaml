@@ -1,0 +1,28 @@
+labels:
+  testcontainers: victus
+
+when:
+  - event: manual
+    branch: develop
+  - event: pull_request
+    path:
+      include:
+        - communications-service/**
+        - .woodpecker/communications-service-test.yaml
+        - scripts/woodpecker/**
+  - event: push
+    branch: develop
+    path:
+      include:
+        - communications-service/**
+        - .woodpecker/communications-service-test.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: communications-service
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - ./mvnw -B clean verify

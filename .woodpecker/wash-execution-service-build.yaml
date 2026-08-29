@@ -7,9 +7,13 @@ when:
     path:
       include:
         - wash-execution-service/**
+        - .woodpecker/wash-execution-service-test.yaml
         - .woodpecker/wash-execution-service-build.yaml
         - .woodpecker/wash-execution-service-gitops.yaml
         - scripts/woodpecker/**
+
+depends_on:
+  - wash-execution-service-test
 
 steps:
   - name: build-and-push
