@@ -109,7 +109,8 @@ def late_decision_after_valid_arrival(self, supervisor):
     }, self.system_actor("appointments"), occurred_at=start + timedelta(minutes=11), producer="appointments")
     run.wait_until("missed command processed", lambda: run.scalar(
         run.APPOINTMENTS_DSN,
-        "SELECT status FROM processed_messages WHERE message_id=%s", (uuid.UUID(missed["messageId"]),)) == "APPLIED")
+        "SELECT status FROM command_idempotency_records WHERE message_id=%s",
+        (uuid.UUID(missed["messageId"]),)) == "COMPLETED")
     assert run.scalar(run.APPOINTMENTS_DSN,
         "SELECT status FROM appointments WHERE appointment_id=%s", (uuid.UUID(appointment),)) == "SCHEDULED"
 
@@ -135,10 +136,13 @@ def pending_initial_without_capacity_loss(self, supervisor):
     self.decide(supervisor, execution)
     run.wait_until("pending initial", lambda: run.scalar(run.EXECUTION_DSN,
         "SELECT status FROM wash_executions WHERE wash_execution_id=%s", (uuid.UUID(execution),)) == "PENDING_REASSIGNMENT")
-    status, entry = run.rows(run.APPOINTMENTS_DSN,
+    run.wait_until("entryAuthorizedAt while appointment remains scheduled", lambda: run.rows(
+        run.APPOINTMENTS_DSN,
         "SELECT status,entry_authorized_at FROM appointments WHERE appointment_id=%s",
-        (uuid.UUID(appointment),))[0]
-    assert status == "SCHEDULED" and entry is not None
+        (uuid.UUID(appointment),))[0][0] == "SCHEDULED" and run.rows(
+        run.APPOINTMENTS_DSN,
+        "SELECT status,entry_authorized_at FROM appointments WHERE appointment_id=%s",
+        (uuid.UUID(appointment),))[0][1] is not None)
     run.execute(run.EXECUTION_DSN, "UPDATE tank_projection SET status='ACTIVE' WHERE tank_id=%s",
                 (uuid.UUID(self.ids["tank_immuno"]),))
     now2 = run.utcnow()
@@ -228,6 +232,8 @@ run.Harness.scenario_09_failure_no_alternative_cancel = scenario_09
 def run_main(self):
     self.connect(); self.wait_infrastructure()
     self.seed_admin_owner()
+    slot_administrator = run.uid(); self.ids["slot_administrator"] = slot_administrator
+    self.seed_identity(slot_administrator, "ADMINISTRADOR_LAVADO")
     supervisor = run.uid(); self.ids["supervisor"] = supervisor
     self.seed_identity(supervisor, "SUPERVISOR_LAVADO")
     self.mark_execution_ready()
