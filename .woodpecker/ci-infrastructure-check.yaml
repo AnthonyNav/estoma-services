@@ -1,0 +1,23 @@
+labels:
+  testcontainers: victus
+
+when:
+  - event: pull_request
+    path:
+      include:
+        - .woodpecker/ci-infrastructure-check.yaml
+        - .woodpecker/maven-settings.xml
+        - scripts/woodpecker/**
+  - event: push
+    branch: develop
+    path:
+      include:
+        - .woodpecker/ci-infrastructure-check.yaml
+        - .woodpecker/maven-settings.xml
+        - scripts/woodpecker/**
+
+steps:
+  - name: resolve-maven-artifact
+    image: maven:3.9.16-eclipse-temurin-25
+    commands:
+      - mvn -s .woodpecker/maven-settings.xml -B dependency:get -Dartifact=org.junit.jupiter:junit-jupiter-api:5.12.2 -Dtransitive=false
