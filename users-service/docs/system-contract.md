@@ -944,9 +944,10 @@ migrations, verified by the repository integration tests.
   `users-service`-owned fact — since the BFF and four more shared services
   will need to adopt it. Also a good place to propose D7 (outbox
   `metadata` column) and D4 (rejected payload shape) platform-wide.
-- **CI workflow and `estoma-infra` manifests**, deferred to a follow-up PR:
-  `.github/workflows/users-service.yaml` calling the reusable
-  `service-ci.yaml`, plus in `estoma-infra`: `users-db` (logical database +
+- **Woodpecker CI workflows and `estoma-infra` manifests**, deferred to a
+  follow-up PR: `.woodpecker/users-service-test.yaml`,
+  `users-service-build.yaml`, and `users-service-gitops.yaml`, plus in
+  `estoma-infra`: `users-db` (logical database +
   two roles — migration and runtime), a RabbitMQ vhost/user with the
   permissions in §12, Kubernetes Secrets, and the
   `apps/users-service/overlays/develop/kustomization.yaml` overlay. The
