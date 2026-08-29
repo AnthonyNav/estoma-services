@@ -93,7 +93,7 @@ class ProjectionQueriesPostgresIT {
     projections.upsert(execution(firstId, first));
     projections.upsert(new ProjectionReadModel.WashExecution(
         UUID.randomUUID(), null, null, "IN_PROGRESS", null, first, null, null, null, null,
-        null, 1, first));
+        null, null, null, null, null, null, 1, first));
 
     assertThat(projections.findPendingReassignments())
         .extracting(item -> item.washExecutionId())
@@ -153,7 +153,7 @@ class ProjectionQueriesPostgresIT {
 
   private static ProjectionReadModel.WashExecution execution(UUID id, Instant authorizedAt) {
     return new ProjectionReadModel.WashExecution(id, null, null, "PENDING_REASSIGNMENT", null,
-        authorizedAt, null, null, null, null, null, 1, authorizedAt);
+        authorizedAt, null, null, null, null, null, null, null, null, null, null, 1, authorizedAt);
   }
 
   private UUID appointment(UUID accountId, String status, Instant updatedAt) {

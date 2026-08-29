@@ -19,6 +19,7 @@ import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -78,30 +79,37 @@ public class AdminController {
           required("studentNumber", STRING), positive("currentSemester"),
           enumValue("academicStatus", false, "ACTIVE", "INACTIVE"))),
       route("PATCH", "/api/v1/admin/academic/students/{studentAcademicProfileId}/student-number", "admin.academic.students.correct-number", "CorrectStudentNumber", of(
-          positive("expectedVersion"), required("currentStudentNumber", STRING), required("newStudentNumber", STRING), required("reason", STRING))),
+          positive("expectedVersion"), required("currentStudentNumber", STRING), required("newStudentNumber", STRING), required("reason", STRING)),
+          Set.of("correctedByAccountId")),
       route("PATCH", "/api/v1/admin/academic/students/{studentAcademicProfileId}/semester", "admin.academic.students.change-semester", "ChangeStudentSemester", of(
           positive("expectedVersion"), positive("currentSemester"))),
       route("POST", "/api/v1/admin/academic/students/{studentAcademicProfileId}/activate", "admin.academic.students.activate", "ActivateStudentAcademicProfile", EXPECTED),
       route("POST", "/api/v1/admin/academic/students/{studentAcademicProfileId}/deactivate", "admin.academic.students.deactivate", "DeactivateStudentAcademicProfile", EXPECTED),
       route("POST", "/api/v1/admin/academic/periods", "admin.academic.periods.create-and-activate", "CreateAndActivateAcademicPeriod", of(
           optional("academicPeriodId", UUID), required("code", STRING), required("name", STRING),
-          required("startDate", DATE), required("endDate", DATE), required("warningAcknowledged", BOOLEAN))),
+          required("startDate", DATE), required("endDate", DATE), required("warningAcknowledged", BOOLEAN)),
+          Set.of("requestedByAccountId")),
       route("POST", "/api/v1/admin/academic/course-sections", "admin.academic.course-sections.register", "RegisterCourseSection", of(
           optional("courseSectionId", UUID), required("academicPeriodId", UUID), required("nrc", STRING), required("name", STRING))),
       route("PATCH", "/api/v1/admin/academic/course-sections/{courseSectionId}", "admin.academic.course-sections.update", "UpdateCourseSection", of(
-          positive("expectedVersion"), required("name", STRING))),
+          positive("expectedVersion"), required("name", STRING)), Set.of("requestedByAccountId")),
       route("POST", "/api/v1/admin/academic/course-sections/{courseSectionId}/activate", "admin.academic.course-sections.activate", "ActivateCourseSection", of(
-          positive("expectedVersion"), required("academicPeriodId", UUID), required("name", STRING), optional("reason", STRING))),
+          positive("expectedVersion"), required("academicPeriodId", UUID), required("name", STRING), optional("reason", STRING)),
+          Set.of("requestedByAccountId")),
       route("POST", "/api/v1/admin/academic/course-sections/{courseSectionId}/deactivate", "admin.academic.course-sections.deactivate", "DeactivateCourseSection", of(
-          positive("expectedVersion"), required("academicPeriodId", UUID), optional("reason", STRING))),
+          positive("expectedVersion"), required("academicPeriodId", UUID), optional("reason", STRING)),
+          Set.of("requestedByAccountId")),
       route("POST", "/api/v1/admin/academic/students/{studentAcademicProfileId}/enrollments", "admin.academic.enrollments.add", "AddStudentEnrollment", of(required("courseSectionId", UUID))),
       route("POST", "/api/v1/admin/academic/enrollments/{studentEnrollmentId}/reactivate", "admin.academic.enrollments.reactivate", "ReactivateStudentEnrollment", of(
-          required("studentAcademicProfileId", UUID), required("courseSectionId", UUID), positive("expectedVersion"))),
+          required("studentAcademicProfileId", UUID), required("courseSectionId", UUID), positive("expectedVersion")),
+          Set.of("requestedByAccountId")),
       route("DELETE", "/api/v1/admin/academic/enrollments/{studentEnrollmentId}", "admin.academic.enrollments.remove", "RemoveStudentEnrollment", of(
           required("studentAcademicProfileId", UUID), required("courseSectionId", UUID), optional("reason", STRING))),
       route("POST", "/api/v1/admin/academic/imports", "admin.academic.imports.start", "StartStudentImport", of(
-          required("importId", UUID), required("fileReference", UUID), required("fileChecksum", STRING), optional("confirmationAcknowledged", BOOLEAN))),
-      route("POST", "/api/v1/admin/academic/imports/{importId}/resume", "admin.academic.imports.resume", "ResumeStudentImport", of()),
+          required("importId", UUID), required("fileReference", UUID), required("fileChecksum", STRING), optional("confirmationAcknowledged", BOOLEAN)),
+          Set.of("requestedByAccountId")),
+      route("POST", "/api/v1/admin/academic/imports/{importId}/resume", "admin.academic.imports.resume", "ResumeStudentImport", of(),
+          Set.of("requestedByAccountId")),
 
       route("POST", "/api/v1/admin/communications/email-deliveries/{emailDeliveryId}/retry", "admin.communications.email-deliveries.retry", "RetryEmailDelivery", of(optional("reason", STRING))),
       route("POST", "/api/v1/admin/communications/email-deliveries/{emailDeliveryId}/resolve-indeterminate", "admin.communications.email-deliveries.resolve-indeterminate", "ResolveIndeterminateEmailDelivery", of(
@@ -213,10 +221,18 @@ public class AdminController {
     RouteContract route = routeFor(method, pattern);
     if (route == null) throw new IllegalArgumentException("unsupported administrative route");
     route.requestSchema().validate(body);
-    Map<String, Object> payload = new LinkedHashMap<>(body);
-    pathVariables.forEach((name, value) -> payload.put(route.pathBindings().getOrDefault(name, name), value));
+    Map<String, Object> idempotencyPayload = new LinkedHashMap<>(body);
+    pathVariables.forEach((name, value) -> idempotencyPayload.put(
+        route.pathBindings().getOrDefault(name, name), value));
+    Map<String, Object> payload = new LinkedHashMap<>(idempotencyPayload);
     java.util.UUID actorAccountId = route.washScoped()
         ? authorization.requireWashAdministrator() : authorization.requireSuperAdministrator();
+    route.serverDerivedActorFields().forEach(field -> payload.put(field, actorAccountId));
+    if (!route.serverDerivedActorFields().isEmpty()) {
+      AcceptedOperationResponse accepted = commands.submitEnriched(actorAccountId, route.publicOperation(),
+          route.messageType(), payload, idempotencyPayload, idempotencyKey, null, null, null, null);
+      return ResponseEntity.status(HttpStatus.ACCEPTED).body(accepted);
+    }
     AcceptedOperationResponse accepted = commands.submit(actorAccountId, route.publicOperation(),
         route.messageType(), payload, idempotencyKey, null, null);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(accepted);
@@ -233,13 +249,25 @@ public class AdminController {
 
   private static Map.Entry<String, RouteContract> route(String method, String path, String publicOperation,
       String messageType, AdminRequestSchema schema) {
-    return route(method, path, publicOperation, messageType, schema, Map.of());
+    return route(method, path, publicOperation, messageType, schema, Map.of(), Set.of());
+  }
+
+  private static Map.Entry<String, RouteContract> route(String method, String path, String publicOperation,
+      String messageType, AdminRequestSchema schema, Set<String> serverDerivedActorFields) {
+    return route(method, path, publicOperation, messageType, schema, Map.of(), serverDerivedActorFields);
   }
 
   private static Map.Entry<String, RouteContract> route(String method, String path, String publicOperation,
       String messageType, AdminRequestSchema schema, Map<String, String> pathBindings) {
+    return route(method, path, publicOperation, messageType, schema, pathBindings, Set.of());
+  }
+
+  private static Map.Entry<String, RouteContract> route(String method, String path, String publicOperation,
+      String messageType, AdminRequestSchema schema, Map<String, String> pathBindings,
+      Set<String> serverDerivedActorFields) {
     return Map.entry(key(method, path), new RouteContract(method, path, publicOperation, messageType,
-        ownerFor(path), path.startsWith("/api/v1/admin/wash/"), schema, Map.copyOf(pathBindings)));
+        ownerFor(path), path.startsWith("/api/v1/admin/wash/"), schema, Map.copyOf(pathBindings),
+        Set.copyOf(serverDerivedActorFields)));
   }
 
   private static String key(String method, String path) { return method + " " + path; }
@@ -255,7 +283,8 @@ public class AdminController {
   }
 
   public record RouteContract(String method, String path, String publicOperation, String messageType,
-      String owner, boolean washScoped, AdminRequestSchema requestSchema, Map<String, String> pathBindings) {}
+      String owner, boolean washScoped, AdminRequestSchema requestSchema, Map<String, String> pathBindings,
+      Set<String> serverDerivedActorFields) {}
 
   public record TemporaryPasswordResponse(String temporaryPassword, java.time.Instant expiresAt) {}
 }

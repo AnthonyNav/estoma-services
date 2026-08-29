@@ -1,61 +1,6084 @@
-openapi: 3.1.1
-info:
-  title: Estoma Platform BFF API
-  version: v1
-  description: >-
-    Versioned V1 public-contract index. The runtime document at /api/v1/openapi supplies the
-    complete JSON Schema for these operations; OpenApiControllerTest validates every live route
-    and this index independently guards the durable administrative method/path surface.
-paths: {}
-x-estoma-admin-route-index:
-  - "POST /api/v1/admin/people"
-  - "PATCH /api/v1/admin/people/{personId}"
-  - "POST /api/v1/admin/people/{personId}/activate"
-  - "POST /api/v1/admin/people/{personId}/deactivate"
-  - "POST /api/v1/admin/accounts"
-  - "POST /api/v1/admin/accounts/{accountId}/activate"
-  - "POST /api/v1/admin/accounts/{accountId}/deactivate"
-  - "PATCH /api/v1/admin/accounts/{accountId}/login-identifier"
-  - "POST /api/v1/admin/accounts/{accountId}/sessions/revoke-all"
-  - "POST /api/v1/admin/authorization/accounts/{accountId}/role"
-  - "PATCH /api/v1/admin/authorization/accounts/{accountId}/role"
-  - "POST /api/v1/admin/authorization/accounts/{accountId}/system-accesses"
-  - "POST /api/v1/admin/authorization/system-accesses/{systemAccessId}/suspend"
-  - "POST /api/v1/admin/authorization/system-accesses/{systemAccessId}/revoke"
-  - "POST /api/v1/admin/authorization/system-accesses/{systemAccessId}/restore"
-  - "POST /api/v1/admin/academic/students"
-  - "PATCH /api/v1/admin/academic/students/{studentAcademicProfileId}/student-number"
-  - "PATCH /api/v1/admin/academic/students/{studentAcademicProfileId}/semester"
-  - "POST /api/v1/admin/academic/students/{studentAcademicProfileId}/activate"
-  - "POST /api/v1/admin/academic/students/{studentAcademicProfileId}/deactivate"
-  - "POST /api/v1/admin/academic/periods"
-  - "POST /api/v1/admin/academic/course-sections"
-  - "PATCH /api/v1/admin/academic/course-sections/{courseSectionId}"
-  - "POST /api/v1/admin/academic/course-sections/{courseSectionId}/activate"
-  - "POST /api/v1/admin/academic/course-sections/{courseSectionId}/deactivate"
-  - "POST /api/v1/admin/academic/students/{studentAcademicProfileId}/enrollments"
-  - "POST /api/v1/admin/academic/enrollments/{studentEnrollmentId}/reactivate"
-  - "DELETE /api/v1/admin/academic/enrollments/{studentEnrollmentId}"
-  - "POST /api/v1/admin/academic/imports"
-  - "POST /api/v1/admin/academic/imports/{importId}/resume"
-  - "POST /api/v1/admin/communications/email-deliveries/{emailDeliveryId}/retry"
-  - "POST /api/v1/admin/communications/email-deliveries/{emailDeliveryId}/resolve-indeterminate"
-  - "POST /api/v1/admin/wash/calendars"
-  - "PATCH /api/v1/admin/wash/calendars/{serviceCalendarId}"
-  - "POST /api/v1/admin/wash/calendars/{serviceCalendarId}/activate"
-  - "POST /api/v1/admin/wash/calendars/{serviceCalendarId}/deactivate"
-  - "POST /api/v1/admin/wash/calendars/{serviceCalendarId}/schedules"
-  - "PATCH /api/v1/admin/wash/schedules/{serviceScheduleId}"
-  - "POST /api/v1/admin/wash/schedules/{serviceScheduleId}/deactivate"
-  - "POST /api/v1/admin/wash/administrative-closures"
-  - "POST /api/v1/admin/wash/administrative-closures/{administrativeClosureId}/cancel"
-  - "POST /api/v1/admin/wash/cabins"
-  - "PATCH /api/v1/admin/wash/cabins/{cabinId}"
-  - "POST /api/v1/admin/wash/cabins/{cabinId}/activate"
-  - "POST /api/v1/admin/wash/cabins/{cabinId}/deactivate"
-  - "POST /api/v1/admin/wash/cabins/{cabinId}/retire"
-  - "POST /api/v1/admin/wash/cabins/{cabinId}/tanks"
-  - "PATCH /api/v1/admin/wash/tanks/{tankId}"
-  - "POST /api/v1/admin/wash/tanks/{tankId}/activate"
-  - "POST /api/v1/admin/wash/tanks/{tankId}/deactivate"
-  - "POST /api/v1/admin/wash/tanks/{tankId}/retire"
+{
+  "components" : {
+    "schemas" : {
+      "AcceptedOperation" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "operationId" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "pollPath" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string"
+          },
+          "submittedAt" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "operationId", "status", "pollPath", "submittedAt" ],
+        "type" : "object"
+      },
+      "Problem" : {
+        "additionalProperties" : false,
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "integer"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "traceId" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "type", "title", "status", "code", "detail", "traceId" ],
+        "type" : "object"
+      }
+    },
+    "securitySchemes" : {
+      "bearerAuth" : {
+        "bearerFormat" : "JWT",
+        "scheme" : "bearer",
+        "type" : "http"
+      }
+    }
+  },
+  "info" : {
+    "title" : "Estoma Platform BFF API",
+    "version" : "v1"
+  },
+  "openapi" : "3.1.1",
+  "paths" : {
+    "/api/v1/admin/academic/course-sections" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: RegisterCourseSection.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_course_sections",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "academicPeriodId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "courseSectionId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  },
+                  "nrc" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "academicPeriodId", "name", "nrc" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.course-sections.register"
+      }
+    },
+    "/api/v1/admin/academic/course-sections/{courseSectionId}" : {
+      "patch" : {
+        "description" : "Owner: academic; owner operation: UpdateCourseSection.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_academic_course_sections_courseSectionId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "courseSectionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "name" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.course-sections.update",
+        "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/academic/course-sections/{courseSectionId}/activate" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: ActivateCourseSection.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_course_sections_courseSectionId_activate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "courseSectionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "academicPeriodId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "academicPeriodId", "expectedVersion", "name" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.course-sections.activate",
+        "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/academic/course-sections/{courseSectionId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: DeactivateCourseSection.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_course_sections_courseSectionId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "courseSectionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "academicPeriodId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "academicPeriodId", "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.course-sections.deactivate",
+        "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/academic/enrollments/{studentEnrollmentId}" : {
+      "delete" : {
+        "description" : "Owner: academic; owner operation: RemoveStudentEnrollment.",
+        "operationId" : "AdminController_delete_delete__api_v1_admin_academic_enrollments_studentEnrollmentId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "studentEnrollmentId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "courseSectionId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  },
+                  "studentAcademicProfileId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "courseSectionId", "studentAcademicProfileId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.enrollments.remove"
+      }
+    },
+    "/api/v1/admin/academic/enrollments/{studentEnrollmentId}/reactivate" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: ReactivateStudentEnrollment.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_enrollments_studentEnrollmentId_reactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "studentEnrollmentId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "courseSectionId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "studentAcademicProfileId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "courseSectionId", "expectedVersion", "studentAcademicProfileId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.enrollments.reactivate",
+        "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/academic/imports" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: StartStudentImport.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_imports",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "confirmationAcknowledged" : {
+                    "type" : "boolean"
+                  },
+                  "fileChecksum" : {
+                    "type" : "string"
+                  },
+                  "fileReference" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "importId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "fileChecksum", "fileReference", "importId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.imports.start",
+        "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/academic/imports/{importId}/resume" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: ResumeStudentImport.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_imports_importId_resume",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "importId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : { },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.imports.resume",
+        "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/academic/periods" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: CreateAndActivateAcademicPeriod.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_periods",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "academicPeriodId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "code" : {
+                    "type" : "string"
+                  },
+                  "endDate" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  },
+                  "startDate" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "warningAcknowledged" : {
+                    "type" : "boolean"
+                  }
+                },
+                "required" : [ "code", "endDate", "name", "startDate", "warningAcknowledged" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.periods.create-and-activate",
+        "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/academic/students" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: CreateStudentAcademicProfile.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_students",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "academicStatus" : {
+                    "enum" : [ "ACTIVE", "INACTIVE" ],
+                    "type" : "string"
+                  },
+                  "accountId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "currentSemester" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "personId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "studentAcademicProfileId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "studentNumber" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "accountId", "currentSemester", "personId", "studentNumber" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.students.create"
+      }
+    },
+    "/api/v1/admin/academic/students/{studentAcademicProfileId}/activate" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: ActivateStudentAcademicProfile.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_students_studentAcademicProfileId_activate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "studentAcademicProfileId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.students.activate"
+      }
+    },
+    "/api/v1/admin/academic/students/{studentAcademicProfileId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: DeactivateStudentAcademicProfile.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_students_studentAcademicProfileId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "studentAcademicProfileId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.students.deactivate"
+      }
+    },
+    "/api/v1/admin/academic/students/{studentAcademicProfileId}/enrollments" : {
+      "post" : {
+        "description" : "Owner: academic; owner operation: AddStudentEnrollment.",
+        "operationId" : "AdminController_post_post__api_v1_admin_academic_students_studentAcademicProfileId_enrollments",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "studentAcademicProfileId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "courseSectionId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "courseSectionId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.enrollments.add"
+      }
+    },
+    "/api/v1/admin/academic/students/{studentAcademicProfileId}/semester" : {
+      "patch" : {
+        "description" : "Owner: academic; owner operation: ChangeStudentSemester.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_academic_students_studentAcademicProfileId_semester",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "studentAcademicProfileId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "currentSemester" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "currentSemester", "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.students.change-semester"
+      }
+    },
+    "/api/v1/admin/academic/students/{studentAcademicProfileId}/student-number" : {
+      "patch" : {
+        "description" : "Owner: academic; owner operation: CorrectStudentNumber.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_academic_students_studentAcademicProfileId_student_number",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "studentAcademicProfileId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "currentStudentNumber" : {
+                    "type" : "string"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "newStudentNumber" : {
+                    "type" : "string"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "currentStudentNumber", "expectedVersion", "newStudentNumber", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.students.correct-number",
+        "x-server-derived-actor-fields" : [ "correctedByAccountId" ]
+      }
+    },
+    "/api/v1/admin/accounts" : {
+      "post" : {
+        "description" : "Owner: authentication; owner operation: CreateAccount.",
+        "operationId" : "AdminController_post_post__api_v1_admin_accounts",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "accountId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "loginIdentifier" : {
+                    "type" : "string"
+                  },
+                  "loginType" : {
+                    "enum" : [ "MATRICULA", "USERNAME" ],
+                    "type" : "string"
+                  },
+                  "personId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "accountId", "loginIdentifier", "loginType", "personId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.accounts.create"
+      }
+    },
+    "/api/v1/admin/accounts/{accountId}/activate" : {
+      "post" : {
+        "description" : "Owner: authentication; owner operation: ActivateAccount.",
+        "operationId" : "AdminController_post_post__api_v1_admin_accounts_accountId_activate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.accounts.activate"
+      }
+    },
+    "/api/v1/admin/accounts/{accountId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: authentication; owner operation: DeactivateAccount.",
+        "operationId" : "AdminController_post_post__api_v1_admin_accounts_accountId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reasonCode" : {
+                    "type" : "string"
+                  },
+                  "reasonDetail" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reasonCode" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.accounts.deactivate"
+      }
+    },
+    "/api/v1/admin/accounts/{accountId}/login-identifier" : {
+      "patch" : {
+        "description" : "Owner: authentication; owner operation: ChangeLoginIdentifier.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_accounts_accountId_login_identifier",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "newLoginIdentifier" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "newLoginIdentifier" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.accounts.change-login-identifier"
+      }
+    },
+    "/api/v1/admin/accounts/{accountId}/sessions/revoke-all" : {
+      "post" : {
+        "description" : "Owner: authentication; owner operation: RevokeAllAccountSessions.",
+        "operationId" : "AdminController_post_post__api_v1_admin_accounts_accountId_sessions_revoke_all",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.accounts.revoke-all-sessions"
+      }
+    },
+    "/api/v1/admin/accounts/{accountId}/temporary-password" : {
+      "post" : {
+        "operationId" : "AdminController_setTemporaryPassword_post__api_v1_admin_accounts_accountId_temporary_password",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "expiresAt" : {
+                      "format" : "date-time",
+                      "type" : [ "string", "null" ]
+                    },
+                    "temporaryPassword" : {
+                      "type" : [ "string", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/admin/accounts/{accountId}/temporary-password/regenerate" : {
+      "post" : {
+        "operationId" : "AdminController_regenerateTemporaryPassword_post__api_v1_admin_accounts_accountId_temporary_password_regenerate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "expiresAt" : {
+                      "format" : "date-time",
+                      "type" : [ "string", "null" ]
+                    },
+                    "temporaryPassword" : {
+                      "type" : [ "string", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/admin/authorization/accounts/{accountId}/role" : {
+      "patch" : {
+        "description" : "Owner: authorization; owner operation: ChangeAccountRole.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_authorization_accounts_accountId_role",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "newRoleCode" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "newRoleCode" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.authorization.change-role"
+      },
+      "post" : {
+        "description" : "Owner: authorization; owner operation: AssignAccountRole.",
+        "operationId" : "AdminController_post_post__api_v1_admin_authorization_accounts_accountId_role",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "roleCode" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "roleCode" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.authorization.assign-role"
+      }
+    },
+    "/api/v1/admin/authorization/accounts/{accountId}/system-accesses" : {
+      "post" : {
+        "description" : "Owner: authorization; owner operation: GrantSystemAccess.",
+        "operationId" : "AdminController_post_post__api_v1_admin_authorization_accounts_accountId_system_accesses",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "accountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "systemAccessId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "systemCode" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "systemAccessId", "systemCode" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.authorization.grant-system-access"
+      }
+    },
+    "/api/v1/admin/authorization/system-accesses/{systemAccessId}/restore" : {
+      "post" : {
+        "description" : "Owner: authorization; owner operation: RestoreSystemAccess.",
+        "operationId" : "AdminController_post_post__api_v1_admin_authorization_system_accesses_systemAccessId_restore",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "systemAccessId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.authorization.restore-system-access"
+      }
+    },
+    "/api/v1/admin/authorization/system-accesses/{systemAccessId}/revoke" : {
+      "post" : {
+        "description" : "Owner: authorization; owner operation: RevokeSystemAccess.",
+        "operationId" : "AdminController_post_post__api_v1_admin_authorization_system_accesses_systemAccessId_revoke",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "systemAccessId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reasonCode" : {
+                    "type" : "string"
+                  },
+                  "reasonDetail" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reasonCode" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.authorization.revoke-system-access"
+      }
+    },
+    "/api/v1/admin/authorization/system-accesses/{systemAccessId}/suspend" : {
+      "post" : {
+        "description" : "Owner: authorization; owner operation: SuspendSystemAccess.",
+        "operationId" : "AdminController_post_post__api_v1_admin_authorization_system_accesses_systemAccessId_suspend",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "systemAccessId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reasonCode" : {
+                    "type" : "string"
+                  },
+                  "reasonDetail" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reasonCode" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.authorization.suspend-system-access"
+      }
+    },
+    "/api/v1/admin/communications/email-deliveries/{emailDeliveryId}/resolve-indeterminate" : {
+      "post" : {
+        "description" : "Owner: communications; owner operation: ResolveIndeterminateEmailDelivery.",
+        "operationId" : "AdminController_post_post__api_v1_admin_communications_email_deliveries_emailDeliveryId_resolve_indeterminate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "emailDeliveryId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "reason" : {
+                    "type" : "string"
+                  },
+                  "resolution" : {
+                    "enum" : [ "RECONCILED_ACCEPTED", "RECONCILED_FAILED", "RESEND_AUTHORIZED" ],
+                    "type" : "string"
+                  },
+                  "riskAcknowledged" : {
+                    "type" : "boolean"
+                  }
+                },
+                "required" : [ "resolution", "riskAcknowledged" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.communications.email-deliveries.resolve-indeterminate"
+      }
+    },
+    "/api/v1/admin/communications/email-deliveries/{emailDeliveryId}/retry" : {
+      "post" : {
+        "description" : "Owner: communications; owner operation: RetryEmailDelivery.",
+        "operationId" : "AdminController_post_post__api_v1_admin_communications_email_deliveries_emailDeliveryId_retry",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "emailDeliveryId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.communications.email-deliveries.retry"
+      }
+    },
+    "/api/v1/admin/people" : {
+      "post" : {
+        "description" : "Owner: users; owner operation: CreatePerson.",
+        "operationId" : "AdminController_post_post__api_v1_admin_people",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "firstName" : {
+                    "type" : "string"
+                  },
+                  "institutionalEmail" : {
+                    "type" : "string"
+                  },
+                  "maternalSurname" : {
+                    "type" : "string"
+                  },
+                  "paternalSurname" : {
+                    "type" : "string"
+                  },
+                  "personId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "phone" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "firstName", "institutionalEmail", "paternalSurname", "personId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.people.create"
+      }
+    },
+    "/api/v1/admin/people/{personId}" : {
+      "patch" : {
+        "description" : "Owner: users; owner operation: UpdatePerson.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_people_personId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "personId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "firstName" : {
+                    "type" : "string"
+                  },
+                  "institutionalEmail" : {
+                    "type" : "string"
+                  },
+                  "maternalSurname" : {
+                    "type" : "string"
+                  },
+                  "paternalSurname" : {
+                    "type" : "string"
+                  },
+                  "phone" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "firstName", "institutionalEmail", "paternalSurname" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.people.update"
+      }
+    },
+    "/api/v1/admin/people/{personId}/activate" : {
+      "post" : {
+        "description" : "Owner: users; owner operation: ActivatePerson.",
+        "operationId" : "AdminController_post_post__api_v1_admin_people_personId_activate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "personId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.people.activate"
+      }
+    },
+    "/api/v1/admin/people/{personId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: users; owner operation: DeactivatePerson.",
+        "operationId" : "AdminController_post_post__api_v1_admin_people_personId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "personId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reasonCode" : {
+                    "type" : "string"
+                  },
+                  "reasonDetail" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reasonCode" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.people.deactivate"
+      }
+    },
+    "/api/v1/admin/wash/administrative-closures" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: ScheduleAdministrativeClosure.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_administrative_closures",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cabinId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "calendarId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "closureId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "endsAt" : {
+                    "format" : "date-time",
+                    "type" : "string"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  },
+                  "scope" : {
+                    "enum" : [ "CALENDAR", "CABIN", "TANK" ],
+                    "type" : "string"
+                  },
+                  "startsAt" : {
+                    "format" : "date-time",
+                    "type" : "string"
+                  },
+                  "tankId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "calendarId", "closureId", "endsAt", "reason", "scope", "startsAt" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.closures.schedule"
+      }
+    },
+    "/api/v1/admin/wash/administrative-closures/{administrativeClosureId}/cancel" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: CancelAdministrativeClosure.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_administrative_closures_administrativeClosureId_cancel",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "administrativeClosureId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.closures.cancel"
+      }
+    },
+    "/api/v1/admin/wash/cabins" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: RegisterCabin.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_cabins",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cabinId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "cabinType" : {
+                    "type" : "string"
+                  },
+                  "code" : {
+                    "type" : "string"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "cabinId", "cabinType", "code", "name" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.cabins.register"
+      }
+    },
+    "/api/v1/admin/wash/cabins/{cabinId}" : {
+      "patch" : {
+        "description" : "Owner: wash-administration; owner operation: UpdateCabin.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_wash_cabins_cabinId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "cabinId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cabinType" : {
+                    "type" : "string"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "cabinType", "expectedVersion", "name" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.cabins.update"
+      }
+    },
+    "/api/v1/admin/wash/cabins/{cabinId}/activate" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: ActivateCabin.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_cabins_cabinId_activate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "cabinId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.cabins.activate"
+      }
+    },
+    "/api/v1/admin/wash/cabins/{cabinId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: DeactivateCabin.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_cabins_cabinId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "cabinId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.cabins.deactivate"
+      }
+    },
+    "/api/v1/admin/wash/cabins/{cabinId}/retire" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: RetireCabin.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_cabins_cabinId_retire",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "cabinId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.cabins.retire"
+      }
+    },
+    "/api/v1/admin/wash/cabins/{cabinId}/tanks" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: RegisterTank.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_cabins_cabinId_tanks",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "cabinId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "code" : {
+                    "type" : "string"
+                  },
+                  "configuredCapacity" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  },
+                  "tankId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "code", "configuredCapacity", "name", "tankId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.tanks.register"
+      }
+    },
+    "/api/v1/admin/wash/calendars" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: CreateServiceCalendar.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_calendars",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "calendarId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "code" : {
+                    "type" : "string"
+                  },
+                  "effectiveFrom" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "effectiveUntil" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  },
+                  "timezone" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "calendarId", "code", "effectiveFrom", "name", "timezone" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.calendars.create"
+      }
+    },
+    "/api/v1/admin/wash/calendars/{serviceCalendarId}" : {
+      "patch" : {
+        "description" : "Owner: wash-administration; owner operation: UpdateServiceCalendar.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_wash_calendars_serviceCalendarId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "serviceCalendarId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "effectiveFrom" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "effectiveUntil" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  },
+                  "timezone" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "effectiveFrom", "expectedVersion", "name", "timezone" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.calendars.update"
+      }
+    },
+    "/api/v1/admin/wash/calendars/{serviceCalendarId}/activate" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: ActivateServiceCalendar.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_calendars_serviceCalendarId_activate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "serviceCalendarId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.calendars.activate"
+      }
+    },
+    "/api/v1/admin/wash/calendars/{serviceCalendarId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: DeactivateServiceCalendar.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_calendars_serviceCalendarId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "serviceCalendarId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.calendars.deactivate"
+      }
+    },
+    "/api/v1/admin/wash/calendars/{serviceCalendarId}/schedules" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: ConfigureServiceSchedule.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_calendars_serviceCalendarId_schedules",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "serviceCalendarId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "closingTime" : {
+                    "type" : "string"
+                  },
+                  "dayOfWeek" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "openingTime" : {
+                    "type" : "string"
+                  },
+                  "scheduleId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "slotDurationMinutes" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "closingTime", "dayOfWeek", "openingTime", "scheduleId", "slotDurationMinutes" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.schedules.configure"
+      }
+    },
+    "/api/v1/admin/wash/schedules/{serviceScheduleId}" : {
+      "patch" : {
+        "description" : "Owner: wash-administration; owner operation: UpdateServiceSchedule.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_wash_schedules_serviceScheduleId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "serviceScheduleId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "closingTime" : {
+                    "type" : "string"
+                  },
+                  "dayOfWeek" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "openingTime" : {
+                    "type" : "string"
+                  },
+                  "slotDurationMinutes" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "closingTime", "dayOfWeek", "expectedVersion", "openingTime", "slotDurationMinutes" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.schedules.update"
+      }
+    },
+    "/api/v1/admin/wash/schedules/{serviceScheduleId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: DeactivateServiceSchedule.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_schedules_serviceScheduleId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "serviceScheduleId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.schedules.deactivate"
+      }
+    },
+    "/api/v1/admin/wash/tanks/{tankId}" : {
+      "patch" : {
+        "description" : "Owner: wash-administration; owner operation: UpdateTank.",
+        "operationId" : "AdminController_patch_patch__api_v1_admin_wash_tanks_tankId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "tankId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "configuredCapacity" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "name" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "configuredCapacity", "expectedVersion", "name" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.tanks.update"
+      }
+    },
+    "/api/v1/admin/wash/tanks/{tankId}/activate" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: ActivateTank.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_tanks_tankId_activate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "tankId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.tanks.activate"
+      }
+    },
+    "/api/v1/admin/wash/tanks/{tankId}/deactivate" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: DeactivateTank.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_tanks_tankId_deactivate",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "tankId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.tanks.deactivate"
+      }
+    },
+    "/api/v1/admin/wash/tanks/{tankId}/retire" : {
+      "post" : {
+        "description" : "Owner: wash-administration; owner operation: RetireTank.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_tanks_tankId_retire",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "tankId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "minimum" : 1,
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "expectedVersion", "reason" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.tanks.retire"
+      }
+    },
+    "/api/v1/auth/login" : {
+      "post" : {
+        "operationId" : "AuthenticationController_login_post__api_v1_auth_login",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "deviceName" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "loginIdentifier" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "loginType" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "password" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "accessToken" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "accountId" : {
+                      "format" : "uuid",
+                      "type" : [ "string", "null" ]
+                    },
+                    "authState" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "refreshToken" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "sessionId" : {
+                      "format" : "uuid",
+                      "type" : [ "string", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout" : {
+      "post" : {
+        "operationId" : "AuthenticationController_logout_post__api_v1_auth_logout",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "revoked" : {
+                      "type" : "boolean"
+                    }
+                  },
+                  "required" : [ "revoked" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/auth/password-recovery" : {
+      "post" : {
+        "operationId" : "AuthenticationController_requestRecovery_post__api_v1_auth_password_recovery",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "loginIdentifier" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "loginType" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password-recovery/reset" : {
+      "post" : {
+        "operationId" : "AuthenticationController_resetPassword_post__api_v1_auth_password_recovery_reset",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "code" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "loginIdentifier" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "loginType" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "newPassword" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "reset" : {
+                      "type" : "boolean"
+                    }
+                  },
+                  "required" : [ "reset" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password-recovery/validate" : {
+      "post" : {
+        "operationId" : "AuthenticationController_validateRecovery_post__api_v1_auth_password_recovery_validate",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "code" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "loginIdentifier" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "loginType" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "result" : {
+                      "type" : [ "string", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh" : {
+      "post" : {
+        "operationId" : "AuthenticationController_refresh_post__api_v1_auth_refresh",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "refreshToken" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "sessionId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "accessToken" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "expiresAt" : {
+                      "format" : "date-time",
+                      "type" : [ "string", "null" ]
+                    },
+                    "refreshToken" : {
+                      "type" : [ "string", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/mailbox/messages" : {
+      "get" : {
+        "operationId" : "MailboxController_messages_get__api_v1_mailbox_messages",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "messages" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "body" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "communicationId" : {
+                            "format" : "uuid",
+                            "type" : [ "string", "null" ]
+                          },
+                          "communicationType" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "createdAt" : {
+                            "format" : "date-time",
+                            "type" : [ "string", "null" ]
+                          },
+                          "expiresAt" : {
+                            "format" : "date-time",
+                            "type" : [ "string", "null" ]
+                          },
+                          "messageId" : {
+                            "format" : "uuid",
+                            "type" : [ "string", "null" ]
+                          },
+                          "systemCode" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "title" : {
+                            "type" : [ "string", "null" ]
+                          }
+                        },
+                        "type" : "object"
+                      },
+                      "type" : [ "array", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/mailbox/summary" : {
+      "get" : {
+        "operationId" : "MailboxController_summary_get__api_v1_mailbox_summary",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "messageCount" : {
+                      "type" : "integer"
+                    },
+                    "newMessageCount" : {
+                      "type" : "integer"
+                    },
+                    "systems" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "lastVisitedAt" : {
+                            "format" : "date-time",
+                            "type" : [ "string", "null" ]
+                          },
+                          "messageCount" : {
+                            "type" : "integer"
+                          },
+                          "newMessageCount" : {
+                            "type" : "integer"
+                          },
+                          "systemCode" : {
+                            "type" : [ "string", "null" ]
+                          }
+                        },
+                        "required" : [ "messageCount", "newMessageCount" ],
+                        "type" : "object"
+                      },
+                      "type" : [ "array", "null" ]
+                    }
+                  },
+                  "required" : [ "messageCount", "newMessageCount" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/mailbox/visits" : {
+      "post" : {
+        "operationId" : "MailboxController_registerVisit_post__api_v1_mailbox_visits",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "systemCode" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/me/password" : {
+      "post" : {
+        "operationId" : "MePasswordController_changePassword_post__api_v1_me_password",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "currentPassword" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "newPassword" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "accessToken" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "accountId" : {
+                      "format" : "uuid",
+                      "type" : [ "string", "null" ]
+                    },
+                    "authState" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "refreshToken" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "sessionId" : {
+                      "format" : "uuid",
+                      "type" : [ "string", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/openapi" : {
+      "get" : {
+        "operationId" : "OpenApiController_document_get__api_v1_openapi",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : { },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/operations/{operationId}" : {
+      "get" : {
+        "operationId" : "OperationsController_get_get__api_v1_operations_operationId_",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "operationId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "completedAt" : {
+                      "format" : "date-time",
+                      "type" : [ "string", "null" ]
+                    },
+                    "createdAt" : {
+                      "format" : "date-time",
+                      "type" : [ "string", "null" ]
+                    },
+                    "data" : {
+                      "anyOf" : [ { }, {
+                        "type" : "null"
+                      } ]
+                    },
+                    "errorCode" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "operationId" : {
+                      "format" : "uuid",
+                      "type" : [ "string", "null" ]
+                    },
+                    "publicOperation" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "status" : {
+                      "type" : [ "string", "null" ]
+                    },
+                    "updatedAt" : {
+                      "format" : "date-time",
+                      "type" : [ "string", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/wash/appointments" : {
+      "post" : {
+        "operationId" : "WashController_scheduleAppointment_post__api_v1_wash_appointments",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "appointmentTimeSlotId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  },
+                  "appointmentType" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "courseSectionId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  },
+                  "exceptionalAuthorizationId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  },
+                  "instrumentCount" : {
+                    "type" : "integer"
+                  },
+                  "pieceType" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "regulationAccepted" : {
+                    "type" : "boolean"
+                  }
+                },
+                "required" : [ "instrumentCount", "regulationAccepted" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/appointments/form-context" : {
+      "get" : {
+        "operationId" : "WashController_appointmentFormContext_get__api_v1_wash_appointments_form_context",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "availableCourseSections" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "courseSectionId" : {
+                            "format" : "uuid",
+                            "type" : [ "string", "null" ]
+                          },
+                          "name" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "nrc" : {
+                            "type" : [ "string", "null" ]
+                          }
+                        },
+                        "type" : "object"
+                      },
+                      "type" : [ "array", "null" ]
+                    },
+                    "student" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "currentSemester" : {
+                          "type" : [ "integer", "null" ]
+                        },
+                        "fullName" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "studentEnrollment" : {
+                          "type" : [ "string", "null" ]
+                        }
+                      },
+                      "type" : [ "object", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/appointments/{appointmentId}/cancel" : {
+      "post" : {
+        "operationId" : "WashController_cancelAppointment_post__api_v1_wash_appointments_appointmentId_cancel",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "appointmentId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "type" : "integer"
+                  },
+                  "reason" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/exceptional-authorizations" : {
+      "post" : {
+        "operationId" : "WashController_grantExceptionalAuthorization_post__api_v1_wash_exceptional_authorizations",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expiresAt" : {
+                    "format" : "date-time",
+                    "type" : [ "string", "null" ]
+                  },
+                  "reason" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "serviceDate" : {
+                    "format" : "date",
+                    "type" : [ "string", "null" ]
+                  },
+                  "studentAccountId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/exceptional-authorizations/{authorizationId}/cancel" : {
+      "post" : {
+        "operationId" : "WashController_cancelExceptionalAuthorization_post__api_v1_wash_exceptional_authorizations_authorizationId_cancel",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "authorizationId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "reason" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/executions/arrivals" : {
+      "post" : {
+        "operationId" : "WashController_registerArrival_post__api_v1_wash_executions_arrivals",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "appointmentId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/executions/{washExecutionId}/clinic-cancel" : {
+      "post" : {
+        "operationId" : "WashController_cancelByClinic_post__api_v1_wash_executions_washExecutionId_clinic_cancel",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "washExecutionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cancellationReason" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "cancellationSubreason" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "expectedVersion" : {
+                    "type" : "integer"
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/executions/{washExecutionId}/complete" : {
+      "post" : {
+        "operationId" : "WashController_completeWashExecution_post__api_v1_wash_executions_washExecutionId_complete",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "washExecutionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "type" : "integer"
+                  },
+                  "finalMaterials" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "greenPaperCassette10Count" : {
+                        "type" : "integer"
+                      },
+                      "greenPaperCassette8Count" : {
+                        "type" : "integer"
+                      },
+                      "packageCount" : {
+                        "type" : "integer"
+                      },
+                      "witnessTapePortionCount" : {
+                        "type" : "integer"
+                      }
+                    },
+                    "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                    "type" : [ "object", "null" ]
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/executions/{washExecutionId}/entry-decision" : {
+      "post" : {
+        "operationId" : "WashController_decideEntry_post__api_v1_wash_executions_washExecutionId_entry_decision",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "washExecutionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "decision" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "expectedVersion" : {
+                    "type" : "integer"
+                  },
+                  "identityConfirmed" : {
+                    "type" : "boolean"
+                  },
+                  "rejectionReason" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "requirementsSatisfied" : {
+                    "type" : "boolean"
+                  }
+                },
+                "required" : [ "identityConfirmed", "requirementsSatisfied", "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/executions/{washExecutionId}/exit" : {
+      "post" : {
+        "operationId" : "WashController_submitExit_post__api_v1_wash_executions_washExecutionId_exit",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "washExecutionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "type" : "integer"
+                  },
+                  "materials" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "greenPaperCassette10Count" : {
+                        "type" : "integer"
+                      },
+                      "greenPaperCassette8Count" : {
+                        "type" : "integer"
+                      },
+                      "packageCount" : {
+                        "type" : "integer"
+                      },
+                      "witnessTapePortionCount" : {
+                        "type" : "integer"
+                      }
+                    },
+                    "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                    "type" : [ "object", "null" ]
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/executions/{washExecutionId}/reassignment" : {
+      "post" : {
+        "operationId" : "WashController_resolveReassignment_post__api_v1_wash_executions_washExecutionId_reassignment",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "washExecutionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cabinId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  },
+                  "expectedVersion" : {
+                    "type" : "integer"
+                  },
+                  "tankId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/operational-resources/disable" : {
+      "post" : {
+        "operationId" : "WashController_disableOperationalResource_post__api_v1_wash_operational_resources_disable",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cabinId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  },
+                  "causeType" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "detectedDuringWashExecutionId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  },
+                  "reason" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "tankId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/operational-resources/restore" : {
+      "post" : {
+        "operationId" : "WashController_restoreOperationalResource_post__api_v1_wash_operational_resources_restore",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "expectedVersion" : {
+                    "type" : "integer"
+                  },
+                  "resolution" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "resourceUnavailabilityId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/student/home" : {
+      "get" : {
+        "operationId" : "WashController_studentHome_get__api_v1_wash_student_home",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "appointment" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "appointmentId" : {
+                          "format" : "uuid",
+                          "type" : [ "string", "null" ]
+                        },
+                        "appointmentStatus" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "appointmentType" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "courseSection" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "courseSectionId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "name" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "nrc" : {
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "type" : [ "object", "null" ]
+                        },
+                        "instrumentCount" : {
+                          "type" : [ "integer", "null" ]
+                        },
+                        "pieceType" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "qrRepresentation" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "qrUsageContext" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "timeSlot" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "appointmentTimeSlotId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "endsAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "startsAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "timezone" : {
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "type" : [ "object", "null" ]
+                        },
+                        "washExecution" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "activeResourceAssignment" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "cabinCode" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "cabinId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "cabinName" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "resourceAssignmentId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankCode" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankName" : {
+                                  "type" : [ "string", "null" ]
+                                }
+                              },
+                              "type" : [ "object", "null" ]
+                            },
+                            "arrivedAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "rejectionReason" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "status" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "version" : {
+                              "type" : [ "integer", "null" ]
+                            },
+                            "washExecutionId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "type" : [ "object", "null" ]
+                        }
+                      },
+                      "type" : [ "object", "null" ]
+                    },
+                    "serviceDate" : {
+                      "format" : "date",
+                      "type" : [ "string", "null" ]
+                    },
+                    "student" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "currentSemester" : {
+                          "type" : [ "integer", "null" ]
+                        },
+                        "firstName" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "fullName" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "studentEnrollment" : {
+                          "type" : [ "string", "null" ]
+                        }
+                      },
+                      "type" : [ "object", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/supervision/entry-lookup" : {
+      "post" : {
+        "description" : "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is explicitly gated until the owner-backed QR projection is available and returns 503.",
+        "operationId" : "WashController_entryLookup_post__api_v1_wash_supervision_entry_lookup",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "lookupType" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "qrRepresentation" : {
+                    "type" : [ "string", "null" ]
+                  },
+                  "studentEnrollment" : {
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "appointment" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "appointmentId" : {
+                          "format" : "uuid",
+                          "type" : [ "string", "null" ]
+                        },
+                        "appointmentStatus" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "appointmentType" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "courseSection" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "courseSectionId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "name" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "nrc" : {
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "type" : [ "object", "null" ]
+                        },
+                        "instrumentCount" : {
+                          "type" : [ "integer", "null" ]
+                        },
+                        "pieceType" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "qrRepresentation" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "qrUsageContext" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "timeSlot" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "appointmentTimeSlotId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "endsAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "startsAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "timezone" : {
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "type" : [ "object", "null" ]
+                        },
+                        "washExecution" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "activeResourceAssignment" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "cabinCode" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "cabinId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "cabinName" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "resourceAssignmentId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankCode" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankName" : {
+                                  "type" : [ "string", "null" ]
+                                }
+                              },
+                              "type" : [ "object", "null" ]
+                            },
+                            "arrivedAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "rejectionReason" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "status" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "version" : {
+                              "type" : [ "integer", "null" ]
+                            },
+                            "washExecutionId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "type" : [ "object", "null" ]
+                        }
+                      },
+                      "type" : [ "object", "null" ]
+                    },
+                    "serviceDate" : {
+                      "format" : "date",
+                      "type" : [ "string", "null" ]
+                    },
+                    "student" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "currentSemester" : {
+                          "type" : [ "integer", "null" ]
+                        },
+                        "fullName" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "studentEnrollment" : {
+                          "type" : [ "string", "null" ]
+                        }
+                      },
+                      "type" : [ "object", "null" ]
+                    },
+                    "washExecution" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "activeResourceAssignment" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "cabinCode" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "cabinId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "cabinName" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "resourceAssignmentId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "tankCode" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "tankId" : {
+                              "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "tankName" : {
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "type" : [ "object", "null" ]
+                        },
+                        "arrivedAt" : {
+                          "format" : "date-time",
+                          "type" : [ "string", "null" ]
+                        },
+                        "rejectionReason" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "status" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "version" : {
+                          "type" : [ "integer", "null" ]
+                        },
+                        "washExecutionId" : {
+                          "format" : "uuid",
+                          "type" : [ "string", "null" ]
+                        }
+                      },
+                      "type" : [ "object", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "x-provider-ready" : {
+          "QR" : false,
+          "STUDENT_ENROLLMENT" : true
+        }
+      }
+    },
+    "/api/v1/wash/supervision/pending-reassignments" : {
+      "get" : {
+        "operationId" : "WashController_pendingReassignments_get__api_v1_wash_supervision_pending_reassignments",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "items" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "activeResourceAssignment" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "assignedAt" : {
+                                "format" : "date-time",
+                                "type" : [ "string", "null" ]
+                              },
+                              "assignmentType" : {
+                                "type" : [ "string", "null" ]
+                              },
+                              "cabin" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "code" : {
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "name" : {
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "resourceId" : {
+                                    "format" : "uuid",
+                                    "type" : [ "string", "null" ]
+                                  }
+                                },
+                                "type" : [ "object", "null" ]
+                              },
+                              "resourceAssignmentId" : {
+                                "format" : "uuid",
+                                "type" : [ "string", "null" ]
+                              },
+                              "tank" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "code" : {
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "name" : {
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "resourceId" : {
+                                    "format" : "uuid",
+                                    "type" : [ "string", "null" ]
+                                  }
+                                },
+                                "type" : [ "object", "null" ]
+                              }
+                            },
+                            "type" : [ "object", "null" ]
+                          },
+                          "appointment" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "appointmentId" : {
+                                "format" : "uuid",
+                                "type" : [ "string", "null" ]
+                              },
+                              "appointmentStatus" : {
+                                "type" : [ "string", "null" ]
+                              },
+                              "appointmentTimeSlot" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "appointmentTimeSlotId" : {
+                                    "format" : "uuid",
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "endsAt" : {
+                                    "format" : "date-time",
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "serviceDate" : {
+                                    "format" : "date",
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "startsAt" : {
+                                    "format" : "date-time",
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "timezone" : {
+                                    "type" : [ "string", "null" ]
+                                  }
+                                },
+                                "type" : [ "object", "null" ]
+                              },
+                              "appointmentType" : {
+                                "type" : [ "string", "null" ]
+                              },
+                              "courseSectionReference" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "courseSectionId" : {
+                                    "format" : "uuid",
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "name" : {
+                                    "type" : [ "string", "null" ]
+                                  },
+                                  "nrc" : {
+                                    "type" : [ "string", "null" ]
+                                  }
+                                },
+                                "type" : [ "object", "null" ]
+                              },
+                              "instrumentCount" : {
+                                "type" : [ "integer", "null" ]
+                              },
+                              "pieceType" : {
+                                "type" : [ "string", "null" ]
+                              }
+                            },
+                            "type" : [ "object", "null" ]
+                          },
+                          "authorizedAt" : {
+                            "format" : "date-time",
+                            "type" : [ "string", "null" ]
+                          },
+                          "executionVersion" : {
+                            "type" : "integer"
+                          },
+                          "qrUsageContext" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "student" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "academicStatus" : {
+                                "type" : [ "string", "null" ]
+                              },
+                              "accountId" : {
+                                "format" : "uuid",
+                                "type" : [ "string", "null" ]
+                              },
+                              "currentSemester" : {
+                                "type" : [ "integer", "null" ]
+                              },
+                              "displayName" : {
+                                "type" : [ "string", "null" ]
+                              },
+                              "enrollment" : {
+                                "type" : [ "string", "null" ]
+                              },
+                              "personId" : {
+                                "format" : "uuid",
+                                "type" : [ "string", "null" ]
+                              }
+                            },
+                            "type" : [ "object", "null" ]
+                          },
+                          "submittedExitMaterials" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "greenPaperCassette10Count" : {
+                                "type" : [ "integer", "null" ]
+                              },
+                              "greenPaperCassette8Count" : {
+                                "type" : [ "integer", "null" ]
+                              },
+                              "packageCount" : {
+                                "type" : [ "integer", "null" ]
+                              },
+                              "witnessTapePortionCount" : {
+                                "type" : [ "integer", "null" ]
+                              }
+                            },
+                            "type" : [ "object", "null" ]
+                          },
+                          "washExecutionId" : {
+                            "format" : "uuid",
+                            "type" : [ "string", "null" ]
+                          },
+                          "washExecutionStatus" : {
+                            "type" : [ "string", "null" ]
+                          }
+                        },
+                        "required" : [ "executionVersion" ],
+                        "type" : "object"
+                      },
+                      "type" : [ "array", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/health" : {
+      "get" : {
+        "operationId" : "SystemController_health_get__health",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/version" : {
+      "get" : {
+        "operationId" : "SystemController_version_get__version",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : {
+                    "type" : "string"
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    }
+  },
+  "servers" : [ {
+    "url" : "/"
+  } ]
+}

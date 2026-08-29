@@ -5,6 +5,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
 
 /**
  * Public, client-oriented schema for an administrative request.
@@ -24,7 +25,7 @@ public final class AdminRequestSchema {
   private final Map<String, Field> fields;
 
   private AdminRequestSchema(Map<String, Field> fields) {
-    this.fields = Map.copyOf(new LinkedHashMap<>(fields));
+    this.fields = Collections.unmodifiableMap(new LinkedHashMap<>(fields));
   }
 
   public static AdminRequestSchema of(FieldEntry... entries) {
@@ -100,7 +101,10 @@ public final class AdminRequestSchema {
     schema.put("type", "object");
     schema.put("additionalProperties", false);
     schema.put("properties", properties);
-    if (!required.isEmpty()) schema.put("required", required);
+    if (!required.isEmpty()) {
+      required.sort(String::compareTo);
+      schema.put("required", required);
+    }
     return schema;
   }
 

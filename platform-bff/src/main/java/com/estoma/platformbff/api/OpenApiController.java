@@ -32,6 +32,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
@@ -68,6 +69,7 @@ public class OpenApiController {
     return Map.of(
         "openapi", "3.1.1",
         "info", Map.of("title", "Estoma Platform BFF API", "version", "v1"),
+        "servers", List.of(Map.of("url", "/")),
         "paths", paths,
         "components", Map.of(
             "securitySchemes", Map.of("bearerAuth", Map.of("type", "http", "scheme", "bearer",
@@ -114,6 +116,9 @@ public class OpenApiController {
       operation.put("summary", admin.publicOperation());
       operation.put("description", "Owner: " + admin.owner() + "; owner operation: "
           + admin.messageType() + ".");
+      if (!admin.serverDerivedActorFields().isEmpty()) {
+        operation.put("x-server-derived-actor-fields", admin.serverDerivedActorFields().stream().sorted().toList());
+      }
     } else if (requestType != null) {
       operation.put("requestBody", Map.of("required", true, "content", Map.of(
           MediaType.APPLICATION_JSON_VALUE, Map.of("schema", schemaFor(requestType)))));
@@ -124,10 +129,7 @@ public class OpenApiController {
       operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
     }
     List<Map<String, Object>> parameters = new ArrayList<>();
-    if (accepted) {
-      parameters.add(Map.of("name", "Idempotency-Key", "in", "header", "required", true,
-          "schema", Map.of("type", "string")));
-    }
+    requestHeaders(handler, parameters);
     Matcher matcher = PATH_VARIABLE.matcher(path);
     while (matcher.find()) {
       String name = matcher.group(1);
@@ -155,6 +157,17 @@ public class OpenApiController {
       if (parameter.isAnnotationPresent(RequestBody.class)) return parameter.getParameterizedType();
     }
     return null;
+  }
+
+  /** Headers are part of each handler's public contract, independently of its response status. */
+  private static void requestHeaders(HandlerMethod handler, List<Map<String, Object>> parameters) {
+    for (Parameter parameter : handler.getMethod().getParameters()) {
+      RequestHeader header = parameter.getAnnotation(RequestHeader.class);
+      if (header == null) continue;
+      String name = header.name().isBlank() ? header.value() : header.name();
+      parameters.add(Map.of("name", name, "in", "header", "required", header.required(),
+          "schema", schemaFor(parameter.getParameterizedType())));
+    }
   }
 
   private static Type responseType(HandlerMethod handler) {

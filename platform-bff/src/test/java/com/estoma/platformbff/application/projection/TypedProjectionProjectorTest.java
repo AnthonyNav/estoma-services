@@ -123,4 +123,22 @@ class TypedProjectionProjectorTest {
     assertEquals(ProjectionEventRuntime.DispatchOutcome.UNTRUSTED, outcome);
     assertFalse(inboxCalled.get());
   }
+
+  @Test
+  void washEntryRejectedProjectsTheOwnerSuppliedRejectionReason() {
+    List<ProjectionReadModel> projected = new ArrayList<>();
+    TypedProjectionProjector projector = new TypedProjectionProjector(projected::add, null);
+    UUID executionId = UUID.randomUUID();
+    String rejectionReason = "El material no coincide con la cita";
+
+    projector.project(new ProjectionEvent(
+        UUID.randomUUID(), "WashEntryRejected", 1, "wash-execution",
+        Instant.parse("2026-08-27T12:00:00Z"), UUID.randomUUID(), UUID.randomUUID(), executionId, 4,
+        Map.of("washExecutionId", executionId, "executionStatus", "ENTRY_REJECTED",
+            "rejectionReason", rejectionReason)));
+
+    ProjectionReadModel.WashExecution execution = (ProjectionReadModel.WashExecution) projected.getFirst();
+    assertEquals("ENTRY_REJECTED", execution.status());
+    assertEquals(rejectionReason, execution.rejectionReason());
+  }
 }

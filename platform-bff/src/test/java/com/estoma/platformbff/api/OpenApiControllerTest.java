@@ -2,6 +2,10 @@ package com.estoma.platformbff.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -16,6 +20,9 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
 @SpringBootTest
 @ActiveProfiles("test")
 class OpenApiControllerTest {
+  private static final Path VERSIONED_DOCUMENT = Path.of("docs/openapi.yaml");
+  private static final ObjectMapper JSON = new ObjectMapper()
+      .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
   @Autowired OpenApiController openApi;
   @Autowired @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping mappings;
 
@@ -50,6 +57,26 @@ class OpenApiControllerTest {
     assertThat(((Map<String, Object>) lookup.get("responses"))).containsKey("200");
     assertThat((Map<String, Boolean>) lookup.get("x-provider-ready"))
         .containsEntry("STUDENT_ENROLLMENT", true).containsEntry("QR", false);
+
+    Map<String, Object> temporaryPassword = operation(paths,
+        "/api/v1/admin/accounts/{accountId}/temporary-password", "post");
+    assertThat((java.util.List<Map<String, Object>>) temporaryPassword.get("parameters"))
+        .anySatisfy(parameter -> assertThat(parameter).containsEntry("name", "Idempotency-Key")
+            .containsEntry("in", "header").containsEntry("required", true));
+    assertThat((Map<String, Object>) temporaryPassword.get("responses")).containsKey("200");
+  }
+
+  @Test
+  void versionedDocumentIsACompleteBidirectionalSnapshotOfTheRuntimeContract() throws Exception {
+    String runtime = JSON.writerWithDefaultPrettyPrinter().writeValueAsString(openApi.document())
+        + System.lineSeparator();
+    if (Boolean.getBoolean("updateOpenApi")) Files.writeString(VERSIONED_DOCUMENT, runtime);
+
+    assertThat(Files.exists(VERSIONED_DOCUMENT)).isTrue();
+    Map<String, Object> versioned = JSON.readValue(Files.readString(VERSIONED_DOCUMENT), Map.class);
+    assertThat(versioned).containsEntry("openapi", "3.1.1");
+    assertThat((Map<String, Object>) versioned.get("paths")).isNotEmpty();
+    assertThat(JSON.readTree(Files.readString(VERSIONED_DOCUMENT))).isEqualTo(JSON.readTree(runtime));
   }
 
   private Set<String> documentedMappings() {

@@ -2,25 +2,29 @@ package com.estoma.platformbff.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.estoma.platformbff.api.admin.AdminController;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import java.util.Locale;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-/** Keeps the committed V1 contract index independent from live controller mappings. */
+/** Keeps the committed V1 document's administrative operations independent from controller tests. */
 class VersionedOpenApiContractTest {
-  private static final Pattern ROUTE = Pattern.compile("^\\s*- \\\"([A-Z]+ /api/v1/admin/[^\\\"]+)\\\"\\s*$");
+  private static final ObjectMapper JSON = new ObjectMapper();
 
   @Test
-  void committedOpenApiIndexMatchesTheAdministrativeProviderSurface() throws Exception {
-    String document = Files.readString(Path.of("docs/openapi.yaml"));
-    Set<String> versioned = document.lines().map(ROUTE::matcher).filter(Matcher::matches)
-        .map(matcher -> matcher.group(1)).collect(Collectors.toSet());
+  @SuppressWarnings("unchecked")
+  void committedOpenApiDocumentContainsEveryAdministrativeProviderOperation() throws Exception {
+    Map<String, Object> document = JSON.readValue(Files.readString(Path.of("docs/openapi.yaml")), Map.class);
+    Map<String, Object> paths = (Map<String, Object>) document.get("paths");
 
-    assertThat(versioned).containsExactlyInAnyOrderElementsOf(AdminController.routeMatrix().keySet());
+    assertThat(paths).isNotEmpty();
+    AdminController.routeMatrix().forEach((key, route) -> {
+      Map<String, Object> path = (Map<String, Object>) paths.get(route.path());
+      assertThat(path).as(key).isNotNull();
+      assertThat(path).containsKey(route.method().toLowerCase(Locale.ROOT));
+    });
   }
 }
