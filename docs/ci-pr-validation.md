@@ -1,9 +1,9 @@
 # Pull Request Validation
 
-Woodpecker test workflows publish pull-request statuses for changes to their
-respective service paths. Configure the `develop` branch ruleset only after a
-test pull request has run successfully, because GitHub can require only status
-check names that it has received.
+The always-present Woodpecker `pr-validation` workflow determines which Maven
+service directories changed in a pull request and validates each one. Configure
+the `develop` branch ruleset only after a pull request has run successfully,
+because GitHub can require only status check names that it has received.
 
 ## Configure The `develop` Ruleset
 
@@ -14,17 +14,15 @@ check names that it has received.
 4. Under **Branch rules**, enable **Require a pull request before merging**.
 5. Enable **Require status checks to pass**, then enable **Require branches to
    be up to date before merging** if the repository policy requires it.
-6. Open a pull request that changes each service path at least once and wait for
-   its Woodpecker test status to complete. In the status-check picker, select
-   the exact check names GitHub reports from that first pull request. Do not
-   type or guess names such as pipeline file names: Woodpecker's reported check
-   name is the value GitHub will enforce.
+6. Open any pull request and wait for its Woodpecker `pr-validation` status to
+   complete. In the status-check picker, select the exact `pr-validation` check
+   name GitHub reports from that first pull request. Do not type or guess the
+   name; Woodpecker's reported check name is the value GitHub will enforce.
 7. Save the ruleset and verify that a subsequent pull request into `develop`
-   cannot merge until every selected Woodpecker check passes.
+   cannot merge until `pr-validation` passes.
 
-The test workflows are path-scoped. Configure only checks that should be
-required for every pull request, or use separate rulesets/path policy where
-available; GitHub treats a required check that Woodpecker did not run as
+Existing service test workflows remain path-scoped and should not be required
+by this ruleset. GitHub treats a required check that Woodpecker did not run as
 pending.
 
 ## Credentials

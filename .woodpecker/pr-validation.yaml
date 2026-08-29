@@ -1,0 +1,13 @@
+labels:
+  testcontainers: victus
+
+when:
+  - event: pull_request
+
+steps:
+  - name: pr-validation
+    image: maven:3.9.16-eclipse-temurin-25
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - ./scripts/woodpecker/validate-pr.sh
