@@ -7,6 +7,7 @@ when:
       include:
         - authorization-service/**
         - .woodpecker/authorization-service-build.yaml
+        - .woodpecker/authorization-service-gitops.yaml
         - scripts/woodpecker/**
 
 steps:

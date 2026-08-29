@@ -7,6 +7,7 @@ when:
       include:
         - appointments-service/**
         - .woodpecker/appointments-service-build.yaml
+        - .woodpecker/appointments-service-gitops.yaml
         - scripts/woodpecker/**
 
 steps:
