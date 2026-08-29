@@ -1,0 +1,44 @@
+when:
+  - event: pull_request
+    path:
+      include:
+        - shared-contract-tests/**
+        - users-service/src/main/java/**
+        - authentication-service/src/main/java/**
+        - academic-service/src/main/java/**
+        - authorization-service/src/main/java/**
+        - communications-service/src/main/java/**
+        - users-service/pom.xml
+        - authentication-service/pom.xml
+        - academic-service/pom.xml
+        - authorization-service/pom.xml
+        - communications-service/pom.xml
+        - .woodpecker/shared-contract-tests.yaml
+  - event: push
+    branch: develop
+    path:
+      include:
+        - shared-contract-tests/**
+        - users-service/src/main/java/**
+        - authentication-service/src/main/java/**
+        - academic-service/src/main/java/**
+        - authorization-service/src/main/java/**
+        - communications-service/src/main/java/**
+        - users-service/pom.xml
+        - authentication-service/pom.xml
+        - academic-service/pom.xml
+        - authorization-service/pom.xml
+        - communications-service/pom.xml
+        - .woodpecker/shared-contract-tests.yaml
+
+steps:
+  - name: contracts
+    image: maven:3.9.16-eclipse-temurin-25
+    commands:
+      - >-
+        mvn -s .woodpecker/maven-settings.xml -B
+        -f shared-contract-tests/reactor/pom.xml
+        -Dmaven.test.skip=true
+        -Dspring-boot.repackage.skip=true
+        install
+      - mvn -s .woodpecker/maven-settings.xml -B -f shared-contract-tests/tests/pom.xml test
