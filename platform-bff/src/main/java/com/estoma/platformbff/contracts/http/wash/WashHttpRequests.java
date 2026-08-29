@@ -39,6 +39,21 @@ public final class WashHttpRequests {
 
   public record RegisterArrivalRequest(@NotNull UUID appointmentId) {}
 
+  /** QR is intentionally rejected until a QR-to-appointment projection is owner-supported. */
+  public record EntryLookupRequest(
+      @NotBlank @Pattern(regexp = "QR|STUDENT_ENROLLMENT") String lookupType,
+      @Size(max = 2_000) String qrRepresentation,
+      @Size(max = 120) String studentEnrollment) {
+    @AssertTrue(message = "exactly one lookup value matching lookupType is required")
+    public boolean hasMatchingValue() {
+      return "QR".equals(lookupType) ? notBlank(qrRepresentation) && !notBlank(studentEnrollment)
+          : "STUDENT_ENROLLMENT".equals(lookupType) ? notBlank(studentEnrollment) && !notBlank(qrRepresentation)
+          : false;
+    }
+
+    private static boolean notBlank(String value) { return value != null && !value.isBlank(); }
+  }
+
   public record EntryDecisionRequest(
       boolean identityConfirmed,
       boolean requirementsSatisfied,

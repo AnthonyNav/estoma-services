@@ -6,6 +6,7 @@ import com.estoma.platformbff.application.security.LocalAuthorizationService.Aut
 import com.estoma.platformbff.application.security.AuthenticationRejectedException;
 import com.estoma.platformbff.application.security.AuthenticationRequiredException;
 import com.estoma.platformbff.application.security.SecurityRpcUnavailableException;
+import com.estoma.platformbff.application.wash.WashStudentQueryService.EntryLookupNotFoundException;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
@@ -41,6 +42,12 @@ public class ApiExceptionHandler {
   ResponseEntity<ProblemResponse> projectionUnavailable() {
     return problem(HttpStatus.SERVICE_UNAVAILABLE, "BFF.PROJECTION_UNAVAILABLE",
         "Service Unavailable", "The required local projection is temporarily unavailable.");
+  }
+
+  @ExceptionHandler(EntryLookupNotFoundException.class)
+  ResponseEntity<ProblemResponse> entryLookupNotFound() {
+    return problem(HttpStatus.NOT_FOUND, "BFF.WASH_ENTRY_NOT_FOUND", "Not Found",
+        "No appointment was found for today.");
   }
 
   @ExceptionHandler(AuthorizationDeniedException.class)

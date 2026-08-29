@@ -15,6 +15,8 @@ public class LocalAuthorizationService {
   public static final String WASH_SYSTEM_CODE = "LAVADO_ULTRASONICO";
   public static final String STUDENT_ROLE = "ALUMNO";
   public static final String WASH_SUPERVISOR_ROLE = "SUPERVISOR_LAVADO";
+  public static final String WASH_ADMINISTRATOR_ROLE = "ADMINISTRADOR_LAVADO";
+  public static final String SUPERADMIN_ROLE = "SUPERADMIN";
 
   private final CurrentActor currentActor;
   private final ProjectionQueryPort projections;
@@ -40,6 +42,29 @@ public class LocalAuthorizationService {
   public UUID requireWashSupervisor() {
     UUID accountId = requireAuthenticatedAccount();
     requireRoleAndWashAccess(accountId, WASH_SUPERVISOR_ROLE);
+    return accountId;
+  }
+
+  /** Global administrative commands have no system-local scope in the V1 contract. */
+  public UUID requireSuperAdministrator() {
+    UUID accountId = requireAuthenticatedAccount();
+    readiness.requireAuthorizationReady();
+    if (!projections.findRoleCode(accountId).filter(SUPERADMIN_ROLE::equals).isPresent()) {
+      throw new AuthorizationDeniedException();
+    }
+    return accountId;
+  }
+
+  /** Wash administration requires its compatible role and an active Lavado access locally. */
+  public UUID requireWashAdministrator() {
+    UUID accountId = requireAuthenticatedAccount();
+    readiness.requireAuthorizationReady();
+    boolean roleMatches = projections.findRoleCode(accountId)
+        .filter(role -> WASH_ADMINISTRATOR_ROLE.equals(role) || SUPERADMIN_ROLE.equals(role))
+        .isPresent();
+    if (!roleMatches || !projections.hasActiveSystemAccess(accountId, WASH_SYSTEM_CODE)) {
+      throw new AuthorizationDeniedException();
+    }
     return accountId;
   }
 
