@@ -1,0 +1,35 @@
+when:
+  - event: manual
+    branch: develop
+  - event: push
+    branch: develop
+    path:
+      include:
+        - wash-administration-service/**
+        - .woodpecker/wash-administration-service-build.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: build-and-push
+    image: woodpeckerci/plugin-kaniko:2.3.2
+    settings:
+      registry: ghcr.io
+      repo: anthonynav/wash-administration-service
+      context: wash-administration-service
+      dockerfile: wash-administration-service/Dockerfile
+      username:
+        from_secret: GHCR_USERNAME
+      password:
+        from_secret: GHCR_TOKEN
+      tags:
+        - develop-${CI_COMMIT_SHA:0:7}
+        - develop
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 750m
+            memory: 1Gi
