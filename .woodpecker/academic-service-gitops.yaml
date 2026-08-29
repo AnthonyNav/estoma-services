@@ -1,0 +1,37 @@
+when:
+  - event: push
+    branch: develop
+    path:
+      include:
+        - academic-service/**
+        - .woodpecker/academic-service-build.yaml
+        - .woodpecker/academic-service-gitops.yaml
+        - scripts/woodpecker/**
+
+depends_on:
+  - academic-service-build
+
+concurrency:
+  limit: 1
+  group: estoma-infra-develop-update
+
+steps:
+  - name: update-develop-gitops
+    image: python:3.13-alpine
+    environment:
+      ESTOMA_INFRA_TOKEN:
+        from_secret: ESTOMA_INFRA_TOKEN
+    commands:
+      - >-
+        sh scripts/woodpecker/update-develop-infra.sh academic-service
+        ghcr.io/anthonynav/academic-service
+        apps/academic-service/overlays/develop/kustomization.yaml
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi

@@ -1,0 +1,38 @@
+when:
+  - event: push
+    branch: develop
+    path:
+      include:
+        - wash-administration-service/**
+        - .woodpecker/wash-administration-service-build.yaml
+        - .woodpecker/wash-administration-service-gitops.yaml
+        - scripts/woodpecker/**
+
+depends_on:
+  - wash-administration-service-build
+
+concurrency:
+  limit: 1
+  group: estoma-infra-develop-update
+
+steps:
+  - name: update-develop-gitops
+    image: python:3.13-alpine
+    environment:
+      ESTOMA_INFRA_TOKEN:
+        from_secret: ESTOMA_INFRA_TOKEN
+    commands:
+      - >-
+        sh scripts/woodpecker/update-develop-infra.sh
+        wash-administration-service
+        ghcr.io/anthonynav/wash-administration-service
+        apps/wash-administration-service/overlays/develop/kustomization.yaml
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
