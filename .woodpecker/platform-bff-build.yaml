@@ -7,6 +7,7 @@ when:
       include:
         - platform-bff/**
         - .woodpecker/platform-bff-build.yaml
+        - .woodpecker/platform-bff-gitops.yaml
         - scripts/woodpecker/**
 
 steps:
