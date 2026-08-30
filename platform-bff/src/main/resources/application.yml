@@ -6,7 +6,10 @@ spring:
     username: ${BFF_DB_USERNAME:bff}
     password: ${BFF_DB_PASSWORD:bff}
     hikari:
-      maximum-pool-size: ${BFF_DB_POOL_SIZE:10}
+      maximum-pool-size: ${BFF_DB_POOL_SIZE:4}
+      minimum-idle: ${BFF_DB_MIN_IDLE:1}
+      connection-timeout: 10000
+      validation-timeout: 5000
   flyway:
     enabled: ${BFF_FLYWAY_ENABLED:true}
     baseline-on-migrate: false

@@ -52,10 +52,10 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
     UUID operationId = UUID.randomUUID();
     UUID commandMessageId = UUID.randomUUID();
 
-    Queue resultsQueue = amqpAdmin.declareQueue();
+    Queue resultsQueue = declareQueue("results");
     amqpAdmin.declareBinding(BindingBuilder.bind(resultsQueue).to(new org.springframework.amqp.core.DirectExchange(AmqpNames.EXCHANGE_RESULTS)).with("bff"));
-    Queue eventsQueue = amqpAdmin.declareQueue();
-    Binding eventsBinding = BindingBuilder.bind(eventsQueue).to(eventsExchange).with("identity.person.*");
+    Queue eventsQueue = declareQueue("events");
+    Binding eventsBinding = BindingBuilder.bind(eventsQueue).to(eventsExchange).with("users.person.*");
     amqpAdmin.declareBinding(eventsBinding);
 
     try {
@@ -72,7 +72,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
                 MessageEnvelope result = codec.decode(resultMessage.getBody());
                 assertThat(result.messageType()).isEqualTo("CreatePersonSucceeded");
                 assertThat(result.messageKind()).isEqualTo(MessageKind.RESULT);
-                assertThat(result.producer()).isEqualTo("users-service");
+                assertThat(result.producer()).isEqualTo("users");
                 assertThat(result.correlationId()).isEqualTo(correlationId);
                 assertThat(result.causationId()).isEqualTo(commandMessageId);
                 assertThat(result.operationId()).isEqualTo(operationId);
@@ -109,7 +109,7 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
     UUID originalCorrelationId = UUID.randomUUID();
     UUID originalMessageId = UUID.randomUUID();
     String idempotencyKey = UUID.randomUUID().toString();
-    Queue resultsQueue = amqpAdmin.declareQueue();
+    Queue resultsQueue = declareQueue("replay-results");
     amqpAdmin.declareBinding(
         BindingBuilder.bind(resultsQueue).to(new org.springframework.amqp.core.DirectExchange(AmqpNames.EXCHANGE_RESULTS)).with("bff"));
 
@@ -143,6 +143,12 @@ class CreatePersonCommandIT extends AbstractMessagingIT {
 
   private void publishCreatePersonCommand(UUID personId, UUID correlationId, UUID operationId, UUID messageId) {
     publishCreatePersonCommand(personId, correlationId, operationId, messageId, UUID.randomUUID().toString());
+  }
+
+  private Queue declareQueue(String purpose) {
+    Queue queue = new Queue("it.create-person." + purpose + "." + UUID.randomUUID(), false, false, false);
+    amqpAdmin.declareQueue(queue);
+    return queue;
   }
 
   private void publishCreatePersonCommand(

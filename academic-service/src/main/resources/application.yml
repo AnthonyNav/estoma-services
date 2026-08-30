@@ -5,6 +5,11 @@ spring:
     url: ${ACADEMIC_DB_URL:jdbc:postgresql://localhost:5432/academic_db}
     username: ${ACADEMIC_DB_RUNTIME_USER:academic_service}
     password: ${ACADEMIC_DB_RUNTIME_PASSWORD:academic_service}
+    hikari:
+      maximum-pool-size: ${ACADEMIC_DB_POOL_SIZE:4}
+      minimum-idle: ${ACADEMIC_DB_MIN_IDLE:1}
+      connection-timeout: 10000
+      validation-timeout: 5000
   flyway:
     url: ${ACADEMIC_DB_URL:jdbc:postgresql://localhost:5432/academic_db}
     user: ${ACADEMIC_DB_MIGRATION_USER:academic_service}
