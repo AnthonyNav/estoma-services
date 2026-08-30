@@ -17,7 +17,10 @@ import tools.jackson.databind.ObjectMapper;
 class UsersPersonEventsContractTest {
 
   private final ObjectMapper mapper = new ObjectMapper()
-      .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+      .rebuild()
+      .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+      .disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
+      .build();
 
   @Test
   void personCreatedIsReadableByAuthenticationAndCommunications() {
