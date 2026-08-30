@@ -54,7 +54,10 @@ public class RpcListener {
     this.envelopeValidator = envelopeValidator;
   }
 
-  @RabbitListener(queues = MessagingNames.AUTHENTICATION_RPC_QUEUE, containerFactory = "rpcContainerFactory")
+  @RabbitListener(
+      id = "rpcListener",
+      queues = MessagingNames.AUTHENTICATION_RPC_QUEUE,
+      containerFactory = "rpcContainerFactory")
   public Message onMessage(Message message) {
     MessageEnvelope request;
     try {

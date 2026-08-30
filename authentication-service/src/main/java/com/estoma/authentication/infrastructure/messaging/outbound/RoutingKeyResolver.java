@@ -42,7 +42,7 @@ public class RoutingKeyResolver {
 
   private static final Map<String, String> RESULT_ROUTING_KEYS =
       Map.of("bff", AmqpNames.ROUTING_KEY_RESULTS_BFF,
-          "student-import-process", AmqpNames.ROUTING_KEY_RESULTS_STUDENT_IMPORT_PROCESS);
+          "academic", AmqpNames.ROUTING_KEY_RESULTS_ACADEMIC);
 
   public record Destination(String exchange, String routingKey) {}
 

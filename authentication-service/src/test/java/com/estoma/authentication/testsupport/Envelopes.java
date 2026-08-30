@@ -39,7 +39,7 @@ public final class Envelopes {
   public static MessageEnvelope event(String messageType, Object payload, UUID aggregateId, int aggregateVersion, UUID messageId) {
     JsonNode payloadNode = MAPPER.valueToTree(payload);
     return new MessageEnvelope(
-        messageId, messageType, 1, MessageKind.EVENT, "users-service", Instant.now(), UUID.randomUUID(), null, null,
+        messageId, messageType, 1, MessageKind.EVENT, "users", Instant.now(), UUID.randomUUID(), null, null,
         null, aggregateId, aggregateVersion, null, payloadNode);
   }
 }
