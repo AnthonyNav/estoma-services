@@ -24,6 +24,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.core.Queue;
@@ -53,8 +54,13 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
   @Test
   void fourSequentialCommandsProduceFourEventsWithGaplessAggregateVersions() {
     UUID personId = UUID.randomUUID();
-    Queue eventsQueue = amqpAdmin.declareQueue();
-    amqpAdmin.declareBinding(BindingBuilder.bind(eventsQueue).to(eventsExchange).with("identity.person.*"));
+    Queue resultsQueue = declareQueue("results");
+    amqpAdmin.declareBinding(
+        BindingBuilder.bind(resultsQueue)
+            .to(new DirectExchange(AmqpNames.EXCHANGE_RESULTS))
+            .with("bff"));
+    Queue eventsQueue = declareQueue("events");
+    amqpAdmin.declareBinding(BindingBuilder.bind(eventsQueue).to(eventsExchange).with("users.person.*"));
 
     try {
       send(MessageTypes.CREATE_PERSON, codec.toJsonNode(
@@ -86,8 +92,15 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
       int converged = applyVersionLadder(shuffled);
       assertThat(converged).isEqualTo(4);
     } finally {
+      amqpAdmin.deleteQueue(resultsQueue.getName());
       amqpAdmin.deleteQueue(eventsQueue.getName());
     }
+  }
+
+  private Queue declareQueue(String purpose) {
+    Queue queue = new Queue("it.aggregate-version." + purpose + "." + UUID.randomUUID(), false, false, false);
+    amqpAdmin.declareQueue(queue);
+    return queue;
   }
 
   /**
@@ -125,7 +138,7 @@ class AggregateVersionMonotonicityIT extends AbstractMessagingIT {
   /**
    * Drains {@code queue} until a message matching both {@code
    * expectedType} and {@code personId} arrives, discarding anything else.
-   * The wildcard binding ({@code identity.person.*}) only isolates this
+   * The wildcard binding ({@code users.person.*}) only isolates this
    * test from unrelated aggregate types by routing key shape, not from
    * background activity in the shared broker touching a DIFFERENT
    * {@code personId} of the same event type (e.g. another test's Outbox
