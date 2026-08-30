@@ -1,5 +1,5 @@
 labels:
-  testcontainers: victus
+  testcontainers: "true"
 
 when:
   - event: pull_request
