@@ -5,14 +5,11 @@ import com.estoma.authorization.application.port.SystemCatalogRepository;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator.ProjectionType;
 import com.estoma.authorization.domain.model.CatalogStatus;
 import com.estoma.authorization.domain.model.SystemCode;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
 
 @Component("projectionRecovery")
-@ConditionalOnProperty(
-    prefix = "estoma.messaging", name = "recovery-worker-enabled", havingValue = "true", matchIfMissing = true)
 final class ProjectionRecoveryHealthIndicator implements HealthIndicator {
 
   private final ProjectionRecoveryJobRepository jobs;

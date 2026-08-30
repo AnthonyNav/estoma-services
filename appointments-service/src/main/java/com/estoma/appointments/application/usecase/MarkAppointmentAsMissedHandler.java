@@ -107,7 +107,8 @@ public class MarkAppointmentAsMissedHandler implements MarkAppointmentAsMissedUs
       String payload = "{\"appointmentId\":\"" + appointmentId + "\"}";
       ApplicationSupport.append(outbox, queryMessageId, new OutboxIntent(
           "GetWashExecutionIntegrationContext", "QUERY", appointmentId, appointmentVersion,
-          command.metadata().correlationId(), command.metadata().messageId(), payload, now));
+          command.metadata().correlationId(), command.metadata().messageId(), payload, now,
+          queryMessageId));
     }
     return ApplicationResult.deferred("AUTHORITATIVE_EXECUTION_CONFIRMATION_PENDING",
         "MISSED waits for authoritative Execution evidence", appointmentId);

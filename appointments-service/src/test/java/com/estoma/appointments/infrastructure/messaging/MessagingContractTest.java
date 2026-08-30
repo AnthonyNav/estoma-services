@@ -32,6 +32,22 @@ class MessagingContractTest {
   }
 
   @Test
+  void acceptsExplicitNullForOptionalAggregateVersionFromAnotherService() {
+    UUID messageId = UUID.randomUUID();
+    EnvelopeJsonCodec codec = new EnvelopeJsonCodec(new ObjectMapper());
+    String wire = """
+        {"messageId":"%s","messageType":"GetWashExecutionIntegrationContextResult",
+        "messageVersion":1,"messageKind":"RESULT","producer":"wash-execution",
+        "occurredAt":"2026-01-01T10:00:00Z","correlationId":"%s",
+        "aggregateVersion":null,"actor":{"type":"SYSTEM","service":"appointments"},"payload":{}}
+        """.formatted(messageId, UUID.randomUUID());
+
+    MessageEnvelope decoded = codec.decode(codec.readTree(wire));
+
+    assertThat(decoded.aggregateVersion()).isNull();
+  }
+
+  @Test
   void scheduleAppointmentWireRequiresExplicitRegulationAcceptance() {
     EnvelopeJsonCodec codec = new EnvelopeJsonCodec(new ObjectMapper());
     CommandMessageMapper commandMapper = new CommandMessageMapper();

@@ -52,7 +52,8 @@ def late_decision_after_valid_arrival(self, supervisor):
     }, self.system_actor("appointments"), occurred_at=start + timedelta(minutes=11), producer="appointments")
     run.wait_until("missed command processed", lambda: run.scalar(
         run.APPOINTMENTS_DSN,
-        "SELECT status FROM processed_messages WHERE message_id=%s", (uuid.UUID(missed["messageId"]),)) == "APPLIED")
+        "SELECT status FROM command_idempotency_records WHERE message_id=%s",
+        (uuid.UUID(missed["messageId"]),)) == "COMPLETED")
     assert run.scalar(run.APPOINTMENTS_DSN,
         "SELECT status FROM appointments WHERE appointment_id=%s", (uuid.UUID(appointment),)) == "SCHEDULED"
 
@@ -70,7 +71,7 @@ def late_decision_after_valid_arrival(self, supervisor):
     entry_at = run.scalar(run.APPOINTMENTS_DSN,
         "SELECT entry_authorized_at FROM appointments WHERE appointment_id=%s", (uuid.UUID(appointment),))
     assert entry_at is not None
-    self.submit_and_complete(student, supervisor, execution)
+    self.submit_and_complete(student, supervisor, execution, start + timedelta(minutes=13))
 
 
 entry.late_decision_after_valid_arrival = late_decision_after_valid_arrival
@@ -91,15 +92,17 @@ def preventive_immuno_symmetry(self):
         candidate_start = anchor_start + timedelta(hours=offset)
         slot = self.create_slot(candidate_start, base)
         command = self.command("appointments", "ScheduleAppointment", {
+            "appointmentId": run.uid(),
             "studentAccountId": student,
             "appointmentTimeSlotId": slot,
             "courseSectionId": self.ids[f"section:{student}"],
             "appointmentType": "IMMUNOCOMPROMISED",
             "instrumentCount": 1,
             "pieceType": "HIGH_SPEED",
+            "regulationAccepted": True,
         }, self.account_actor(student), occurred_at=base)
-        run.wait_until(f"IMMUNO conflict command {offset}h processed", lambda mid=uuid.UUID(command["messageId"]): run.scalar(
-            run.APPOINTMENTS_DSN, "SELECT status FROM processed_messages WHERE message_id=%s", (mid,)) == "APPLIED")
+        result = self.wait_result(self.result_queue, command["correlationId"])
+        assert result["messageType"] == "ScheduleAppointmentRejected", result
         count = run.scalar(run.APPOINTMENTS_DSN,
             "SELECT count(*) FROM appointments WHERE student_account_id=%s AND appointment_time_slot_id=%s",
             (uuid.UUID(student), uuid.UUID(slot)))
