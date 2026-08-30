@@ -47,13 +47,13 @@ final class QueryMessageMapper {
     if (limit > 1000) {
       throw new InvalidMessageException("limit must be at most 1000");
     }
-    String cursor = payload.has("cursor") ? WireValues.uuid(payload, "cursor").toString() : null;
+    String cursor = payload.hasNonNull("cursor") ? WireValues.uuid(payload, "cursor").toString() : null;
     return new ListAccountAuthorizationSnapshotsPage(
         cursor, limit, optionalSystemCode(payload));
   }
 
   private static SystemCode optionalSystemCode(JsonNode payload) {
-    return payload.has("systemCode")
+    return payload.hasNonNull("systemCode")
         ? WireValues.enumValue(payload, "systemCode", SystemCode.class)
         : null;
   }

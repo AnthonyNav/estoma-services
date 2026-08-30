@@ -152,7 +152,7 @@ public final class EnvelopeJsonCodec {
   }
 
   private static Integer optionalInt(JsonNode node, String field) {
-    if (!node.has(field)) {
+    if (!node.hasNonNull(field)) {
       return null;
     }
     return requiredInt(node, field);
