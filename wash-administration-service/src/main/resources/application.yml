@@ -7,6 +7,8 @@ spring:
     username: ${WASH_ADMINISTRATION_DB_RUNTIME_USER:wash_administration_service}
     password: ${WASH_ADMINISTRATION_DB_RUNTIME_PASSWORD:wash_administration_service}
     hikari:
+      maximum-pool-size: ${WASH_ADMINISTRATION_DB_POOL_SIZE:4}
+      minimum-idle: ${WASH_ADMINISTRATION_DB_MIN_IDLE:1}
       connection-timeout: 10000
       validation-timeout: 5000
       data-source-properties:

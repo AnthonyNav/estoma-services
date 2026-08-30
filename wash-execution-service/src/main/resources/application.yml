@@ -1,6 +1,12 @@
 spring:
   application:
     name: wash-execution-service
+  datasource:
+    hikari:
+      maximum-pool-size: ${WASH_EXECUTION_DB_POOL_SIZE:4}
+      minimum-idle: ${WASH_EXECUTION_DB_MIN_IDLE:1}
+      connection-timeout: 10000
+      validation-timeout: 5000
   rabbitmq:
     publisher-confirm-type: correlated
     publisher-returns: true
