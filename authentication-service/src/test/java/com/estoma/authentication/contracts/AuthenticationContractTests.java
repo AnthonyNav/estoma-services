@@ -65,9 +65,17 @@ class AuthenticationContractTests {
     var payload = new OtherAccountSessionsRevokedPayload(accountId, retainedSessionId, "password_changed", revokedAt);
 
     assertThat(payload.accountId()).isEqualTo(accountId);
-    assertThat(payload.retainedSessionId()).isEqualTo(retainedSessionId);
+    assertThat(payload.currentSessionId()).isEqualTo(retainedSessionId);
     assertThat(new RoutingKeyResolver().resolveEvent(AuthenticationEvent.OTHER_ACCOUNT_SESSIONS_REVOKED.wireName()).routingKey())
         .isEqualTo(AmqpNames.ROUTING_KEY_OTHER_ACCOUNT_SESSIONS_REVOKED);
+  }
+
+  @Test
+  void routesResultsToTheOwningLogicalComponent() {
+    var resolver = new RoutingKeyResolver();
+
+    assertThat(resolver.resolveResult("bff").routingKey()).isEqualTo("bff");
+    assertThat(resolver.resolveResult("academic").routingKey()).isEqualTo("academic");
   }
 
   @Test

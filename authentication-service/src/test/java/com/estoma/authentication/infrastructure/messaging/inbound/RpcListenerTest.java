@@ -1,6 +1,7 @@
 package com.estoma.authentication.infrastructure.messaging.inbound;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -39,8 +40,11 @@ class RpcListenerTest {
   @Test
   void refreshReturnsDirectRpcResponseWithExactCorrelationAndCausation() {
     MessageEnvelope request = refreshRequest(new Actor("ANONYMOUS", null, null, "PUBLIC", null), null);
-    when(router.route(request)).thenReturn(new RpcOutcome.Success<>(
-        new RefreshSessionResponse("access", "refresh", Instant.parse("2026-09-01T00:00:00Z"))));
+    doReturn(
+            new RpcOutcome.Success<>(
+                new RefreshSessionResponse("access", "refresh", Instant.parse("2026-09-01T00:00:00Z"))))
+        .when(router)
+        .route(request);
 
     MessageEnvelope response = codec.decode(listener.onMessage(message(request)));
 
