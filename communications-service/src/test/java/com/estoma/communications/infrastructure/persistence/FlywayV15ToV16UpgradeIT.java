@@ -36,12 +36,29 @@ class FlywayV15ToV16UpgradeIT {
           "appointments");
       UUID unrelatedResult = insertOutbox(postgres, "CommunicationRequestedSucceeded", null, null);
 
+      migrate(postgres, "16");
+
+      UUID pendingRace = insertOutbox(
+          postgres,
+          "ExpireInboxMessagesSucceeded",
+          "{\"type\":\"SYSTEM\",\"service\":\"communications\"}",
+          "communications",
+          "PENDING");
+      UUID failedRace = insertOutbox(
+          postgres,
+          "ExpireInboxMessagesSucceeded",
+          "{\"type\":\"SYSTEM\",\"service\":\"communications\"}",
+          "communications",
+          "FAILED");
+
       migrate(postgres, null);
 
       assertStatus(postgres, legacyInternal, "DISCARDED", "DISCARDED_INTERNAL_RESULT_NO_CONSUMER");
       assertStatus(postgres, recentInternal, "DISCARDED", "DISCARDED_INTERNAL_RESULT_NO_CONSUMER");
       assertStatus(postgres, externalResult, "FAILED", "RABBIT_PUBLICATION_NOT_CONFIRMED");
       assertStatus(postgres, unrelatedResult, "FAILED", "RABBIT_PUBLICATION_NOT_CONFIRMED");
+      assertStatus(postgres, pendingRace, "DISCARDED", "DISCARDED_INTERNAL_RESULT_NO_CONSUMER");
+      assertStatus(postgres, failedRace, "DISCARDED", "DISCARDED_INTERNAL_RESULT_NO_CONSUMER");
     }
   }
 
@@ -58,6 +75,12 @@ class FlywayV15ToV16UpgradeIT {
 
   private static UUID insertOutbox(PostgreSQLContainer postgres, String type, String actor, String destination)
       throws Exception {
+    return insertOutbox(postgres, type, actor, destination, "FAILED");
+  }
+
+  private static UUID insertOutbox(
+      PostgreSQLContainer postgres, String type, String actor, String destination, String status)
+      throws Exception {
     UUID id = UUID.randomUUID();
     try (Connection connection = DriverManager.getConnection(
             postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
@@ -65,14 +88,15 @@ class FlywayV15ToV16UpgradeIT {
             INSERT INTO outbox_messages (
               message_id, message_type, message_version, message_kind, correlation_id, payload,
               status, attempts, occurred_at, available_at, last_error, actor, destination
-            ) VALUES (?, ?, 1, 'RESULT', ?, '{}'::jsonb, 'FAILED', 10, now(), now(),
+            ) VALUES (?, ?, 1, 'RESULT', ?, '{}'::jsonb, CAST(? AS outbox_status), 10, now(), now(),
               'RABBIT_PUBLICATION_NOT_CONFIRMED', CAST(? AS jsonb), ?)
             """)) {
       statement.setObject(1, id);
       statement.setString(2, type);
       statement.setObject(3, UUID.randomUUID());
-      statement.setString(4, actor);
-      statement.setString(5, destination);
+      statement.setString(4, status);
+      statement.setString(5, actor);
+      statement.setString(6, destination);
       statement.executeUpdate();
     }
     return id;
