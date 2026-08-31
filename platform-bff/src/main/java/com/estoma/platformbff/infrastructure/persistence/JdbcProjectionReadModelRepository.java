@@ -2,6 +2,7 @@ package com.estoma.platformbff.infrastructure.persistence;
 
 import com.estoma.platformbff.application.port.AuthorizationRecoveryPort;
 import com.estoma.platformbff.application.port.AccountPresentationRecoveryPort;
+import com.estoma.platformbff.application.port.PersonPresentationRecoveryPort;
 import com.estoma.platformbff.application.port.ProjectionQueryPort;
 import com.estoma.platformbff.application.port.ProjectionReadModelPort;
 import com.estoma.platformbff.application.port.SystemCatalogRecoveryPort;
@@ -18,7 +19,7 @@ import org.springframework.stereotype.Repository;
 /** JDBC adapter for the typed PR4 read models. Fencing is local to each row/stream. */
 @Repository
 public class JdbcProjectionReadModelRepository implements ProjectionReadModelPort, AuthorizationRecoveryPort,
-    AccountPresentationRecoveryPort, SystemCatalogRecoveryPort, ProjectionQueryPort {
+    AccountPresentationRecoveryPort, PersonPresentationRecoveryPort, SystemCatalogRecoveryPort, ProjectionQueryPort {
   private final JdbcClient jdbc;
 
   public JdbcProjectionReadModelRepository(JdbcClient jdbc) {
@@ -95,6 +96,16 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   @Override
   public void upsertAccountPresentationSnapshot(ProjectionReadModel.AccountPresentation presentation) {
     accountPresentation(presentation);
+  }
+
+  @Override
+  public void clearPersonPresentationProjection() {
+    jdbc.sql("DELETE FROM person_presentation_read_model").update();
+  }
+
+  @Override
+  public void upsertPersonPresentationSnapshot(ProjectionReadModel.Person presentation) {
+    person(presentation);
   }
 
   @Override

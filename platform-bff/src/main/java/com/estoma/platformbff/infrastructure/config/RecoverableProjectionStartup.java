@@ -2,6 +2,7 @@ package com.estoma.platformbff.infrastructure.config;
 
 import com.estoma.platformbff.application.projection.AccountPresentationRecoveryService;
 import com.estoma.platformbff.application.projection.AuthorizationRecoveryService;
+import com.estoma.platformbff.application.projection.PersonPresentationRecoveryService;
 import com.estoma.platformbff.application.projection.SystemCatalogRecoveryService;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -16,14 +17,17 @@ import org.springframework.stereotype.Component;
 public class RecoverableProjectionStartup implements ApplicationRunner {
   private final AuthorizationRecoveryService authorization;
   private final AccountPresentationRecoveryService accountPresentation;
+  private final PersonPresentationRecoveryService personPresentation;
   private final SystemCatalogRecoveryService systemCatalog;
   private final PlatformProperties properties;
 
   public RecoverableProjectionStartup(AuthorizationRecoveryService authorization,
-      AccountPresentationRecoveryService accountPresentation, SystemCatalogRecoveryService systemCatalog,
+      AccountPresentationRecoveryService accountPresentation, PersonPresentationRecoveryService personPresentation,
+      SystemCatalogRecoveryService systemCatalog,
       PlatformProperties properties) {
     this.authorization = authorization;
     this.accountPresentation = accountPresentation;
+    this.personPresentation = personPresentation;
     this.systemCatalog = systemCatalog;
     this.properties = properties;
   }
@@ -31,6 +35,7 @@ public class RecoverableProjectionStartup implements ApplicationRunner {
   @Override
   public void run(ApplicationArguments arguments) {
     startAuthorizationIfBootstrapping();
+    personPresentation.startFullIfBootstrapping();
     accountPresentation.startFullIfBootstrapping();
     systemCatalog.startFullIfBootstrapping();
     for (String systemCode : properties.recovery().systemCatalogRefreshCodes()) {

@@ -48,6 +48,7 @@ class SessionContextRecoveryPostgresIT {
   }
 
   @Autowired AccountPresentationRecoveryService accounts;
+  @Autowired PersonPresentationRecoveryService people;
   @Autowired SystemCatalogRecoveryService systems;
   @Autowired JdbcClient jdbc;
 
@@ -55,7 +56,8 @@ class SessionContextRecoveryPostgresIT {
   void clear() {
     jdbc.sql("""
         TRUNCATE TABLE projection_recovery_messages, projection_recovery_jobs, projection_status,
-          inbox_messages, account_presentation_read_model, authorization_system_catalog_read_model CASCADE
+          inbox_messages, person_presentation_read_model, account_presentation_read_model,
+          authorization_system_catalog_read_model CASCADE
         """).update();
   }
 
@@ -87,6 +89,29 @@ class SessionContextRecoveryPostgresIT {
     assertThat(jdbc.sql("SELECT status FROM projection_status WHERE projection_name = 'account-presentation'")
         .query(String.class).single()).isEqualTo("READY");
     assertThat(jdbc.sql("SELECT status FROM projection_status WHERE projection_name = 'system-catalog'")
+        .query(String.class).single()).isEqualTo("READY");
+  }
+
+  @Test
+  void personPresentationRecoveryReplacesTheHistoricalNullEmail() {
+    UUID personId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO person_presentation_read_model
+          (person_id, first_name, paternal_surname, maternal_surname, institutional_email,
+           status, source_version, updated_at)
+        VALUES (:personId, 'Ana', 'García', NULL, NULL, 'ACTIVE', 3, :updatedAt)
+        """).param("personId", personId).param("updatedAt", java.sql.Timestamp.from(Instant.parse(NOW))).update();
+
+    RecoveryJob job = job(people.startFull());
+    assertThat(people.applyResult(result("users", "ListPersonPresentationSnapshotsPageResult", job,
+        "SUCCEEDED", Map.of("items", List.of(Map.of(
+            "personId", personId.toString(), "firstName", "Ana", "paternalSurname", "García",
+            "institutionalEmail", "ana@example.invalid", "status", "ACTIVE", "sourceVersion", 3,
+            "updatedAt", NOW)), "hasMore", false)))).isTrue();
+
+    assertThat(jdbc.sql("SELECT institutional_email FROM person_presentation_read_model WHERE person_id = :personId")
+        .param("personId", personId).query(String.class).single()).isEqualTo("ana@example.invalid");
+    assertThat(jdbc.sql("SELECT status FROM projection_status WHERE projection_name = 'person'")
         .query(String.class).single()).isEqualTo("READY");
   }
 

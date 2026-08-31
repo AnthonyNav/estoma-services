@@ -1,6 +1,6 @@
 # Frontend V1 Backend Convergence Gaps — platform-bff
 
-Status: `IMPLEMENTED` — pending the documented deployment order for the Authentication Account Presentation producer.
+Status: `IN PROGRESS` — GAP-BFF-01 requires the separate Users Person Presentation recovery producer before the BFF can safely recover historical rows.
 
 Scope: BFF convergence required by the closed Front V1 flows for real session context (`GET /api/v1/me`), Wash Mailbox V1 and voluntary password change (`AUTH-04`).
 
@@ -33,9 +33,9 @@ Remaining BFF work is therefore projection/composition/edge hardening, plus cons
 ## GAP-BFF-01 — Person projection discards `institutionalEmail`
 
 - Severity: `HIGH`
-- Status: `IMPLEMENTED`
+- Status: `IN PROGRESS` — incremental projection is implemented; historical recovery is pending the Users Person Presentation contract.
 - Owner: `platform-bff`
-- Upstream owner: `users-service` — no owner change required
+- Upstream dependency: `users-service` Person Presentation recovery contract
 - Affected flows: `GET /api/v1/me`, WASH-ADM-04 presentation
 
 ### Current state
@@ -44,9 +44,13 @@ The BFF Person read model/persistence already has an `institutionalEmail` field,
 
 This is a consumer projection bug, not a Users contract gap.
 
-### Proposed solution
+### Required solution
 
 Project the actual `institutionalEmail` from the Users owner Event into the existing Person read model for both creation and update paths, and ensure recovery/rebuild applies the same semantic value.
+
+The existing Users Status Snapshot cannot close the recovery obligation because it contains
+only status/version fields. The owner must publish a separate Person Presentation snapshot;
+the BFF must rebuild this local read model from that contract before declaring `person` READY.
 
 ### Acceptance criteria
 
