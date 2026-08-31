@@ -14,7 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class JdbcWashExecutionIntegrationQueryRepository
+public class JdbcWashExecutionIntegrationQueryRepository
     implements WashExecutionIntegrationQueryRepository {
   private static final String EXECUTION_SELECT = """
       SELECT w.*,

@@ -17,6 +17,7 @@ public class RabbitConfig {
   @Primary
   RabbitTemplate requiredRouteRabbitTemplate(ConnectionFactory connectionFactory) {
     var template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(true);
     return template;
   }
@@ -26,6 +27,7 @@ public class RabbitConfig {
   RabbitTemplate securityRpcRabbitTemplate(
       ConnectionFactory connectionFactory, PlatformProperties properties) {
     var template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     template.setMandatory(true);
     template.setReplyTimeout(properties.securityRpc().timeout().toMillis());
     return template;
@@ -37,6 +39,7 @@ public class RabbitConfig {
       @Value("${platform.messaging.listeners-enabled:true}") boolean listenersEnabled) {
     var factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
+    factory.setObservationEnabled(true);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
     factory.setDefaultRequeueRejected(true);
     factory.setAutoStartup(listenersEnabled);

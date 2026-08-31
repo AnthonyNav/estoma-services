@@ -12,10 +12,12 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 class ContractAccountAuthorizationPolicyTest {
 
   private final ContractAccountAuthorizationPolicy policy = new ContractAccountAuthorizationPolicy();
+  private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().findAndAddModules().build();
 
   @Test
   void rejectsAnUnknownProducer() {
@@ -53,16 +55,25 @@ class ContractAccountAuthorizationPolicyTest {
   @Test
   void permitsAcademicStudentImportToDeactivateAnAggregate() {
     UUID accountId = UUID.randomUUID();
+    var execution = mapper.createObjectNode()
+        .put("importId", UUID.randomUUID().toString())
+        .put("planItemId", UUID.randomUUID().toString())
+        .put("executionGeneration", 1)
+        .put("authorizedByAccountId", UUID.randomUUID().toString())
+        .put("scope", "DEACTIVATE_ACCOUNT");
+    var payload = mapper.createObjectNode().put("accountId", accountId.toString());
+    payload.set("importExecution", execution);
+
     assertThatCode(() -> policy.check(new MessageEnvelope(
-        UUID.randomUUID(), "DeactivateAccount", 1, MessageKind.COMMAND, "student-import-process", Instant.now(),
+        UUID.randomUUID(), "DeactivateAccount", 1, MessageKind.COMMAND, "academic", Instant.now(),
         UUID.randomUUID(), null, UUID.randomUUID(), "test", accountId, 1,
-        new Actor("SYSTEM", null, "academic", "GLOBAL", null), null))).doesNotThrowAnyException();
+        new Actor("SYSTEM", null, "academic", null, null), payload))).doesNotThrowAnyException();
   }
 
   @Test
   void rejectsAcademicDeactivateWithoutAnAggregate() {
     assertRejected(new MessageEnvelope(
-        UUID.randomUUID(), "DeactivateAccount", 1, MessageKind.COMMAND, "student-import-process", Instant.now(),
+        UUID.randomUUID(), "DeactivateAccount", 1, MessageKind.COMMAND, "academic", Instant.now(),
         UUID.randomUUID(), null, UUID.randomUUID(), "test", null, null,
         new Actor("SYSTEM", null, "academic", "GLOBAL", null), null));
   }
@@ -78,7 +89,7 @@ class ContractAccountAuthorizationPolicyTest {
   @Test
   void academicOnlyAuthorizesAccountLifecycleCommands() {
     assertThat(com.estoma.authentication.contracts.AuthenticationAuthorizationMatrix.rules().stream()
-        .filter(rule -> "student-import-process".equals(rule.producer()))
+        .filter(rule -> "academic".equals(rule.producer()))
         .map(com.estoma.authentication.contracts.AuthenticationAuthorizationMatrix.Rule::operation)
         .collect(java.util.stream.Collectors.toSet()))
         .isEqualTo(Set.of("CreateAccount", "ActivateAccount", "DeactivateAccount"));

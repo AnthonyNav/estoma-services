@@ -11,6 +11,7 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
@@ -21,6 +22,7 @@ import org.testcontainers.rabbitmq.RabbitMQContainer;
 @SpringBootTest
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("integration")
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class AbstractMessagingIT {
   protected static final String BFF_RESULT_QUEUE = "test.wash-execution.results.platform-bff";
   protected static final String APPOINTMENTS_RESULT_QUEUE = "test.wash-execution.results.appointments";

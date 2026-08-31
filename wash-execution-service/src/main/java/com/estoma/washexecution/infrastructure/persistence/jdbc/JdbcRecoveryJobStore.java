@@ -12,7 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class JdbcRecoveryJobStore implements RecoveryJobStore {
+public class JdbcRecoveryJobStore implements RecoveryJobStore {
   private final JdbcTemplate jdbc;
 
   public JdbcRecoveryJobStore(JdbcTemplate jdbc) {

@@ -95,6 +95,8 @@ class StudentImportIdentityContractIT {
         .param("account", profileAccount).param("person", profilePerson).update();
     jdbc.sql("INSERT INTO student_academic_profiles (student_academic_profile_id,person_id,account_id,student_number,student_number_normalized,current_semester,academic_status,version,student_number_version,created_at,updated_at) VALUES (:id,:person,:account,'ST-1','ST-1',4,'ACTIVE',3,0,now(),now())")
         .param("id", UUID.randomUUID()).param("person", profilePerson).param("account", profileAccount).update();
+    jdbc.sql("INSERT INTO person_status_projection (person_id,status,source_version,updated_at) VALUES (:person,'ACTIVE',1,now())")
+        .param("person", resolvedPerson).update();
     resolution(importId, "student@estoma.mx", "{\"outcome\":\"FOUND\",\"personId\":\"" + resolvedPerson + "\",\"status\":\"ACTIVE\"}");
 
     assertThat(planBuilder.buildIfReady(importId)).isFalse();

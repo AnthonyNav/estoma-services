@@ -20,6 +20,7 @@ final class SystemCatalogRowMapper implements RowMapper<SystemCatalog> {
         SystemCode.parse(rs.getString("code")),
         rs.getString("name"),
         CatalogStatus.valueOf(rs.getString("status")),
+        rs.getInt("version"),
         Timestamps.toInstant(rs, "created_at"),
         Timestamps.toInstant(rs, "updated_at"));
   }

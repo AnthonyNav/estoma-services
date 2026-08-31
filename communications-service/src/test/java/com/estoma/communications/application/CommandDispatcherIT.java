@@ -369,12 +369,43 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   }
 
   @Test
+  void internallyDispatchedRejectedCommandDoesNotEmitAResult() {
+    MessageEnvelope envelope =
+        Envelopes.command(
+            CommunicationsCommand.EXPIRE_INBOX_MESSAGES.wireName(),
+            new ExpireInboxMessagesCommand(Instant.now(), 0));
+
+    var outcome = dispatcher.dispatchInternal(envelope);
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Rejected(RejectionCode.INVALID_BATCH_SIZE));
+    assertThat(
+            jdbc.sql(
+                    "SELECT count(*) FROM outbox_messages WHERE causation_id = :id AND message_kind = 'RESULT'")
+                .param("id", envelope.messageId())
+                .query(Long.class)
+                .single())
+        .isZero();
+  }
+
+  @Test
   void expireInboxMessagesExpiresDueMessages() {
     insertExpiredInboxMessage();
 
-    var outcome = dispatcher.dispatch(Envelopes.command(CommunicationsCommand.EXPIRE_INBOX_MESSAGES.wireName(), new ExpireInboxMessagesCommand(Instant.now(), 10)));
+    MessageEnvelope envelope =
+        Envelopes.command(
+            CommunicationsCommand.EXPIRE_INBOX_MESSAGES.wireName(),
+            new ExpireInboxMessagesCommand(Instant.now(), 10));
+
+    var outcome = dispatcher.dispatch(envelope);
 
     assertThat(outcome).isInstanceOf(CommandOutcome.Succeeded.class);
+    assertThat(
+            jdbc.sql(
+                    "SELECT count(*) FROM outbox_messages WHERE causation_id = :id AND message_kind = 'RESULT' AND message_type = 'ExpireInboxMessagesSucceeded'")
+                .param("id", envelope.messageId())
+                .query(Long.class)
+                .single())
+        .isEqualTo(1);
   }
 
   private UUID insertFailedEmailDelivery() {

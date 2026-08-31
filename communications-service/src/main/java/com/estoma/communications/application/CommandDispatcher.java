@@ -42,6 +42,23 @@ public class CommandDispatcher {
 
   @Transactional
   public CommandOutcome dispatch(MessageEnvelope envelope) {
+    return dispatch(envelope, true);
+  }
+
+  /**
+   * Dispatches a command initiated by this service itself.
+   *
+   * <p>Internal work has no remote caller waiting for a command result, so it
+   * deliberately persists only the domain events produced by the handler. The
+   * normal {@link #dispatch(MessageEnvelope)} path remains responsible for
+   * durable succeeded and rejected result envelopes.
+   */
+  @Transactional
+  public CommandOutcome dispatchInternal(MessageEnvelope envelope) {
+    return dispatch(envelope, false);
+  }
+
+  private CommandOutcome dispatch(MessageEnvelope envelope, boolean appendResult) {
     boolean inserted = inbox.tryInsert(ConsumerNames.COMMANDS, envelope.messageId(), envelope.correlationId());
     if (!inserted) return new CommandOutcome.Duplicate();
 
@@ -50,11 +67,11 @@ public class CommandDispatcher {
       CommandHandler handler = handlersByMessageType.get(envelope.messageType());
       if (handler == null) throw new IllegalStateException("no handler registered for messageType " + envelope.messageType());
       CommandHandlerResult result = handler.handle(envelope);
-      appendSucceededResult(envelope, result);
+      if (appendResult) appendSucceededResult(envelope, result);
       result.events().forEach(event -> appendEvent(envelope, result.aggregateId(), result.aggregateVersion(), event));
       return new CommandOutcome.Succeeded(result.aggregateVersion());
     } catch (CommunicationsRejectedException rejected) {
-      appendRejectedResult(envelope, rejected);
+      if (appendResult) appendRejectedResult(envelope, rejected);
       return new CommandOutcome.Rejected(rejected.code());
     }
   }

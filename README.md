@@ -33,6 +33,7 @@ Monorepo for Estoma microservices.
 - `wash-administration-service`: Lavado Ultrasonico schedule and resource configuration service.
 - `appointments-service`: Lavado Ultrasonico appointments, QR, capacity, and points service.
 - `wash-execution-service`: Lavado Ultrasonico arrival, assignment, incident, and exit service.
+- `jornadas-service`: Prácticas Profesionales Jornadas catalog — publish, edit, cancel, and automatic date-based finalization.
 - `registros-service`: Prácticas Profesionales pre-registro to a Jornada — cupo, confirmation, rejection, and cancellation.
 - `platform-bff`: client-facing API gateway and composition layer.
 
@@ -79,8 +80,8 @@ Only `deploy-test` is allowed to exercise the Woodpecker publishing path initial
 
 1. `deploy-test-test` runs `./mvnw -B clean verify` for pull requests and pushes.
 2. `deploy-test-build` uses `woodpeckerci/plugin-kaniko:2.3.2` to publish `develop-<short-sha>` / `main-<short-sha>` plus the convenience branch tag without Docker-in-Docker or a host Docker socket.
-3. On `develop`, `deploy-test-gitops` opens a Pull Request that changes only `apps/deploy-test/overlays/develop/kustomization.yaml` in `estoma-infra`.
-4. Argo CD deploys only after that infrastructure Pull Request is reviewed and merged.
+3. On `develop`, `deploy-test-gitops` creates and squash-merges a deterministic Pull Request that changes only `apps/deploy-test/overlays/develop/kustomization.yaml` in `estoma-infra`.
+4. Argo CD deploys the merged immutable image automatically. Staging and production remain explicit promotions.
 
 Woodpecker repository secrets are provisioned in Woodpecker, never committed here:
 

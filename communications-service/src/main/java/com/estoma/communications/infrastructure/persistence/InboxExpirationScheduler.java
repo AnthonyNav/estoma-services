@@ -34,7 +34,9 @@ class InboxExpirationScheduler {
     this.batchSize = batchSize;
   }
 
-  @Scheduled(fixedDelayString = "${estoma.communications.inbox.expiration.poll-interval-ms:300000}")
+  @Scheduled(
+      fixedDelayString = "${estoma.communications.inbox.expiration.poll-interval-ms:300000}",
+      initialDelayString = "${estoma.communications.inbox.expiration.initial-delay-ms:0}")
   public void expireDueMessages() {
     Instant now = Instant.now();
     MessageEnvelope envelope =
@@ -42,6 +44,6 @@ class InboxExpirationScheduler {
             UUID.randomUUID(), CommunicationsCommand.EXPIRE_INBOX_MESSAGES.wireName(), 1, MessageKind.COMMAND, "communications", now, UUID.randomUUID(),
             null, UUID.randomUUID(), null, null, null, Actor.system("communications"),
             codec.toJsonNode(new ExpireInboxMessagesCommand(now, batchSize)));
-    dispatcher.dispatch(envelope);
+    dispatcher.dispatchInternal(envelope);
   }
 }

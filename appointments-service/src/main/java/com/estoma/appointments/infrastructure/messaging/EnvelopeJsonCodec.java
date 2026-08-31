@@ -65,7 +65,9 @@ public final class EnvelopeJsonCodec {
     if (!node.has(field) || !node.path(field).isInt()) throw new IllegalArgumentException(field + " must be an integer");
     return node.path(field).asInt();
   }
-  private static Integer optionalInt(JsonNode node, String field) { return node.has(field) ? requiredInt(node, field) : null; }
+  private static Integer optionalInt(JsonNode node, String field) {
+    return !node.has(field) || node.path(field).isNull() ? null : requiredInt(node, field);
+  }
   private static String requiredText(JsonNode node, String field) {
     String value = optionalText(node, field);
     if (value == null || value.isBlank()) throw new IllegalArgumentException(field + " is required");

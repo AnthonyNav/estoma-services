@@ -7,7 +7,7 @@ when:
         - .woodpecker/deploy-test-test.yaml
         - .woodpecker/deploy-test-build.yaml
         - .woodpecker/deploy-test-gitops.yaml
-        - .woodpecker/scripts/**
+        - scripts/woodpecker/**
 
 depends_on:
   - deploy-test-build
@@ -23,7 +23,10 @@ steps:
       ESTOMA_INFRA_TOKEN:
         from_secret: ESTOMA_INFRA_TOKEN
     commands:
-      - sh .woodpecker/scripts/update-develop-infra.sh deploy-test ghcr.io/anthonynav/deploy-test apps/deploy-test/overlays/develop/kustomization.yaml
+      - >-
+        sh scripts/woodpecker/update-develop-infra.sh deploy-test
+        ghcr.io/anthonynav/deploy-test
+        apps/deploy-test/overlays/develop/kustomization.yaml
     backend_options:
       kubernetes:
         resources:

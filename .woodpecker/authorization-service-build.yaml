@@ -1,0 +1,41 @@
+when:
+  # Retry the immutable develop image after the initial promotion pass.
+  - event: manual
+    branch: develop
+  - event: push
+    branch: develop
+    path:
+      include:
+        - authorization-service/**
+        - .woodpecker/authorization-service-test.yaml
+        - .woodpecker/authorization-service-build.yaml
+        - .woodpecker/authorization-service-gitops.yaml
+        - scripts/woodpecker/**
+
+depends_on:
+  - authorization-service-test
+
+steps:
+  - name: build-and-push
+    image: woodpeckerci/plugin-kaniko:2.3.2
+    settings:
+      registry: ghcr.io
+      repo: anthonynav/authorization-service
+      context: authorization-service
+      dockerfile: authorization-service/Dockerfile
+      username:
+        from_secret: GHCR_USERNAME
+      password:
+        from_secret: GHCR_TOKEN
+      tags:
+        - develop-${CI_COMMIT_SHA:0:7}
+        - develop
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 750m
+            memory: 1Gi

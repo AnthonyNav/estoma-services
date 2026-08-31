@@ -25,6 +25,7 @@ Internal V1 business communication uses the canonical RabbitMQ contracts. Normal
 
 - [`docs/system_contract.md`](docs/system_contract.md) — local implementation contract.
 - [`docs/execution_plan.md`](docs/execution_plan.md) — PR1–PR6 implementation sequence and gates.
+- [`docs/admin_http_contract.md`](docs/admin_http_contract.md) — PR6 concrete `/api/v1/admin/**` route-to-owner matrix.
 - [`docs/pr2_correction_gate.md`](docs/pr2_correction_gate.md) — mandatory corrections/rebase gate identified before PR2 reconstruction.
 - [`docs/pr2_retention_addendum.md`](docs/pr2_retention_addendum.md) — PR2 idempotency retention correction: `expiresAt` starts at terminal state, not at submit.
 - [`docs/pr2_owner_contract_addendum.md`](docs/pr2_owner_contract_addendum.md) — owner-precedence correction for `CancelAppointmentTimeSlot` and its registry/wire gate.

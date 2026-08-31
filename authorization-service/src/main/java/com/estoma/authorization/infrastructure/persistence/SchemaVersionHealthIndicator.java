@@ -7,6 +7,7 @@ import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.flywaydb.core.api.MigrationInfoService;
 import org.flywaydb.core.api.MigrationState;
+import org.springframework.boot.health.contributor.Status;
 import org.springframework.stereotype.Component;
 
 /** Keeps schema compatibility visible to readiness without affecting liveness. */
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 public class SchemaVersionHealthIndicator implements HealthIndicator {
 
   private final Flyway flyway;
+  private volatile Health successfulHealth;
 
   public SchemaVersionHealthIndicator(Flyway flyway) {
     this.flyway = flyway;
@@ -21,6 +23,23 @@ public class SchemaVersionHealthIndicator implements HealthIndicator {
 
   @Override
   public Health health() {
+    Health cached = successfulHealth;
+    if (cached != null) {
+      return cached;
+    }
+    synchronized (this) {
+      if (successfulHealth != null) {
+        return successfulHealth;
+      }
+      Health health = validateSchema();
+      if (Status.UP.equals(health.getStatus())) {
+        successfulHealth = health;
+      }
+      return health;
+    }
+  }
+
+  private Health validateSchema() {
     try {
       MigrationInfoService migrationInfo = flyway.info();
       MigrationInfo current = migrationInfo.current();

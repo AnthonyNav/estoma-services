@@ -93,6 +93,10 @@ channels:
         $ref: '#/components/messages/GetAccountAuthorizationSnapshot'
       listAccountAuthorizationSnapshotsPage:
         $ref: '#/components/messages/ListAccountAuthorizationSnapshotsPage'
+      getSystemCatalogSnapshot:
+        $ref: '#/components/messages/GetSystemCatalogSnapshot'
+      listSystemCatalogSnapshotsPage:
+        $ref: '#/components/messages/ListSystemCatalogSnapshotsPage'
     bindings:
       amqp:
         is: queue
@@ -158,6 +162,10 @@ channels:
         $ref: '#/components/messages/GetAccountAuthorizationSnapshotResult'
       listAccountAuthorizationSnapshotsPageResult:
         $ref: '#/components/messages/ListAccountAuthorizationSnapshotsPageResult'
+      getSystemCatalogSnapshotResult:
+        $ref: '#/components/messages/GetSystemCatalogSnapshotResult'
+      listSystemCatalogSnapshotsPageResult:
+        $ref: '#/components/messages/ListSystemCatalogSnapshotsPageResult'
     bindings:
       amqp:
         is: routingKey
@@ -246,6 +254,8 @@ operations:
     messages:
       - $ref: '#/channels/queries.authorization/messages/getAccountAuthorizationSnapshot'
       - $ref: '#/channels/queries.authorization/messages/listAccountAuthorizationSnapshotsPage'
+      - $ref: '#/channels/queries.authorization/messages/getSystemCatalogSnapshot'
+      - $ref: '#/channels/queries.authorization/messages/listSystemCatalogSnapshotsPage'
   receiveRecoveryResults:
     action: receive
     channel:
@@ -270,6 +280,8 @@ operations:
       - $ref: '#/channels/platform.results/messages/restoreSystemAccessResult'
       - $ref: '#/channels/platform.results/messages/getAccountAuthorizationSnapshotResult'
       - $ref: '#/channels/platform.results/messages/listAccountAuthorizationSnapshotsPageResult'
+      - $ref: '#/channels/platform.results/messages/getSystemCatalogSnapshotResult'
+      - $ref: '#/channels/platform.results/messages/listSystemCatalogSnapshotsPageResult'
   sendAuthorizationEvents:
     action: send
     channel:
@@ -415,6 +427,14 @@ components:
       name: ListAccountAuthorizationSnapshotsPage
       payload:
         $ref: './schemas/queries/authorization-query.schema.json#/$defs/listAccountAuthorizationSnapshotsPage'
+    GetSystemCatalogSnapshot:
+      name: GetSystemCatalogSnapshot
+      payload:
+        $ref: './schemas/queries/authorization-query.schema.json#/$defs/getSystemCatalogSnapshot'
+    ListSystemCatalogSnapshotsPage:
+      name: ListSystemCatalogSnapshotsPage
+      payload:
+        $ref: './schemas/queries/authorization-query.schema.json#/$defs/listSystemCatalogSnapshotsPage'
     GetAccountAuthorizationSnapshotResult:
       name: GetAccountAuthorizationSnapshotResult
       payload:
@@ -423,6 +443,14 @@ components:
       name: ListAccountAuthorizationSnapshotsPageResult
       payload:
         $ref: './schemas/results/authorization-query-result.schema.json#/$defs/listAccountAuthorizationSnapshotsPageResult'
+    GetSystemCatalogSnapshotResult:
+      name: GetSystemCatalogSnapshotResult
+      payload:
+        $ref: './schemas/results/authorization-query-result.schema.json#/$defs/getSystemCatalogSnapshotResult'
+    ListSystemCatalogSnapshotsPageResult:
+      name: ListSystemCatalogSnapshotsPageResult
+      payload:
+        $ref: './schemas/results/authorization-query-result.schema.json#/$defs/listSystemCatalogSnapshotsPageResult'
     GetPersonStatusSnapshot:
       name: GetPersonStatusSnapshot
       description: Published to platform.queries with routing key users.

@@ -58,7 +58,8 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
     var metadata = command.metadata();
     String fingerprint = ApplicationSupport.fingerprint(command.appointmentId(), command.studentAccountId(),
         command.appointmentTimeSlotId(), command.courseSectionId(), command.appointmentType(),
-        command.instrumentCount(), command.pieceType(), command.exceptionalAuthorizationId());
+        command.instrumentCount(), command.pieceType(), command.exceptionalAuthorizationId(),
+        command.regulationAccepted());
     Optional<ApplicationResult> gate = ApplicationSupport.claimClient(idempotency, outbox, metadata,
         "ScheduleAppointment", fingerprint, now);
     if (gate.isPresent()) return gate.get();
@@ -77,6 +78,9 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
   private ApplicationResult validateAndSchedule(Command command) {
     if (command.appointmentId() == null) {
       return ApplicationResult.rejected("INVALID_APPOINTMENT_ID", "appointmentId is required");
+    }
+    if (!command.regulationAccepted()) {
+      return ApplicationResult.rejected("REGULATION_NOT_ACCEPTED", "regulation acceptance is required");
     }
     if (appointments.findById(command.appointmentId()).isPresent()) {
       return ApplicationResult.rejected("APPOINTMENT_ALREADY_EXISTS", "appointmentId already exists");

@@ -1,4 +1,6 @@
 when:
+  - event: manual
+    branch: [develop, main]
   - event: pull_request
     path:
       include:
@@ -6,7 +8,7 @@ when:
         - .woodpecker/deploy-test-test.yaml
         - .woodpecker/deploy-test-build.yaml
         - .woodpecker/deploy-test-gitops.yaml
-        - .woodpecker/scripts/**
+        - scripts/woodpecker/**
   - event: push
     branch: [develop, main]
     path:
@@ -15,14 +17,14 @@ when:
         - .woodpecker/deploy-test-test.yaml
         - .woodpecker/deploy-test-build.yaml
         - .woodpecker/deploy-test-gitops.yaml
-        - .woodpecker/scripts/**
+        - scripts/woodpecker/**
 
 steps:
   - name: test
     image: maven:3.9.16-eclipse-temurin-25
     directory: deploy-test
     commands:
-      - ./mvnw -B clean verify
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify
     backend_options:
       kubernetes:
         resources:
@@ -30,5 +32,5 @@ steps:
             cpu: 250m
             memory: 512Mi
           limits:
-            cpu: "1"
-            memory: 2Gi
+            cpu: 750m
+            memory: 1Gi

@@ -29,6 +29,7 @@ import com.estoma.authentication.testsupport.AbstractPostgresIT;
 import com.estoma.authentication.testsupport.Envelopes;
 import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -473,7 +474,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         AuthenticationCommand.ACTIVATE_ACCOUNT.wireName(),
         1,
         MessageKind.COMMAND,
-         "student-import-process",
+        "academic",
         Instant.now(),
         UUID.randomUUID(),
         null,
@@ -482,7 +483,11 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         accountId,
         null,
          new Actor("SYSTEM", null, "academic", "GLOBAL", null),
-         codec.toJsonNode(new ActivateAccountCommand(accountId, expectedVersion)));
+        codec.toJsonNode(
+            Map.of(
+                "accountId", accountId,
+                "expectedVersion", expectedVersion,
+                "importExecution", academicImportExecution("ACTIVATE_ACCOUNT"))));
   }
 
   private MessageEnvelope studentImportDeactivation(UUID accountId, int expectedVersion, String reasonCode) {
@@ -491,7 +496,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         AuthenticationCommand.DEACTIVATE_ACCOUNT.wireName(),
         1,
         MessageKind.COMMAND,
-        "student-import-process",
+        "academic",
         Instant.now(),
         UUID.randomUUID(),
         null,
@@ -500,7 +505,21 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         accountId,
         null,
         new Actor("SYSTEM", null, "academic", "GLOBAL", null),
-        codec.toJsonNode(new DeactivateAccountCommand(accountId, expectedVersion, reasonCode, null)));
+        codec.toJsonNode(
+            Map.of(
+                "accountId", accountId,
+                "expectedVersion", expectedVersion,
+                "reasonCode", reasonCode,
+                "importExecution", academicImportExecution("DEACTIVATE_ACCOUNT"))));
+  }
+
+  private static Map<String, Object> academicImportExecution(String scope) {
+    return Map.of(
+        "importId", UUID.randomUUID(),
+        "planItemId", UUID.randomUUID(),
+        "authorizedByAccountId", UUID.randomUUID(),
+        "executionGeneration", 1,
+        "scope", scope);
   }
 
   private static MessageEnvelope withMessageId(MessageEnvelope source, UUID messageId) {

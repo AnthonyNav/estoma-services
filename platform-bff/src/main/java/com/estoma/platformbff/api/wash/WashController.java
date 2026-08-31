@@ -3,20 +3,25 @@ package com.estoma.platformbff.api.wash;
 import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
+import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelAppointmentRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelExceptionalAuthorizationRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ClinicCancelRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CompleteWashExecutionRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.DisableOperationalResourceRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryDecisionRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryLookupRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.GrantExceptionalAuthorizationRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ReassignmentRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.RegisterArrivalRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.RestoreOperationalResourceRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ScheduleAppointmentRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.SubmitExitRequest;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.SupervisorEntryLookupResponse;
 import jakarta.validation.Valid;
 import java.time.Clock;
 import java.time.Instant;
@@ -39,13 +44,15 @@ public class WashController {
   private final PublicCommandAdapter commands;
   private final LocalAuthorizationService authorization;
   private final WashSupervisionQueryService supervision;
+  private final WashStudentQueryService studentQueries;
   private final Clock clock;
 
   public WashController(PublicCommandAdapter commands, LocalAuthorizationService authorization,
-      WashSupervisionQueryService supervision, Clock clock) {
+      WashSupervisionQueryService supervision, WashStudentQueryService studentQueries, Clock clock) {
     this.commands = commands;
     this.authorization = authorization;
     this.supervision = supervision;
+    this.studentQueries = studentQueries;
     this.clock = clock;
   }
 
@@ -55,12 +62,19 @@ public class WashController {
       @Valid @RequestBody ScheduleAppointmentRequest request) {
     UUID studentId = authorization.requireStudent();
     UUID appointmentId = UUID.randomUUID();
-    return accepted(commands.submit(studentId, "wash-schedule-appointment", "ScheduleAppointment",
-        payload("appointmentId", appointmentId, "studentAccountId", studentId,
-            "appointmentTimeSlotId", request.appointmentTimeSlotId(), "courseSectionId", request.courseSectionId(),
-            "appointmentType", request.appointmentType(), "instrumentCount", request.instrumentCount(),
-            "pieceType", request.pieceType(), "exceptionalAuthorizationId", request.exceptionalAuthorizationId()),
-        idempotencyKey, appointmentId, null));
+    Map<String, Object> intent = payload(
+        "appointmentTimeSlotId", request.appointmentTimeSlotId(),
+        "courseSectionId", request.courseSectionId(),
+        "appointmentType", request.appointmentType(),
+        "instrumentCount", request.instrumentCount(),
+        "pieceType", request.pieceType(),
+        "exceptionalAuthorizationId", request.exceptionalAuthorizationId(),
+        "regulationAccepted", request.regulationAccepted());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("appointmentId", appointmentId);
+    owner.put("studentAccountId", studentId);
+    return accepted(commands.submitEnriched(studentId, "wash-schedule-appointment", "ScheduleAppointment",
+        owner, intent, idempotencyKey, appointmentId, null, null, null));
   }
 
   @PostMapping("/appointments/{appointmentId}/cancel")
@@ -80,11 +94,13 @@ public class WashController {
       @Valid @RequestBody GrantExceptionalAuthorizationRequest request) {
     UUID supervisorId = authorization.requireWashSupervisor();
     UUID authorizationId = UUID.randomUUID();
-    return accepted(commands.submit(supervisorId, "wash-grant-exceptional-authorization",
-        "GrantExceptionalAppointmentAuthorization",
-        payload("authorizationId", authorizationId, "studentAccountId", request.studentAccountId(),
-            "serviceDate", request.serviceDate(), "reason", request.reason(), "expiresAt", request.expiresAt()),
-        idempotencyKey, authorizationId, null));
+    Map<String, Object> intent = payload("studentAccountId", request.studentAccountId(),
+        "serviceDate", request.serviceDate(), "reason", request.reason(), "expiresAt", request.expiresAt());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("authorizationId", authorizationId);
+    return accepted(commands.submitEnriched(supervisorId, "wash-grant-exceptional-authorization",
+        "GrantExceptionalAppointmentAuthorization", owner, intent, idempotencyKey,
+        authorizationId, null, null, null));
   }
 
   @PostMapping("/exceptional-authorizations/{authorizationId}/cancel")
@@ -104,9 +120,12 @@ public class WashController {
       @Valid @RequestBody RegisterArrivalRequest request) {
     UUID supervisorId = authorization.requireWashSupervisor();
     UUID washExecutionId = UUID.randomUUID();
-    return accepted(commands.submit(supervisorId, "wash-register-arrival", "RegisterWashArrival",
-        payload("washExecutionId", washExecutionId, "appointmentId", request.appointmentId(),
-            "arrivedAt", request.arrivedAt()), idempotencyKey, washExecutionId, null));
+    Instant arrivedAt = clock.instant();
+    Map<String, Object> intent = payload("appointmentId", request.appointmentId());
+    Map<String, Object> owner = payload("washExecutionId", washExecutionId,
+        "appointmentId", request.appointmentId(), "arrivedAt", arrivedAt);
+    return accepted(commands.submitEnriched(supervisorId, "wash-register-arrival", "RegisterWashArrival",
+        owner, intent, idempotencyKey, washExecutionId, null, null, null));
   }
 
   @PostMapping("/executions/{washExecutionId}/entry-decision")
@@ -115,12 +134,16 @@ public class WashController {
       @Valid @RequestBody EntryDecisionRequest request) {
     UUID supervisorId = authorization.requireWashSupervisor();
     Instant now = clock.instant();
-    return accepted(commands.submit(supervisorId, "wash-decide-entry", "DecideWashEntry",
-        payload("washExecutionId", washExecutionId, "identityConfirmed", request.identityConfirmed(),
-            "requirementsSatisfied", request.requirementsSatisfied(), "decision", request.decision(),
-            "rejectionReason", request.rejectionReason(), "decidedByAccountId", supervisorId,
-            "decidedAt", now, "expectedVersion", request.expectedVersion()),
-        idempotencyKey, washExecutionId, request.expectedVersion()));
+    Map<String, Object> intent = payload("washExecutionId", washExecutionId,
+        "identityConfirmed", request.identityConfirmed(), "requirementsSatisfied", request.requirementsSatisfied(),
+        "decision", request.decision(), "rejectionReason", request.rejectionReason(),
+        "expectedVersion", request.expectedVersion());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("decidedByAccountId", supervisorId);
+    owner.put("decidedAt", now);
+    return accepted(commands.submitEnriched(supervisorId, "wash-decide-entry", "DecideWashEntry",
+        owner, intent, idempotencyKey, washExecutionId, request.expectedVersion(),
+        washExecutionId, request.expectedVersion()));
   }
 
   @PostMapping("/executions/{washExecutionId}/reassignment")
@@ -129,11 +152,14 @@ public class WashController {
       @Valid @RequestBody ReassignmentRequest request) {
     UUID supervisorId = authorization.requireWashSupervisor();
     Instant now = clock.instant();
-    return accepted(commands.submit(supervisorId, "wash-resolve-reassignment", "ResolvePendingReassignment",
-        payload("washExecutionId", washExecutionId, "cabinId", request.cabinId(), "tankId", request.tankId(),
-            "resolvedByAccountId", supervisorId, "resolvedAt", now,
-            "expectedVersion", request.expectedVersion()),
-        idempotencyKey, washExecutionId, request.expectedVersion()));
+    Map<String, Object> intent = payload("washExecutionId", washExecutionId,
+        "cabinId", request.cabinId(), "tankId", request.tankId(), "expectedVersion", request.expectedVersion());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("resolvedByAccountId", supervisorId);
+    owner.put("resolvedAt", now);
+    return accepted(commands.submitEnriched(supervisorId, "wash-resolve-reassignment",
+        "ResolvePendingReassignment", owner, intent, idempotencyKey,
+        washExecutionId, request.expectedVersion(), washExecutionId, request.expectedVersion()));
   }
 
   @PostMapping("/executions/{washExecutionId}/exit")
@@ -144,11 +170,14 @@ public class WashController {
     authorization.requireStudentOwnsWashExecution(washExecutionId);
     UUID studentId = authorization.requireAuthenticatedAccount();
     Instant now = clock.instant();
-    return accepted(commands.submit(studentId, "wash-submit-exit", "SubmitWashExit",
-        payload("washExecutionId", washExecutionId, "submittedByStudentAccountId", studentId,
-            "materials", materials(request.materials()), "submittedAt", now,
-            "expectedVersion", request.expectedVersion()),
-        idempotencyKey, washExecutionId, request.expectedVersion()));
+    Map<String, Object> intent = payload("washExecutionId", washExecutionId,
+        "materials", materials(request.materials()), "expectedVersion", request.expectedVersion());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("submittedByStudentAccountId", studentId);
+    owner.put("submittedAt", now);
+    return accepted(commands.submitEnriched(studentId, "wash-submit-exit", "SubmitWashExit",
+        owner, intent, idempotencyKey, washExecutionId, request.expectedVersion(),
+        washExecutionId, request.expectedVersion()));
   }
 
   @PostMapping("/executions/{washExecutionId}/complete")
@@ -158,11 +187,14 @@ public class WashController {
     if (request.finalMaterials().isEmpty()) throw new IllegalArgumentException("final materials cannot be empty");
     UUID supervisorId = authorization.requireWashSupervisor();
     Instant now = clock.instant();
-    return accepted(commands.submit(supervisorId, "wash-complete-execution", "CompleteWashExecution",
-        payload("washExecutionId", washExecutionId, "completedByAccountId", supervisorId,
-            "finalMaterials", materials(request.finalMaterials()), "completedAt", now,
-            "expectedVersion", request.expectedVersion()),
-        idempotencyKey, washExecutionId, request.expectedVersion()));
+    Map<String, Object> intent = payload("washExecutionId", washExecutionId,
+        "finalMaterials", materials(request.finalMaterials()), "expectedVersion", request.expectedVersion());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("completedByAccountId", supervisorId);
+    owner.put("completedAt", now);
+    return accepted(commands.submitEnriched(supervisorId, "wash-complete-execution", "CompleteWashExecution",
+        owner, intent, idempotencyKey, washExecutionId, request.expectedVersion(),
+        washExecutionId, request.expectedVersion()));
   }
 
   @PostMapping("/executions/{washExecutionId}/clinic-cancel")
@@ -171,12 +203,15 @@ public class WashController {
       @Valid @RequestBody ClinicCancelRequest request) {
     UUID supervisorId = authorization.requireWashSupervisor();
     Instant now = clock.instant();
-    return accepted(commands.submit(supervisorId, "wash-clinic-cancel-execution",
-        "CancelWashExecutionByClinic",
-        payload("washExecutionId", washExecutionId, "cancellationSubreason", request.cancellationSubreason(),
-            "cancellationReason", request.cancellationReason(), "cancelledByAccountId", supervisorId,
-            "cancelledAt", now, "expectedVersion", request.expectedVersion()),
-        idempotencyKey, washExecutionId, request.expectedVersion()));
+    Map<String, Object> intent = payload("washExecutionId", washExecutionId,
+        "cancellationSubreason", request.cancellationSubreason(),
+        "cancellationReason", request.cancellationReason(), "expectedVersion", request.expectedVersion());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("cancelledByAccountId", supervisorId);
+    owner.put("cancelledAt", now);
+    return accepted(commands.submitEnriched(supervisorId, "wash-clinic-cancel-execution",
+        "CancelWashExecutionByClinic", owner, intent, idempotencyKey,
+        washExecutionId, request.expectedVersion(), washExecutionId, request.expectedVersion()));
   }
 
   @PostMapping("/operational-resources/disable")
@@ -189,13 +224,16 @@ public class WashController {
     UUID supervisorId = authorization.requireWashSupervisor();
     UUID resourceUnavailabilityId = UUID.randomUUID();
     Instant now = clock.instant();
-    return accepted(commands.submit(supervisorId, "wash-disable-operational-resource",
-        "DisableOperationalResource",
-        payload("resourceUnavailabilityId", resourceUnavailabilityId, "cabinId", request.cabinId(),
-            "tankId", request.tankId(), "causeType", request.causeType(), "reason", request.reason(),
-            "disabledByAccountId", supervisorId,
-            "detectedDuringWashExecutionId", request.detectedDuringWashExecutionId(), "disabledAt", now),
-        idempotencyKey, resourceUnavailabilityId, null));
+    Map<String, Object> intent = payload("cabinId", request.cabinId(), "tankId", request.tankId(),
+        "causeType", request.causeType(), "reason", request.reason(),
+        "detectedDuringWashExecutionId", request.detectedDuringWashExecutionId());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("resourceUnavailabilityId", resourceUnavailabilityId);
+    owner.put("disabledByAccountId", supervisorId);
+    owner.put("disabledAt", now);
+    return accepted(commands.submitEnriched(supervisorId, "wash-disable-operational-resource",
+        "DisableOperationalResource", owner, intent, idempotencyKey,
+        resourceUnavailabilityId, null, null, null));
   }
 
   @PostMapping("/operational-resources/restore")
@@ -204,17 +242,35 @@ public class WashController {
       @Valid @RequestBody RestoreOperationalResourceRequest request) {
     UUID supervisorId = authorization.requireWashSupervisor();
     Instant now = clock.instant();
-    return accepted(commands.submit(supervisorId, "wash-restore-operational-resource",
-        "RestoreOperationalResource",
-        payload("resourceUnavailabilityId", request.resourceUnavailabilityId(), "resolution", request.resolution(),
-            "restoredByAccountId", supervisorId, "restoredAt", now,
-            "expectedVersion", request.expectedVersion()),
-        idempotencyKey, request.resourceUnavailabilityId(), request.expectedVersion()));
+    Map<String, Object> intent = payload("resourceUnavailabilityId", request.resourceUnavailabilityId(),
+        "resolution", request.resolution(), "expectedVersion", request.expectedVersion());
+    Map<String, Object> owner = new LinkedHashMap<>(intent);
+    owner.put("restoredByAccountId", supervisorId);
+    owner.put("restoredAt", now);
+    return accepted(commands.submitEnriched(supervisorId, "wash-restore-operational-resource",
+        "RestoreOperationalResource", owner, intent, idempotencyKey,
+        request.resourceUnavailabilityId(), request.expectedVersion(),
+        request.resourceUnavailabilityId(), request.expectedVersion()));
   }
 
   @GetMapping("/supervision/pending-reassignments")
   public PendingReassignmentsResponse pendingReassignments() {
     return supervision.pendingReassignments();
+  }
+
+  @PostMapping("/supervision/entry-lookup")
+  public SupervisorEntryLookupResponse entryLookup(@Valid @RequestBody EntryLookupRequest request) {
+    return studentQueries.entryLookup(request);
+  }
+
+  @GetMapping("/student/home")
+  public StudentHomeResponse studentHome() {
+    return studentQueries.home();
+  }
+
+  @GetMapping("/appointments/form-context")
+  public AppointmentFormContextResponse appointmentFormContext() {
+    return studentQueries.formContext();
   }
 
   private static ResponseEntity<AcceptedOperationResponse> accepted(AcceptedOperationResponse response) {

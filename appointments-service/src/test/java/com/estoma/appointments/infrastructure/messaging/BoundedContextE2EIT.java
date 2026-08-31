@@ -200,6 +200,7 @@ class BoundedContextE2EIT extends AbstractPostgresIT {
     payload.put("appointmentType", "NORMAL");
     payload.put("instrumentCount", 1);
     payload.put("pieceType", "HIGH_SPEED");
+    payload.put("regulationAccepted", true);
     return new MessageEnvelope(messageId, "ScheduleAppointment", 1, MessageKind.COMMAND,
         "bff", NOW, correlationId, null, operationId, idempotencyKey, appointmentId, null,
         new WireActor("ACCOUNT", studentId, null), payload);

@@ -1,0 +1,36 @@
+when:
+  - event: manual
+    branch: [develop, main]
+  - event: pull_request
+    path:
+      include:
+        - infra-test/**
+        - .woodpecker/infra-test-test.yaml
+        - .woodpecker/infra-test-build.yaml
+        - .woodpecker/infra-test-gitops.yaml
+        - scripts/woodpecker/**
+  - event: push
+    branch: [develop, main]
+    path:
+      include:
+        - infra-test/**
+        - .woodpecker/infra-test-test.yaml
+        - .woodpecker/infra-test-build.yaml
+        - .woodpecker/infra-test-gitops.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: infra-test
+    commands:
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 750m
+            memory: 1Gi

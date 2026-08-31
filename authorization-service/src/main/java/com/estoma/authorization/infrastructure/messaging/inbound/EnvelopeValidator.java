@@ -67,19 +67,19 @@ final class EnvelopeValidator {
     WireValues.uuid(raw, "messageId");
     WireValues.instant(raw, "occurredAt");
     WireValues.uuid(raw, "correlationId");
-    if (raw.has("causationId")) {
+    if (raw.hasNonNull("causationId")) {
       WireValues.uuid(raw, "causationId");
     }
-    if (raw.has("operationId")) {
+    if (raw.hasNonNull("operationId")) {
       WireValues.uuid(raw, "operationId");
     }
-    if (raw.has("idempotencyKey")) {
+    if (raw.hasNonNull("idempotencyKey")) {
       WireValues.uuid(raw, "idempotencyKey");
     }
-    if (raw.has("aggregateId")) {
+    if (raw.hasNonNull("aggregateId")) {
       WireValues.uuid(raw, "aggregateId");
     }
-    if (raw.has("aggregateVersion")) {
+    if (raw.hasNonNull("aggregateVersion")) {
       WireValues.positiveInt(raw, "aggregateVersion");
     }
     validateActor(raw.get("actor"));
@@ -132,7 +132,7 @@ final class EnvelopeValidator {
   }
 
   private static void forbidden(JsonNode raw, String field) {
-    if (raw.has(field)) {
+    if (raw.hasNonNull(field)) {
       throw new InvalidMessageException(field + " is not applicable to this messageKind");
     }
   }

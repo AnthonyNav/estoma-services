@@ -271,6 +271,11 @@ public sealed interface ProjectionReadModel permits
       Instant completedAt,
       Instant cancelledAt,
       String cancellationType,
+      String rejectionReason,
+      Integer submittedPackageCount,
+      Integer submittedGreenPaperCassette8Count,
+      Integer submittedGreenPaperCassette10Count,
+      Integer submittedWitnessTapePortionCount,
       long executionVersion,
       Instant updatedAt) implements ProjectionReadModel {}
 

@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bff_db
+      POSTGRES_USER: bff
+      POSTGRES_PASSWORD: bff
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bff -d bff_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  bff:
+    image: platform-bff:ci
+    ports:
+      - "18080:8080"
+    environment:
+      BFF_DB_URL: jdbc:postgresql://postgres:5432/bff_db
+      BFF_DB_USERNAME: bff
+      BFF_DB_PASSWORD: bff
+      BFF_RABBITMQ_ADDRESSES: amqp://rabbitmq:5672
+      BFF_RABBITMQ_LISTENERS_ENABLED: "false"
+      BFF_OUTBOX_ENABLED: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy

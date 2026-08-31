@@ -1,6 +1,7 @@
 package com.estoma.platformbff.contracts.http.wash;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -21,7 +22,8 @@ public final class WashHttpRequests {
       @NotBlank @Pattern(regexp = "NORMAL|JOURNEY|IMMUNOCOMPROMISED") String appointmentType,
       @Positive int instrumentCount,
       @NotBlank @Pattern(regexp = "HIGH_SPEED|LOW_SPEED|CONTRA_ANGLE") String pieceType,
-      UUID exceptionalAuthorizationId) {}
+      UUID exceptionalAuthorizationId,
+      @AssertTrue boolean regulationAccepted) {}
 
   public record CancelAppointmentRequest(
       @Positive long expectedVersion,
@@ -35,7 +37,22 @@ public final class WashHttpRequests {
 
   public record CancelExceptionalAuthorizationRequest(@NotBlank @Size(max = 500) String reason) {}
 
-  public record RegisterArrivalRequest(@NotNull UUID appointmentId, @NotNull Instant arrivedAt) {}
+  public record RegisterArrivalRequest(@NotNull UUID appointmentId) {}
+
+  /** QR is intentionally rejected until a QR-to-appointment projection is owner-supported. */
+  public record EntryLookupRequest(
+      @NotBlank @Pattern(regexp = "QR|STUDENT_ENROLLMENT") String lookupType,
+      @Size(max = 2_000) String qrRepresentation,
+      @Size(max = 120) String studentEnrollment) {
+    @AssertTrue(message = "exactly one lookup value matching lookupType is required")
+    public boolean hasMatchingValue() {
+      return "QR".equals(lookupType) ? notBlank(qrRepresentation) && !notBlank(studentEnrollment)
+          : "STUDENT_ENROLLMENT".equals(lookupType) ? notBlank(studentEnrollment) && !notBlank(qrRepresentation)
+          : false;
+    }
+
+    private static boolean notBlank(String value) { return value != null && !value.isBlank(); }
+  }
 
   public record EntryDecisionRequest(
       boolean identityConfirmed,

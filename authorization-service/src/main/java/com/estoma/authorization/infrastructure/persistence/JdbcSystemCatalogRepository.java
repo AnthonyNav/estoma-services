@@ -12,7 +12,7 @@ import org.springframework.stereotype.Repository;
 class JdbcSystemCatalogRepository implements SystemCatalogRepository {
 
   private static final String COLUMNS =
-      "system_id, code, name, status, created_at, updated_at";
+      "system_id, code, name, status, version, created_at, updated_at";
   private final JdbcClient jdbc;
 
   JdbcSystemCatalogRepository(JdbcClient jdbc) {

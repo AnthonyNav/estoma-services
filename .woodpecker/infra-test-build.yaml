@@ -1,0 +1,38 @@
+when:
+  - event: push
+    branch: [develop, main]
+    path:
+      include:
+        - infra-test/**
+        - .woodpecker/infra-test-test.yaml
+        - .woodpecker/infra-test-build.yaml
+        - .woodpecker/infra-test-gitops.yaml
+        - scripts/woodpecker/**
+
+depends_on:
+  - infra-test-test
+
+steps:
+  - name: build-and-push
+    image: woodpeckerci/plugin-kaniko:2.3.2
+    settings:
+      registry: ghcr.io
+      repo: anthonynav/infra-test
+      context: infra-test
+      dockerfile: infra-test/Dockerfile
+      username:
+        from_secret: GHCR_USERNAME
+      password:
+        from_secret: GHCR_TOKEN
+      tags:
+        - ${CI_COMMIT_BRANCH}-${CI_COMMIT_SHA:0:7}
+        - ${CI_COMMIT_BRANCH}
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 750m
+            memory: 1Gi

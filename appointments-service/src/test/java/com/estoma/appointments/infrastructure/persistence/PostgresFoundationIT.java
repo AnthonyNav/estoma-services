@@ -7,6 +7,7 @@ import com.estoma.appointments.application.port.out.CommandIdempotencyRepository
 import com.estoma.appointments.application.port.out.OutboxRepository;
 import com.estoma.appointments.application.port.out.PendingCapacityEvaluationRepository;
 import com.estoma.appointments.application.port.out.WashExecutionEvidenceRepository;
+import com.estoma.appointments.application.port.out.WashExecutionOperationalProjectionRepository;
 import com.estoma.appointments.application.port.out.WashExecutionTransitionRepository;
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
@@ -43,6 +44,7 @@ class PostgresFoundationIT extends AbstractPostgresIT {
   @Autowired JdbcAppointmentCapacityProjectionRepository capacity;
   @Autowired JdbcPendingCapacityEvaluationRepository pendingCapacity;
   @Autowired JdbcWashExecutionEvidenceRepository evidence;
+  @Autowired JdbcWashExecutionOperationalProjectionRepository executionProjection;
   @Autowired org.springframework.transaction.PlatformTransactionManager transactionManager;
   @Autowired JdbcCommandIdempotencyRepository idempotency;
 
@@ -205,6 +207,46 @@ class PostgresFoundationIT extends AbstractPostgresIT {
     appointments.save(stored);
     assertThat(appointments.findForStudentAndDate(student, slot.serviceDate()))
         .extracting(Appointment::appointmentId).containsExactly(stored.appointmentId());
+  }
+
+  @Test void serviceDatePageSupportsAnInitialRequestWithoutCursor() {
+    Instant now = Instant.parse("2026-01-12T10:00:00Z");
+    AppointmentTimeSlot firstSlot = saveSlot(now);
+    AppointmentTimeSlot secondSlot = saveSlot(now.plusSeconds(3_600));
+    Appointment first = appointment(firstSlot, UUID.randomUUID(), AppointmentType.NORMAL, null, now);
+    Appointment second = appointment(secondSlot, UUID.randomUUID(), AppointmentType.NORMAL, null,
+        now.plusSeconds(1));
+    appointments.save(first);
+    appointments.save(second);
+
+    var initial = appointments.findForServiceDatePage(firstSlot.serviceDate(), null, 10);
+    assertThat(initial).extracting(Appointment::appointmentId)
+        .containsExactlyInAnyOrder(first.appointmentId(), second.appointmentId());
+
+    UUID cursor = initial.getFirst().appointmentId();
+    assertThat(appointments.findForServiceDatePage(firstSlot.serviceDate(), cursor, 10))
+        .extracting(Appointment::appointmentId).hasSize(1);
+  }
+
+  @Test void completedCleaningDoesNotBlockOverlappingCapacity() {
+    Instant now = Instant.parse("2026-01-11T10:00:00Z");
+    UUID cleaningId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    executionProjection.upsertCleaningPeriod(
+        new WashExecutionOperationalProjectionRepository.CleaningPeriodProjection(
+            cleaningId, executionId, assignmentId, cabinId, "NORMAL_COMPLETION", now,
+            now.plusSeconds(10_800), null, 1, now));
+    assertThat(executionProjection.findCleaningPeriodsOverlapping(now.plusSeconds(60),
+        now.plusSeconds(3_600))).hasSize(1);
+
+    executionProjection.upsertCleaningPeriod(
+        new WashExecutionOperationalProjectionRepository.CleaningPeriodProjection(
+            cleaningId, executionId, assignmentId, cabinId, "NORMAL_COMPLETION", now,
+            now.plusSeconds(10_800), now.plusSeconds(120), 2, now.plusSeconds(120)));
+    assertThat(executionProjection.findCleaningPeriodsOverlapping(now.plusSeconds(60),
+        now.plusSeconds(3_600))).isEmpty();
   }
 
   @Test void outboxFailureRollsBackTheContainingTransaction() {

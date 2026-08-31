@@ -209,7 +209,7 @@ class PostgresFoundationIT extends AbstractPostgresIT {
       start.countDown();
       assertThat(a.get()).isNotEqualTo(b.get());
       assertThat(cleaningPeriods.findByAssignmentId(assignmentId).orElseThrow().completedAt())
-          .isEqualTo(cleaning.expectedEndsAt().truncatedTo(ChronoUnit.MICROS));
+          .isEqualTo(postgresTimestamp(cleaning.expectedEndsAt()));
     }
   }
 
@@ -279,6 +279,10 @@ class PostgresFoundationIT extends AbstractPostgresIT {
       return true;
     });
     return Boolean.TRUE.equals(result);
+  }
+
+  private static Instant postgresTimestamp(Instant value) {
+    return value.plusNanos(500).truncatedTo(ChronoUnit.MICROS);
   }
 
   private boolean attemptAssignment(

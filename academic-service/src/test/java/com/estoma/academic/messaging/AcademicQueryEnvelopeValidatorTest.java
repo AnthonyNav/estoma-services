@@ -35,6 +35,21 @@ class AcademicQueryEnvelopeValidatorTest {
   }
 
   @Test
+  void acceptsTheActivePeriodSnapshotOnlyFromCommunications() {
+    assertThatCode(() -> validator.validate(query("communications",
+        "GetActiveAcademicPeriodSnapshot", mapper.createObjectNode(), null)))
+        .doesNotThrowAnyException();
+    assertThatThrownBy(() -> validator.validate(query("appointments",
+        "GetActiveAcademicPeriodSnapshot", mapper.createObjectNode(), null)))
+        .isInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
+        .hasMessage("QUERY_PRODUCER_NOT_ALLOWED");
+    assertThatThrownBy(() -> validator.validate(query("communications",
+        "GetActiveAcademicPeriodSnapshot", mapper.createObjectNode().put("unexpected", true), null)))
+        .isInstanceOf(AcademicQueryEnvelopeValidator.RejectedException.class)
+        .hasMessage("INVALID_ACTIVE_ACADEMIC_PERIOD_QUERY");
+  }
+
+  @Test
   void keepsQueryFamiliesRequesterScoped() {
     assertThatThrownBy(() -> validator.validate(query("appointments",
         "GetStudentAcademicEligibilitySnapshot", mapper.createObjectNode()

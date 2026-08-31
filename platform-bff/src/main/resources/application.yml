@@ -6,7 +6,10 @@ spring:
     username: ${BFF_DB_USERNAME:bff}
     password: ${BFF_DB_PASSWORD:bff}
     hikari:
-      maximum-pool-size: ${BFF_DB_POOL_SIZE:10}
+      maximum-pool-size: ${BFF_DB_POOL_SIZE:4}
+      minimum-idle: ${BFF_DB_MIN_IDLE:1}
+      connection-timeout: 10000
+      validation-timeout: 5000
   flyway:
     enabled: ${BFF_FLYWAY_ENABLED:true}
     baseline-on-migrate: false
@@ -19,9 +22,20 @@ spring:
     listener:
       simple:
         auto-startup: ${BFF_RABBITMQ_LISTENERS_ENABLED:true}
+        observation-enabled: true
+    template:
+      observation-enabled: true
 server:
   port: 8080
 management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces
   endpoint:
     health:
       probes:
@@ -64,3 +78,6 @@ platform:
     outbox-failed-days: ${BFF_OUTBOX_FAILED_RETENTION_DAYS:30}
     inbox-days: ${BFF_INBOX_RETENTION_DAYS:30}
     recovery-job-days: ${BFF_RECOVERY_JOB_RETENTION_DAYS:30}
+  genesis:
+    enabled: ${BFF_GENESIS_ENABLED:false}
+    environment-fresh: ${BFF_GENESIS_ENVIRONMENT_FRESH:false}

@@ -13,10 +13,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 /**
  * Verifies the documented operational HTTP surface (system_contract.md
  * "Operational HTTP Interface"): every health path and {@code
- * /metrics}/{@code /info} respond when the database is healthy. This
- * service has no RabbitMQ dependency yet (messaging is Phase 3), so the
- * aggregate {@code /health} endpoint only ever reflects the {@code db}
- * indicator here.
+ * /metrics}/{@code /info} respond when the database is healthy. Messaging
+ * infrastructure is deliberately disabled by {@link AbstractPostgresIT}, so
+ * this HTTP-surface test disables only RabbitMQ's connection health check.
  *
  * <p>{@code @AutoConfigureMetrics} is required: Spring Boot's test support
  * disables metrics export by default in every {@code @SpringBootTest} (so
@@ -25,7 +24,9 @@ import org.springframework.boot.test.context.SpringBootTest;
  * PrometheusMeterRegistry} bean and {@code /metrics} never registers at all
  * unless this annotation opts back in.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties = "management.health.rabbit.enabled=false")
 @AutoConfigureTestRestTemplate
 @AutoConfigureMetrics
 class HealthEndpointsIT extends AbstractPostgresIT {
