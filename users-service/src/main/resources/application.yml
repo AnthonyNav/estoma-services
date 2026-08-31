@@ -62,6 +62,8 @@ estoma:
       authorization:
         - GetPersonStatusSnapshot
         - ListPersonStatusSnapshotsPage
+      bff:
+        - ListPersonPresentationSnapshotsPage
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
     command-max-attempts: 3
     query-max-attempts: 3

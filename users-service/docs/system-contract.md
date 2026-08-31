@@ -240,6 +240,16 @@ A malformed `institutionalEmail` is not `NOT_FOUND` — it is a
 structurally invalid request, translated explicitly to a DLQ'd message,
 never left to escape uncaught into the (nonexistent) rejection path.
 
+`ListPersonPresentationSnapshotsPage` is the separate, BFF-only recovery
+query for rebuilding its local Person Presentation from the Users source of
+truth. It requires producer and `SYSTEM` actor `bff`; no other producer is
+authorized. Its payload requires `limit: 200` and accepts an optional UUID
+`cursor`. The successful result contains `{ items, hasMore, nextCursor? }`;
+each item contains `personId`, `firstName`, `paternalSurname`, optional
+`maternalSurname`, `institutionalEmail`, `status`, `sourceVersion`, and
+`updatedAt`. This deliberately does not expand the authorization status
+recovery contract: that result remains status-only.
+
 ---
 
 ## 4. Results (published to `platform.results`)

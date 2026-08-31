@@ -7,6 +7,7 @@ import com.estoma.users.config.MessagingProperties;
 import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
+import com.estoma.users.contract.MessageTypes;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -20,7 +21,14 @@ class QueryEnvelopeValidatorTest {
   private final QueryEnvelopeValidator validator =
       new QueryEnvelopeValidator(
           new MessagingProperties(
-              Map.of(), Map.of("academic", Set.of("ResolvePersonByInstitutionalEmail")), true, 3, 3, Duration.ofSeconds(5)));
+              Map.of(),
+              Map.of(
+                  "academic", Set.of(MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL),
+                  "bff", Set.of(MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE)),
+              true,
+              3,
+              3,
+              Duration.ofSeconds(5)));
   private final tools.jackson.databind.ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
@@ -84,6 +92,26 @@ class QueryEnvelopeValidatorTest {
   void rejectsSystemActorWithoutService() {
     assertThatThrownBy(() -> validator.validate(withActor(validQuery(), new Actor.System(null))))
         .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void acceptsTheBffPersonPresentationRecoveryQuery() {
+    MessageEnvelope bffQuery = new MessageEnvelope(
+        UUID.randomUUID(), MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE, 1, MessageKind.QUERY,
+        "bff", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(), null, null, null,
+        new Actor.System("bff"), mapper.valueToTree(Map.of("limit", 200)));
+
+    assertThatCode(() -> validator.validate(bffQuery)).doesNotThrowAnyException();
+  }
+
+  @Test
+  void rejectsTheBffPresentationQueryFromAnotherProducer() {
+    MessageEnvelope academicQuery = new MessageEnvelope(
+        UUID.randomUUID(), MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE, 1, MessageKind.QUERY,
+        "academic", Instant.now(), UUID.randomUUID(), null, UUID.randomUUID(), null, null, null,
+        new Actor.System("academic"), mapper.valueToTree(Map.of("limit", 200)));
+
+    assertThatThrownBy(() -> validator.validate(academicQuery)).isInstanceOf(InvalidMessageException.class);
   }
 
   @Test

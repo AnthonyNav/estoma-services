@@ -48,6 +48,8 @@ channels:
         $ref: '#/components/messages/GetPersonStatusSnapshot'
       listPersonStatusSnapshotsPage:
         $ref: '#/components/messages/ListPersonStatusSnapshotsPage'
+      listPersonPresentationSnapshotsPage:
+        $ref: '#/components/messages/ListPersonPresentationSnapshotsPage'
     bindings:
       amqp:
         is: queue
@@ -70,6 +72,8 @@ channels:
         $ref: '#/components/messages/GetPersonStatusSnapshotResult'
       listPersonStatusSnapshotsPageResult:
         $ref: '#/components/messages/ListPersonStatusSnapshotsPageResult'
+      listPersonPresentationSnapshotsPageResult:
+        $ref: '#/components/messages/ListPersonPresentationSnapshotsPageResult'
     bindings:
       amqp:
         is: routingKey
@@ -146,6 +150,10 @@ components:
       name: ListPersonStatusSnapshotsPage
       payload:
         $ref: '#/components/schemas/QueryEnvelope'
+    ListPersonPresentationSnapshotsPage:
+      name: ListPersonPresentationSnapshotsPage
+      payload:
+        $ref: '#/components/schemas/QueryEnvelope'
 
     CreatePersonResult:
       name: CreatePersonResult
@@ -165,6 +173,10 @@ components:
         $ref: '#/components/schemas/ResultEnvelope'
     ListPersonStatusSnapshotsPageResult:
       name: ListPersonStatusSnapshotsPageResult
+      payload:
+        $ref: '#/components/schemas/ResultEnvelope'
+    ListPersonPresentationSnapshotsPageResult:
+      name: ListPersonPresentationSnapshotsPageResult
       payload:
         $ref: '#/components/schemas/ResultEnvelope'
 
@@ -341,6 +353,33 @@ components:
       properties:
         personId:
           $ref: '#/components/schemas/Uuid'
+        status:
+          enum: [ACTIVE, INACTIVE]
+        sourceVersion:
+          type: integer
+          minimum: 1
+        updatedAt:
+          $ref: '#/components/schemas/Timestamp'
+
+    PersonPresentationSnapshot:
+      type: object
+      additionalProperties: false
+      required: [personId, firstName, paternalSurname, institutionalEmail, status, sourceVersion, updatedAt]
+      properties:
+        personId:
+          $ref: '#/components/schemas/Uuid'
+        firstName:
+          type: string
+          minLength: 1
+        paternalSurname:
+          type: string
+          minLength: 1
+        maternalSurname:
+          type: string
+          minLength: 1
+        institutionalEmail:
+          type: string
+          format: email
         status:
           enum: [ACTIVE, INACTIVE]
         sourceVersion:
