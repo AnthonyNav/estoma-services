@@ -123,6 +123,7 @@ class JdbcAcademicPeriodProjectionRepository implements AcademicPeriodProjection
             recovery_requested_at = NULL,
             updated_at = :updatedAt
         WHERE state_key = 1
+          AND readiness <> 'BOOTSTRAPPING'
           AND active_academic_period_id = :id
           AND EXISTS (
             SELECT 1 FROM academic_period_projections p
@@ -198,7 +199,17 @@ class JdbcAcademicPeriodProjectionRepository implements AcademicPeriodProjection
             recovery_query_message_id = NULL,
             recovery_requested_at = NULL,
             updated_at = :updatedAt
-        WHERE state_key = 1 AND recovery_query_message_id = :queryMessageId
+        WHERE state_key = 1
+          AND recovery_query_message_id = :queryMessageId
+          AND (
+            :hasActive = FALSE
+            OR EXISTS (
+              SELECT 1 FROM academic_period_projections p
+              WHERE p.academic_period_id = :activeAcademicPeriodId
+                AND p.status = 'ACTIVE'
+                AND p.source_version = :activeSourceVersion
+            )
+          )
         """)
         .param("activeAcademicPeriodId", period.map(ActiveAcademicPeriod::academicPeriodId).orElse(null))
         .param("activeSourceVersion", period.map(ActiveAcademicPeriod::sourceVersion).orElse(null))

@@ -117,6 +117,45 @@ class AcademicPeriodRecoveryIT extends AbstractPostgresIT {
   }
 
   @Test
+  void closingThePreviousPeriodKeepsTheNewPeriodRecoveryFence() {
+    UUID previousPeriodId = UUID.randomUUID();
+    UUID currentPeriodId = UUID.randomUUID();
+    dispatcher.dispatch(activatedEvent(
+        previousPeriodId, Instant.parse("2030-08-01T12:00:00Z"), LocalDate.of(2030, 1, 1), LocalDate.of(2030, 6, 30)));
+
+    dispatcher.dispatch(activatedEvent(
+        currentPeriodId, Instant.parse("2030-08-01T12:01:00Z"), LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)));
+    UUID queryId = latestRecoveryQueryId();
+    dispatcher.dispatch(closedEvent(previousPeriodId, Instant.parse("2030-08-01T12:01:00Z"), 2));
+
+    assertThat(periods.readiness()).isEqualTo("BOOTSTRAPPING");
+    assertThat(recovery.handleResult(foundResult(
+        queryId, currentPeriodId, 1, LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)))).isTrue();
+    assertThat(periods.findAuthoritativeActive()).hasValueSatisfying(period ->
+        assertThat(period.academicPeriodId()).isEqualTo(currentPeriodId));
+  }
+
+  @Test
+  void closedPeriodRejectsAnOlderFoundSnapshotAndRemainsRecoverable() {
+    UUID periodId = UUID.randomUUID();
+    dispatcher.dispatch(activatedEvent(
+        periodId, Instant.parse("2030-08-01T12:00:00Z"), LocalDate.of(2030, 1, 1), LocalDate.of(2030, 6, 30)));
+    recovery.requestBootstrap();
+    UUID staleQueryId = latestRecoveryQueryId();
+    dispatcher.dispatch(closedEvent(periodId, Instant.parse("2030-08-01T12:01:00Z"), 2));
+
+    assertThat(recovery.handleResult(foundResult(
+        staleQueryId, periodId, 1, LocalDate.of(2030, 1, 1), LocalDate.of(2030, 6, 30)))).isFalse();
+    assertThat(periods.readiness()).isEqualTo("BOOTSTRAPPING");
+
+    recovery.requestBootstrap();
+    UUID currentQueryId = latestRecoveryQueryId();
+    assertThat(recovery.handleResult(notFoundResult(currentQueryId, Instant.parse("2030-08-01T12:02:00Z")))).isTrue();
+    assertThat(periods.readiness()).isEqualTo("READY");
+    assertThat(periods.findAuthoritativeActive()).isEmpty();
+  }
+
+  @Test
   void sourceVersionPreventsAStaleActivationFromReopeningAClosedPeriod() {
     UUID periodId = UUID.randomUUID();
     dispatcher.dispatch(Envelopes.event(
@@ -180,5 +219,13 @@ class AcademicPeriodRecoveryIT extends AbstractPostgresIT {
         UUID.randomUUID(), ConsumedEventTypes.ACADEMIC_PERIOD_ACTIVATED, 1, MessageKind.EVENT, "academic", occurredAt,
         UUID.randomUUID(), null, null, null, periodId, 1, Actor.system("academic"),
         mapper.valueToTree(new AcademicPeriodActivatedPayload(periodId, "2030-B", "ACTIVE", startDate, endDate)));
+  }
+
+  private static MessageEnvelope closedEvent(UUID periodId, Instant occurredAt, int version) {
+    ObjectMapper mapper = new ObjectMapper();
+    return new MessageEnvelope(
+        UUID.randomUUID(), ConsumedEventTypes.ACADEMIC_PERIOD_CLOSED, 1, MessageKind.EVENT, "academic", occurredAt,
+        UUID.randomUUID(), null, null, null, periodId, version, Actor.system("academic"),
+        mapper.valueToTree(new AcademicPeriodClosedPayload(periodId, "CLOSED")));
   }
 }
