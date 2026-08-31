@@ -34,7 +34,9 @@ class InboxExpirationScheduler {
     this.batchSize = batchSize;
   }
 
-  @Scheduled(fixedDelayString = "${estoma.communications.inbox.expiration.poll-interval-ms:300000}")
+  @Scheduled(
+      fixedDelayString = "${estoma.communications.inbox.expiration.poll-interval-ms:300000}",
+      initialDelayString = "${estoma.communications.inbox.expiration.initial-delay-ms:0}")
   public void expireDueMessages() {
     Instant now = Instant.now();
     MessageEnvelope envelope =

@@ -18,4 +18,4 @@ steps:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     commands:
-      - ./scripts/woodpecker/validate-pr.sh
+      - sh .woodpecker/validate-pr.sh
