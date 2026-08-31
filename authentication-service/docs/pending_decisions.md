@@ -9,6 +9,12 @@ Resolved in code:
 - Users Person events use canonical `producer = users` / `users.person.*` routing.
 - Academic coordinated account Commands use `producer = academic`, `SYSTEM/academic`, `importExecution`, stable `operationId` and `idempotencyKey`.
 - Authorization projection recovery uses `platform.queries -> queries.authentication` with `GetAccountStatusSnapshot` and `ListAccountStatusSnapshotsPage`.
+- BFF Account Presentation recovery uses `GetAccountPresentationSnapshot` and
+  `ListAccountPresentationSnapshotsPage`; both are restricted to `SYSTEM/bff`
+  and return the current login identifier without credentials or session data.
+- `AccountPresentationUpdated` carries incremental non-secret presentation
+  state on `authentication.account.presentation-updated` without changing the
+  existing Account lifecycle Event payloads consumed by other services.
 - Command Results route to the original requester and coordinated Academic terminal Results retain `importId`, `planItemId`, and `executionGeneration`.
 - `PasswordChanged` integration with Communications is governed by the Communications owner contract rather than Authentication-local assumptions.
 

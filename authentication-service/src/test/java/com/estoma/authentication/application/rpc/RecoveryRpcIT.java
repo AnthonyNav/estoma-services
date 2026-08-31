@@ -1,6 +1,10 @@
 package com.estoma.authentication.application.rpc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 
 import com.estoma.authentication.application.RpcDispatcher;
 import com.estoma.authentication.application.RpcOutcome;
@@ -11,8 +15,19 @@ import com.estoma.authentication.application.port.PersonStatusProjectionReposito
 import com.estoma.authentication.application.port.PasswordRecoveryRepository;
 import com.estoma.authentication.application.port.RecoveryCodeDeriver;
 import com.estoma.authentication.application.port.SessionRepository;
+import com.estoma.authentication.contracts.Actor;
+import com.estoma.authentication.contracts.AuthenticationRpcOperation;
 import com.estoma.authentication.contracts.LoginType;
+import com.estoma.authentication.contracts.MessageEnvelope;
+import com.estoma.authentication.contracts.MessageKind;
+import com.estoma.authentication.contracts.result.ResultPayload;
+import com.estoma.authentication.contracts.result.ResultStatus;
+import com.estoma.authentication.contracts.rpc.AuthenticateAccountRequest;
+import com.estoma.authentication.contracts.rpc.AuthenticateAccountResponse;
 import com.estoma.authentication.contracts.rpc.ChangePasswordRequest;
+import com.estoma.authentication.contracts.rpc.ChangePasswordResponse;
+import com.estoma.authentication.contracts.rpc.RefreshSessionRequest;
+import com.estoma.authentication.contracts.rpc.RefreshSessionResponse;
 import com.estoma.authentication.contracts.rpc.ResetPasswordRequest;
 import com.estoma.authentication.contracts.rpc.RpcRequestContext;
 import com.estoma.authentication.contracts.rpc.ValidateRecoveryCodeRequest;
@@ -22,12 +37,23 @@ import com.estoma.authentication.domain.account.LoginIdentifier;
 import com.estoma.authentication.domain.credential.Credential;
 import com.estoma.authentication.domain.recovery.PasswordRecoveryRequest;
 import com.estoma.authentication.domain.session.Session;
+import com.estoma.authentication.infrastructure.messaging.EnvelopeJsonCodec;
+import com.estoma.authentication.infrastructure.messaging.rpc.RpcListener;
 import com.estoma.authentication.testsupport.AbstractPostgresIT;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 class RecoveryRpcIT extends AbstractPostgresIT {
 
@@ -43,6 +69,10 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Autowired private RecoveryCodeDeriver codeDeriver;
   @Autowired private ResetPasswordHandler resetHandler;
   @Autowired private ChangePasswordHandler changeHandler;
+  @Autowired private AuthenticateAccountHandler authenticateHandler;
+  @Autowired private RefreshSessionHandler refreshHandler;
+  @Autowired private RpcListener rpcListener;
+  @Autowired private EnvelopeJsonCodec codec;
   @Autowired private AccountRepository accountRepository;
   @Autowired private CredentialRepository credentialRepository;
   @Autowired private PasswordRecoveryRepository recoveryRepository;
@@ -50,6 +80,8 @@ class RecoveryRpcIT extends AbstractPostgresIT {
   @Autowired private PersonStatusProjectionRepository personStatusProjectionRepository;
   @Autowired private SessionRepository sessionRepository;
   @Autowired private JdbcClient jdbc;
+
+  @MockitoSpyBean private SessionRepository sessionRepositorySpy;
 
   @Test
   void validateRecoveryCodeAcceptsTheCorrectCode() {
@@ -147,6 +179,53 @@ class RecoveryRpcIT extends AbstractPostgresIT {
    }
 
   @Test
+  void changePasswordRotatesUsableCredentialsAndInvalidatesThePreviousRefreshToken() {
+    UUID accountId = insertActiveAccountWithPassword();
+    AuthenticateAccountResponse authenticated = authenticate(accountId, OLD_PASSWORD);
+    Session otherSession = normalSession(accountId);
+    sessionRepository.insert(otherSession);
+
+    var changedOutcome = dispatcher.execute(
+        context(accountId),
+        () -> changeHandler.handle(
+            context(accountId),
+            new ChangePasswordRequest(authenticated.sessionId(), OLD_PASSWORD, NEW_PASSWORD)));
+
+    assertThat(changedOutcome).isInstanceOf(RpcOutcome.Success.class);
+    ChangePasswordResponse changed = (ChangePasswordResponse) ((RpcOutcome.Success<?>) changedOutcome).response();
+    assertThat(changed.sessionId()).isEqualTo(authenticated.sessionId());
+    assertThat(changed.accessToken()).isNotBlank().isNotEqualTo(authenticated.accessToken());
+    assertThat(changed.refreshToken()).isNotBlank().isNotEqualTo(authenticated.refreshToken());
+    assertThat(sessionRepository.findById(authenticated.sessionId()).orElseThrow().isValid(Instant.now())).isTrue();
+    assertThat(sessionRepository.findById(otherSession.sessionId()).orElseThrow().isValid(Instant.now())).isFalse();
+
+    var refreshedOutcome = dispatcher.execute(
+        context(accountId),
+        () -> refreshHandler.handle(
+            context(accountId), new RefreshSessionRequest(changed.sessionId(), changed.refreshToken())));
+    assertThat(refreshedOutcome).isInstanceOf(RpcOutcome.Success.class);
+    assertThat(((RefreshSessionResponse) ((RpcOutcome.Success<?>) refreshedOutcome).response()).refreshToken())
+        .isNotEqualTo(changed.refreshToken());
+
+    jdbc.sql("UPDATE sessions SET previous_refresh_valid_until = :expired WHERE session_id = :sessionId")
+        .param("expired", java.sql.Timestamp.from(Instant.now().minusSeconds(1)))
+        .param("sessionId", authenticated.sessionId())
+        .update();
+    var previousToken = dispatcher.execute(
+        context(accountId),
+        () -> refreshHandler.handle(
+            context(accountId), new RefreshSessionRequest(changed.sessionId(), changed.refreshToken())));
+    assertThat(((RpcOutcome.Rejected<?>) previousToken).code()).isEqualTo(RejectionCode.REFRESH_TOKEN_REPLAY);
+
+    assertThat(authenticate(accountId, NEW_PASSWORD).sessionId()).isNotEqualTo(authenticated.sessionId());
+    var oldPassword = dispatcher.execute(
+        context(null),
+        () -> authenticateHandler.handle(
+            new AuthenticateAccountRequest(LoginType.USERNAME, accountLogin(accountId), OLD_PASSWORD, null, null, null)));
+    assertThat(((RpcOutcome.Rejected<?>) oldPassword).code()).isEqualTo(RejectionCode.INVALID_CREDENTIALS);
+  }
+
+  @Test
   void securityRpcEventsPreserveRequestMetadata() {
     UUID accountId = insertActiveAccountWithPassword();
     Session currentSession = normalSession(accountId);
@@ -206,6 +285,136 @@ class RecoveryRpcIT extends AbstractPostgresIT {
      var outcome = dispatcher.execute(context(accountId), () -> changeHandler.handle(context(accountId), new ChangePasswordRequest(currentSession.sessionId(), "not-the-current-password", NEW_PASSWORD)));
 
     assertThat(((RpcOutcome.Rejected<?>) outcome).code()).isEqualTo(RejectionCode.INVALID_CREDENTIALS);
+  }
+
+  @Test
+  void changePasswordRejectionsLeaveCredentialSessionAndEventsUntouched() {
+    UUID accountId = insertActiveAccountWithPassword();
+    Session currentSession = normalSession(accountId);
+    sessionRepository.insert(currentSession);
+    var originalHash = credentialRepository.findByAccountId(accountId).orElseThrow().hash();
+    String originalRefreshHash = sessionRepository.findById(currentSession.sessionId()).orElseThrow().refreshTokenHash();
+
+    var wrongCurrent = dispatcher.execute(
+        context(accountId),
+        () -> changeHandler.handle(
+            context(accountId),
+            new ChangePasswordRequest(currentSession.sessionId(), "not-the-current-password", NEW_PASSWORD)));
+    assertThat(((RpcOutcome.Rejected<?>) wrongCurrent).code()).isEqualTo(RejectionCode.INVALID_CREDENTIALS);
+
+    var invalidPolicy = dispatcher.execute(
+        context(accountId),
+        () -> changeHandler.handle(
+            context(accountId), new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, "too-short")));
+    assertThat(((RpcOutcome.Rejected<?>) invalidPolicy).code()).isEqualTo(RejectionCode.INVALID_PASSWORD);
+
+    assertThat(credentialRepository.findByAccountId(accountId).orElseThrow().hash()).isEqualTo(originalHash);
+    Session persisted = sessionRepository.findById(currentSession.sessionId()).orElseThrow();
+    assertThat(persisted.refreshTokenHash()).isEqualTo(originalRefreshHash);
+    assertThat(persisted.isValid(Instant.now())).isTrue();
+    assertThat(eventCount(accountId, "PasswordChanged")).isZero();
+    assertThat(eventCount(accountId, "OtherAccountSessionsRevoked")).isZero();
+  }
+
+  @Test
+  void refreshAndChangePasswordSerializeAndTheStaleRefreshTokenCannotOverwriteTheChange() throws Exception {
+    UUID accountId = insertActiveAccountWithPassword();
+    AuthenticateAccountResponse authenticated = authenticate(accountId, OLD_PASSWORD);
+    CountDownLatch refreshLockAcquired = new CountDownLatch(1);
+    CountDownLatch releaseRefresh = new CountDownLatch(1);
+    AtomicInteger lockCalls = new AtomicInteger();
+    doAnswer(invocation -> {
+      @SuppressWarnings("unchecked")
+      Optional<Session> locked = (Optional<Session>) invocation.callRealMethod();
+      if (lockCalls.incrementAndGet() == 1) {
+        refreshLockAcquired.countDown();
+        await(releaseRefresh);
+      }
+      return locked;
+    }).when(sessionRepositorySpy).findByIdForUpdate(authenticated.sessionId());
+
+    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var refresh = executor.submit(() -> dispatcher.execute(
+          context(accountId),
+          () -> refreshHandler.handle(
+              context(accountId), new RefreshSessionRequest(authenticated.sessionId(), authenticated.refreshToken()))));
+      await(refreshLockAcquired);
+      var change = executor.submit(() -> dispatcher.execute(
+          context(accountId),
+          () -> changeHandler.handle(
+              context(accountId),
+              new ChangePasswordRequest(authenticated.sessionId(), OLD_PASSWORD, NEW_PASSWORD))));
+
+      releaseRefresh.countDown();
+      var refreshOutcome = refresh.get(10, TimeUnit.SECONDS);
+      var changeOutcome = change.get(10, TimeUnit.SECONDS);
+      assertThat(refreshOutcome).isInstanceOf(RpcOutcome.Success.class);
+      assertThat(changeOutcome).isInstanceOf(RpcOutcome.Success.class);
+      String staleRefreshToken =
+          ((RefreshSessionResponse) ((RpcOutcome.Success<?>) refreshOutcome).response()).refreshToken();
+      ChangePasswordResponse changed =
+          (ChangePasswordResponse) ((RpcOutcome.Success<?>) changeOutcome).response();
+
+      var staleRefresh = dispatcher.execute(
+          context(accountId),
+          () -> refreshHandler.handle(
+              context(accountId), new RefreshSessionRequest(authenticated.sessionId(), staleRefreshToken)));
+      assertThat(((RpcOutcome.Rejected<?>) staleRefresh).code()).isEqualTo(RejectionCode.INVALID_REFRESH_TOKEN);
+      var changedRefresh = dispatcher.execute(
+          context(accountId),
+          () -> refreshHandler.handle(
+              context(accountId), new RefreshSessionRequest(authenticated.sessionId(), changed.refreshToken())));
+      assertThat(changedRefresh).isInstanceOf(RpcOutcome.Success.class);
+    }
+
+    assertThat(passwordHasher.matches(NEW_PASSWORD, credentialRepository.findByAccountId(accountId).orElseThrow().hash())).isTrue();
+  }
+
+  @Test
+  void technicalFailureAfterCredentialMutationRollsBackThePasswordAndSessionUpdate() {
+    UUID accountId = insertActiveAccountWithPassword();
+    Session currentSession = normalSession(accountId);
+    sessionRepository.insert(currentSession);
+    var originalHash = credentialRepository.findByAccountId(accountId).orElseThrow().hash();
+    String originalRefreshHash = sessionRepository.findById(currentSession.sessionId()).orElseThrow().refreshTokenHash();
+    doThrow(new IllegalStateException("forced session persistence failure"))
+        .when(sessionRepositorySpy)
+        .update(any(Session.class));
+
+    assertThatThrownBy(() -> dispatcher.execute(
+        context(accountId),
+        () -> changeHandler.handle(
+            context(accountId), new ChangePasswordRequest(currentSession.sessionId(), OLD_PASSWORD, NEW_PASSWORD))))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("forced session persistence failure");
+
+    assertThat(credentialRepository.findByAccountId(accountId).orElseThrow().hash()).isEqualTo(originalHash);
+    Session persisted = sessionRepository.findById(currentSession.sessionId()).orElseThrow();
+    assertThat(persisted.refreshTokenHash()).isEqualTo(originalRefreshHash);
+    assertThat(persisted.isValid(Instant.now())).isTrue();
+    assertThat(eventCount(accountId, "PasswordChanged")).isZero();
+  }
+
+  @Test
+  void repeatedEphemeralTransportDeliveryCannotRepeatThePasswordMutation() {
+    UUID accountId = insertActiveAccountWithPassword();
+    AuthenticateAccountResponse authenticated = authenticate(accountId, OLD_PASSWORD);
+    MessageEnvelope request = new MessageEnvelope(
+        UUID.randomUUID(), AuthenticationRpcOperation.CHANGE_PASSWORD.wireName(), 1, MessageKind.RPC_REQUEST,
+        "bff", Instant.now(), UUID.randomUUID(), null, null, null, accountId, null,
+        new Actor("ACCOUNT", accountId, null, "SELF", null),
+        codec.toJsonNode(new ChangePasswordRequest(authenticated.sessionId(), OLD_PASSWORD, NEW_PASSWORD)));
+    MessageProperties properties = new MessageProperties();
+    properties.setReplyTo("test-reply");
+
+    ResultPayload first = resultOf(rpcListener.onMessage(new Message(codec.encode(request), properties)));
+    ResultPayload replay = resultOf(rpcListener.onMessage(new Message(codec.encode(request), properties)));
+
+    assertThat(first.status()).isEqualTo(ResultStatus.SUCCEEDED);
+    assertThat(replay.status()).isEqualTo(ResultStatus.REJECTED);
+    assertThat(replay.error().code()).isEqualTo(RejectionCode.PASSWORD_REUSE.name());
+    assertThat(eventCount(accountId, "PasswordChanged")).isEqualTo(1);
+    assertThat(passwordHasher.matches(NEW_PASSWORD, credentialRepository.findByAccountId(accountId).orElseThrow().hash())).isTrue();
   }
 
   @Test
@@ -278,6 +487,28 @@ class RecoveryRpcIT extends AbstractPostgresIT {
         .param("messageType", messageType)
         .query(Long.class)
         .single();
+  }
+
+  private AuthenticateAccountResponse authenticate(UUID accountId, String password) {
+    var outcome = dispatcher.execute(
+        context(null),
+        () -> authenticateHandler.handle(
+            new AuthenticateAccountRequest(LoginType.USERNAME, accountLogin(accountId), password, null, null, null)));
+    assertThat(outcome).isInstanceOf(RpcOutcome.Success.class);
+    return (AuthenticateAccountResponse) ((RpcOutcome.Success<?>) outcome).response();
+  }
+
+  private ResultPayload resultOf(Message response) {
+    return codec.convertPayload(codec.decode(response.getBody()), ResultPayload.class);
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      assertThat(latch.await(10, TimeUnit.SECONDS)).as("concurrency latch").isTrue();
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(interrupted);
+    }
   }
 
   private static Session normalSession(UUID accountId) {

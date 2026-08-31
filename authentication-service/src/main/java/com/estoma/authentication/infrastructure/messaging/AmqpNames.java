@@ -46,6 +46,8 @@ public final class AmqpNames {
   public static final String ROUTING_KEY_ACCOUNT_ACTIVATED = "authentication.account.activated";
   public static final String ROUTING_KEY_ACCOUNT_DEACTIVATED = "authentication.account.deactivated";
   public static final String ROUTING_KEY_LOGIN_IDENTIFIER_CHANGED = "authentication.account.login-identifier-changed";
+  public static final String ROUTING_KEY_ACCOUNT_PRESENTATION_UPDATED =
+      "authentication.account.presentation-updated";
   public static final String ROUTING_KEY_STUDENT_LOGIN_SYNC_FAILED =
       "authentication.account.student-login-identifier-synchronization-failed";
   public static final String ROUTING_KEY_PASSWORD_CHANGED = "authentication.credential.password-changed";

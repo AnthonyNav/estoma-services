@@ -17,12 +17,14 @@ import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-/** Authoritative Account status snapshots used only by Authorization recovery. */
+/** Authoritative Account snapshots used only by requester-scoped projection recovery. */
 @Component
 public class AccountStatusSnapshotQueryService {
 
   public static final String GET = "GetAccountStatusSnapshot";
   public static final String LIST = "ListAccountStatusSnapshotsPage";
+  public static final String GET_PRESENTATION = "GetAccountPresentationSnapshot";
+  public static final String LIST_PRESENTATION = "ListAccountPresentationSnapshotsPage";
   private static final int PAGE_LIMIT = 200;
   private static final Actor SYSTEM = new Actor("SYSTEM", null, "authentication", null, null);
 
@@ -42,6 +44,8 @@ public class AccountStatusSnapshotQueryService {
     switch (query.messageType()) {
       case GET -> point(query);
       case LIST -> page(query);
+      case GET_PRESENTATION -> point(query);
+      case LIST_PRESENTATION -> page(query);
       default -> throw new IllegalArgumentException("unsupported Authentication Query " + query.messageType());
     }
   }
@@ -61,15 +65,15 @@ public class AccountStatusSnapshotQueryService {
       payload.put("status", "NOT_FOUND");
     } else {
       payload.put("status", "FOUND");
-      payload.put("data", snapshot(account.get()));
+      payload.put("data", snapshot(account.get(), isPresentation(query)));
     }
-    append(query, GET + "Result", accountId, payload);
+    append(query, query.messageType() + "Result", accountId, payload);
   }
 
   private void page(MessageEnvelope query) {
     int limit = query.payload().path("limit").asInt(-1);
     if (limit != PAGE_LIMIT) {
-      throw new IllegalArgumentException("ListAccountStatusSnapshotsPage requires limit=200");
+      throw new IllegalArgumentException(query.messageType() + " requires limit=200");
     }
     UUID cursor = query.payload().hasNonNull("cursor")
         ? requiredUuid(query.payload().path("cursor").asString(null), "cursor")
@@ -78,7 +82,7 @@ public class AccountStatusSnapshotQueryService {
     boolean hasMore = rows.size() > PAGE_LIMIT;
     List<Account> visible = hasMore ? rows.subList(0, PAGE_LIMIT) : rows;
     List<Map<String, Object>> items = new ArrayList<>(visible.size());
-    visible.forEach(account -> items.add(snapshot(account)));
+    visible.forEach(account -> items.add(snapshot(account, isPresentation(query))));
 
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("items", items);
@@ -86,15 +90,18 @@ public class AccountStatusSnapshotQueryService {
     if (hasMore && !visible.isEmpty()) {
       data.put("nextCursor", visible.getLast().accountId());
     }
-    append(query, LIST + "Result", null, Map.of("status", "SUCCEEDED", "data", data));
+    append(query, query.messageType() + "Result", null, Map.of("status", "SUCCEEDED", "data", data));
   }
 
-  private Map<String, Object> snapshot(Account account) {
+  private Map<String, Object> snapshot(Account account, boolean presentation) {
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("accountId", account.accountId());
     data.put("personId", account.personId());
     data.put("loginType", account.loginIdentifier().type().name());
-    data.put("status", account.status().name());
+    if (presentation) {
+      data.put("loginIdentifier", account.loginIdentifier().value());
+    }
+    data.put(presentation ? "accountStatus" : "status", account.status().name());
     data.put("sourceVersion", account.version());
     data.put("updatedAt", account.updatedAt());
     return data;
@@ -104,7 +111,11 @@ public class AccountStatusSnapshotQueryService {
     outbox.append(new OutboxAppendRequest(
         UUID.randomUUID(), resultType, 1, MessageKind.RESULT.name(), aggregateId, null,
         query.correlationId(), query.messageId(), query.operationId(), null, SYSTEM,
-        "authorization", codec.writeValueAsString(payload), Instant.now()));
+        query.producer(), codec.writeValueAsString(payload), Instant.now()));
+  }
+
+  private static boolean isPresentation(MessageEnvelope query) {
+    return GET_PRESENTATION.equals(query.messageType()) || LIST_PRESENTATION.equals(query.messageType());
   }
 
   private static UUID requiredUuid(String value, String field) {

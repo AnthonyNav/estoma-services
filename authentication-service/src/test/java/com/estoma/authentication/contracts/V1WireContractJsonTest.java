@@ -13,6 +13,7 @@ import com.estoma.authentication.contracts.command.RevokeAllAccountSessionsComma
 import com.estoma.authentication.contracts.event.AccountActivatedPayload;
 import com.estoma.authentication.contracts.event.AccountCreatedPayload;
 import com.estoma.authentication.contracts.event.AccountDeactivatedPayload;
+import com.estoma.authentication.contracts.event.AccountPresentationUpdatedPayload;
 import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayload;
 import com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload;
 import com.estoma.authentication.contracts.event.OtherAccountSessionsRevokedPayload;
@@ -110,31 +111,38 @@ class V1WireContractJsonTest {
     UUID personId = UUID.randomUUID();
     Instant now = Instant.parse("2026-08-08T00:00:00Z");
 
-     var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "RESET_PASSWORD", now)));
-     var changedPassword = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "CHANGE_PASSWORD", now)));
-     var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.USERNAME, "ADMINISTRATIVE", now)));
-     var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, personId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE", null, now)));
-     var created = mapper.readTree(mapper.writeValueAsBytes(new AccountCreatedPayload(accountId, personId, LoginType.USERNAME, "INACTIVE", now)));
-      var activated = mapper.readTree(mapper.writeValueAsBytes(new AccountActivatedPayload(accountId, personId, "INACTIVE", "ACTIVE", "ADMINISTRATIVE", now)));
+    var password = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "RESET_PASSWORD", now)));
+    var changedPassword = mapper.readTree(mapper.writeValueAsBytes(new PasswordChangedPayload(accountId, "CHANGE_PASSWORD", now)));
+    var login = mapper.readTree(mapper.writeValueAsBytes(new LoginIdentifierChangedPayload(accountId, LoginType.USERNAME, "ADMINISTRATIVE", now)));
+    var deactivation = mapper.readTree(mapper.writeValueAsBytes(new AccountDeactivatedPayload(accountId, personId, "ACTIVE", "INACTIVE", "ADMINISTRATIVE", null, now)));
+    var created = mapper.readTree(mapper.writeValueAsBytes(new AccountCreatedPayload(accountId, personId, LoginType.USERNAME, "INACTIVE", now)));
+    var activated = mapper.readTree(mapper.writeValueAsBytes(new AccountActivatedPayload(accountId, personId, "INACTIVE", "ACTIVE", "ADMINISTRATIVE", now)));
+    var presentation = mapper.readTree(mapper.writeValueAsBytes(new AccountPresentationUpdatedPayload(
+         accountId, personId, LoginType.USERNAME, "alumno", "ACTIVE", now)));
     var sessions = mapper.readTree(mapper.writeValueAsBytes(new AllAccountSessionsRevokedPayload(accountId, "PERSON_DEACTIVATED", now)));
 
-      assertThat(password.get("changeSource").asString()).isEqualTo("RESET_PASSWORD");
-      assertThat(changedPassword.get("changeSource").asString()).isEqualTo("CHANGE_PASSWORD");
-      assertExactFields(password, "accountId", "changeSource", "changedAt");
-      assertExactFields(changedPassword, "accountId", "changeSource", "changedAt");
-      assertThat(password.has("sessionsRevoked")).isFalse();
-     assertThat(login.get("changeSource").asString()).isEqualTo("ADMINISTRATIVE");
+    assertThat(password.get("changeSource").asString()).isEqualTo("RESET_PASSWORD");
+    assertThat(changedPassword.get("changeSource").asString()).isEqualTo("CHANGE_PASSWORD");
+    assertExactFields(password, "accountId", "changeSource", "changedAt");
+    assertExactFields(changedPassword, "accountId", "changeSource", "changedAt");
+    assertThat(password.has("sessionsRevoked")).isFalse();
+    assertThat(login.get("changeSource").asString()).isEqualTo("ADMINISTRATIVE");
+    assertExactFields(login, "accountId", "loginType", "changeSource", "changedAt");
     assertThat(login.has("version")).isFalse();
     assertThat(created.has("version")).isFalse();
-     assertThat(activated.get("previousStatus").asString()).isEqualTo("INACTIVE");
-     assertThat(activated.get("personId").asString()).isEqualTo(personId.toString());
-      assertThat(activated.get("activationReason").asString()).isEqualTo("ADMINISTRATIVE");
-      assertExactFields(activated, "accountId", "personId", "previousStatus", "status", "activationReason", "activatedAt");
-     assertThat(deactivation.get("previousStatus").asString()).isEqualTo("ACTIVE");
-     assertThat(deactivation.get("personId").asString()).isEqualTo(personId.toString());
-      assertThat(deactivation.get("reasonDetail").isNull()).isTrue();
-      assertThat(deactivation.get("reasonCode").asString()).isEqualTo("ADMINISTRATIVE");
-      assertExactFields(deactivation, "accountId", "personId", "previousStatus", "status", "reasonCode", "reasonDetail", "deactivatedAt");
+    assertThat(activated.get("previousStatus").asString()).isEqualTo("INACTIVE");
+    assertThat(activated.get("personId").asString()).isEqualTo(personId.toString());
+    assertThat(activated.get("activationReason").asString()).isEqualTo("ADMINISTRATIVE");
+    assertExactFields(activated, "accountId", "personId", "previousStatus", "status", "activationReason", "activatedAt");
+    assertThat(deactivation.get("previousStatus").asString()).isEqualTo("ACTIVE");
+    assertThat(deactivation.get("personId").asString()).isEqualTo(personId.toString());
+    assertThat(deactivation.get("reasonDetail").isNull()).isTrue();
+    assertThat(deactivation.get("reasonCode").asString()).isEqualTo("ADMINISTRATIVE");
+    assertExactFields(deactivation, "accountId", "personId", "previousStatus", "status", "reasonCode", "reasonDetail", "deactivatedAt");
+    assertExactFields(
+        presentation,
+        "accountId", "personId", "loginType", "loginIdentifier", "accountStatus", "updatedAt");
+    assertThat(presentation.get("loginIdentifier").asString()).isEqualTo("alumno");
     assertThat(sessions.get("reasonCode").asString()).isEqualTo("PERSON_DEACTIVATED");
     assertThat(sessions.has("reason")).isFalse();
 
@@ -178,6 +186,19 @@ class V1WireContractJsonTest {
               "reasonCode": "ADMINISTRATIVE",
               "reasonDetail": null,
               "deactivatedAt": "2026-08-08T00:00:00Z"
+            }
+            """));
+    tools.jackson.databind.JsonNode presentation = mapper.valueToTree(new AccountPresentationUpdatedPayload(
+        accountId, personId, LoginType.USERNAME, "alumno", "ACTIVE", changedAt));
+    assertThat(presentation)
+        .isEqualTo(mapper.readTree("""
+            {
+              "accountId": "11111111-1111-1111-1111-111111111111",
+              "personId": "22222222-2222-2222-2222-222222222222",
+              "loginType": "USERNAME",
+              "loginIdentifier": "alumno",
+              "accountStatus": "ACTIVE",
+              "updatedAt": "2026-08-08T00:00:00Z"
             }
             """));
     tools.jackson.databind.JsonNode changed = mapper.valueToTree(new PasswordChangedPayload(accountId, "CHANGE_PASSWORD", changedAt));
@@ -232,6 +253,7 @@ class V1WireContractJsonTest {
             AccountActivatedPayload.class,
             AccountCreatedPayload.class,
             AccountDeactivatedPayload.class,
+            AccountPresentationUpdatedPayload.class,
             AllAccountSessionsRevokedPayload.class,
             LoginIdentifierChangedPayload.class,
             OtherAccountSessionsRevokedPayload.class,

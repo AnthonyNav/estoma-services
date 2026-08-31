@@ -8,6 +8,7 @@ import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.consumed.ConsumedEventTypes;
 import com.estoma.authentication.contracts.consumed.StudentNumberCorrectedPayload;
+import com.estoma.authentication.contracts.event.AccountPresentationUpdatedPayload;
 import com.estoma.authentication.contracts.event.StudentLoginIdentifierSynchronizationFailedPayload;
 import com.estoma.authentication.domain.account.Account;
 import com.estoma.authentication.domain.account.LoginIdentifier;
@@ -89,8 +90,22 @@ class StudentNumberCorrectedHandler implements ProjectionHandler {
     }
 
     syncRepository.markSynchronized(account.accountId(), payload.studentNumberVersion(), now);
-    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(updated.accountId(), LoginType.MATRICULA, "STUDENT_NUMBER_CORRECTION", now);
-    return ProjectionHandlerResult.of(new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), event, updated.accountId(), updated.version()));
+    var event = new com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload(
+        updated.accountId(), LoginType.MATRICULA, "STUDENT_NUMBER_CORRECTION", now);
+    var presentation = presentation(updated);
+    return ProjectionHandlerResult.of(
+        new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), event, updated.accountId(), updated.version()),
+        new EventToAppend(
+            AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName(),
+            presentation,
+            updated.accountId(),
+            updated.version()));
+  }
+
+  private static AccountPresentationUpdatedPayload presentation(Account account) {
+    return new AccountPresentationUpdatedPayload(
+        account.accountId(), account.personId(), account.loginIdentifier().type(),
+        account.loginIdentifier().value(), account.status().name(), account.updatedAt());
   }
 
   private ProjectionHandlerResult fail(MessageEnvelope envelope, StudentNumberCorrectedPayload payload, String errorCode, Instant now) {

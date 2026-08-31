@@ -46,6 +46,8 @@ class AuthenticationContractTests {
     assertThat(AuthenticationEvent.ACCOUNT_ACTIVATED.wireName()).isEqualTo("AccountActivated");
     assertThat(AuthenticationEvent.ACCOUNT_DEACTIVATED.wireName()).isEqualTo("AccountDeactivated");
     assertThat(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName()).isEqualTo("LoginIdentifierChanged");
+    assertThat(AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName())
+        .isEqualTo("AccountPresentationUpdated");
     assertThat(AuthenticationEvent.STUDENT_LOGIN_IDENTIFIER_SYNCHRONIZATION_FAILED.wireName())
         .isEqualTo("StudentLoginIdentifierSynchronizationFailed");
     assertThat(AuthenticationEvent.PASSWORD_CHANGED.wireName()).isEqualTo("PasswordChanged");
@@ -68,6 +70,13 @@ class AuthenticationContractTests {
     assertThat(payload.currentSessionId()).isEqualTo(retainedSessionId);
     assertThat(new RoutingKeyResolver().resolveEvent(AuthenticationEvent.OTHER_ACCOUNT_SESSIONS_REVOKED.wireName()).routingKey())
         .isEqualTo(AmqpNames.ROUTING_KEY_OTHER_ACCOUNT_SESSIONS_REVOKED);
+  }
+
+  @Test
+  void routesAccountPresentationUpdatesForBffProjectionConsumers() {
+    assertThat(new RoutingKeyResolver()
+        .resolveEvent(AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName())
+        .routingKey()).isEqualTo(AmqpNames.ROUTING_KEY_ACCOUNT_PRESENTATION_UPDATED);
   }
 
   @Test

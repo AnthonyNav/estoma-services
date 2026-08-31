@@ -6,21 +6,23 @@ import com.estoma.authentication.contracts.MessageKind;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 
-/** Strict V1 validation for Authorization-owned recovery Queries. */
+/** Strict V1 validation for requester-scoped Authentication recovery Queries. */
 @Component
 public class QueryEnvelopeValidator {
 
-  private static final Set<String> TYPES = Set.of(
+  private static final Set<String> AUTHORIZATION_TYPES = Set.of(
       AccountStatusSnapshotQueryService.GET,
       AccountStatusSnapshotQueryService.LIST);
+  private static final Set<String> BFF_TYPES = Set.of(
+      AccountStatusSnapshotQueryService.GET_PRESENTATION,
+      AccountStatusSnapshotQueryService.LIST_PRESENTATION);
 
   public void validate(MessageEnvelope envelope) {
     if (envelope == null
         || envelope.messageId() == null
         || envelope.messageVersion() != 1
         || envelope.messageKind() != MessageKind.QUERY
-        || !TYPES.contains(envelope.messageType())
-        || !"authorization".equals(envelope.producer())
+        || (!AUTHORIZATION_TYPES.contains(envelope.messageType()) && !BFF_TYPES.contains(envelope.messageType()))
         || envelope.occurredAt() == null
         || envelope.correlationId() == null
         || envelope.operationId() == null
@@ -28,17 +30,21 @@ public class QueryEnvelopeValidator {
         || envelope.payload() == null
         || !envelope.payload().isObject()
         || envelope.actor() == null
-        || !envelope.actor().isSystemService("authorization")
         || envelope.actor().accountId() != null) {
-      throw new InvalidMessageException("invalid Authorization recovery Query envelope");
+      throw new InvalidMessageException("invalid Authentication recovery Query envelope");
     }
-    if (AccountStatusSnapshotQueryService.GET.equals(envelope.messageType())) {
+    String requester = AUTHORIZATION_TYPES.contains(envelope.messageType()) ? "authorization" : "bff";
+    if (!requester.equals(envelope.producer()) || !envelope.actor().isSystemService(requester)) {
+      throw new InvalidMessageException("Query requester is not authorized for this snapshot family");
+    }
+    if (AccountStatusSnapshotQueryService.GET.equals(envelope.messageType())
+        || AccountStatusSnapshotQueryService.GET_PRESENTATION.equals(envelope.messageType())) {
       if (!envelope.payload().hasNonNull("accountId")) {
-        throw new InvalidMessageException("GetAccountStatusSnapshot requires accountId");
+        throw new InvalidMessageException(envelope.messageType() + " requires accountId");
       }
     } else {
       if (envelope.payload().path("limit").asInt(-1) != 200) {
-        throw new InvalidMessageException("ListAccountStatusSnapshotsPage requires limit=200");
+        throw new InvalidMessageException(envelope.messageType() + " requires limit=200");
       }
     }
   }
