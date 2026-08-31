@@ -94,17 +94,24 @@ class AcademicPeriodRecoveryIT extends AbstractPostgresIT {
   @Test
   void competingActivePeriodEventsTriggerAFencedOwnerRecoveryInsteadOfChoosingByTimestamp() {
     UUID firstPeriodId = UUID.randomUUID();
+    UUID secondPeriodId = UUID.randomUUID();
     UUID currentPeriodId = UUID.randomUUID();
     dispatcher.dispatch(activatedEvent(
         firstPeriodId, Instant.parse("2030-08-01T12:00:00Z"), LocalDate.of(2030, 1, 1), LocalDate.of(2030, 6, 30)));
 
     dispatcher.dispatch(activatedEvent(
-        currentPeriodId, Instant.parse("2030-08-01T12:00:00Z"), LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)));
+        secondPeriodId, Instant.parse("2030-08-01T12:00:00Z"), LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)));
+    UUID staleQueryId = latestRecoveryQueryId();
+    dispatcher.dispatch(activatedEvent(
+        currentPeriodId, Instant.parse("2030-08-01T12:01:00Z"), LocalDate.of(2031, 1, 1), LocalDate.of(2031, 6, 30)));
 
     assertThat(periods.readiness()).isEqualTo("BOOTSTRAPPING");
     UUID queryId = latestRecoveryQueryId();
+    assertThat(queryId).isNotEqualTo(staleQueryId);
     assertThat(recovery.handleResult(foundResult(
-        queryId, currentPeriodId, 1, LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)))).isTrue();
+        staleQueryId, secondPeriodId, 1, LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)))).isFalse();
+    assertThat(recovery.handleResult(foundResult(
+        queryId, currentPeriodId, 1, LocalDate.of(2031, 1, 1), LocalDate.of(2031, 6, 30)))).isTrue();
     assertThat(periods.findAuthoritativeActive()).hasValueSatisfying(period ->
         assertThat(period.academicPeriodId()).isEqualTo(currentPeriodId));
   }

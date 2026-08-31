@@ -52,7 +52,6 @@ class JdbcAcademicPeriodProjectionRepository implements AcademicPeriodProjection
           FROM academic_period_projection_state s
           JOIN academic_period_projections p ON p.academic_period_id = :id
           WHERE s.state_key = 1
-            AND s.readiness <> 'BOOTSTRAPPING'
             AND s.active_academic_period_id IS NOT NULL
             AND s.active_academic_period_id <> :id
             AND p.status = 'ACTIVE'
