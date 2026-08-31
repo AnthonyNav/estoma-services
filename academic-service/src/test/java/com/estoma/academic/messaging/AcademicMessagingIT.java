@@ -262,6 +262,68 @@ class AcademicMessagingIT {
   }
 
   @Test
+  void activeAcademicPeriodSnapshotIsRecoverableByCommunicationsWithRetentionDates() {
+    UUID periodId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO academic_periods
+          (academic_period_id,code,name,start_date,end_date,status,academic_data_status,version,created_at,updated_at)
+        VALUES (:id,'2026-1','Spring',DATE '2026-01-12',DATE '2026-06-30','ACTIVE','READY',7,now(),now())
+        """).param("id", periodId).update();
+    Queue results = new Queue("results.communications.active-period-" + UUID.randomUUID(), false, true, true);
+    admin.declareQueue(results);
+    admin.declareBinding(BindingBuilder.bind(results)
+        .to(new DirectExchange(AcademicTopology.RESULTS)).with("communications"));
+    UUID queryId = UUID.randomUUID();
+    try {
+      MessageEnvelope query = new MessageEnvelope(queryId, "GetActiveAcademicPeriodSnapshot", 1, "QUERY",
+          "communications", Instant.now(), UUID.randomUUID(), null, null, null, null, null,
+          new Actor("SYSTEM", null, "communications"), mapper.createObjectNode());
+      rabbit.send(AcademicTopology.QUERIES, "academic", new Message(codec.encode(query)));
+
+      await().atMost(Duration.ofSeconds(10)).until(() -> count(
+          "SELECT count(*) FROM outbox_messages WHERE message_type='GetActiveAcademicPeriodSnapshotResult'"
+              + " AND causation_id=:id", queryId) == 1);
+      relay.relay();
+
+      Message resultMessage = rabbit.receive(results.getName(), 5_000);
+      assertThat(resultMessage).isNotNull();
+      MessageEnvelope result = codec.decode(resultMessage.getBody());
+      assertThat(result.messageType()).isEqualTo("GetActiveAcademicPeriodSnapshotResult");
+      assertThat(result.producer()).isEqualTo("academic");
+      assertThat(result.causationId()).isEqualTo(queryId);
+      assertThat(result.aggregateId()).isEqualTo(periodId);
+      assertThat(result.aggregateVersion()).isEqualTo(7);
+      assertThat(result.payload().path("status").asString()).isEqualTo("FOUND");
+      assertThat(result.payload().path("data").path("academicPeriodId").asString()).isEqualTo(periodId.toString());
+      assertThat(result.payload().path("data").path("code").asString()).isEqualTo("2026-1");
+      assertThat(result.payload().path("data").path("status").asString()).isEqualTo("ACTIVE");
+      assertThat(result.payload().path("data").path("startDate").asString()).isEqualTo("2026-01-12");
+      assertThat(result.payload().path("data").path("endDate").asString()).isEqualTo("2026-06-30");
+      assertThat(result.payload().path("data").path("sourceVersion").asInt()).isEqualTo(7);
+      assertThat(result.payload().path("data").path("snapshotGeneratedAt").asString()).isNotBlank();
+    } finally {
+      admin.deleteQueue(results.getName());
+    }
+  }
+
+  @Test
+  void activeAcademicPeriodSnapshotAuthoritativelyReportsItsAbsence() {
+    UUID queryId = UUID.randomUUID();
+    MessageEnvelope query = new MessageEnvelope(queryId, "GetActiveAcademicPeriodSnapshot", 1, "QUERY",
+        "communications", Instant.now(), UUID.randomUUID(), null, null, null, null, null,
+        new Actor("SYSTEM", null, "communications"), mapper.createObjectNode());
+    rabbit.send(AcademicTopology.QUERIES, "academic", new Message(codec.encode(query)));
+
+    await().atMost(Duration.ofSeconds(10)).until(() -> count(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='GetActiveAcademicPeriodSnapshotResult'"
+            + " AND causation_id=:id", queryId) == 1);
+    assertThat(jdbc.sql("SELECT payload->>'status' FROM outbox_messages WHERE causation_id=:id")
+        .param("id", queryId).query(String.class).single()).isEqualTo("NOT_FOUND");
+    assertThat(count("SELECT count(*) FROM outbox_messages WHERE causation_id=:id AND aggregate_id IS NULL", queryId))
+        .isEqualTo(1L);
+  }
+
+  @Test
   void invalidEligibilityQueryProducesRejectedResultWithoutRetryOrDlq() {
     UUID queryId = UUID.randomUUID();
     MessageEnvelope query = new MessageEnvelope(queryId, "ListStudentAcademicEligibilitySnapshotsPage", 1, "QUERY",
