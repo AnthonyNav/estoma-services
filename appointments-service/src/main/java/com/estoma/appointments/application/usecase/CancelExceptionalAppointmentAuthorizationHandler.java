@@ -52,6 +52,9 @@ public class CancelExceptionalAppointmentAuthorizationHandler
       } else if (current.isCancelled()) {
         result = ApplicationResult.rejected("AUTHORIZATION_ALREADY_CANCELLED",
             "authorization has already been cancelled");
+      } else if (current.isSuperseded()) {
+        result = ApplicationResult.rejected("AUTHORIZATION_SUPERSEDED",
+            "a later supervisor decision superseded this authorization");
       } else if (OperationalDatePolicy.hasConcluded(current.authorizationDate(), now)) {
         result = ApplicationResult.rejected("AUTHORIZATION_DATE_CONCLUDED",
             "the authorization date has already concluded");

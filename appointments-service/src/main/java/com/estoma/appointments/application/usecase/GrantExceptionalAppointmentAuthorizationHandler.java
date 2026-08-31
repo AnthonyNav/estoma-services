@@ -11,6 +11,8 @@ import com.estoma.appointments.application.port.out.OutboxRepository;
 import com.estoma.appointments.domain.model.ExceptionalAppointmentAuthorization;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -65,20 +67,25 @@ public class GrantExceptionalAppointmentAuthorizationHandler
       } else if (OperationalDatePolicy.hasConcluded(command.serviceDate(), now)) {
         result = ApplicationResult.rejected("AUTHORIZATION_DATE_CONCLUDED",
             "the authorization date has already concluded");
-      } else if (hasAvailableAuthorization(command.studentAccountId(), command.serviceDate(), now)) {
-        result = ApplicationResult.rejected("AUTHORIZATION_ALREADY_EXISTS",
-            "student already has an available authorization for that date");
       } else {
-        ExceptionalAppointmentAuthorization authorization = ExceptionalAppointmentAuthorization.grant(
-            command.authorizationId() == null ? UUID.randomUUID() : command.authorizationId(),
-            command.studentAccountId(), command.serviceDate(), command.metadata().actor().accountId(),
-            command.reason(), now, null);
-        authorizations.save(authorization);
-        ApplicationSupport.appendEvent(outbox, command.metadata(),
-            "ExceptionalAppointmentAuthorizationGranted", authorization.exceptionalAuthorizationId(),
-            authorization.version(), AppointmentEventPayloads.authorizationGranted(authorization), now);
-        result = ApplicationResult.applied(authorization.exceptionalAuthorizationId(),
-            authorization.version(), "exceptional authorization granted");
+        GrantEligibility eligibility = evaluateHistory(
+            command.studentAccountId(), command.serviceDate(), now);
+        if (eligibility.hasAvailableAuthorization()) {
+          result = ApplicationResult.rejected("AUTHORIZATION_ALREADY_EXISTS",
+              "student already has an available authorization for that date");
+        } else {
+          ExceptionalAppointmentAuthorization authorization = ExceptionalAppointmentAuthorization.grant(
+              command.authorizationId() == null ? UUID.randomUUID() : command.authorizationId(),
+              command.studentAccountId(), command.serviceDate(), command.metadata().actor().accountId(),
+              command.reason(), now, null);
+          authorizations.save(authorization);
+          supersede(eligibility.consumedAuthorizations(), authorization, now);
+          ApplicationSupport.appendEvent(outbox, command.metadata(),
+              "ExceptionalAppointmentAuthorizationGranted", authorization.exceptionalAuthorizationId(),
+              authorization.version(), AppointmentEventPayloads.authorizationGranted(authorization), now);
+          result = ApplicationResult.applied(authorization.exceptionalAuthorizationId(),
+              authorization.version(), "exceptional authorization granted");
+        }
       }
     } catch (IllegalArgumentException exception) {
       result = ApplicationResult.rejected("INVALID_AUTHORIZATION", exception.getMessage());
@@ -91,10 +98,33 @@ public class GrantExceptionalAppointmentAuthorizationHandler
     return result;
   }
 
-  private boolean hasAvailableAuthorization(UUID studentAccountId, LocalDate serviceDate, Instant now) {
-    return authorizations.findByStudentAndDate(studentAccountId, serviceDate).stream()
-        .anyMatch(authorization -> authorization.isAvailableOn(serviceDate, now)
-            && appointments.findActiveByExceptionalAuthorizationForUpdate(
-                authorization.exceptionalAuthorizationId()).isEmpty());
+  private GrantEligibility evaluateHistory(UUID studentAccountId,
+      LocalDate serviceDate, Instant now) {
+    List<ExceptionalAppointmentAuthorization> consumed = new ArrayList<>();
+    for (ExceptionalAppointmentAuthorization authorization :
+        authorizations.findByStudentAndDate(studentAccountId, serviceDate)) {
+      boolean isConsumed = appointments.findActiveByExceptionalAuthorizationForUpdate(
+          authorization.exceptionalAuthorizationId()).isPresent();
+      if (authorization.isAvailableOn(serviceDate, now) && !isConsumed) {
+        return new GrantEligibility(true, List.of());
+      }
+      if (!authorization.isCancelled() && !authorization.isSuperseded() && isConsumed) {
+        consumed.add(authorization);
+      }
+    }
+    return new GrantEligibility(false, List.copyOf(consumed));
   }
+
+  private void supersede(List<ExceptionalAppointmentAuthorization> consumed,
+      ExceptionalAppointmentAuthorization successor, Instant now) {
+    for (ExceptionalAppointmentAuthorization authorization : consumed) {
+      var superseded = authorization.supersede(successor.exceptionalAuthorizationId(), now);
+      if (!authorizations.updateIfVersion(superseded, authorization.version())) {
+        throw new IllegalStateException("authorization changed while recording its successor");
+      }
+    }
+  }
+
+  private record GrantEligibility(boolean hasAvailableAuthorization,
+      List<ExceptionalAppointmentAuthorization> consumedAuthorizations) {}
 }

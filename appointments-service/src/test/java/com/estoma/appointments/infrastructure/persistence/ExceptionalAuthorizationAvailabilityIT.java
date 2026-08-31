@@ -16,6 +16,8 @@ import com.estoma.appointments.application.usecase.GrantExceptionalAppointmentAu
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
 import com.estoma.appointments.domain.model.AppointmentType;
+import com.estoma.appointments.domain.model.CancellationSubreason;
+import com.estoma.appointments.domain.model.CancellationType;
 import com.estoma.appointments.domain.model.ExceptionalAppointmentAuthorization;
 import com.estoma.appointments.domain.model.PieceType;
 import com.estoma.appointments.testsupport.AbstractPostgresIT;
@@ -87,7 +89,7 @@ class ExceptionalAuthorizationAvailabilityIT extends AbstractPostgresIT {
   }
 
   @Test
-  void consumedAuthorizationDoesNotBlockANewSupervisorDecision() {
+  void clinicCancellationCannotReactivateAConsumedAuthorizationAfterANewerDecision() {
     UUID firstId = UUID.randomUUID();
     authorizations.save(ExceptionalAppointmentAuthorization.grant(firstId, studentId, TODAY,
         supervisorId, "first decision", NOW, null));
@@ -96,14 +98,27 @@ class ExceptionalAuthorizationAvailabilityIT extends AbstractPostgresIT {
         Instant.parse("2026-08-24T16:00:00Z"), Instant.parse("2026-08-24T17:00:00Z"),
         ZoneId.of("America/Mexico_City"), Instant.parse("2026-08-24T15:50:00Z"),
         Instant.parse("2026-08-24T15:40:00Z"), Instant.parse("2026-08-24T17:10:00Z")));
-    appointments.save(Appointment.scheduled(UUID.randomUUID(), slotId, studentId, UUID.randomUUID(),
-        AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, firstId, NOW));
+    Appointment scheduled = Appointment.scheduled(UUID.randomUUID(), slotId, studentId, UUID.randomUUID(),
+        AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, firstId, NOW);
+    appointments.save(scheduled);
 
     UUID secondId = UUID.randomUUID();
     var result = grant.grant(grantCommand(secondId, TODAY, null));
 
     assertThat(result.status().name()).isEqualTo("APPLIED");
     assertThat(authorizations.findByStudentAndDate(studentId, TODAY)).hasSize(2);
+    assertThat(authorizations.findById(firstId).orElseThrow().supersededByAuthorizationId())
+        .isEqualTo(secondId);
+
+    Appointment clinicCancelled = scheduled.cancel(CancellationType.CLINIC,
+        CancellationSubreason.CAPACITY_LOSS, "capacity loss", null, NOW.plusSeconds(1));
+    assertThat(appointments.updateIfVersion(clinicCancelled, scheduled.version())).isTrue();
+
+    var first = authorizations.findById(firstId).orElseThrow();
+    var second = authorizations.findById(secondId).orElseThrow();
+    assertThat(first.isAvailableOn(TODAY, NOW.plusSeconds(2))).isFalse();
+    assertThat(second.isAvailableOn(TODAY, NOW.plusSeconds(2))).isTrue();
+    assertThat(cancel.cancel(cancelCommand(firstId)).code()).isEqualTo("AUTHORIZATION_SUPERSEDED");
   }
 
   @Test
@@ -133,6 +148,32 @@ class ExceptionalAuthorizationAvailabilityIT extends AbstractPostgresIT {
         concludedDate, supervisorId, "historical decision", NOW.minusSeconds(86_400), null));
     assertThat(cancel.cancel(cancelCommand(authorizationId)).code())
         .isEqualTo("AUTHORIZATION_DATE_CONCLUDED");
+  }
+
+  @Test
+  void legacyCustomExpiryRemainsUnavailableUntilItsServiceDateConcludes() {
+    UUID legacyId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO exceptional_appointment_authorizations
+          (exceptional_authorization_id, student_account_id, service_date,
+           authorized_by_account_id, reason, granted_at, expires_at, version)
+        VALUES (:id, :student, :date, :supervisor, :reason, :granted, :expires, 1)
+        """)
+        .param("id", legacyId)
+        .param("student", studentId)
+        .param("date", TODAY)
+        .param("supervisor", supervisorId)
+        .param("reason", "legacy expiry")
+        .param("granted", Timestamps.toTimestamp(NOW.minusSeconds(3_600)))
+        .param("expires", Timestamps.toTimestamp(NOW.minusSeconds(1)))
+        .update();
+
+    assertThat(authorizations.findById(legacyId).orElseThrow().isAvailableOn(TODAY, NOW)).isFalse();
+
+    UUID currentId = UUID.randomUUID();
+    assertThat(grant.grant(grantCommand(currentId, TODAY, null)).status().name()).isEqualTo("APPLIED");
+    assertThat(authorizations.findById(legacyId).orElseThrow().isAvailableOn(TODAY, NOW)).isFalse();
+    assertThat(authorizations.findById(currentId).orElseThrow().expiresAt()).isNull();
   }
 
   @Test
