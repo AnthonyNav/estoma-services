@@ -11,9 +11,19 @@ import java.util.UUID;
  * operations: public views must be assembled from the local projection database only.
  */
 public interface ProjectionQueryPort {
-  List<MailboxMessage> findVisibleMailboxMessages(UUID recipientAccountId);
+  MailboxPage findVisibleMailboxMessages(UUID recipientAccountId, String systemCode, int limit,
+      MailboxCursor cursor);
 
-  List<MailboxSummary> summarizeMailbox(UUID recipientAccountId);
+  MailboxSummary summarizeMailbox(UUID recipientAccountId, String systemCode);
+
+  Optional<PersonPresentation> findPersonPresentation(UUID personId);
+
+  Optional<AccountPresentation> findAccountPresentation(UUID accountId);
+
+  /** Active access plus a trusted, active catalog row; eligibility remains an application rule. */
+  List<String> findActiveSystemCandidates(UUID accountId);
+
+  boolean hasEligibleAcademicSystem(UUID accountId, String systemCode);
 
   Optional<String> findRoleCode(UUID accountId);
 
@@ -38,11 +48,30 @@ public interface ProjectionQueryPort {
       Instant createdAt,
       Instant expiresAt) {}
 
+  record MailboxCursor(Instant createdAt, UUID inboxMessageId) {}
+
+  record MailboxPage(List<MailboxMessage> items, MailboxCursor nextCursor) {}
+
   record MailboxSummary(
       String systemCode,
       long messageCount,
       long newMessageCount,
       Instant lastVisitedAt) {}
+
+  record PersonPresentation(
+      UUID personId,
+      String firstName,
+      String paternalSurname,
+      String maternalSurname,
+      String institutionalEmail,
+      String status) {}
+
+  record AccountPresentation(
+      UUID accountId,
+      UUID personId,
+      String loginType,
+      String loginIdentifier,
+      String accountStatus) {}
 
   /** A denormalized row used only to assemble the supervisor view at the HTTP boundary. */
   record PendingReassignment(

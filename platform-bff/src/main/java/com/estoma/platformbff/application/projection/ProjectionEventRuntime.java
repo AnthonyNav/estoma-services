@@ -79,9 +79,9 @@ public class ProjectionEventRuntime {
   private static Map<EventKey, Contract> buildRegistry() {
     Map<EventKey, Contract> entries = new HashMap<>();
     // Users
-    register(entries, "users", "PersonCreated", Set.of("personId", "firstName", "paternalSurname"),
+    register(entries, "users", "PersonCreated", Set.of("personId", "firstName", "paternalSurname", "institutionalEmail"),
         Set.of("personId", "firstName", "paternalSurname", "maternalSurname", "institutionalEmail", "phone", "status", "version", "createdAt"), true);
-    register(entries, "users", "PersonUpdated", Set.of("personId", "firstName", "paternalSurname"),
+    register(entries, "users", "PersonUpdated", Set.of("personId", "firstName", "paternalSurname", "institutionalEmail"),
         Set.of("personId", "firstName", "paternalSurname", "maternalSurname", "institutionalEmail", "phone", "status", "version", "updatedAt"), true);
     register(entries, "users", "PersonActivated", Set.of("personId", "status"),
         Set.of("personId", "status", "version", "activatedAt"), true);
@@ -91,6 +91,9 @@ public class ProjectionEventRuntime {
     // Existing authentication security Events remain in the same projection runtime.
     register(entries, "authentication", "AccountCreated", Set.of("accountId", "personId", "createdAt"),
         Set.of("accountId", "personId", "createdAt"), true);
+    register(entries, "authentication", "AccountPresentationUpdated",
+        Set.of("accountId", "personId", "loginType", "loginIdentifier", "accountStatus", "updatedAt"),
+        Set.of("accountId", "personId", "loginType", "loginIdentifier", "accountStatus", "updatedAt"), true);
     register(entries, "authentication", "SessionRevoked", Set.of("sessionId", "revokedAt", "reasonCode"),
         Set.of("sessionId", "revokedAt", "reasonCode"), false);
     register(entries, "authentication", "AllAccountSessionsRevoked", Set.of("accountId", "revokedAt", "reasonCode"),

@@ -8,8 +8,10 @@ import java.util.UUID;
 /** Typed values accepted by the read-model port. */
 public sealed interface ProjectionReadModel permits
     ProjectionReadModel.Person,
+    ProjectionReadModel.AccountPresentation,
     ProjectionReadModel.AuthorizationRole,
     ProjectionReadModel.AuthorizationAccess,
+    ProjectionReadModel.SystemCatalog,
     ProjectionReadModel.AcademicPeriod,
     ProjectionReadModel.StudentProfile,
     ProjectionReadModel.StudentEligibility,
@@ -39,7 +41,18 @@ public sealed interface ProjectionReadModel permits
       String paternalSurname,
       String maternalSurname,
       String institutionalEmail,
+      boolean institutionalEmailAuthoritative,
       String status,
+      long sourceVersion,
+      Instant updatedAt) implements ProjectionReadModel {}
+
+  /** Authentication-owned, non-secret account context used by public BFF compositions. */
+  record AccountPresentation(
+      UUID accountId,
+      UUID personId,
+      String loginType,
+      String loginIdentifier,
+      String accountStatus,
       long sourceVersion,
       Instant updatedAt) implements ProjectionReadModel {}
 
@@ -56,6 +69,15 @@ public sealed interface ProjectionReadModel permits
       String systemCode,
       String status,
       long sourceVersion,
+      Instant updatedAt) implements ProjectionReadModel {}
+
+  /** Authorization-owned catalog state. trusted=false is an explicit fail-closed refresh fence. */
+  record SystemCatalog(
+      UUID systemId,
+      String systemCode,
+      String status,
+      long sourceVersion,
+      boolean trusted,
       Instant updatedAt) implements ProjectionReadModel {}
 
   record AcademicPeriod(
