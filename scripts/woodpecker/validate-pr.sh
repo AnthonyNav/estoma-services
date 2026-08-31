@@ -4,8 +4,6 @@ set -eu
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
-maven_settings="$repo_root/.woodpecker/maven-settings.xml"
-
 : "${CI_COMMIT_TARGET_BRANCH:?CI_COMMIT_TARGET_BRANCH is required for pull-request validation}"
 
 target_branch="$CI_COMMIT_TARGET_BRANCH"
@@ -25,6 +23,8 @@ if ! merge_base="$(git merge-base "$target_ref" HEAD)"; then
   exit 1
 fi
 
+git diff --check "$merge_base" HEAD
+
 changed_services=0
 for service_dir in */; do
   [ -f "${service_dir}mvnw" ] || continue
@@ -32,18 +32,16 @@ for service_dir in */; do
   if ! git diff --quiet "$merge_base" HEAD -- "$service_dir"; then
     changed_services=1
     service_dir="${service_dir%/}"
-    printf 'Running %s/mvn -s %s -B clean verify\n' "$service_dir" "$maven_settings"
-    if ! (
-      cd "$service_dir"
-      mvn -s "$maven_settings" -B clean verify
-    ); then
-      printf 'Validation failed for %s.\n' "$service_dir" >&2
+    workflow=".woodpecker/${service_dir}-test.yaml"
+    if [ ! -f "$workflow" ]; then
+      printf 'Changed Maven service %s has no dedicated test workflow (%s).\n' "$service_dir" "$workflow" >&2
       exit 1
     fi
+    printf 'Maven validation for %s is provided by %s.\n' "$service_dir" "$workflow"
   fi
 done
 
 if [ "$changed_services" -eq 0 ]; then
-  printf 'No Maven service directories changed; skipping service validation.\n'
+  printf 'No Maven service directories changed; checked pull-request diff only.\n'
   exit 0
 fi
