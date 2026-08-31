@@ -1,5 +1,6 @@
 when:
   # Retry the immutable develop image after the initial promotion pass.
+  # Recovery-envelope contract changes must be promoted through this immutable image.
   - event: manual
     branch: develop
   - event: push
