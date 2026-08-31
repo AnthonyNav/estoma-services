@@ -6,9 +6,12 @@ import com.estoma.authorization.application.port.AuthorizationSnapshotRepository
 import com.estoma.authorization.application.port.OutboxRepository;
 import com.estoma.authorization.application.port.TransactionRunner;
 import com.estoma.authorization.application.query.AuthorizationSnapshotQuery.GetAccountAuthorizationSnapshot;
+import com.estoma.authorization.application.query.AuthorizationSnapshotQuery.GetSystemCatalogSnapshot;
 import com.estoma.authorization.application.query.AuthorizationSnapshotQuery.ListAccountAuthorizationSnapshotsPage;
+import com.estoma.authorization.application.query.AuthorizationSnapshotQuery.ListSystemCatalogSnapshotsPage;
 import com.estoma.authorization.application.query.AuthorizationSnapshotQueryService.QueryRejectedException;
 import com.estoma.authorization.application.query.AuthorizationSnapshotQueryService.QueryResult;
+import com.estoma.authorization.application.query.SystemCatalogSnapshotQueryService.SystemSnapshot;
 import com.estoma.authorization.application.support.CanonicalJson;
 import com.estoma.authorization.application.support.OutboxIntentWriter;
 import java.time.Clock;
@@ -24,16 +27,19 @@ public final class AuthorizationSnapshotQueryResponder {
 
   private final TransactionRunner transactions;
   private final AuthorizationSnapshotQueryService queries;
+  private final SystemCatalogSnapshotQueryService catalogQueries;
   private final OutboxRepository outbox;
   private final Clock clock;
 
   public AuthorizationSnapshotQueryResponder(
       TransactionRunner transactions,
       AuthorizationSnapshotQueryService queries,
+      SystemCatalogSnapshotQueryService catalogQueries,
       OutboxRepository outbox,
       Clock clock) {
     this.transactions = transactions;
     this.queries = queries;
+    this.catalogQueries = catalogQueries;
     this.outbox = outbox;
     this.clock = clock;
   }
@@ -72,22 +78,20 @@ public final class AuthorizationSnapshotQueryResponder {
 
   private OutboundQueryResultIntent respondInTransaction(
       AuthorizationQueryMetadata metadata, AuthorizationSnapshotQuery query) {
-    QueryResult result;
+    String payload;
     try {
-      result = switch (query) {
-        case GetAccountAuthorizationSnapshot point ->
-            queries.get(metadata.producer(), point.accountId(), point.systemCode());
-        case ListAccountAuthorizationSnapshotsPage page ->
-            queries.list(metadata.producer(), page.cursor(), page.limit(), page.systemCode());
+      payload = switch (query) {
+        case GetAccountAuthorizationSnapshot point -> accountPayload(
+            queries.get(metadata.producer(), point.accountId(), point.systemCode()));
+        case ListAccountAuthorizationSnapshotsPage page -> accountPayload(
+            queries.list(metadata.producer(), page.cursor(), page.limit(), page.systemCode()));
+        case GetSystemCatalogSnapshot point -> catalogPayload(
+            catalogQueries.get(metadata.producer(), point.systemCode()));
+        case ListSystemCatalogSnapshotsPage page -> catalogPayload(
+            catalogQueries.list(metadata.producer(), page.cursor(), page.limit()));
       };
     } catch (QueryRejectedException rejection) {
-      result = new QueryResult(
-          AuthorizationSnapshotQueryService.Status.REJECTED,
-          List.of(),
-          null,
-          false,
-          clock.instant(),
-          rejection.code());
+      payload = rejectedPayload(rejection.code());
     }
 
     Instant now = clock.instant();
@@ -100,13 +104,13 @@ public final class AuthorizationSnapshotQueryResponder {
         metadata.actor(),
         metadata.correlationId(),
         metadata.messageId(),
-        payload(result, query),
+        payload,
         now);
     OutboxIntentWriter.append(outbox, intent);
     return intent;
   }
 
-  private static String payload(QueryResult result, AuthorizationSnapshotQuery query) {
+  private static String accountPayload(QueryResult result) {
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("status", result.status().name());
     if (result.status() == AuthorizationSnapshotQueryService.Status.FOUND) {
@@ -128,6 +132,36 @@ public final class AuthorizationSnapshotQueryResponder {
       payload.put("error", Map.of("code", result.errorCode()));
     }
     return CanonicalJson.write(payload);
+  }
+
+  private static String catalogPayload(SystemCatalogSnapshotQueryService.QueryResult result) {
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("status", result.status().name());
+    if (result.status() == SystemCatalogSnapshotQueryService.Status.FOUND) {
+      payload.put("data", catalogSnapshot(result.items().getFirst(), result.snapshotGeneratedAt()));
+    } else if (result.status() == SystemCatalogSnapshotQueryService.Status.SUCCEEDED) {
+      Map<String, Object> data = new LinkedHashMap<>();
+      List<Map<String, Object>> items = new ArrayList<>();
+      for (SystemSnapshot item : result.items()) {
+        items.add(catalogSnapshot(item, null));
+      }
+      data.put("items", items);
+      if (result.nextCursor() != null) {
+        data.put("nextCursor", result.nextCursor());
+      }
+      data.put("hasMore", result.hasMore());
+      data.put("snapshotGeneratedAt", result.snapshotGeneratedAt());
+      payload.put("data", data);
+    } else if (result.status() == SystemCatalogSnapshotQueryService.Status.REJECTED) {
+      payload.put("error", Map.of("code", result.errorCode()));
+    }
+    return CanonicalJson.write(payload);
+  }
+
+  private static String rejectedPayload(String errorCode) {
+    return CanonicalJson.write(Map.of(
+        "status", "REJECTED",
+        "error", Map.of("code", errorCode)));
   }
 
   private static Map<String, Object> snapshot(
@@ -156,5 +190,18 @@ public final class AuthorizationSnapshotQueryResponder {
 
   private static Map<String, Object> role(RoleSnapshot value) {
     return Map.of("roleCode", value.roleCode(), "roleVersion", value.roleVersion());
+  }
+
+  private static Map<String, Object> catalogSnapshot(
+      SystemSnapshot value, Instant snapshotGeneratedAt) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("systemId", value.systemId());
+    data.put("systemCode", value.systemCode());
+    data.put("status", value.status());
+    data.put("sourceVersion", value.sourceVersion());
+    if (snapshotGeneratedAt != null) {
+      data.put("snapshotGeneratedAt", snapshotGeneratedAt);
+    }
+    return data;
   }
 }

@@ -47,6 +47,7 @@
       ]
     },
     "systemCode": { "enum": ["LAVADO_ULTRASONICO", "PRACTICAS_PROFESIONALES"] },
+    "catalogStatus": { "enum": ["ACTIVE", "INACTIVE"] },
     "systemAccessStatus": { "enum": ["ACTIVE", "SUSPENDED", "REVOKED"] },
     "projectedStatus": { "enum": ["ACTIVE", "INACTIVE"] },
     "loginType": { "enum": ["MATRICULA", "USERNAME"] },

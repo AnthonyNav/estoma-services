@@ -35,6 +35,8 @@ class JsonSchemaContractTest {
     assertValid("events/external-projection-event.schema.json", externalEvent());
     assertValid("queries/authorization-query.schema.json", authorizationQuery());
     assertValid("results/authorization-query-result.schema.json", authorizationQueryResult());
+    assertValid("queries/authorization-query.schema.json", systemCatalogQuery());
+    assertValid("results/authorization-query-result.schema.json", systemCatalogQueryResult());
     assertValid("queries/recovery-query.schema.json", recoveryQuery());
     assertValid("results/recovery-result.schema.json", recoveryResult());
   }
@@ -123,7 +125,7 @@ class JsonSchemaContractTest {
     JsonNode document = new YAMLMapper().readTree(Files.readString(CONTRACTS.resolve("asyncapi.yaml")));
 
     assertThat(document.path("asyncapi").asText()).isEqualTo("3.0.0");
-    assertThat(document.path("components").path("messages").size()).isEqualTo(41);
+    assertThat(document.path("components").path("messages").size()).isEqualTo(45);
     assertThat(document.path("channels").has("commands.authorization")).isTrue();
     assertThat(document.path("channels").has("events.authorization")).isTrue();
     assertThat(document.path("channels").has("queries.authorization")).isTrue();
@@ -210,6 +212,29 @@ class JsonSchemaContractTest {
     data.put("accountId", UUID.randomUUID().toString());
     data.putArray("systemAccesses");
     data.put("snapshotGeneratedAt", Instant.parse("2026-08-16T00:00:00Z").toString());
+    return message;
+  }
+
+  private static ObjectNode systemCatalogQuery() {
+    ObjectNode message = envelope("GetSystemCatalogSnapshot", "QUERY", "bff", "SYSTEM", null);
+    message.put("operationId", UUID.randomUUID().toString());
+    ((ObjectNode) message.get("payload")).put("systemCode", "LAVADO_ULTRASONICO");
+    return message;
+  }
+
+  private static ObjectNode systemCatalogQueryResult() {
+    ObjectNode message = envelope(
+        "GetSystemCatalogSnapshotResult", "RESULT", "authorization", "SYSTEM", null);
+    message.put("causationId", UUID.randomUUID().toString());
+    message.put("operationId", UUID.randomUUID().toString());
+    ObjectNode payload = (ObjectNode) message.get("payload");
+    payload.put("status", "FOUND");
+    ObjectNode data = payload.putObject("data");
+    data.put("systemId", UUID.randomUUID().toString());
+    data.put("systemCode", "LAVADO_ULTRASONICO");
+    data.put("status", "ACTIVE");
+    data.put("sourceVersion", 1);
+    data.put("snapshotGeneratedAt", Instant.parse("2026-08-30T00:00:00Z").toString());
     return message;
   }
 
