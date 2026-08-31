@@ -34,7 +34,8 @@ import tools.jackson.databind.ObjectMapper;
 
 /** Exercises real topology, durable Results and projection recovery invariants. */
 @SpringBootTest(properties = {
-    "estoma.messaging.topology-declare=true"
+    "estoma.messaging.topology-declare=true",
+    "estoma.authorization-recovery.initial-delay=3600000"
 })
 @Testcontainers
 @Tag("integration")

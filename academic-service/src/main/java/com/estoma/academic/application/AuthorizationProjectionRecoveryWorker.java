@@ -51,7 +51,9 @@ public class AuthorizationProjectionRecoveryWorker {
     }
   }
 
-  @Scheduled(fixedDelayString = "${estoma.authorization-recovery.delay:5s}")
+  @Scheduled(
+      fixedDelayString = "${estoma.authorization-recovery.delay:5s}",
+      initialDelayString = "${estoma.authorization-recovery.initial-delay:0}")
   public void run() {
     for (ProjectionRecoveryJobRepository.ExpiredJob expired
         : jobs.requeueExpiredWaiting(resultTimeout, maxAttempts)) {
