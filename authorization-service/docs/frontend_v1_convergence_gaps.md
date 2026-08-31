@@ -1,6 +1,6 @@
 # Frontend V1 Backend Convergence Gaps — authorization-service
 
-Status: `PLANNED`
+Status: `CLOSED`
 
 Scope: authorization data needed to compose the closed Front V1 real session context and to apply the same effective-system access rule to system-scoped BFF reads such as the Wash mailbox.
 
@@ -19,7 +19,7 @@ This distinction matters because the remaining gap is narrower: the BFF cannot r
 ## GAP-AUTHZ-01 — System catalog status is not reconstructible by the BFF
 
 - Severity: `HIGH`
-- Status: `OPEN`
+- Status: `CLOSED`
 - Owner: `authorization-service`
 - Consumer: `platform-bff`
 - Affected flows: `GET /api/v1/me`, Wash mailbox authorization, reusable system-scoped BFF reads
@@ -59,11 +59,16 @@ Without System status, the BFF has two unsafe choices:
 
 Both violate the closed V1 convergence model. The same missing status would also force mailbox-specific authorization logic to diverge from `/me`.
 
-### Proposed solution
+### Resolution
 
-Add a durable, asynchronous and recoverable projection contract for the System catalog, following the same platform recovery/versioning principles already used by Authorization projections.
+Authorization now exposes durable, asynchronous and recoverable System catalog snapshots through:
 
-The exact Event/Query/Result shape is a technical implementation choice, but the reconstructible item must include at least:
+```text
+GetSystemCatalogSnapshot(systemCode)
+ListSystemCatalogSnapshotsPage(cursor?, limit)
+```
+
+Both Queries are limited to `bff` and write their Result through the Authorization Transactional Outbox before the inbound Query is acknowledged. The reconstructible item includes:
 
 ```text
 systemCode
@@ -71,12 +76,12 @@ status
 sourceVersion
 ```
 
-If System catalog records have another stable identity that is required by the existing recovery framework, it may be included, but `systemCode` remains the canonical consumer key.
+`systemId` is included as the stable owner identity, while `systemCode` remains the canonical consumer key. `systems.version` is the monotonic `sourceVersion`; a controlled configuration change of `systems.status` increments it atomically. A BFF point recovery after that change can therefore apply the new status only when its source version is newer, without a synchronous HTTP read or an unversioned timestamp comparison.
 
-The contract must support:
+The contract supports:
 
 1. bootstrap/rebuild of all relevant V1 systems;
-2. incremental status changes;
+2. applying incremental status changes through a versioned point snapshot;
 3. idempotent duplicate handling;
 4. monotonic source-version protection;
 5. authoritative `NOT_FOUND`/recovery semantics consistent with the service's current recovery architecture.
@@ -90,7 +95,7 @@ The contract must support:
 ### Acceptance criteria
 
 - A fresh BFF projection can rebuild the current status of all supported systems without a synchronous Authorization read.
-- A System status change is propagated incrementally and produces the same final state as a rebuild.
+- A System status change increments `sourceVersion`; applying its point snapshot produces the same final state as a rebuild.
 - System projection processing is idempotent and source-version aware.
 - Canonical system codes are preserved; no frontend aliases such as `wash-ultrasonico` are introduced into owner contracts.
 - No eligibility rule is moved into Authorization merely to satisfy the BFF composition.

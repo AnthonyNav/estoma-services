@@ -940,9 +940,11 @@ La falta de prerrequisitos de aprovisionamiento no convierte `StudentAcademicEli
 ```text
 GetAccountAuthorizationSnapshot
 ListAccountAuthorizationSnapshotsPage
+GetSystemCatalogSnapshot
+ListSystemCatalogSnapshotsPage
 ```
 
-Requesters V1:
+Requesters for account authorization snapshots:
 
 ```text
 bff
@@ -955,6 +957,14 @@ academic
 Requesters limitados a Lavado usan `systemCode = LAVADO_ULTRASONICO` y no reciben accesos de Prácticas.
 
 Snapshots contienen únicamente rol y `SystemAccess` propiedad de Authorization; no incluyen Persona, credenciales, sesiones ni elegibilidad.
+
+Los snapshots del catálogo de Systems están limitados a `bff`. Contienen
+`systemId`, `systemCode`, `status` de catálogo y `sourceVersion` positivo. El
+catálogo es configuración controlada y no un agregado event-sourced: una
+migración que cambia `systems.status` incrementa `systems.version` de forma
+atómica. Así, BFF puede reconstruir con la Query paginada y aplicar después un
+snapshot puntual sólo si su source version es más nueva, sin un read síncrono a
+Authorization.
 
 ## Queries Que Authorization Emite Para Recovery
 

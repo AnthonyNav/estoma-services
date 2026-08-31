@@ -23,7 +23,10 @@ final class QueryListener {
 
   private static final String CONSUMER = "queries";
   private static final Set<String> TYPES = Set.of(
-      "GetAccountAuthorizationSnapshot", "ListAccountAuthorizationSnapshotsPage");
+      "GetAccountAuthorizationSnapshot",
+      "ListAccountAuthorizationSnapshotsPage",
+      "GetSystemCatalogSnapshot",
+      "ListSystemCatalogSnapshotsPage");
 
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;

@@ -26,6 +26,7 @@ import com.estoma.authorization.application.projection.PracticesProvisioningServ
 import com.estoma.authorization.application.projection.ProjectionEventProcessor;
 import com.estoma.authorization.application.query.AuthorizationSnapshotQueryService;
 import com.estoma.authorization.application.query.AuthorizationSnapshotQueryResponder;
+import com.estoma.authorization.application.query.SystemCatalogSnapshotQueryService;
 import com.estoma.authorization.application.recovery.DeferredCommandRecoveryService;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryCoordinator;
 import com.estoma.authorization.application.recovery.ProjectionRecoveryResultHandler;
@@ -108,12 +109,20 @@ class AuthorizationApplicationConfig {
   }
 
   @Bean
+  SystemCatalogSnapshotQueryService systemCatalogSnapshotQueryService(
+      SystemCatalogRepository systems, Clock clock) {
+    return new SystemCatalogSnapshotQueryService(systems, clock);
+  }
+
+  @Bean
   AuthorizationSnapshotQueryResponder authorizationSnapshotQueryResponder(
       TransactionRunner transactions,
       AuthorizationSnapshotQueryService queries,
+      SystemCatalogSnapshotQueryService catalogQueries,
       OutboxRepository outbox,
       Clock clock) {
-    return new AuthorizationSnapshotQueryResponder(transactions, queries, outbox, clock);
+    return new AuthorizationSnapshotQueryResponder(
+        transactions, queries, catalogQueries, outbox, clock);
   }
 
   @Bean

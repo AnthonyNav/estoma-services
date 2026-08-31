@@ -4,7 +4,9 @@
   "title": "Authorization V1 snapshot query results",
   "oneOf": [
     { "$ref": "#/$defs/getAccountAuthorizationSnapshotResult" },
-    { "$ref": "#/$defs/listAccountAuthorizationSnapshotsPageResult" }
+    { "$ref": "#/$defs/listAccountAuthorizationSnapshotsPageResult" },
+    { "$ref": "#/$defs/getSystemCatalogSnapshotResult" },
+    { "$ref": "#/$defs/listSystemCatalogSnapshotsPageResult" }
   ],
   "$defs": {
     "resultEnvelope": {
@@ -101,6 +103,58 @@
         }
       }
     },
+    "systemCatalogSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["systemId", "systemCode", "status", "sourceVersion"],
+      "properties": {
+        "systemId": { "$ref": "../common-envelope.schema.json#/$defs/uuid" },
+        "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+        "status": { "$ref": "../common-envelope.schema.json#/$defs/catalogStatus" },
+        "sourceVersion": { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+        "snapshotGeneratedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+      }
+    },
+    "systemCatalogPointFoundPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "FOUND" },
+        "data": {
+          "allOf": [
+            { "$ref": "#/$defs/systemCatalogSnapshot" },
+            { "required": ["snapshotGeneratedAt"] }
+          ]
+        }
+      }
+    },
+    "systemCatalogPageSucceededPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "data"],
+      "properties": {
+        "status": { "const": "SUCCEEDED" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["items", "hasMore", "snapshotGeneratedAt"],
+          "properties": {
+            "items": { "type": "array", "items": { "$ref": "#/$defs/systemCatalogSnapshot" } },
+            "nextCursor": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+            "hasMore": { "type": "boolean" },
+            "snapshotGeneratedAt": { "$ref": "../common-envelope.schema.json#/$defs/timestamp" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "hasMore": { "const": true } }, "required": ["hasMore"] },
+              "then": { "required": ["nextCursor"] },
+              "else": { "not": { "required": ["nextCursor"] } }
+            }
+          ]
+        }
+      }
+    },
     "getAccountAuthorizationSnapshotResult": {
       "allOf": [
         { "$ref": "#/$defs/resultEnvelope" },
@@ -127,6 +181,39 @@
             "payload": {
               "oneOf": [
                 { "$ref": "#/$defs/pageSucceededPayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "getSystemCatalogSnapshotResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetSystemCatalogSnapshotResult" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/systemCatalogPointFoundPayload" },
+                { "$ref": "#/$defs/pointNotFoundPayload" },
+                { "$ref": "#/$defs/failurePayload" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "listSystemCatalogSnapshotsPageResult": {
+      "allOf": [
+        { "$ref": "#/$defs/resultEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListSystemCatalogSnapshotsPageResult" },
+            "payload": {
+              "oneOf": [
+                { "$ref": "#/$defs/systemCatalogPageSucceededPayload" },
                 { "$ref": "#/$defs/failurePayload" }
               ]
             }

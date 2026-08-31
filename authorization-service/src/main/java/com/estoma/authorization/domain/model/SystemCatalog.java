@@ -9,6 +9,7 @@ public record SystemCatalog(
     SystemCode code,
     String name,
     CatalogStatus status,
+    int version,
     Instant createdAt,
     Instant updatedAt) {
 
@@ -17,6 +18,9 @@ public record SystemCatalog(
     Objects.requireNonNull(code, "code");
     Objects.requireNonNull(status, "status");
     requireText(name, "name", 160);
+    if (version <= 0) {
+      throw new IllegalArgumentException("version must be positive");
+    }
     Objects.requireNonNull(createdAt, "createdAt");
     Objects.requireNonNull(updatedAt, "updatedAt");
     if (updatedAt.isBefore(createdAt)) {

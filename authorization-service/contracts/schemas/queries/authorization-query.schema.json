@@ -4,7 +4,9 @@
   "title": "Authorization V1 snapshot queries",
   "oneOf": [
     { "$ref": "#/$defs/getAccountAuthorizationSnapshot" },
-    { "$ref": "#/$defs/listAccountAuthorizationSnapshotsPage" }
+    { "$ref": "#/$defs/listAccountAuthorizationSnapshotsPage" },
+    { "$ref": "#/$defs/getSystemCatalogSnapshot" },
+    { "$ref": "#/$defs/listSystemCatalogSnapshotsPage" }
   ],
   "$defs": {
     "queryEnvelope": {
@@ -60,6 +62,58 @@
                   ]
                 },
                 "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "systemCatalogQueryEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/queryEnvelope" },
+        {
+          "properties": {
+            "producer": { "const": "bff" }
+          }
+        }
+      ]
+    },
+    "getSystemCatalogSnapshot": {
+      "allOf": [
+        { "$ref": "#/$defs/systemCatalogQueryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "GetSystemCatalogSnapshot" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["systemCode"],
+              "properties": {
+                "systemCode": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "listSystemCatalogSnapshotsPage": {
+      "allOf": [
+        { "$ref": "#/$defs/systemCatalogQueryEnvelope" },
+        {
+          "properties": {
+            "messageType": { "const": "ListSystemCatalogSnapshotsPage" },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["limit"],
+              "properties": {
+                "cursor": { "$ref": "../common-envelope.schema.json#/$defs/systemCode" },
+                "limit": {
+                  "allOf": [
+                    { "$ref": "../common-envelope.schema.json#/$defs/positiveInteger" },
+                    { "maximum": 1000 }
+                  ]
+                }
               }
             }
           }
