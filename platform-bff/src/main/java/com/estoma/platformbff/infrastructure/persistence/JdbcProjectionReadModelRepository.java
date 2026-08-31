@@ -50,6 +50,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
       case ProjectionReadModel.ResourceAssignment value -> assignment(value);
       case ProjectionReadModel.ResourceUnavailability value -> unavailability(value);
       case ProjectionReadModel.CleaningPeriod value -> cleaning(value);
+      case ProjectionReadModel.Jornada value -> jornada(value);
     }
   }
 
@@ -610,5 +611,51 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
         ON CONFLICT (cleaning_period_id) DO UPDATE SET wash_execution_id = EXCLUDED.wash_execution_id, resource_assignment_id = COALESCE(EXCLUDED.resource_assignment_id, wash_cleaning_period_read_model.resource_assignment_id), cabin_id = COALESCE(EXCLUDED.cabin_id, wash_cleaning_period_read_model.cabin_id), tank_id = COALESCE(EXCLUDED.tank_id, wash_cleaning_period_read_model.tank_id), starts_at = COALESCE(EXCLUDED.starts_at, wash_cleaning_period_read_model.starts_at), expected_ends_at = COALESCE(EXCLUDED.expected_ends_at, wash_cleaning_period_read_model.expected_ends_at), completed_at = COALESCE(EXCLUDED.completed_at, wash_cleaning_period_read_model.completed_at), status = EXCLUDED.status, source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
         WHERE wash_cleaning_period_read_model.source_version <= EXCLUDED.source_version
         """).param("id", v.cleaningPeriodId()).param("executionId", v.washExecutionId()).param("assignmentId", v.resourceAssignmentId()).param("cabinId", v.cabinId()).param("tankId", v.tankId()).param("startsAt", JdbcTimes.timestamp(v.startsAt())).param("expectedEndsAt", JdbcTimes.timestamp(v.expectedEndsAt())).param("completedAt", JdbcTimes.timestamp(v.completedAt())).param("status", v.status()).param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  private void jornada(ProjectionReadModel.Jornada v) {
+    jdbc.sql("""
+        INSERT INTO jornada_read_model
+          (jornada_id, tipo_jornada_id, nombre, fecha, hora_inicio, hora_fin, lugar, cupo_total,
+           fecha_limite_documentos, descripcion, estado, source_version, updated_at)
+        VALUES (:id, :tipoJornadaId, :nombre, :fecha, :horaInicio, :horaFin, :lugar, :cupoTotal,
+          :fechaLimite, :descripcion, :estado, :version, :updatedAt)
+        ON CONFLICT (jornada_id) DO UPDATE SET
+          tipo_jornada_id = COALESCE(EXCLUDED.tipo_jornada_id, jornada_read_model.tipo_jornada_id),
+          nombre = COALESCE(EXCLUDED.nombre, jornada_read_model.nombre),
+          fecha = COALESCE(EXCLUDED.fecha, jornada_read_model.fecha),
+          hora_inicio = COALESCE(EXCLUDED.hora_inicio, jornada_read_model.hora_inicio),
+          hora_fin = COALESCE(EXCLUDED.hora_fin, jornada_read_model.hora_fin),
+          lugar = COALESCE(EXCLUDED.lugar, jornada_read_model.lugar),
+          cupo_total = COALESCE(EXCLUDED.cupo_total, jornada_read_model.cupo_total),
+          fecha_limite_documentos = COALESCE(EXCLUDED.fecha_limite_documentos, jornada_read_model.fecha_limite_documentos),
+          descripcion = COALESCE(EXCLUDED.descripcion, jornada_read_model.descripcion),
+          estado = EXCLUDED.estado, source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
+        WHERE jornada_read_model.source_version <= EXCLUDED.source_version
+        """)
+        .param("id", v.jornadaId()).param("tipoJornadaId", v.tipoJornadaId()).param("nombre", v.nombre())
+        .param("fecha", v.fecha()).param("horaInicio", v.horaInicio()).param("horaFin", v.horaFin())
+        .param("lugar", v.lugar()).param("cupoTotal", v.cupoTotal()).param("fechaLimite", v.fechaLimiteDocumentos())
+        .param("descripcion", v.descripcion()).param("estado", v.estado()).param("version", v.sourceVersion())
+        .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  @Override
+  public List<ProjectionReadModel.Jornada> findJornadas() {
+    return jdbc.sql("""
+        SELECT jornada_id, tipo_jornada_id, nombre, fecha, hora_inicio, hora_fin, lugar, cupo_total,
+               fecha_limite_documentos, descripcion, estado, source_version, updated_at
+        FROM jornada_read_model
+        WHERE estado = 'PUBLICADA'
+        ORDER BY fecha ASC, jornada_id ASC
+        """)
+        .query((rs, rowNum) -> new ProjectionReadModel.Jornada(
+            uuid(rs, "jornada_id"), uuid(rs, "tipo_jornada_id"), rs.getString("nombre"),
+            rs.getObject("fecha", java.time.LocalDate.class), rs.getObject("hora_inicio", java.time.LocalTime.class),
+            rs.getObject("hora_fin", java.time.LocalTime.class), rs.getString("lugar"),
+            integer(rs, "cupo_total"), rs.getObject("fecha_limite_documentos", java.time.LocalDate.class),
+            rs.getString("descripcion"), rs.getString("estado"), rs.getLong("source_version"),
+            instant(rs, "updated_at")))
+        .list();
   }
 }

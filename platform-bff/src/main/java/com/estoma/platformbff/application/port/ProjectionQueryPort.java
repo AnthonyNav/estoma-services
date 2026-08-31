@@ -1,5 +1,6 @@
 package com.estoma.platformbff.application.port;
 
+import com.estoma.platformbff.application.projection.ProjectionReadModel;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +24,9 @@ public interface ProjectionQueryPort {
   Optional<UUID> findWashExecutionStudentAccountId(UUID washExecutionId);
 
   List<PendingReassignment> findPendingReassignments();
+
+  /** Publicly visible Jornadas catalog (Prácticas Profesionales) — no per-account scoping. */
+  List<ProjectionReadModel.Jornada> findJornadas();
 
   record MailboxMessage(
       UUID inboxMessageId,

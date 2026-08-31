@@ -4123,6 +4123,76 @@
         }
       }
     },
+    "/api/v1/jornadas" : {
+      "get" : {
+        "operationId" : "JornadasController_list_get__api_v1_jornadas",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "cupoTotal" : {
+                        "type" : [ "integer", "null" ]
+                      },
+                      "descripcion" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "estado" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "fecha" : {
+                        "format" : "date",
+                        "type" : [ "string", "null" ]
+                      },
+                      "fechaLimiteDocumentos" : {
+                        "format" : "date",
+                        "type" : [ "string", "null" ]
+                      },
+                      "horaFin" : {
+                        "type" : [ "object", "null" ]
+                      },
+                      "horaInicio" : {
+                        "type" : [ "object", "null" ]
+                      },
+                      "jornadaId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      },
+                      "lugar" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "nombre" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "tipoJornadaId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      }
+                    },
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
     "/api/v1/mailbox/messages" : {
       "get" : {
         "operationId" : "MailboxController_messages_get__api_v1_mailbox_messages",

@@ -30,7 +30,8 @@ public sealed interface ProjectionReadModel permits
     ProjectionReadModel.WashExecution,
     ProjectionReadModel.ResourceAssignment,
     ProjectionReadModel.ResourceUnavailability,
-    ProjectionReadModel.CleaningPeriod {
+    ProjectionReadModel.CleaningPeriod,
+    ProjectionReadModel.Jornada {
 
   record Person(
       UUID personId,
@@ -312,6 +313,22 @@ public sealed interface ProjectionReadModel permits
       Instant expectedEndsAt,
       Instant completedAt,
       String status,
+      long sourceVersion,
+      Instant updatedAt) implements ProjectionReadModel {}
+
+  /** Prácticas Profesionales — Jornadas catalog, projected read-only from jornadas-service. */
+  record Jornada(
+      UUID jornadaId,
+      UUID tipoJornadaId,
+      String nombre,
+      LocalDate fecha,
+      LocalTime horaInicio,
+      LocalTime horaFin,
+      String lugar,
+      Integer cupoTotal,
+      LocalDate fechaLimiteDocumentos,
+      String descripcion,
+      String estado,
       long sourceVersion,
       Instant updatedAt) implements ProjectionReadModel {}
 }

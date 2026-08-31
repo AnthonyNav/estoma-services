@@ -75,6 +75,7 @@ public class AmqpTopologyConfig {
         BindingBuilder.bind(queue).to(eventsExchange).with("communications.inbox.visited"),
         BindingBuilder.bind(queue).to(eventsExchange).with("wash-administration.#"),
         BindingBuilder.bind(queue).to(eventsExchange).with("appointments.#"),
-        BindingBuilder.bind(queue).to(eventsExchange).with("wash-execution.#"));
+        BindingBuilder.bind(queue).to(eventsExchange).with("wash-execution.#"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("jornadas.#"));
   }
 }

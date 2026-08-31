@@ -51,7 +51,7 @@ public class OpenApiController {
   private static final Set<String> ANONYMOUS = Set.of(
       "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/password-recovery",
       "/api/v1/auth/password-recovery/validate", "/api/v1/auth/password-recovery/reset",
-      "/api/v1/operations/{operationId}", "/api/v1/openapi", "/health", "/version",
+      "/api/v1/operations/{operationId}", "/api/v1/openapi", "/api/v1/jornadas", "/health", "/version",
       "/actuator/health", "/actuator/health/**", "/actuator/prometheus");
 
   private final RequestMappingHandlerMapping mappings;
