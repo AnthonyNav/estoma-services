@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Configuration;
 public class AmqpTopologyConfig {
 
   @Bean DirectExchange communicationsCommandsExchange() { return new DirectExchange(MessagingNames.COMMANDS_EXCHANGE, true, false); }
+  @Bean DirectExchange communicationsQueriesExchange() { return new DirectExchange(MessagingNames.QUERIES_EXCHANGE, true, false); }
   @Bean DirectExchange communicationsResultsExchange() { return new DirectExchange(MessagingNames.RESULTS_EXCHANGE, true, false); }
   @Bean TopicExchange communicationsEventsExchange() { return new TopicExchange(MessagingNames.EVENTS_EXCHANGE, true, false); }
   @Bean TopicExchange communicationsDlxExchange() { return new TopicExchange(MessagingNames.DLX_EXCHANGE, true, false); }
@@ -38,8 +39,22 @@ public class AmqpTopologyConfig {
   @Bean Binding communicationsAppointmentBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
     return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with("appointments.appointment.cancelled");
   }
+  @Bean Binding communicationsAcademicPeriodActivatedBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
+    return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with("academic.period.activated");
+  }
+  @Bean Binding communicationsAcademicPeriodClosedBinding(Queue communicationsEventQueue, TopicExchange communicationsEventsExchange) {
+    return BindingBuilder.bind(communicationsEventQueue).to(communicationsEventsExchange).with("academic.period.closed");
+  }
   @Bean Binding communicationsEventRetryReturnBinding(Queue communicationsEventQueue, TopicExchange communicationsDlxExchange) {
     return BindingBuilder.bind(communicationsEventQueue).to(communicationsDlxExchange).with(MessagingNames.EVENT_RETRY_RETURN);
+  }
+
+  @Bean Queue communicationsResultQueue() { return QueueBuilder.durable(MessagingNames.RESULT_QUEUE).build(); }
+  @Bean Binding communicationsResultBinding(Queue communicationsResultQueue, DirectExchange communicationsResultsExchange) {
+    return BindingBuilder.bind(communicationsResultQueue).to(communicationsResultsExchange).with("communications");
+  }
+  @Bean Binding communicationsResultRetryReturnBinding(Queue communicationsResultQueue, TopicExchange communicationsDlxExchange) {
+    return BindingBuilder.bind(communicationsResultQueue).to(communicationsDlxExchange).with(MessagingNames.RESULT_RETRY_RETURN);
   }
 
   @Bean Queue communicationsCommandRetry5s() { return retry(MessagingNames.COMMAND_RETRY_5S, 5_000, MessagingNames.COMMANDS_EXCHANGE, "communications"); }
@@ -52,6 +67,11 @@ public class AmqpTopologyConfig {
   @Bean Queue communicationsEventRetry300s() { return retry(MessagingNames.EVENT_RETRY_300S, 300_000, MessagingNames.DLX_EXCHANGE, MessagingNames.EVENT_RETRY_RETURN); }
   @Bean Queue communicationsEventDlq() { return QueueBuilder.durable(MessagingNames.EVENT_DLQ).build(); }
 
+  @Bean Queue communicationsResultRetry5s() { return retry(MessagingNames.RESULT_RETRY_5S, 5_000, MessagingNames.DLX_EXCHANGE, MessagingNames.RESULT_RETRY_RETURN); }
+  @Bean Queue communicationsResultRetry30s() { return retry(MessagingNames.RESULT_RETRY_30S, 30_000, MessagingNames.DLX_EXCHANGE, MessagingNames.RESULT_RETRY_RETURN); }
+  @Bean Queue communicationsResultRetry300s() { return retry(MessagingNames.RESULT_RETRY_300S, 300_000, MessagingNames.DLX_EXCHANGE, MessagingNames.RESULT_RETRY_RETURN); }
+  @Bean Queue communicationsResultDlq() { return QueueBuilder.durable(MessagingNames.RESULT_DLQ).build(); }
+
   @Bean Binding commandRetry5sBinding(Queue communicationsCommandRetry5s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsCommandRetry5s).to(communicationsDlxExchange).with(MessagingNames.COMMAND_RETRY_5S); }
   @Bean Binding commandRetry30sBinding(Queue communicationsCommandRetry30s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsCommandRetry30s).to(communicationsDlxExchange).with(MessagingNames.COMMAND_RETRY_30S); }
   @Bean Binding commandRetry300sBinding(Queue communicationsCommandRetry300s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsCommandRetry300s).to(communicationsDlxExchange).with(MessagingNames.COMMAND_RETRY_300S); }
@@ -61,6 +81,11 @@ public class AmqpTopologyConfig {
   @Bean Binding eventRetry30sBinding(Queue communicationsEventRetry30s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsEventRetry30s).to(communicationsDlxExchange).with(MessagingNames.EVENT_RETRY_30S); }
   @Bean Binding eventRetry300sBinding(Queue communicationsEventRetry300s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsEventRetry300s).to(communicationsDlxExchange).with(MessagingNames.EVENT_RETRY_300S); }
   @Bean Binding eventDlqBinding(Queue communicationsEventDlq, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsEventDlq).to(communicationsDlxExchange).with(MessagingNames.EVENT_DLQ); }
+
+  @Bean Binding resultRetry5sBinding(Queue communicationsResultRetry5s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsResultRetry5s).to(communicationsDlxExchange).with(MessagingNames.RESULT_RETRY_5S); }
+  @Bean Binding resultRetry30sBinding(Queue communicationsResultRetry30s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsResultRetry30s).to(communicationsDlxExchange).with(MessagingNames.RESULT_RETRY_30S); }
+  @Bean Binding resultRetry300sBinding(Queue communicationsResultRetry300s, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsResultRetry300s).to(communicationsDlxExchange).with(MessagingNames.RESULT_RETRY_300S); }
+  @Bean Binding resultDlqBinding(Queue communicationsResultDlq, TopicExchange communicationsDlxExchange) { return BindingBuilder.bind(communicationsResultDlq).to(communicationsDlxExchange).with(MessagingNames.RESULT_DLQ); }
 
   private static Queue retry(String name, int ttlMs, String deadLetterExchange, String deadLetterRoutingKey) {
     return QueueBuilder.durable(name)

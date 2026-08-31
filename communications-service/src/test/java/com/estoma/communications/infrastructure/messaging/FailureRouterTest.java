@@ -34,6 +34,12 @@ class FailureRouterTest {
     verify(publisher).publishRequiredRoute(eq(MessagingNames.DLX_EXCHANGE), eq(MessagingNames.EVENT_DLQ), any());
   }
 
+  @Test
+  void malformedRecoveryResultUsesTheResultDlq() {
+    router.route(message(0), FailureRouter.RESULTS, new IllegalArgumentException("invalid"), false);
+    verify(publisher).publishRequiredRoute(eq(MessagingNames.DLX_EXCHANGE), eq(MessagingNames.RESULT_DLQ), any());
+  }
+
   private static Message message(int attempt) {
     MessageProperties properties = new MessageProperties();
     if (attempt > 0) properties.setHeader(MessagingNames.HEADER_ATTEMPT, attempt);
