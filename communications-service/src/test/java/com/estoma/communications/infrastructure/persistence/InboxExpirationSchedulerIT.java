@@ -11,6 +11,7 @@ import com.estoma.communications.domain.inbox.InboxMessage;
 import com.estoma.communications.testsupport.AbstractPostgresIT;
 import java.time.Instant;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -23,6 +24,11 @@ class InboxExpirationSchedulerIT extends AbstractPostgresIT {
   @Autowired private InboxMessageRepository inboxMessageRepository;
   @Autowired private CommunicationRepository communicationRepository;
   @Autowired private JdbcClient jdbc;
+
+  @BeforeEach
+  void isolateSchedulerState() {
+    jdbc.sql("TRUNCATE TABLE outbox_messages, inbox_messages, communications CASCADE").update();
+  }
 
   @Test
   void expireDueMessagesMarksOverdueMessagesExpired() {
