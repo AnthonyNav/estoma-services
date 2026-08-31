@@ -48,7 +48,7 @@ class CommunicationTest {
 
   private static Communication newCommunication() {
     return Communication.requested(
-        UUID.randomUUID(), UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
+        UUID.randomUUID(), UUID.randomUUID(), "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
         "appointments-service", "AppointmentCancelled", UUID.randomUUID().toString(), null, NOW);
   }
 }

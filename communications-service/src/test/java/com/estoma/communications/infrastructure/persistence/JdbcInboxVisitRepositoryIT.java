@@ -17,7 +17,7 @@ class JdbcInboxVisitRepositoryIT extends AbstractPostgresIT {
   void firstVisitIsApplied() {
     UUID accountId = UUID.randomUUID();
 
-    boolean applied = repository.upsertIfNewer(accountId, "wash-ultrasonico", Instant.now(), Instant.now());
+    boolean applied = repository.upsertIfNewer(accountId, "LAVADO_ULTRASONICO", Instant.now(), Instant.now());
 
     assertThat(applied).isTrue();
   }
@@ -26,9 +26,9 @@ class JdbcInboxVisitRepositoryIT extends AbstractPostgresIT {
   void aDelayedVisitDoesNotOverwriteAMoreRecentOne() {
     UUID accountId = UUID.randomUUID();
     Instant now = Instant.now();
-    repository.upsertIfNewer(accountId, "wash-ultrasonico", now, now);
+    repository.upsertIfNewer(accountId, "LAVADO_ULTRASONICO", now, now);
 
-    boolean applied = repository.upsertIfNewer(accountId, "wash-ultrasonico", now.minusSeconds(3600), now);
+    boolean applied = repository.upsertIfNewer(accountId, "LAVADO_ULTRASONICO", now.minusSeconds(3600), now);
 
     assertThat(applied).isFalse();
   }
@@ -37,9 +37,9 @@ class JdbcInboxVisitRepositoryIT extends AbstractPostgresIT {
   void aNewerVisitOverwritesAnOlderOne() {
     UUID accountId = UUID.randomUUID();
     Instant now = Instant.now();
-    repository.upsertIfNewer(accountId, "wash-ultrasonico", now, now);
+    repository.upsertIfNewer(accountId, "LAVADO_ULTRASONICO", now, now);
 
-    boolean applied = repository.upsertIfNewer(accountId, "wash-ultrasonico", now.plusSeconds(60), now.plusSeconds(60));
+    boolean applied = repository.upsertIfNewer(accountId, "LAVADO_ULTRASONICO", now.plusSeconds(60), now.plusSeconds(60));
 
     assertThat(applied).isTrue();
   }

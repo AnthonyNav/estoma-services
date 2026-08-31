@@ -61,7 +61,7 @@ class JdbcCommunicationRepositoryIT extends AbstractPostgresIT {
 
   private Communication newCommunication(String sourceReferenceId, UUID recipientAccountId) {
     return Communication.requested(
-        UUID.randomUUID(), recipientAccountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
+        UUID.randomUUID(), recipientAccountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
         "appointments-service", "AppointmentCancelled", sourceReferenceId, null, Instant.now());
   }
 }

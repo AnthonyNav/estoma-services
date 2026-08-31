@@ -1,6 +1,6 @@
 # Frontend V1 Backend Convergence Gaps — communications-service
 
-Status: `PLANNED`
+Status: `CLOSED`
 
 Scope: backend convergence required by the closed Wash Mailbox V1 flow, specifically semester retention and the capacity-loss cancellation communication.
 
@@ -35,14 +35,16 @@ These are not gaps. New work should extend them rather than create parallel impl
 ## GAP-COMM-01 — Academic Period is not locally projected/recoverable for retention decisions
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `CLOSED` — `academic_period_projections` is owner-versioned; bootstrap/retry uses the durable Academic Query/Result contract.
 - Owner: `communications-service`
 - Upstream dependency: `academic-service` GAP-ACADEMIC-01
 - Affected flow: Wash Mailbox V1 semester retention
 
-### Current state
+### Implemented behavior
 
-Communications has the persistence mechanics to expire inbox messages but does not maintain a local, rebuildable projection of the current Academic Period. As a result, it cannot deterministically calculate the Wash inbox `expiresAt` from owner-authoritative semester dates after bootstrap/rebuild.
+Communications consumes `AcademicPeriodActivated` and `AcademicPeriodClosed`, stores per-period source versions, and fences its current state with a recovery query `causationId`. Startup/retry recovery is sent through the Outbox to `platform.queries` / `academic`; only the matching Academic Result can make the projection `READY`.
+
+The Wash policy converts `endDate` to the first local instant after the final academic date using the explicit `estoma.communications.wash.institutional-time-zone` configuration (default `America/Mexico_City`). It reuses the existing `expiresAt` worker and applies no global Practices policy.
 
 ### Required behavior
 
@@ -90,13 +92,13 @@ The closed requirement is for the Wash mailbox. Semester expiration must therefo
 ## GAP-COMM-02 — `AppointmentCancelled` capacity-loss adapter is not aligned with closed Mailbox V1 behavior
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `CLOSED` — qualifying events now create the canonical two-channel Wash communication through the existing in-process request path.
 - Owner: `communications-service`
 - Upstream event: Appointments `AppointmentCancelled`
 - Dependency: GAP-COMM-01 for the INBOX expiration value
 - Affected flow: Wash appointment cancelled by clinic because of capacity loss
 
-### Verified current behavior
+### Implemented behavior
 
 The adapter already has the important functional filter and it must be preserved:
 
@@ -105,14 +107,7 @@ cancellationOwner == CLINIC
 AND cancellationSubreason == CAPACITY_LOSS
 ```
 
-However the matching path is still incomplete/inconsistent with the closed V1 contract:
-
-1. it uses the non-canonical system alias `wash-ultrasonico` instead of `LAVADO_ULTRASONICO`;
-2. it creates Email content only and does not create the required Inbox content;
-3. its copy promises/indicates future contact or reprogramming, while the closed policy requires a factual cancellation notification without a rebooking promise;
-4. once INBOX is added, its expiration must use the locally projected Academic Period from GAP-COMM-01.
-
-These are one cohesive adapter correction, not four independent features.
+The adapter preserves the exact `CLINIC + CAPACITY_LOSS` predicate and requests `INBOX + EMAIL` through `RequestCommunicationService`. It uses `LAVADO_ULTRASONICO`, factual cancellation copy, the source appointment as its stable idempotency key, and the local authoritative period for the Inbox expiration.
 
 ### Proposed solution
 
@@ -155,13 +150,13 @@ Do not:
 ## GAP-COMM-03 — Negative regression coverage is insufficient to freeze Wash communication exclusions
 
 - Severity: `MEDIUM`
-- Status: `PARTIAL`
+- Status: `CLOSED` — integration coverage now asserts durable absence for exclusions and exact durable channels for the inclusion path.
 - Owner: `communications-service`
 - Affected flow: Wash cancellation communication safety
 
-### Risk
+### Regression coverage
 
-The positive adapter path is only safe if non-qualifying cancellation variants remain silent. Without explicit negative coverage, a refactor could accidentally notify on student/user cancellations or unrelated clinic reasons.
+`AppointmentCancelledAdapterIT` verifies the qualifying channels/system/expiration/copy and redelivery idempotency. It also verifies that student cancellations (including redelivery), wrong clinic reasons, predicate half-matches, malformed qualifying payloads and unavailable period state leave no Communication, InboxMessage or EmailDelivery.
 
 ### Proposed test matrix
 

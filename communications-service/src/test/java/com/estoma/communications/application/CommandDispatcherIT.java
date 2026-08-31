@@ -59,7 +59,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
             Envelopes.command(
                 CommunicationsCommand.REQUEST_COMMUNICATION.wireName(),
                 new RequestCommunicationCommand(
-                    accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
+                    accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
                     "AppointmentCancelled", "appt-" + UUID.randomUUID(), null,
                     new RequestCommunicationCommand.InboxContent("Cita cancelada", "Tu cita fue cancelada por la clínica.", null), null)));
 
@@ -75,7 +75,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
             Envelopes.command(
                 CommunicationsCommand.REQUEST_COMMUNICATION.wireName(),
                 new RequestCommunicationCommand(
-                    accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
+                    accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
                     "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, null,
                     new RequestCommunicationCommand.EmailContent(
                         EmailContentMode.GENERIC, null, "Cita cancelada", "Tu cita fue cancelada por la clínica.", null, null, null))));
@@ -90,7 +90,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         Envelopes.command(
             CommunicationsCommand.REQUEST_COMMUNICATION.wireName(),
             new RequestCommunicationCommand(
-                accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
+                accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
                 "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, null,
                 new RequestCommunicationCommand.EmailContent(
                     null, null, "Cita cancelada", "Tu cita fue cancelada por la clínica.", null, null, null)));
@@ -105,7 +105,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         Envelopes.command(
             CommunicationsCommand.REQUEST_COMMUNICATION.wireName(),
             new RequestCommunicationCommand(
-                accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
+                accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
                 "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, null,
                 new RequestCommunicationCommand.EmailContent(
                     EmailContentMode.TEMPLATE, null, null, null, null, "appointment-cancelled", "{malformed")));
@@ -120,7 +120,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
             Envelopes.command(
                 CommunicationsCommand.REQUEST_COMMUNICATION.wireName(),
                 new RequestCommunicationCommand(
-                    UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
+                    UUID.randomUUID(), "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
                     "AppointmentCancelled", "appt-" + UUID.randomUUID(), null,
                     new RequestCommunicationCommand.InboxContent("Cita cancelada", "Tu cita fue cancelada.", null), null)));
 
@@ -137,7 +137,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
             Envelopes.command(
                 CommunicationsCommand.REQUEST_COMMUNICATION.wireName(),
                 new RequestCommunicationCommand(
-                    accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
+                    accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
                     "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, null, null)));
 
     assertThat(outcome).isInstanceOf(CommandOutcome.Rejected.class);
@@ -150,7 +150,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     String sourceReferenceId = "appt-" + UUID.randomUUID();
     RequestCommunicationCommand command =
         new RequestCommunicationCommand(
-            accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service", "AppointmentCancelled",
+            accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service", "AppointmentCancelled",
             sourceReferenceId, null, new RequestCommunicationCommand.InboxContent("Cita cancelada", "Tu cita fue cancelada.", null), null);
      UUID key = UUID.randomUUID();
      dispatcher.dispatch(Envelopes.command(CommunicationsCommand.REQUEST_COMMUNICATION.wireName(), command, UUID.randomUUID(), key));
@@ -222,7 +222,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
         Envelopes.command(
             CommunicationsCommand.REQUEST_COMMUNICATION.wireName(),
             new RequestCommunicationCommand(
-                accountId, "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
+                accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL, "appointments-service",
                 "AppointmentCancelled", "appt-" + UUID.randomUUID(), null,
                 new RequestCommunicationCommand.InboxContent("Cita cancelada", "Tu cita fue cancelada.", null), null),
             messageId);
@@ -239,7 +239,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
     var outcome =
         dispatcher.dispatch(
             Envelopes.command(
-                CommunicationsCommand.REGISTER_INBOX_VISIT.wireName(), new RegisterInboxVisitCommand(UUID.randomUUID(), "wash-ultrasonico", Instant.now())));
+                CommunicationsCommand.REGISTER_INBOX_VISIT.wireName(), new RegisterInboxVisitCommand(UUID.randomUUID(), "LAVADO_ULTRASONICO", Instant.now())));
 
     assertThat(outcome).isInstanceOf(CommandOutcome.Succeeded.class);
   }
@@ -471,7 +471,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   }
 
   private RequestCommunicationCommand inboxCommand(UUID accountId, String sourceReference, CommunicationPriority priority) {
-    return new RequestCommunicationCommand(accountId, "wash-ultrasonico", "AppointmentCancelledNotice", priority, "appointments-service",
+    return new RequestCommunicationCommand(accountId, "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", priority, "appointments-service",
         "AppointmentCancelled", sourceReference, null, new RequestCommunicationCommand.InboxContent("Cita cancelada", "Tu cita fue cancelada.", null), null);
   }
 
@@ -513,7 +513,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
   private UUID insertCommunication() {
     Communication communication =
         Communication.requested(
-            UUID.randomUUID(), UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
+            UUID.randomUUID(), UUID.randomUUID(), "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
             "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, java.util.List.of("EMAIL"),
             UUID.randomUUID(), UUID.randomUUID(), "fingerprint-" + UUID.randomUUID(), UUID.randomUUID(), null, Instant.now());
     communicationRepository.insert(communication);
@@ -522,7 +522,7 @@ class CommandDispatcherIT extends AbstractPostgresIT {
 
   private UUID insertLegacyCommunication() {
     Communication communication = Communication.requested(
-        UUID.randomUUID(), UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
+        UUID.randomUUID(), UUID.randomUUID(), "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
         "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, Instant.now());
     communicationRepository.insert(communication);
     return communication.communicationId();
