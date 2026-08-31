@@ -75,13 +75,13 @@ class AccountPresentationUpdatedIT extends AbstractPostgresIT {
       assertThat(event.payload().path("personId").asString()).isEqualTo(personId.toString());
       assertThat(event.payload().path("loginType").asString()).isEqualTo("USERNAME");
       assertThat(event.payload().path("loginIdentifier").asString()).isNotBlank();
-      assertThat(event.payload().path("accountStatus").asString()).isNotBlank();
+      assertThat(event.payload().path("status").asString()).isNotBlank();
       assertThat(event.payload().has("password")).isFalse();
       assertThat(event.payload().has("refreshToken")).isFalse();
     });
     assertThat(events.getLast().payload().path("loginIdentifier").asString())
         .isEqualTo("corrected-" + accountId);
-    assertThat(events.getLast().payload().path("accountStatus").asString()).isEqualTo("INACTIVE");
+    assertThat(events.getLast().payload().path("status").asString()).isEqualTo("INACTIVE");
     assertThat(accountRepository.findById(accountId).orElseThrow().version()).isEqualTo(4);
   }
 

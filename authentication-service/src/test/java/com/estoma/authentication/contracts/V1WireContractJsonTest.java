@@ -141,7 +141,7 @@ class V1WireContractJsonTest {
     assertExactFields(deactivation, "accountId", "personId", "previousStatus", "status", "reasonCode", "reasonDetail", "deactivatedAt");
     assertExactFields(
         presentation,
-        "accountId", "personId", "loginType", "loginIdentifier", "accountStatus", "updatedAt");
+        "accountId", "personId", "loginType", "loginIdentifier", "status", "updatedAt");
     assertThat(presentation.get("loginIdentifier").asString()).isEqualTo("alumno");
     assertThat(sessions.get("reasonCode").asString()).isEqualTo("PERSON_DEACTIVATED");
     assertThat(sessions.has("reason")).isFalse();
@@ -197,7 +197,7 @@ class V1WireContractJsonTest {
               "personId": "22222222-2222-2222-2222-222222222222",
               "loginType": "USERNAME",
               "loginIdentifier": "alumno",
-              "accountStatus": "ACTIVE",
+              "status": "ACTIVE",
               "updatedAt": "2026-08-08T00:00:00Z"
             }
             """));

@@ -13,5 +13,5 @@ public record AccountPresentationUpdatedPayload(
     UUID personId,
     LoginType loginType,
     String loginIdentifier,
-    String accountStatus,
+    String status,
     Instant updatedAt) {}

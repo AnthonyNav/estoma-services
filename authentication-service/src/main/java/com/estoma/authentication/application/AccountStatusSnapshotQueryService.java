@@ -101,7 +101,7 @@ public class AccountStatusSnapshotQueryService {
     if (presentation) {
       data.put("loginIdentifier", account.loginIdentifier().value());
     }
-    data.put(presentation ? "accountStatus" : "status", account.status().name());
+    data.put("status", account.status().name());
     data.put("sourceVersion", account.version());
     data.put("updatedAt", account.updatedAt());
     return data;

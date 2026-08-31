@@ -7,7 +7,7 @@ accountId
 personId
 loginType
 loginIdentifier
-accountStatus
+status
 sourceVersion
 ```
 

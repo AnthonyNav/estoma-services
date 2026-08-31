@@ -69,8 +69,8 @@ class AccountStatusSnapshotQueryServiceTest {
     assertThat(payload.path("status").asString()).isEqualTo("FOUND");
     assertThat(payload.path("data").path("loginIdentifier").asString())
         .isEqualTo(account.loginIdentifier().value());
-    assertThat(payload.path("data").path("accountStatus").asString()).isEqualTo("INACTIVE");
-    assertThat(payload.path("data").has("status")).isFalse();
+    assertThat(payload.path("data").path("status").asString()).isEqualTo("INACTIVE");
+    assertThat(payload.path("data").has("accountStatus")).isFalse();
     assertThat(payload.path("data").path("sourceVersion").asInt()).isEqualTo(account.version());
   }
 
