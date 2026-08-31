@@ -966,6 +966,13 @@ atómica. Así, BFF puede reconstruir con la Query paginada y aplicar después u
 snapshot puntual sólo si su source version es más nueva, sin un read síncrono a
 Authorization.
 
+Un cambio controlado de `systems.status` tiene un gate de despliegue explícito:
+la migración/operación identifica sus `systemCode` afectados y BFF emite
+`GetSystemCatalogSnapshot` para cada uno. BFF sólo vuelve a considerar ese
+System efectivo después de persistir un Result con `sourceVersion` más nueva;
+si el recovery no puede terminar, permanece fail-closed. El procedimiento
+completo está en [`system_catalog_change_recovery.md`](system_catalog_change_recovery.md).
+
 ## Queries Que Authorization Emite Para Recovery
 
 Users:

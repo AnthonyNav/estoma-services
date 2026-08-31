@@ -206,6 +206,34 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
   }
 
   @Test
+  void systemCatalogPageSnapshotIsDurableAndUsesTheSystemCodeKeyset() {
+    String resultQueue = declareDirectResultQueue("bff");
+    UUID queryId = UUID.randomUUID();
+
+    send(systemCatalogPageQuery(queryId, null, 1),
+        MessagingNames.QUERIES_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID);
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'ListSystemCatalogSnapshotsPageResult'")
+            .query(Long.class)
+            .single()).isEqualTo(1));
+    relay.relay();
+
+    JsonNode result = receive(resultQueue);
+    assertThat(result.path("messageType").asText()).isEqualTo("ListSystemCatalogSnapshotsPageResult");
+    assertThat(result.path("causationId").asText()).isEqualTo(queryId.toString());
+    assertThat(result.path("payload").path("status").asText()).isEqualTo("SUCCEEDED");
+    assertThat(result.path("payload").path("data").path("items").size()).isEqualTo(1);
+    assertThat(result.path("payload").path("data").path("items").get(0).path("systemCode").asText())
+        .isEqualTo("LAVADO_ULTRASONICO");
+    assertThat(result.path("payload").path("data").path("items").get(0).path("sourceVersion").asInt())
+        .isEqualTo(1);
+    assertThat(result.path("payload").path("data").path("hasMore").asBoolean()).isTrue();
+    assertThat(result.path("payload").path("data").path("nextCursor").asText())
+        .isEqualTo("LAVADO_ULTRASONICO");
+  }
+
+  @Test
   void rejectedCommandPublishesOnlyARejectedResult() {
     UUID actor = seedSuperadmin();
     String resultQueue = declareDirectResultQueue("bff");
@@ -623,6 +651,28 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
         null,
         new WireActor("SYSTEM", null, "bff"),
         mapper.createObjectNode().put("systemCode", "LAVADO_ULTRASONICO"));
+  }
+
+  private MessageEnvelope systemCatalogPageQuery(UUID messageId, String cursor, int limit) {
+    var payload = mapper.createObjectNode().put("limit", limit);
+    if (cursor != null) {
+      payload.put("cursor", cursor);
+    }
+    return new MessageEnvelope(
+        messageId,
+        "ListSystemCatalogSnapshotsPage",
+        1,
+        MessageKind.QUERY,
+        "bff",
+        NOW,
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        null,
+        null,
+        null,
+        new WireActor("SYSTEM", null, "bff"),
+        payload);
   }
 
   private MessageEnvelope personCreated(UUID messageId, UUID personId, int version) {

@@ -47,6 +47,8 @@ That historical record supersedes the PR1 observation SHA still described in
 The System catalog recovery contract added after PR3 is declared in the
 executable [`contracts/asyncapi.yaml`](contracts/asyncapi.yaml) and explained
 in [`docs/frontend_v1_convergence_gaps.md`](docs/frontend_v1_convergence_gaps.md).
+The required BFF recovery gate for controlled catalog changes is documented in
+[`docs/system_catalog_change_recovery.md`](docs/system_catalog_change_recovery.md).
 The canonical platform-docs repository intentionally remains unchanged by this
 service-only PR; its matching documentation update is a separate docs-only
 follow-up before a consumer rollout relies on the new Queries.
