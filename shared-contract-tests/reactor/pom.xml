@@ -14,6 +14,8 @@
     <module>../../academic-service</module>
     <module>../../authorization-service</module>
     <module>../../communications-service</module>
+    <module>../../wash-execution-service</module>
+    <module>../../wash-administration-service</module>
     <module>../tests</module>
   </modules>
 </project>

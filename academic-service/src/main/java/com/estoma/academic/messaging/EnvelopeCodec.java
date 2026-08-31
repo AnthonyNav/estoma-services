@@ -13,7 +13,7 @@ public class EnvelopeCodec {
   private final ObjectMapper mapper;
   public EnvelopeCodec(ObjectMapper mapper) { this.mapper = mapper; }
   public MessageEnvelope decode(byte[] body) { return mapper.readValue(body, MessageEnvelope.class); }
-  /** Serializes a V1 envelope without materializing inapplicable optional fields on the wire. */
+  /** Serializes the strict V1 wire form expected by remote consumers, omitting inapplicable fields. */
   public byte[] encode(MessageEnvelope envelope) {
     ObjectNode root = mapper.createObjectNode();
     root.put("messageId", envelope.messageId().toString());
