@@ -22,8 +22,9 @@ class FlywayMigrationIT extends AbstractPostgresIT {
   void migrationsAreAppliedAndRerunningIsANoOp() {
     MigrationInfo[] applied = flyway.info().applied();
 
-    assertThat(applied).hasSize(3);
-    assertThat(applied).extracting(info -> info.getVersion().toString()).containsExactly("1", "2", "3");
+    assertThat(applied).hasSize(4);
+    assertThat(applied).extracting(info -> info.getVersion().toString())
+        .containsExactly("1", "2", "3", "4");
     assertThat(applied).allSatisfy(info -> assertThat(info.getState().isFailed()).isFalse());
     assertThat(flyway.migrate().migrationsExecuted).isZero();
   }

@@ -8,13 +8,21 @@ import com.estoma.communications.contracts.Actor;
 import com.estoma.communications.testsupport.AbstractPostgresIT;
 import java.time.Instant;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 class JdbcOutboxRelayRepositoryIT extends AbstractPostgresIT {
 
   @Autowired private OutboxPort outbox;
   @Autowired private JdbcOutboxRelayRepository relayRepository;
+  @Autowired private JdbcClient jdbc;
+
+  @BeforeEach
+  void isolateOutbox() {
+    jdbc.sql("DELETE FROM outbox_messages").update();
+  }
 
   @Test
   void claimedRowsAreLeasedThenRecoverableAfterLeaseExpiry() {

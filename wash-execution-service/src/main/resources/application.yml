@@ -1,6 +1,12 @@
 spring:
   application:
     name: wash-execution-service
+  datasource:
+    hikari:
+      maximum-pool-size: ${WASH_EXECUTION_DB_POOL_SIZE:4}
+      minimum-idle: ${WASH_EXECUTION_DB_MIN_IDLE:1}
+      connection-timeout: 10000
+      validation-timeout: 5000
   rabbitmq:
     publisher-confirm-type: correlated
     publisher-returns: true
@@ -8,9 +14,20 @@ spring:
       simple:
         acknowledge-mode: manual
         default-requeue-rejected: false
+        observation-enabled: true
+    template:
+      observation-enabled: true
 server:
   port: 8080
 management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces
   endpoint:
     health:
       probes:

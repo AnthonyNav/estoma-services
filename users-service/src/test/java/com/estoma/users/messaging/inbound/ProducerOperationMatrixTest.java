@@ -74,6 +74,19 @@ class ProducerOperationMatrixTest {
 
   private MessageEnvelope command(String producer, String messageType) {
     UUID personId = UUID.randomUUID();
+    Actor actor = "academic".equals(producer)
+        ? new Actor.System("academic")
+        : new Actor.Account(UUID.randomUUID());
+    Map<String, Object> payload = new java.util.LinkedHashMap<>();
+    payload.put("personId", personId.toString());
+    if ("academic".equals(producer)) {
+      payload.put("importExecution", Map.of(
+          "importId", UUID.randomUUID().toString(),
+          "planItemId", UUID.randomUUID().toString(),
+          "authorizedByAccountId", UUID.randomUUID().toString(),
+          "executionGeneration", 1,
+          "scope", "CreatePerson".equals(messageType) ? "CREATE_PERSON" : "UPDATE_PERSON"));
+    }
     return new MessageEnvelope(
         UUID.randomUUID(),
         messageType,
@@ -87,7 +100,7 @@ class ProducerOperationMatrixTest {
         UUID.randomUUID().toString(),
         personId,
         null,
-        new Actor.Account(UUID.randomUUID()),
-        mapper.valueToTree(Map.of("personId", personId.toString())));
+        actor,
+        mapper.valueToTree(payload));
   }
 }

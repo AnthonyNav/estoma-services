@@ -2,6 +2,7 @@ package com.estoma.platformbff.api.auth;
 
 import com.estoma.platformbff.application.security.AuthenticationEdgeService;
 import com.estoma.platformbff.application.security.AuthenticationEdgeService.ClientMetadata;
+import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.auth.LoginRequest;
 import com.estoma.platformbff.contracts.http.auth.LoginResponse;
 import com.estoma.platformbff.contracts.http.auth.LogoutResponse;
@@ -49,11 +50,12 @@ public class AuthenticationController {
   }
 
   @PostMapping("/password-recovery")
-  public ResponseEntity<CommandSubmissionResult> requestRecovery(
+  public ResponseEntity<AcceptedOperationResponse> requestRecovery(
       @Valid @RequestBody PasswordRecoveryRequest request,
       @RequestHeader("Idempotency-Key") String idempotencyKey) {
-    return ResponseEntity.accepted()
-        .body(authentication.requestPasswordRecovery(request, idempotencyKey));
+    CommandSubmissionResult submitted = authentication.requestPasswordRecovery(request, idempotencyKey);
+    return ResponseEntity.accepted().body(new AcceptedOperationResponse(submitted.operationId(),
+        submitted.status(), submitted.pollPath(), submitted.submittedAt()));
   }
 
   @PostMapping("/password-recovery/validate")

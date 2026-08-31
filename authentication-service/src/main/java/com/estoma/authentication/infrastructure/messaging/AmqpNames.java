@@ -34,6 +34,9 @@ public final class AmqpNames {
   public static final String QUEUE_EVENTS_RETRY_5S = "events.authentication-service.retry.5s";
   public static final String ROUTING_KEY_EVENTS_RETRY_5S = "retry.events.authentication-service.5s";
 
+  public static final String ROUTING_KEY_RESULTS_BFF = "bff";
+  public static final String ROUTING_KEY_RESULTS_ACADEMIC = "academic";
+
   public static final String ROUTING_KEY_PERSON_CREATED = "users.person.created";
   public static final String ROUTING_KEY_PERSON_ACTIVATED = "users.person.activated";
   public static final String ROUTING_KEY_PERSON_DEACTIVATED = "users.person.deactivated";

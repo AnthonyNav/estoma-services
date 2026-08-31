@@ -10,7 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public final class JdbcOutboxRelayStore implements OutboxRelayStore {
+public class JdbcOutboxRelayStore implements OutboxRelayStore {
   private final JdbcTemplate jdbc;
 
   public JdbcOutboxRelayStore(JdbcTemplate jdbc) {

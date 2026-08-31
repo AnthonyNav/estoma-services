@@ -5,6 +5,11 @@ spring:
     url: ${ACADEMIC_DB_URL:jdbc:postgresql://localhost:5432/academic_db}
     username: ${ACADEMIC_DB_RUNTIME_USER:academic_service}
     password: ${ACADEMIC_DB_RUNTIME_PASSWORD:academic_service}
+    hikari:
+      maximum-pool-size: ${ACADEMIC_DB_POOL_SIZE:4}
+      minimum-idle: ${ACADEMIC_DB_MIN_IDLE:1}
+      connection-timeout: 10000
+      validation-timeout: 5000
   flyway:
     url: ${ACADEMIC_DB_URL:jdbc:postgresql://localhost:5432/academic_db}
     user: ${ACADEMIC_DB_MIGRATION_USER:academic_service}
@@ -16,13 +21,17 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    virtual-host: ${RABBITMQ_VHOST:/}
     publisher-confirm-type: correlated
     publisher-returns: true
     listener:
       simple:
         default-requeue-rejected: false
+        observation-enabled: true
         retry:
           enabled: false
+    template:
+      observation-enabled: true
 estoma:
   messaging:
     topology-declare: ${ESTOMA_MESSAGING_TOPOLOGY_DECLARE:true}
@@ -42,6 +51,14 @@ estoma:
 server:
   port: 8080
 management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://otel-collector.monitoring.svc.cluster.local:4318/v1/traces
   endpoints:
     access:
       default: none

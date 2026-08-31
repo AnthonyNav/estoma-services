@@ -21,6 +21,7 @@ import com.estoma.authorization.domain.model.RoleCode;
 import com.estoma.authorization.infrastructure.messaging.EnvelopeJsonCodec;
 import com.estoma.authorization.infrastructure.messaging.outbound.OutboxRelay;
 import com.estoma.authorization.testsupport.AbstractMessagingIT;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -161,6 +162,75 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
     assertThat(result.path("operationId").asText()).isEqualTo(operationId.toString());
     assertThat(result.path("payload").path("status").asText()).isEqualTo("FOUND");
     assertThat(result.path("payload").path("data").path("accountId").asText()).isEqualTo(accountId.toString());
+  }
+
+  @Test
+  void systemCatalogSnapshotRebuildsAndCarriesMonotonicStatusVersion() throws Exception {
+    String resultQueue = declareReusableDirectResultQueue("bff");
+    UUID firstQueryId = UUID.randomUUID();
+
+    send(systemCatalogQuery(firstQueryId), MessagingNames.QUERIES_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID);
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'GetSystemCatalogSnapshotResult'")
+            .query(Long.class)
+            .single()).isEqualTo(1));
+    relay.relay();
+
+    JsonNode first = receive(resultQueue);
+    assertThat(first.path("messageType").asText()).isEqualTo("GetSystemCatalogSnapshotResult");
+    assertThat(first.path("causationId").asText()).isEqualTo(firstQueryId.toString());
+    assertThat(first.path("payload").path("status").asText()).isEqualTo("FOUND");
+    assertThat(first.path("payload").path("data").path("status").asText()).isEqualTo("ACTIVE");
+    assertThat(first.path("payload").path("data").path("sourceVersion").asInt()).isEqualTo(1);
+
+    try (var connection = DriverManager.getConnection(
+            POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        var statement = connection.createStatement()) {
+      statement.executeUpdate("UPDATE systems SET status = CAST('INACTIVE' AS catalog_status) "
+          + "WHERE code = 'LAVADO_ULTRASONICO'");
+    }
+    UUID secondQueryId = UUID.randomUUID();
+    send(systemCatalogQuery(secondQueryId), MessagingNames.QUERIES_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID);
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'GetSystemCatalogSnapshotResult'")
+            .query(Long.class)
+            .single()).isEqualTo(2));
+    relay.relay();
+
+    JsonNode second = receive(resultQueue);
+    assertThat(second.path("causationId").asText()).isEqualTo(secondQueryId.toString());
+    assertThat(second.path("payload").path("data").path("status").asText()).isEqualTo("INACTIVE");
+    assertThat(second.path("payload").path("data").path("sourceVersion").asInt()).isEqualTo(2);
+  }
+
+  @Test
+  void systemCatalogPageSnapshotIsDurableAndUsesTheSystemCodeKeyset() {
+    String resultQueue = declareDirectResultQueue("bff");
+    UUID queryId = UUID.randomUUID();
+
+    send(systemCatalogPageQuery(queryId, null, 1),
+        MessagingNames.QUERIES_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID);
+
+    await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
+        jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type = 'ListSystemCatalogSnapshotsPageResult'")
+            .query(Long.class)
+            .single()).isEqualTo(1));
+    relay.relay();
+
+    JsonNode result = receive(resultQueue);
+    assertThat(result.path("messageType").asText()).isEqualTo("ListSystemCatalogSnapshotsPageResult");
+    assertThat(result.path("causationId").asText()).isEqualTo(queryId.toString());
+    assertThat(result.path("payload").path("status").asText()).isEqualTo("SUCCEEDED");
+    assertThat(result.path("payload").path("data").path("items").size()).isEqualTo(1);
+    assertThat(result.path("payload").path("data").path("items").get(0).path("systemCode").asText())
+        .isEqualTo("LAVADO_ULTRASONICO");
+    assertThat(result.path("payload").path("data").path("items").get(0).path("sourceVersion").asInt())
+        .isEqualTo(1);
+    assertThat(result.path("payload").path("data").path("hasMore").asBoolean()).isTrue();
+    assertThat(result.path("payload").path("data").path("nextCursor").asText())
+        .isEqualTo("LAVADO_ULTRASONICO");
   }
 
   @Test
@@ -511,6 +581,16 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
     return declareDirectQueue(MessagingNames.RESULTS_EXCHANGE, routingKey);
   }
 
+  private String declareReusableDirectResultQueue(String routingKey) {
+    String queueName = "authorization-it-" + UUID.randomUUID();
+    temporaryQueues.add(queueName);
+    Queue queue = new Queue(queueName, false, false, false);
+    amqpAdmin.declareQueue(queue);
+    amqpAdmin.declareBinding(BindingBuilder.bind(queue)
+        .to(new DirectExchange(MessagingNames.RESULTS_EXCHANGE)).with(routingKey));
+    return queueName;
+  }
+
   private String declareDirectQueue(String exchangeName, String routingKey) {
     String queueName = "authorization-it-" + UUID.randomUUID();
     temporaryQueues.add(queueName);
@@ -553,6 +633,46 @@ class AuthorizationMessagingIT extends AbstractMessagingIT {
         mapper.createObjectNode()
             .put("accountId", accountId.toString())
             .put("roleCode", "ADMINISTRADOR_PRACTICAS"));
+  }
+
+  private MessageEnvelope systemCatalogQuery(UUID messageId) {
+    return new MessageEnvelope(
+        messageId,
+        "GetSystemCatalogSnapshot",
+        1,
+        MessageKind.QUERY,
+        "bff",
+        NOW,
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        null,
+        null,
+        null,
+        new WireActor("SYSTEM", null, "bff"),
+        mapper.createObjectNode().put("systemCode", "LAVADO_ULTRASONICO"));
+  }
+
+  private MessageEnvelope systemCatalogPageQuery(UUID messageId, String cursor, int limit) {
+    var payload = mapper.createObjectNode().put("limit", limit);
+    if (cursor != null) {
+      payload.put("cursor", cursor);
+    }
+    return new MessageEnvelope(
+        messageId,
+        "ListSystemCatalogSnapshotsPage",
+        1,
+        MessageKind.QUERY,
+        "bff",
+        NOW,
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        null,
+        null,
+        null,
+        new WireActor("SYSTEM", null, "bff"),
+        payload);
   }
 
   private MessageEnvelope personCreated(UUID messageId, UUID personId, int version) {

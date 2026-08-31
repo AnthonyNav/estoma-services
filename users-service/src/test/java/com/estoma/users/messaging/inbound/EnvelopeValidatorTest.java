@@ -176,7 +176,7 @@ class EnvelopeValidatorTest {
                 3,
                 Duration.ofSeconds(5)));
 
-    assertThatCode(() -> twoProducerValidator.validate(withProducer(validCommand(), "academic")))
+    assertThatCode(() -> twoProducerValidator.validate(validAcademicCommand()))
         .doesNotThrowAnyException();
   }
 
@@ -197,6 +197,32 @@ class EnvelopeValidatorTest {
         null,
         new Actor.Account(UUID.randomUUID()),
         mapper.valueToTree(Map.of("personId", personId.toString())));
+  }
+
+  private MessageEnvelope validAcademicCommand() {
+    UUID personId = UUID.randomUUID();
+    return new MessageEnvelope(
+        UUID.randomUUID(),
+        "CreatePerson",
+        1,
+        MessageKind.COMMAND,
+        "academic",
+        Instant.now(),
+        UUID.randomUUID(),
+        null,
+        UUID.randomUUID(),
+        UUID.randomUUID().toString(),
+        personId,
+        null,
+        new Actor.System("academic"),
+        mapper.valueToTree(Map.of(
+            "personId", personId.toString(),
+            "importExecution", Map.of(
+                "importId", UUID.randomUUID().toString(),
+                "planItemId", UUID.randomUUID().toString(),
+                "authorizedByAccountId", UUID.randomUUID().toString(),
+                "executionGeneration", 1,
+                "scope", "CREATE_PERSON"))));
   }
 
   private MessageEnvelope withKind(MessageEnvelope e, MessageKind kind) {

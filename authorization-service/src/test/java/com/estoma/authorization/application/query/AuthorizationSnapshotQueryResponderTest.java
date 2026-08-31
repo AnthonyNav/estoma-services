@@ -26,6 +26,7 @@ class AuthorizationSnapshotQueryResponderTest {
     AuthorizationSnapshotQueryResponder responder = new AuthorizationSnapshotQueryResponder(
         directTransactions(),
         mock(AuthorizationSnapshotQueryService.class),
+        mock(SystemCatalogSnapshotQueryService.class),
         outbox,
         Clock.fixed(NOW, ZoneOffset.UTC));
     UUID queryId = UUID.randomUUID();

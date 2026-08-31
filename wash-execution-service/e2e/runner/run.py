@@ -145,7 +145,7 @@ class Harness:
     def envelope(self, message_type, kind, producer, payload, actor, aggregate_id=None,
                  aggregate_version=None, occurred_at=None, correlation_id=None,
                  causation_id=None, operation_id=None, idempotency_key=None, message_id=None):
-        return {
+        values = {
             "messageId": message_id or uid(),
             "messageType": message_type,
             "messageVersion": 1,
@@ -161,19 +161,20 @@ class Harness:
             "actor": actor,
             "payload": payload,
         }
+        return {key: value for key, value in values.items() if value is not None}
 
     @staticmethod
     def account_actor(account_id):
-        return {"type": "ACCOUNT", "accountId": account_id, "service": None}
+        return {"type": "ACCOUNT", "accountId": account_id}
 
     @staticmethod
     def system_actor(service):
-        return {"type": "SYSTEM", "accountId": None, "service": service}
+        return {"type": "SYSTEM", "service": service}
 
     def command(self, owner, message_type, payload, actor, occurred_at=None, producer="bff"):
         message_id = uid()
         correlation_id = uid()
-        operation_id = uid()
+        operation_id = None if producer == owner else uid()
         envelope = self.envelope(
             message_type, "COMMAND", producer, payload, actor,
             occurred_at=occurred_at, correlation_id=correlation_id,
@@ -277,24 +278,6 @@ class Harness:
                     "INSERT INTO tanks(tank_id,cabin_id,code,name,configured_capacity,status,version,created_by_account_id,updated_by_account_id,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,'ACTIVE',1,%s,%s,%s,%s)",
                     (tanks[name], cabins[name], f"T-{code}", f"Tank {code}", capacity, actor, actor, now, now),
                 )
-            priorities = [
-                ("NORMAL", "NORMAL", "PREFERRED", 1),
-                ("NORMAL", "JOURNEY", "ALTERNATIVE", 2),
-                ("JOURNEY", "JOURNEY", "PREFERRED", 1),
-                ("JOURNEY", "NORMAL", "ALTERNATIVE", 2),
-                ("IMMUNOCOMPROMISED", "IMMUNOCOMPROMISED", "EXCLUSIVE", 1),
-            ]
-            for appt_type, cabin_type, mode, order in priorities:
-                priority_id = uuid.UUID(uid())
-                cur.execute(
-                    "INSERT INTO resource_priorities(resource_priority_id,appointment_type,cabin_type,usage_mode,priority_order,status,version,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,'ACTIVE',1,%s,%s)",
-                    (priority_id, appt_type, cabin_type, mode, order, now, now),
-                )
-                self._admin_outbox(cur, "ResourcePriorityConfigured", priority_id, 1, {
-                    "resourcePriorityId": str(priority_id), "appointmentType": appt_type,
-                    "cabinType": cabin_type, "usageMode": mode, "priorityOrder": order,
-                    "status": "ACTIVE", "version": 1, "occurredAt": iso(now),
-                }, now)
             self._admin_outbox(cur, "ServiceCalendarCreated", calendar, 1, {
                 "calendarId": str(calendar), "code": "E2E-CALENDAR", "name": "PR4 E2E",
                 "timezone": self.zone.key, "effectiveFrom": str(service_date - timedelta(days=1)),
@@ -317,12 +300,28 @@ class Harness:
                     "name": f"Tank {code}", "configuredCapacity": capacity, "status": "ACTIVE",
                     "version": 1, "occurredAt": iso(now),
                 }, now)
+            # The owner provisions this fixed matrix during its application startup.  Replay its
+            # actual rows after all consumer queues exist; the startup events can otherwise be
+            # published before the dependent services have declared their durable bindings.
+            cur.execute(
+                "SELECT resource_priority_id,appointment_type,cabin_type,usage_mode,priority_order,"
+                "status,version FROM resource_priorities ORDER BY appointment_type,cabin_type")
+            for priority_id, appointment_type, cabin_type, usage_mode, priority_order, status, version in cur.fetchall():
+                self._admin_outbox(cur, "ResourcePriorityConfigured", priority_id, version, {
+                    "resourcePriorityId": str(priority_id), "appointmentType": appointment_type,
+                    "cabinType": cabin_type, "usageMode": usage_mode, "priorityOrder": priority_order,
+                    "status": status, "version": version, "occurredAt": iso(now),
+                }, now)
         wait_until("wash admin outbox published", lambda: scalar(
             ADMIN_DSN, "SELECT count(*)=0 FROM outbox_messages WHERE status='PENDING'") is True, timeout=30)
         wait_until("appointments admin projection", lambda: scalar(
             APPOINTMENTS_DSN, "SELECT count(*) FROM tank_projection") >= 4)
         wait_until("execution admin projection", lambda: scalar(
             EXECUTION_DSN, "SELECT count(*) FROM tank_projection") >= 4)
+        wait_until("appointments priority projection", lambda: scalar(
+            APPOINTMENTS_DSN, "SELECT count(*) FROM resource_priority_projection") == 5)
+        wait_until("execution priority projection", lambda: scalar(
+            EXECUTION_DSN, "SELECT count(*) FROM resource_priority_projection") == 5)
         return service_date
 
     def _admin_outbox(self, cur, message_type, aggregate_id, version, payload, now):
@@ -413,8 +412,10 @@ class Harness:
             "cancellationDeadlineAt": iso(start - timedelta(minutes=20)),
             "arrivalToleranceUntil": iso(start + timedelta(minutes=10)),
         }
-        self.command("appointments", "CreateAppointmentTimeSlot", payload,
-                     self.system_actor("appointments"), occurred_at=command_now, producer="appointments")
+        command = self.command("appointments", "CreateAppointmentTimeSlot", payload,
+                               self.account_actor(self.ids["slot_administrator"]), occurred_at=command_now)
+        result = self.wait_result(self.result_queue, command["correlationId"])
+        assert result["messageType"] == "CreateAppointmentTimeSlotSucceeded", result
         wait_until("slot creation", lambda: scalar(
             APPOINTMENTS_DSN, "SELECT count(*) FROM appointment_time_slots WHERE appointment_time_slot_id=%s", (uuid.UUID(slot),)) == 1)
         wait_until("slot projection in execution", lambda: scalar(
@@ -426,13 +427,18 @@ class Harness:
     def schedule(self, student, slot, appointment_type="NORMAL", command_now=None):
         command_now = command_now or utcnow()
         section = self.ids[f"section:{student}"]
+        appointment_id = uid()
         before = set(r[0] for r in rows(APPOINTMENTS_DSN, "SELECT appointment_id FROM appointments WHERE student_account_id=%s AND appointment_time_slot_id=%s", (uuid.UUID(student), uuid.UUID(slot))))
-        self.command("appointments", "ScheduleAppointment", {
-            "studentAccountId": student, "appointmentTimeSlotId": slot, "courseSectionId": section,
+        command = self.command("appointments", "ScheduleAppointment", {
+            "appointmentId": appointment_id, "studentAccountId": student,
+            "appointmentTimeSlotId": slot, "courseSectionId": section,
             "appointmentType": appointment_type, "instrumentCount": 1, "pieceType": "HIGH_SPEED",
+            "regulationAccepted": True,
         }, self.account_actor(student), occurred_at=command_now)
+        result = self.wait_result(self.result_queue, command["correlationId"])
+        assert result["messageType"] == "ScheduleAppointmentSucceeded", result
         def created():
-            found = rows(APPOINTMENTS_DSN, "SELECT appointment_id,status FROM appointments WHERE student_account_id=%s AND appointment_time_slot_id=%s ORDER BY scheduled_at DESC", (uuid.UUID(student), uuid.UUID(slot)))
+            found = rows(APPOINTMENTS_DSN, "SELECT appointment_id,status FROM appointments WHERE student_account_id=%s AND appointment_time_slot_id=%s ORDER BY created_at DESC", (uuid.UUID(student), uuid.UUID(slot)))
             for appt_id, status in found:
                 if appt_id not in before and status == "SCHEDULED":
                     return str(appt_id)
@@ -488,8 +494,8 @@ class Harness:
         wait_until("resource restored", lambda: scalar(
             EXECUTION_DSN, "SELECT restored_at IS NOT NULL FROM resource_unavailabilities WHERE resource_unavailability_id=%s", (uuid.UUID(unavailability),)) is True)
 
-    def submit_and_complete(self, student, supervisor, execution):
-        now = utcnow()
+    def submit_and_complete(self, student, supervisor, execution, submitted_at=None):
+        now = submitted_at or utcnow()
         self.command("wash-execution", "SubmitWashExit", {
             "washExecutionId": execution, "submittedByStudentAccountId": student,
             "materials": {"packageCount": 1, "greenPaperCassette8Count": 0,
@@ -498,7 +504,7 @@ class Harness:
         }, self.account_actor(student), occurred_at=now)
         wait_until("exit submitted", lambda: scalar(EXECUTION_DSN,
             "SELECT status FROM wash_executions WHERE wash_execution_id=%s", (uuid.UUID(execution),)) == "EXIT_SUBMITTED")
-        now2 = utcnow()
+        now2 = now + timedelta(seconds=1) if submitted_at else utcnow()
         self.command("wash-execution", "CompleteWashExecution", {
             "washExecutionId": execution, "completedByAccountId": supervisor,
             "finalMaterials": {"packageCount": 1, "greenPaperCassette8Count": 0,
@@ -575,6 +581,9 @@ class Harness:
             "SELECT completed_at IS NOT NULL FROM cleaning_periods WHERE cleaning_period_id=%s", (cleaning[0],)) is True, timeout=20)
         wait_until("cleaning projected by appointments", lambda: scalar(APPOINTMENTS_DSN,
             "SELECT count(*) FROM cleaning_period_projection WHERE wash_execution_id=%s", (uuid.UUID(execution),)) >= 1)
+        wait_until("cleaning completion projected by appointments", lambda: scalar(APPOINTMENTS_DSN,
+            "SELECT completed_at IS NOT NULL FROM cleaning_period_projection WHERE cleaning_period_id=%s",
+            (cleaning[0],)) is True)
 
     def scenario_04_cancel_immuno_without_use(self):
         print("[04] IMMUNO cancellation releases preventive reservation")
@@ -587,26 +596,35 @@ class Harness:
         }, self.account_actor(student), occurred_at=base + timedelta(minutes=1))
         wait_until("immuno appointment cancelled", lambda: scalar(APPOINTMENTS_DSN,
             "SELECT status FROM appointments WHERE appointment_id=%s", (uuid.UUID(appointment),)) == "CANCELLED")
-        second = self.create_slot(base + timedelta(hours=2), base + timedelta(minutes=2))
-        replacement = self.schedule(student, second, "IMMUNOCOMPROMISED", base + timedelta(minutes=2))
+        second_now = utcnow()
+        second = self.create_slot(base + timedelta(hours=2), second_now)
+        replacement = self.schedule(student, second, "IMMUNOCOMPROMISED", second_now)
         assert replacement
         assert scalar(EXECUTION_DSN, "SELECT count(*) FROM cleaning_periods WHERE wash_execution_id IN (SELECT wash_execution_id FROM wash_executions WHERE appointment_id=%s)", (uuid.UUID(appointment),)) == 0
 
     def scenario_05_missed_immuno_without_use(self):
         print("[05] MISSED IMMUNO releases preventive reservation")
         student = uid(); self.seed_identity(student, "ALUMNO", academic=True)
-        base = utcnow(); start = base + timedelta(minutes=30)
-        first = self.create_slot(start, base)
-        appointment = self.schedule(student, first, "IMMUNOCOMPROMISED", base)
+        base = utcnow(); start = base - timedelta(minutes=12)
+        scheduled_at = start - timedelta(minutes=10)
+        first = self.create_slot(start, scheduled_at)
+        appointment = self.schedule(student, first, "IMMUNOCOMPROMISED", scheduled_at)
         version = int(scalar(APPOINTMENTS_DSN, "SELECT version FROM appointments WHERE appointment_id=%s", (uuid.UUID(appointment),)))
-        missed_at = start + timedelta(minutes=11)
-        self.command("appointments", "MarkAppointmentAsMissed", {
+        missed_at = utcnow()
+        missed = self.command("appointments", "MarkAppointmentAsMissed", {
             "appointmentId": appointment, "expectedVersion": version,
         }, self.system_actor("appointments"), occurred_at=missed_at, producer="appointments")
+        wait_until("missed confirmation query staged", lambda: scalar(APPOINTMENTS_DSN,
+            "SELECT count(*) FROM outbox_messages WHERE message_type='GetWashExecutionIntegrationContext' "
+            "AND correlation_id=%s", (uuid.UUID(missed["correlationId"]),)) == 1)
+        wait_until("confirmed missed retry staged", lambda: scalar(APPOINTMENTS_DSN,
+            "SELECT count(*) FROM outbox_messages WHERE message_type='MarkAppointmentAsMissed' "
+            "AND correlation_id=%s", (uuid.UUID(missed["correlationId"]),)) == 1)
         wait_until("appointment missed", lambda: scalar(APPOINTMENTS_DSN,
             "SELECT status FROM appointments WHERE appointment_id=%s", (uuid.UUID(appointment),)) == "MISSED")
-        second = self.create_slot(start + timedelta(hours=2), missed_at)
-        replacement = self.schedule(student, second, "IMMUNOCOMPROMISED", missed_at)
+        second_now = utcnow()
+        second = self.create_slot(start + timedelta(hours=2), second_now)
+        replacement = self.schedule(student, second, "IMMUNOCOMPROMISED", second_now)
         assert replacement
 
     def scenario_06_entry_rejected_immuno(self, supervisor):

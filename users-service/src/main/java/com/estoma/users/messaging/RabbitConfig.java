@@ -47,6 +47,7 @@ public class RabbitConfig {
   @Primary
   public RabbitTemplate requiredRouteRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     // RESULT, retry tiers and DLQ must always land in a queue
     // (docs/system-contract.md §14 R1); an unroutable message here is a
     // real failure that ConfirmedRabbitPublisher classifies as
@@ -59,6 +60,7 @@ public class RabbitConfig {
   @Bean
   public RabbitTemplate eventRabbitTemplate(ConnectionFactory connectionFactory) {
     RabbitTemplate template = new RabbitTemplate(connectionFactory);
+    template.setObservationEnabled(true);
     // A missing binding on platform.events must not fail the Outbox --
     // only the publisher confirm is required for an EVENT to count as
     // published (docs/system-contract.md §7, §9).
@@ -98,6 +100,7 @@ public class RabbitConfig {
       @Value("${estoma.messaging.listeners-enabled:true}") boolean listenersEnabled) {
     SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
     factory.setConnectionFactory(connectionFactory);
+    factory.setObservationEnabled(true);
     factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
     factory.setPrefetchCount(10);
     factory.setConcurrentConsumers(2);

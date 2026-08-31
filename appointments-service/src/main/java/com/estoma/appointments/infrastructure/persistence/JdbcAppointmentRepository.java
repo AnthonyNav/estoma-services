@@ -145,8 +145,13 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
   }
   @Override public List<Appointment> findForServiceDatePage(LocalDate serviceDate, UUID afterAppointmentId, int limit) {
     if (limit <= 0) return List.of();
-    return jdbc.sql("SELECT " + A_COLUMNS + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id WHERE s.service_date=:date AND (:after IS NULL OR a.appointment_id > :after) ORDER BY a.appointment_id LIMIT :limit")
-        .param("date", serviceDate).param("after", afterAppointmentId).param("limit", limit)
-        .query(JdbcAppointmentRepository::map).list();
+    String sql = "SELECT " + A_COLUMNS
+        + " FROM appointments a JOIN appointment_time_slots s ON s.appointment_time_slot_id=a.appointment_time_slot_id"
+        + " WHERE s.service_date=:date"
+        + (afterAppointmentId == null ? "" : " AND a.appointment_id > :after")
+        + " ORDER BY a.appointment_id LIMIT :limit";
+    var query = jdbc.sql(sql).param("date", serviceDate).param("limit", limit);
+    if (afterAppointmentId != null) query.param("after", afterAppointmentId);
+    return query.query(JdbcAppointmentRepository::map).list();
   }
 }

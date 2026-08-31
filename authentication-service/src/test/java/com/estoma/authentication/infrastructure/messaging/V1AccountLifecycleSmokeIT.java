@@ -98,8 +98,8 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
     ResultPayload restrictedRefresh = rpcResult(
         AuthenticationRpcOperation.REFRESH_SESSION,
         new RefreshSessionRequest(restrictedSession.sessionId(), "not-issued"),
-        accountId,
-        accountActor(accountId));
+        null,
+        anonymousActor());
     assertThat(restrictedRefresh.status()).isEqualTo(ResultStatus.REJECTED);
     assertThat(restrictedRefresh.error().code()).isEqualTo(RejectionCode.INVALID_REFRESH_TOKEN.name());
 
@@ -118,8 +118,8 @@ class V1AccountLifecycleSmokeIT extends AbstractRabbitMqIT {
     RefreshSessionResponse refreshed = rpcSuccess(
         AuthenticationRpcOperation.REFRESH_SESSION,
         new RefreshSessionRequest(restrictedSession.sessionId(), passwordChanged.refreshToken()),
-         accountId,
-         accountActor(accountId),
+        null,
+        anonymousActor(),
         RefreshSessionResponse.class);
     assertThat(refreshed.refreshToken()).isNotBlank();
 

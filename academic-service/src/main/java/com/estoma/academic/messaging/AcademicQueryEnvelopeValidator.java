@@ -15,6 +15,8 @@ public class AcademicQueryEnvelopeValidator {
   private static final Set<String> APPOINTMENTS_QUERIES = Set.of(
       "GetAppointmentAcademicConfiguration",
       "ListStudentAppointmentAcademicSnapshotsPage");
+  private static final Set<String> COMMUNICATIONS_QUERIES = Set.of(
+      "GetActiveAcademicPeriodSnapshot");
   private static final String PRACTICAS = "PRACTICAS_PROFESIONALES";
 
   public void validate(MessageEnvelope envelope) {
@@ -29,7 +31,8 @@ public class AcademicQueryEnvelopeValidator {
     if (!"QUERY".equals(envelope.messageKind())) throw invalid("expected messageKind=QUERY");
     if (envelope.messageVersion() != 1) throw invalid("unsupported messageVersion");
     if (!ELIGIBILITY_QUERIES.contains(envelope.messageType())
-        && !APPOINTMENTS_QUERIES.contains(envelope.messageType())) {
+        && !APPOINTMENTS_QUERIES.contains(envelope.messageType())
+        && !COMMUNICATIONS_QUERIES.contains(envelope.messageType())) {
       throw invalid("unknown Academic Query");
     }
     if (!envelope.payload().isObject()) throw invalid("payload must be an object");
@@ -41,6 +44,12 @@ public class AcademicQueryEnvelopeValidator {
       } else {
         validateEligibilityList(envelope.payload());
       }
+      return;
+    }
+
+    if (COMMUNICATIONS_QUERIES.contains(envelope.messageType())) {
+      requireRequester(envelope, "communications");
+      if (envelope.payload().size() != 0) throw rejected("INVALID_ACTIVE_ACADEMIC_PERIOD_QUERY");
       return;
     }
 

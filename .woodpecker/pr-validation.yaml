@@ -1,0 +1,21 @@
+labels:
+  testcontainers: "true"
+
+when:
+  - event: pull_request
+
+clone:
+  - name: git
+    image: woodpeckerci/plugin-git:2.10.0
+    settings:
+      depth: 0
+      partial: false
+      fetch-target-branch: true
+
+steps:
+  - name: pr-validation
+    image: maven:3.9.16-eclipse-temurin-25
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - sh .woodpecker/validate-pr.sh

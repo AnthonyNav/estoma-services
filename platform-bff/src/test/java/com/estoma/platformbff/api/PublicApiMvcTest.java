@@ -19,12 +19,19 @@ import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.mailbox.MailboxQueryService;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
+import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.mailbox.MailboxMessagesResponse;
 import com.estoma.platformbff.contracts.http.mailbox.MailboxSummaryResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSection;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.FormStudent;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeStudent;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +54,7 @@ class PublicApiMvcTest {
   @Mock LocalAuthorizationService authorization;
   @Mock MailboxQueryService mailboxQueries;
   @Mock WashSupervisionQueryService supervision;
+  @Mock WashStudentQueryService studentQueries;
 
   private MockMvc mailboxMvc;
   private MockMvc washMvc;
@@ -69,7 +77,7 @@ class PublicApiMvcTest {
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
     washMvc = MockMvcBuilders.standaloneSetup(
-        new WashController(commands, authorization, supervision, clock))
+        new WashController(commands, authorization, supervision, studentQueries, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
@@ -150,6 +158,29 @@ class PublicApiMvcTest {
         .andExpect(status().isOk());
     washMvc.perform(get("/api/v1/wash/appointments/availability"))
         .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void studentViewsExposeTheCanonicalWASH_STU_01And_WASH_STU_02Shapes() throws Exception {
+    UUID courseSectionId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    when(studentQueries.home()).thenReturn(new StudentHomeResponse(
+        new StudentHomeStudent("Ana", "Ana García Reyes", "201945678", 7),
+        LocalDate.of(2026, 8, 1), null));
+    when(studentQueries.formContext()).thenReturn(new AppointmentFormContextResponse(
+        new FormStudent("Ana García Reyes", "201945678", 7),
+        List.of(new CourseSection(courseSectionId, "12345", "Cirugía"))));
+
+    washMvc.perform(get("/api/v1/wash/student/home"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.student.firstName").value("Ana"))
+        .andExpect(jsonPath("$.student.studentEnrollment").value("201945678"))
+        .andExpect(jsonPath("$.serviceDate").value("2026-08-01"));
+    washMvc.perform(get("/api/v1/wash/appointments/form-context"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.student.fullName").value("Ana García Reyes"))
+        .andExpect(jsonPath("$.student.studentEnrollment").value("201945678"))
+        .andExpect(jsonPath("$.availableCourseSections[0].courseSectionId").value(courseSectionId.toString()))
+        .andExpect(jsonPath("$.student.currentSemester").value(7));
   }
 
   private void assertAccepted(org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request,

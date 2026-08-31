@@ -13,6 +13,7 @@ import com.estoma.users.contract.MessageTypes;
 import com.estoma.users.contract.query.ResolveOutcome;
 import com.estoma.users.contract.query.ResolvePersonByInstitutionalEmailData;
 import com.estoma.users.contract.result.ResultPayload;
+import com.estoma.users.contract.result.ResultStatus;
 import com.estoma.users.messaging.AmqpNames;
 import com.estoma.users.messaging.EnvelopeJsonCodec;
 import com.estoma.users.messaging.outbound.OutboxRelay;
@@ -107,7 +108,7 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
     Queue resultsQueue = declareResultsQueue("academic");
     Queue eventsQueue = amqpAdmin.declareQueue();
     amqpAdmin.declareBinding(
-        BindingBuilder.bind(eventsQueue).to(new org.springframework.amqp.core.TopicExchange(AmqpNames.EXCHANGE_EVENTS)).with("identity.person.*"));
+        BindingBuilder.bind(eventsQueue).to(new org.springframework.amqp.core.TopicExchange(AmqpNames.EXCHANGE_EVENTS)).with("users.person.*"));
     try {
       UUID messageId = UUID.randomUUID();
       UUID operationId = UUID.randomUUID();
@@ -139,12 +140,20 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
   }
 
   @Test
-  void aMalformedEmailGoesStraightToTheDlq() {
-    publishQuery("academic", "not-an-email", UUID.randomUUID());
+  void aMalformedEmailProducesATerminalFailedResult() {
+    Queue resultsQueue = declareResultsQueue("academic");
+    UUID correlationId = UUID.randomUUID();
+    try {
+      publishQuery("academic", "not-an-email", correlationId);
 
-    await()
-        .atMost(Duration.ofSeconds(10))
-        .untilAsserted(() -> assertThat(rabbitTemplate.receive(AmqpNames.QUEUE_QUERIES_DLQ)).isNotNull());
+      MessageEnvelope result = codec.decode(awaitMessage(resultsQueue, correlationId).getBody());
+      assertThat(result.messageType()).isEqualTo(MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL_RESULT);
+      ResultPayload payload = codec.convertPayload(result, ResultPayload.class);
+      assertThat(payload.status()).isEqualTo(ResultStatus.FAILED);
+      assertThat(payload.error().code()).isEqualTo("TECHNICAL_FAILURE");
+    } finally {
+      amqpAdmin.deleteQueue(resultsQueue.getName());
+    }
   }
 
   @Test
@@ -201,7 +210,8 @@ class ResolvePersonByInstitutionalEmailIT extends AbstractMessagingIT {
   }
 
   private Queue declareResultsQueue(String routingKey) {
-    Queue resultsQueue = amqpAdmin.declareQueue();
+    Queue resultsQueue = new Queue("it.resolve-person.results." + UUID.randomUUID(), false, false, false);
+    amqpAdmin.declareQueue(resultsQueue);
     amqpAdmin.declareBinding(
         BindingBuilder.bind(resultsQueue).to(new DirectExchange(AmqpNames.EXCHANGE_RESULTS)).with(routingKey));
     return resultsQueue;

@@ -47,7 +47,7 @@ public class JdbcWashExecutionOperationalProjectionRepository implements WashExe
   }
 
   @Override public List<CleaningPeriodProjection> findCleaningPeriodsOverlapping(Instant startsAt, Instant endsAt) {
-    return jdbc.sql("SELECT " + CLEANING_COLUMNS + " FROM cleaning_period_projection WHERE starts_at < :ends AND expected_ends_at > :starts")
+    return jdbc.sql("SELECT " + CLEANING_COLUMNS + " FROM cleaning_period_projection WHERE completed_at IS NULL AND starts_at < :ends AND expected_ends_at > :starts")
       .param("starts",Timestamps.toTimestamp(startsAt)).param("ends",Timestamps.toTimestamp(endsAt))
       .query(JdbcWashExecutionOperationalProjectionRepository::mapCleaning).list();
   }

@@ -1,0 +1,38 @@
+when:
+  - event: push
+    branch: develop
+    path:
+      include:
+        - authentication-service/**
+        - .woodpecker/authentication-service-test.yaml
+        - .woodpecker/authentication-service-build.yaml
+        - .woodpecker/authentication-service-gitops.yaml
+        - scripts/woodpecker/**
+
+depends_on:
+  - authentication-service-build
+
+concurrency:
+  limit: 1
+  group: estoma-infra-develop-update
+
+steps:
+  - name: update-develop-gitops
+    image: python:3.13-alpine
+    environment:
+      ESTOMA_INFRA_TOKEN:
+        from_secret: ESTOMA_INFRA_TOKEN
+    commands:
+      - >-
+        sh scripts/woodpecker/update-develop-infra.sh authentication-service
+        ghcr.io/anthonynav/authentication-service
+        apps/authentication-service/overlays/develop/kustomization.yaml
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi

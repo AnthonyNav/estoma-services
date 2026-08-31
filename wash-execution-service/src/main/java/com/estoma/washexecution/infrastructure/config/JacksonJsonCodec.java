@@ -1,5 +1,6 @@
 package com.estoma.washexecution.infrastructure.config;
 
+import com.estoma.washexecution.application.command.ActorContext;
 import com.estoma.washexecution.application.port.JsonCodec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -9,6 +10,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @Component
 public class JacksonJsonCodec implements JsonCodec {
@@ -21,7 +23,7 @@ public class JacksonJsonCodec implements JsonCodec {
   @Override
   public String write(Object value) {
     try {
-      return mapper.writeValueAsString(value);
+      return mapper.writeValueAsString(canonicalWireValue(value));
     } catch (Exception ex) {
       throw new IllegalStateException("JSON_SERIALIZATION_FAILED", ex);
     }
@@ -43,5 +45,20 @@ public class JacksonJsonCodec implements JsonCodec {
     TreeMap<String, Object> sorted = new TreeMap<>();
     map.forEach((key, item) -> sorted.put(String.valueOf(key), normalize(item)));
     return sorted;
+  }
+
+  private Object canonicalWireValue(Object value) {
+    if (!(value instanceof ActorContext actor)) {
+      return value;
+    }
+    ObjectNode node = mapper.createObjectNode();
+    node.put("type", actor.type());
+    if (actor.accountId() != null) {
+      node.put("accountId", actor.accountId().toString());
+    }
+    if (actor.service() != null) {
+      node.put("service", actor.service());
+    }
+    return node;
   }
 }

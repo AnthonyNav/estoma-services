@@ -28,10 +28,10 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 
 /**
- * {@link CommandListenerTest}'s twin for {@link QueryListener}: only ACKs
- * the original delivery once a retry/DLQ republication is confirmed, and
- * NACKs with requeue instead when it cannot be (docs/system-contract.md
- * §7, Round 1, applied to the query queue's own DLQ/retry topology).
+ * {@link CommandListenerTest}'s twin for {@link QueryListener}: transient
+ * failures are retried through the retry topology, while an exhausted or
+ * permanent Query failure first persists a terminal Result. The delivery is
+ * ACKed only after that durable outcome (or a confirmed DLQ fallback).
  */
 class QueryListenerTest {
 
@@ -116,38 +116,39 @@ class QueryListenerTest {
   }
 
   @Test
-  void permanentFailureAcksOnlyAfterDlqIsConfirmed() throws Exception {
+  void permanentFailureAcksAfterTerminalResultIsPersisted() throws Exception {
     Message message = message();
     MessageEnvelope envelope = envelope();
     when(codec.decode(message.getBody())).thenReturn(envelope);
     RuntimeException failure = new RuntimeException("malformed institutionalEmail");
     doThrow(failure).when(dispatcher).resolve(envelope);
     when(classifier.isTransient(failure)).thenReturn(false);
-    when(properties.queryMaxAttempts()).thenReturn(3);
-    when(failureRouter.routeAfterFailure(eq(message), eq(failure), eq(false), any(), eq(3)))
-        .thenReturn(FailureRoute.DLQ);
-
     listener.onMessage(message, channel);
 
-    verify(metrics).deadLettered();
+    verify(dispatcher).fail(envelope, "TECHNICAL_FAILURE");
+    verify(metrics).technicalFailure();
+    verify(metrics, never()).deadLettered();
     verify(metrics, never()).retried();
     verify(channel).basicAck(DELIVERY_TAG, false);
+    verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
   }
 
   @Test
-  void permanentFailureIsNeverAckedWhenTheDlqRepublicationCannotBeConfirmed() throws Exception {
+  void permanentFailureIsRequeuedWhenTerminalResultAndDlqFallbackCannotBePersisted() throws Exception {
     Message message = message();
     MessageEnvelope envelope = envelope();
     when(codec.decode(message.getBody())).thenReturn(envelope);
     RuntimeException failure = new RuntimeException("permanent failure");
     doThrow(failure).when(dispatcher).resolve(envelope);
     when(classifier.isTransient(failure)).thenReturn(false);
-    when(properties.queryMaxAttempts()).thenReturn(3);
-    when(failureRouter.routeAfterFailure(eq(message), eq(failure), eq(false), any(), eq(3)))
-        .thenThrow(new RabbitPublishException(OutboxFailureCode.PUBLISH_RETURNED, UUID.randomUUID(), null));
+    doThrow(new RuntimeException("outbox unavailable")).when(dispatcher)
+        .fail(envelope, "TECHNICAL_FAILURE");
+    doThrow(new RabbitPublishException(OutboxFailureCode.PUBLISH_RETURNED, UUID.randomUUID(), null)).when(failureRouter)
+        .toDlq(eq(message), any(Exception.class), any());
 
     listener.onMessage(message, channel);
 
+    verify(dispatcher).fail(envelope, "TECHNICAL_FAILURE");
     verify(metrics, never()).deadLettered();
     verify(channel, never()).basicAck(anyLong(), anyBoolean());
     verify(channel).basicNack(DELIVERY_TAG, false, true);

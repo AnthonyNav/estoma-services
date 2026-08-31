@@ -32,6 +32,7 @@ public class SecurityConfig {
                 "/api/v1/auth/password-recovery",
                 "/api/v1/auth/password-recovery/validate",
                 "/api/v1/auth/password-recovery/reset",
+                "/api/v1/openapi",
                 "/api/v1/operations/**",
                 "/api/v1/jornadas")
               .permitAll()

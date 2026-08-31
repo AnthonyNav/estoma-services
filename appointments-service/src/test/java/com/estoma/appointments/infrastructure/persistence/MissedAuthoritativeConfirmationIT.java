@@ -61,6 +61,7 @@ class MissedAuthoritativeConfirmationIT extends AbstractPostgresIT {
     assertThat(appointments.findById(value.appointmentId()).orElseThrow().status().name()).isEqualTo("SCHEDULED");
 
     UUID queryId = pendingQuery(value.appointmentId());
+    assertThat(pendingQueryOperationId(value.appointmentId())).isEqualTo(queryId);
     UUID executionId = UUID.randomUUID();
     entityRecovery.process(entityResult(queryId, value.appointmentId(), executionId,
         START.plusSeconds(9 * 60L), EVALUATION.plusSeconds(1)));
@@ -110,6 +111,14 @@ class MissedAuthoritativeConfirmationIT extends AbstractPostgresIT {
   private UUID pendingQuery(UUID appointmentId) {
     return jdbc.sql("""
         SELECT message_id FROM outbox_messages
+        WHERE message_type='GetWashExecutionIntegrationContext' AND aggregate_id=:appointment
+        ORDER BY occurred_at DESC LIMIT 1
+        """).param("appointment", appointmentId).query(UUID.class).single();
+  }
+
+  private UUID pendingQueryOperationId(UUID appointmentId) {
+    return jdbc.sql("""
+        SELECT operation_id FROM outbox_messages
         WHERE message_type='GetWashExecutionIntegrationContext' AND aggregate_id=:appointment
         ORDER BY occurred_at DESC LIMIT 1
         """).param("appointment", appointmentId).query(UUID.class).single();

@@ -22,6 +22,8 @@
     <dependency><groupId>com.estoma</groupId><artifactId>academic-service</artifactId><version>0.1.0</version><scope>test</scope></dependency>
     <dependency><groupId>com.estoma</groupId><artifactId>authorization-service</artifactId><version>0.1.0</version><scope>test</scope></dependency>
     <dependency><groupId>com.estoma</groupId><artifactId>communications-service</artifactId><version>0.1.0</version><scope>test</scope></dependency>
+    <dependency><groupId>com.estoma</groupId><artifactId>wash-execution-service</artifactId><version>0.1.0</version><scope>test</scope></dependency>
+    <dependency><groupId>com.estoma</groupId><artifactId>wash-administration-service</artifactId><version>0.1.0</version><scope>test</scope></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
   </dependencies>
 </project>

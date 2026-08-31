@@ -1,0 +1,32 @@
+labels:
+  testcontainers: "true"
+
+when:
+  - event: manual
+    branch: develop
+  - event: pull_request
+    path:
+      include:
+        - wash-execution-service/**
+        - .woodpecker/wash-execution-service-test.yaml
+        - .woodpecker/wash-execution-service-build.yaml
+        - .woodpecker/wash-execution-service-gitops.yaml
+        - scripts/woodpecker/**
+  - event: push
+    branch: develop
+    path:
+      include:
+        - wash-execution-service/**
+        - .woodpecker/wash-execution-service-test.yaml
+        - .woodpecker/wash-execution-service-build.yaml
+        - .woodpecker/wash-execution-service-gitops.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: wash-execution-service
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify

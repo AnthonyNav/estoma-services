@@ -25,7 +25,7 @@ sessions or expose a business HTTP API.
 - Convergent `PRACTICAS_PROFESIONALES` provisioning is idempotent, eligibility-aware, race-safe and fail-closed on untrusted projections.
 - ENTITY/FULL projection recovery, authoritative snapshots, race-safe `NOT_FOUND`, pagination and wake-up of deferred work are implemented without a broker.
 - Terminal technical failures can produce durable `FAILED`; retryable Spring/JDBC failures remain visible to the PR3 transport retry policy through a hexagonal classifier port.
-- Authorization exposes broker-agnostic `GetAccountAuthorizationSnapshot` and paginated snapshot Query use cases.
+- Authorization exposes broker-agnostic account authorization snapshots plus `GetSystemCatalogSnapshot` and paginated System catalog recovery Queries for the BFF.
 
 The PR2 audit register is in [`docs/implementation_gaps.md`](docs/implementation_gaps.md).
 All recorded `BLOCKER` and `HIGH` findings are resolved and covered by regression tests.
@@ -39,17 +39,19 @@ PR3 materializes the already-complete PR2 behavior through:
 - Outbox Relay publisher confirms, consumer retry/DLQ and broker integration tests;
 - mapping the already implemented Application Commands/Events/Queries/Results to the platform messaging contracts.
 
-The resolved decisions governing implementation and the **current PR3 baseline**
-are recorded in
+The resolved decisions governing the **PR3 baseline** are recorded in
 [`docs/pr3_preimplementation_decisions.md`](docs/pr3_preimplementation_decisions.md).
-That record supersedes the historical PR1 observation SHA still described in
-`docs/system_contract.md`; the canonical platform documentation remains the
-source of truth whenever local documentation differs.
+That historical record supersedes the PR1 observation SHA still described in
+`docs/system_contract.md` for the PR3 work.
 
-Current canonical Authorization resolution: `estomatologia-platform-docs`
-`1578db7976433c099ab77d032e70544ad4aa2ec3`. The later canonical `main`
-advance through `4391b156912085925b94030f2816847679e9640e` changes only Lavado/Wash
-Execution documentation and introduces no Authorization contract drift.
+The System catalog recovery contract added after PR3 is declared in the
+executable [`contracts/asyncapi.yaml`](contracts/asyncapi.yaml) and explained
+in [`docs/frontend_v1_convergence_gaps.md`](docs/frontend_v1_convergence_gaps.md).
+The required BFF recovery gate for controlled catalog changes is documented in
+[`docs/system_catalog_change_recovery.md`](docs/system_catalog_change_recovery.md).
+The canonical platform-docs repository intentionally remains unchanged by this
+service-only PR; its matching documentation update is a separate docs-only
+follow-up before a consumer rollout relies on the new Queries.
 
 ## Operational Endpoints
 

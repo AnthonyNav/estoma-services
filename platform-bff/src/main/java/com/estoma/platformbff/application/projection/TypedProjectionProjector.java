@@ -357,7 +357,8 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
             id, optionalUuid(p, "appointmentId"), optionalText(p, "appointmentType"), executionStatus(event.messageType(), p),
             optionalInstant(p, "arrivedAt"), optionalInstant(p, "authorizedAt"), optionalInstant(p, "startedAt"),
             optionalInstant(p, "submittedAt"), optionalInstant(p, "completedAt"), optionalInstant(p, "cancelledAt"),
-            optionalText(p, "cancellationType"), version, event.occurredAt()));
+            optionalText(p, "cancellationType"), optionalText(p, "rejectionReason"), null, null, null, null,
+            version, event.occurredAt()));
       }
     }
   }
@@ -480,7 +481,7 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
       case "AppointmentCancelled" -> "CANCELLED";
       case "AppointmentMissed" -> "MISSED";
       case "AppointmentEntryRejected" -> "ENTRY_REJECTED";
-      case "AppointmentStarted" -> "STARTED";
+      case "AppointmentStarted" -> "IN_PROGRESS";
       case "AppointmentCompleted" -> "COMPLETED";
       default -> "SCHEDULED";
     };

@@ -54,10 +54,13 @@ def assign_vs_disable(self, supervisor):
     run.wait_until("authorized pending before race", lambda: run.scalar(
         run.EXECUTION_DSN, "SELECT status FROM wash_executions WHERE wash_execution_id=%s",
         (uuid.UUID(execution),)) == "PENDING_REASSIGNMENT")
-    status, entry_at = run.rows(run.APPOINTMENTS_DSN,
+    run.wait_until("entryAuthorizedAt while appointment remains scheduled", lambda: run.rows(
+        run.APPOINTMENTS_DSN,
         "SELECT status,entry_authorized_at FROM appointments WHERE appointment_id=%s",
-        (uuid.UUID(appointment),))[0]
-    assert status == "SCHEDULED" and entry_at is not None
+        (uuid.UUID(appointment),))[0][0] == "SCHEDULED" and run.rows(
+        run.APPOINTMENTS_DSN,
+        "SELECT status,entry_authorized_at FROM appointments WHERE appointment_id=%s",
+        (uuid.UUID(appointment),))[0][1] is not None)
     run.execute(run.EXECUTION_DSN, "UPDATE tank_projection SET status='ACTIVE' WHERE tank_id=%s",
                 (uuid.UUID(self.ids["tank_immuno"]),))
 

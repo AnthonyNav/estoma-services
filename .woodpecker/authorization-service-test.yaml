@@ -1,0 +1,32 @@
+labels:
+  testcontainers: "true"
+
+when:
+  - event: manual
+    branch: develop
+  - event: pull_request
+    path:
+      include:
+        - authorization-service/**
+        - .woodpecker/authorization-service-test.yaml
+        - .woodpecker/authorization-service-build.yaml
+        - .woodpecker/authorization-service-gitops.yaml
+        - scripts/woodpecker/**
+  - event: push
+    branch: develop
+    path:
+      include:
+        - authorization-service/**
+        - .woodpecker/authorization-service-test.yaml
+        - .woodpecker/authorization-service-build.yaml
+        - .woodpecker/authorization-service-gitops.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: authorization-service
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify
