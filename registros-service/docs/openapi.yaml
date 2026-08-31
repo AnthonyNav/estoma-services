@@ -1,0 +1,104 @@
+openapi: 3.1.0
+
+info:
+  title: registros-service operational surface
+  version: 1.0.0
+  description: >
+    registros-service exposes NO business REST API. All business operations
+    (pre-registrarse, confirmar, rechazar, cancelar) arrive exclusively as
+    durable commands over RabbitMQ — see docs/asyncapi.yaml. Client queries
+    are served from the BFF's read_models, fed by the domain Events this
+    service publishes — never by a synchronous call into this service. This
+    document covers only the operational HTTP surface used by Kubernetes
+    probes and Prometheus scraping. There is no `/api` prefix and no
+    client-facing resource here; the BFF is the platform's only public HTTP
+    surface (estomatologia-platform-docs 02-architecture/README.md).
+
+servers:
+  - url: http://registros-service.platform-{env}.svc.cluster.local:8080
+    variables:
+      env:
+        default: dev
+        enum: [dev, staging, prod]
+
+paths:
+  /health:
+    get:
+      summary: Aggregate health (all registered indicators)
+      operationId: getHealth
+      responses:
+        '200':
+          description: Aggregate status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: One or more indicators are DOWN.
+
+  /health/startup:
+    get:
+      summary: Startup probe
+      operationId: getStartupHealth
+      responses:
+        '200':
+          description: Ready to begin serving readiness/liveness checks.
+        '503':
+          description: Still starting up.
+
+  /health/readiness:
+    get:
+      summary: Readiness probe
+      operationId: getReadinessHealth
+      responses:
+        '200':
+          description: Can accept and process commands.
+        '503':
+          description: Cannot currently fulfil its function; remove from traffic.
+
+  /health/liveness:
+    get:
+      summary: Liveness probe
+      operationId: getLivenessHealth
+      responses:
+        '200':
+          description: Process is alive.
+        '503':
+          description: Process should be restarted.
+
+  /metrics:
+    get:
+      summary: Prometheus scrape endpoint
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics in Prometheus text exposition format.
+          content:
+            text/plain: {}
+
+  /info:
+    get:
+      summary: Build information
+      operationId: getInfo
+      responses:
+        '200':
+          description: Build metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  build:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      version: { type: string }
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [UP, DOWN, OUT_OF_SERVICE, UNKNOWN]

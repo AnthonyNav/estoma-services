@@ -1,0 +1,31 @@
+# Local development only. estoma-infra owns real deployment manifests
+# (see root README.md) -- this file exists so `./mvnw spring-boot:run`
+# has something to talk to using nothing but the defaults already baked
+# into src/main/resources/application.yml (no env vars required), except
+# for RABBITMQ_PORT below.
+#
+# Postgres only: RabbitMQ is shared platform infrastructure, not this
+# service's to own locally. Bring up jornadas-service/docker-compose.yml
+# first (it declares the shared RabbitMQ on the default port 5672) and
+# registros-service will connect to that same broker -- exactly like in a
+# real deployment, every service shares one RabbitMQ, only Postgres is
+# per-service.
+#
+# Postgres is published on host port 5434, not 5432: on at least one dev
+# machine in this project 127.0.0.1:5432 is already owned by a pre-existing
+# Homebrew postgresql@14 service, and jornadas-service already claimed 5433.
+# Run with REGISTROS_DB_URL=jdbc:postgresql://localhost:5434/registros_db.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: registros_db
+      POSTGRES_USER: registros_service
+      POSTGRES_PASSWORD: registros_service
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registros_service -d registros_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
