@@ -42,6 +42,6 @@ class InboxExpirationScheduler {
             UUID.randomUUID(), CommunicationsCommand.EXPIRE_INBOX_MESSAGES.wireName(), 1, MessageKind.COMMAND, "communications", now, UUID.randomUUID(),
             null, UUID.randomUUID(), null, null, null, Actor.system("communications"),
             codec.toJsonNode(new ExpireInboxMessagesCommand(now, batchSize)));
-    dispatcher.dispatch(envelope);
+    dispatcher.dispatchInternal(envelope);
   }
 }
