@@ -8,11 +8,15 @@ when:
         - academic-service/src/main/java/**
         - authorization-service/src/main/java/**
         - communications-service/src/main/java/**
+        - wash-execution-service/src/main/java/**
+        - wash-administration-service/src/main/java/**
         - users-service/pom.xml
         - authentication-service/pom.xml
         - academic-service/pom.xml
         - authorization-service/pom.xml
         - communications-service/pom.xml
+        - wash-execution-service/pom.xml
+        - wash-administration-service/pom.xml
         - .woodpecker/shared-contract-tests.yaml
   - event: push
     branch: develop
@@ -24,11 +28,15 @@ when:
         - academic-service/src/main/java/**
         - authorization-service/src/main/java/**
         - communications-service/src/main/java/**
+        - wash-execution-service/src/main/java/**
+        - wash-administration-service/src/main/java/**
         - users-service/pom.xml
         - authentication-service/pom.xml
         - academic-service/pom.xml
         - authorization-service/pom.xml
         - communications-service/pom.xml
+        - wash-execution-service/pom.xml
+        - wash-administration-service/pom.xml
         - .woodpecker/shared-contract-tests.yaml
 
 steps:

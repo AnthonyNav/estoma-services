@@ -23,6 +23,7 @@ public final class EnvelopeJsonCodec {
     return mapper.readValue(body, MessageEnvelope.class);
   }
 
+  /** Emits the strict V1 wire form; actor variants and optional fields are never represented by nulls. */
   public byte[] encode(MessageEnvelope envelope) {
     ObjectNode root = mapper.createObjectNode();
     root.put("messageId", envelope.messageId().toString());
