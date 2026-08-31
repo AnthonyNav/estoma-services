@@ -33,3 +33,6 @@ INSERT INTO academic_period_projection_state (
     state_key, readiness, active_academic_period_id, active_source_version, active_source_occurred_at,
     recovery_query_message_id, recovery_requested_at, updated_at
 ) VALUES (1, 'BOOTSTRAPPING', NULL, NULL, NULL, NULL, NULL, now());
+
+-- V10 ran before these tables existed; grant the separate runtime role explicitly.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE academic_period_projections, academic_period_projection_state TO ${runtime_role};

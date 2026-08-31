@@ -10,7 +10,11 @@ public interface AcademicPeriodProjectionRepository {
 
   record ActiveAcademicPeriod(UUID academicPeriodId, String code, LocalDate startDate, LocalDate endDate, int sourceVersion) {}
 
-  void applyActive(ActiveAcademicPeriod period, Instant sourceOccurredAt, Instant now);
+  /**
+   * Applies an owner event. Returns {@code true} when a different local active period prevents a
+   * causal choice and the caller must request a fenced owner snapshot.
+   */
+  boolean applyActive(ActiveAcademicPeriod period, Instant sourceOccurredAt, Instant now);
 
   /** Stores an owner recovery snapshot without changing the currently fenced recovery state. */
   void recordRecoveryActive(ActiveAcademicPeriod period, Instant sourceOccurredAt, Instant now);

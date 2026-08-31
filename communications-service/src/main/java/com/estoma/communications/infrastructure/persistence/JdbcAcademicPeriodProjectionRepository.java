@@ -19,10 +19,10 @@ class JdbcAcademicPeriodProjectionRepository implements AcademicPeriodProjection
   }
 
   @Override
-  public void applyActive(ActiveAcademicPeriod period, Instant sourceOccurredAt, Instant now) {
+  public boolean applyActive(ActiveAcademicPeriod period, Instant sourceOccurredAt, Instant now) {
     upsertActive(period, sourceOccurredAt, now);
 
-    jdbc.sql("""
+    int updated = jdbc.sql("""
         UPDATE academic_period_projection_state
         SET readiness = 'READY',
             active_academic_period_id = :id,
@@ -36,13 +36,33 @@ class JdbcAcademicPeriodProjectionRepository implements AcademicPeriodProjection
             SELECT 1 FROM academic_period_projections p
             WHERE p.academic_period_id = :id AND p.status = 'ACTIVE' AND p.source_version = :sourceVersion
           )
-          AND (active_source_occurred_at IS NULL OR active_source_occurred_at <= :sourceOccurredAt)
+          AND (active_academic_period_id IS NULL OR active_academic_period_id = :id)
         """)
         .param("id", period.academicPeriodId())
         .param("sourceVersion", period.sourceVersion())
         .param("sourceOccurredAt", java.sql.Timestamp.from(sourceOccurredAt))
         .param("updatedAt", java.sql.Timestamp.from(now))
         .update();
+    if (updated == 1) {
+      return false;
+    }
+    return jdbc.sql("""
+        SELECT EXISTS (
+          SELECT 1
+          FROM academic_period_projection_state s
+          JOIN academic_period_projections p ON p.academic_period_id = :id
+          WHERE s.state_key = 1
+            AND s.readiness <> 'BOOTSTRAPPING'
+            AND s.active_academic_period_id IS NOT NULL
+            AND s.active_academic_period_id <> :id
+            AND p.status = 'ACTIVE'
+            AND p.source_version = :sourceVersion
+        )
+        """)
+        .param("id", period.academicPeriodId())
+        .param("sourceVersion", period.sourceVersion())
+        .query(Boolean.class)
+        .single();
   }
 
   @Override
@@ -173,7 +193,9 @@ class JdbcAcademicPeriodProjectionRepository implements AcademicPeriodProjection
         SET readiness = 'READY',
             active_academic_period_id = :activeAcademicPeriodId,
             active_source_version = :activeSourceVersion,
-            active_source_occurred_at = :sourceOccurredAt,
+            active_source_occurred_at = CASE
+              WHEN :hasActive THEN CAST(:sourceOccurredAt AS timestamptz) ELSE NULL
+            END,
             recovery_query_message_id = NULL,
             recovery_requested_at = NULL,
             updated_at = :updatedAt
@@ -181,6 +203,7 @@ class JdbcAcademicPeriodProjectionRepository implements AcademicPeriodProjection
         """)
         .param("activeAcademicPeriodId", period.map(ActiveAcademicPeriod::academicPeriodId).orElse(null))
         .param("activeSourceVersion", period.map(ActiveAcademicPeriod::sourceVersion).orElse(null))
+        .param("hasActive", period.isPresent())
         .param("sourceOccurredAt", java.sql.Timestamp.from(sourceOccurredAt))
         .param("updatedAt", java.sql.Timestamp.from(now))
         .param("queryMessageId", queryMessageId)

@@ -77,6 +77,39 @@ class AcademicPeriodRecoveryIT extends AbstractPostgresIT {
   }
 
   @Test
+  void activationCommittedAfterANotFoundSnapshotIsNotRejectedByItsEarlierCommandTimestamp() {
+    recovery.requestBootstrap();
+    UUID queryId = latestRecoveryQueryId();
+    Instant snapshotTime = Instant.parse("2030-08-01T12:00:00Z");
+
+    assertThat(recovery.handleResult(notFoundResult(queryId, snapshotTime))).isTrue();
+    UUID periodId = UUID.randomUUID();
+    dispatcher.dispatch(activatedEvent(
+        periodId, Instant.parse("2030-08-01T11:59:00Z"), LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)));
+
+    assertThat(periods.findAuthoritativeActive()).hasValueSatisfying(period ->
+        assertThat(period.academicPeriodId()).isEqualTo(periodId));
+  }
+
+  @Test
+  void competingActivePeriodEventsTriggerAFencedOwnerRecoveryInsteadOfChoosingByTimestamp() {
+    UUID firstPeriodId = UUID.randomUUID();
+    UUID currentPeriodId = UUID.randomUUID();
+    dispatcher.dispatch(activatedEvent(
+        firstPeriodId, Instant.parse("2030-08-01T12:00:00Z"), LocalDate.of(2030, 1, 1), LocalDate.of(2030, 6, 30)));
+
+    dispatcher.dispatch(activatedEvent(
+        currentPeriodId, Instant.parse("2030-08-01T12:00:00Z"), LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)));
+
+    assertThat(periods.readiness()).isEqualTo("BOOTSTRAPPING");
+    UUID queryId = latestRecoveryQueryId();
+    assertThat(recovery.handleResult(foundResult(
+        queryId, currentPeriodId, 1, LocalDate.of(2030, 8, 1), LocalDate.of(2030, 12, 31)))).isTrue();
+    assertThat(periods.findAuthoritativeActive()).hasValueSatisfying(period ->
+        assertThat(period.academicPeriodId()).isEqualTo(currentPeriodId));
+  }
+
+  @Test
   void sourceVersionPreventsAStaleActivationFromReopeningAClosedPeriod() {
     UUID periodId = UUID.randomUUID();
     dispatcher.dispatch(Envelopes.event(
@@ -123,5 +156,22 @@ class AcademicPeriodRecoveryIT extends AbstractPostgresIT {
         UUID.randomUUID(), "GetActiveAcademicPeriodSnapshotResult", 1, MessageKind.RESULT, "academic", now,
         causationId, causationId, UUID.randomUUID(), null, periodId, version, Actor.system("communications"),
         payload);
+  }
+
+  private static MessageEnvelope notFoundResult(UUID causationId, Instant occurredAt) {
+    ObjectMapper mapper = new ObjectMapper();
+    return new MessageEnvelope(
+        UUID.randomUUID(), "GetActiveAcademicPeriodSnapshotResult", 1, MessageKind.RESULT, "academic", occurredAt,
+        causationId, causationId, UUID.randomUUID(), null, null, null, Actor.system("communications"),
+        mapper.createObjectNode().put("status", "NOT_FOUND"));
+  }
+
+  private static MessageEnvelope activatedEvent(
+      UUID periodId, Instant occurredAt, LocalDate startDate, LocalDate endDate) {
+    ObjectMapper mapper = new ObjectMapper();
+    return new MessageEnvelope(
+        UUID.randomUUID(), ConsumedEventTypes.ACADEMIC_PERIOD_ACTIVATED, 1, MessageKind.EVENT, "academic", occurredAt,
+        UUID.randomUUID(), null, null, null, periodId, 1, Actor.system("academic"),
+        mapper.valueToTree(new AcademicPeriodActivatedPayload(periodId, "2030-B", "ACTIVE", startDate, endDate)));
   }
 }

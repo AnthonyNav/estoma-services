@@ -62,15 +62,57 @@ class FlywayV15ToV16UpgradeIT {
     }
   }
 
+  @Test
+  void grantsV18ProjectionTablesToTheDistinctRuntimeRole() throws Exception {
+    try (PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine")
+        .withDatabaseName("communications_runtime_privileges")
+        .withUsername("communications_service")
+        .withPassword("communications_service")) {
+      postgres.start();
+      createRuntimeRole(postgres, "communications_runtime", "runtime-password");
+      migrate(postgres, null, "communications_runtime");
+
+      UUID periodId = UUID.randomUUID();
+      try (Connection runtime = DriverManager.getConnection(
+              postgres.getJdbcUrl(), "communications_runtime", "runtime-password");
+          var statement = runtime.createStatement()) {
+        assertThat(statement.executeQuery("SELECT readiness FROM academic_period_projection_state WHERE state_key = 1").next())
+            .isTrue();
+        assertThat(statement.executeUpdate("""
+            INSERT INTO academic_period_projections (
+              academic_period_id, code, start_date, end_date, status, source_version, source_occurred_at, updated_at
+            ) VALUES ('%s', '2030-B', DATE '2030-08-01', DATE '2030-12-31', 'ACTIVE', 1, now(), now())
+            """.formatted(periodId))).isEqualTo(1);
+        assertThat(statement.executeUpdate("""
+            UPDATE academic_period_projection_state SET updated_at = now() WHERE state_key = 1
+            """)).isEqualTo(1);
+        assertThat(statement.executeUpdate("DELETE FROM academic_period_projections WHERE academic_period_id = '%s'".formatted(periodId)))
+            .isEqualTo(1);
+      }
+    }
+  }
+
   private static void migrate(PostgreSQLContainer postgres, String target) {
+    migrate(postgres, target, postgres.getUsername());
+  }
+
+  private static void migrate(PostgreSQLContainer postgres, String target, String runtimeRole) {
     var configuration = Flyway.configure()
         .dataSource(postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword())
         .locations("classpath:db/migration")
-        .placeholders(java.util.Map.of("runtime_role", postgres.getUsername()));
+        .placeholders(java.util.Map.of("runtime_role", runtimeRole));
     if (target != null) {
       configuration.target(target);
     }
     configuration.load().migrate();
+  }
+
+  private static void createRuntimeRole(PostgreSQLContainer postgres, String username, String password) throws Exception {
+    try (Connection connection = DriverManager.getConnection(
+            postgres.getJdbcUrl(), postgres.getUsername(), postgres.getPassword());
+        var statement = connection.createStatement()) {
+      statement.execute("CREATE ROLE " + username + " LOGIN PASSWORD '" + password + "'");
+    }
   }
 
   private static UUID insertOutbox(PostgreSQLContainer postgres, String type, String actor, String destination)

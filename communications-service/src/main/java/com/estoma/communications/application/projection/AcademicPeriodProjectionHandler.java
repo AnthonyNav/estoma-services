@@ -16,10 +16,15 @@ import org.springframework.stereotype.Component;
 class AcademicPeriodProjectionHandler implements ProjectionHandler {
 
   private final AcademicPeriodProjectionRepository repository;
+  private final AcademicPeriodRecoveryCoordinator recovery;
   private final EnvelopeJsonCodec codec;
 
-  AcademicPeriodProjectionHandler(AcademicPeriodProjectionRepository repository, EnvelopeJsonCodec codec) {
+  AcademicPeriodProjectionHandler(
+      AcademicPeriodProjectionRepository repository,
+      AcademicPeriodRecoveryCoordinator recovery,
+      EnvelopeJsonCodec codec) {
     this.repository = repository;
+    this.recovery = recovery;
     this.codec = codec;
   }
 
@@ -46,10 +51,13 @@ class AcademicPeriodProjectionHandler implements ProjectionHandler {
           || !"ACTIVE".equals(payload.status())) {
         throw new IllegalArgumentException("invalid AcademicPeriodActivated payload");
       }
-      repository.applyActive(
+      boolean requiresRecovery = repository.applyActive(
           new AcademicPeriodProjectionRepository.ActiveAcademicPeriod(
               payload.academicPeriodId(), payload.code(), payload.startDate(), payload.endDate(), envelope.aggregateVersion()),
           envelope.occurredAt(), now);
+      if (requiresRecovery) {
+        recovery.requestBootstrap();
+      }
       return ProjectionHandlerResult.NONE;
     }
 
