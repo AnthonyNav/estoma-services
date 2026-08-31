@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: jornadas-service
+  datasource:
+    url: ${JORNADAS_DB_URL:jdbc:postgresql://localhost:5432/jornadas_db}
+    username: ${JORNADAS_DB_USER:jornadas_service}
+    password: ${JORNADAS_DB_PASSWORD:jornadas_service}
+  flyway:
+    url: ${JORNADAS_DB_URL:jdbc:postgresql://localhost:5432/jornadas_db}
+    user: ${JORNADAS_DB_USER:jornadas_service}
+    password: ${JORNADAS_DB_PASSWORD:jornadas_service}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        default-requeue-rejected: false
+
+estoma:
+  jornadas:
+    finalizacion:
+      fixed-delay: ${JORNADAS_FINALIZACION_FIXED_DELAY:PT1M}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    access:
+      default: none
+    web:
+      base-path: /
+      exposure:
+        include: health,info,prometheus
+      path-mapping:
+        prometheus: metrics
+  endpoint:
+    health:
+      access: read-only
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        startup:
+          include: db
+        readiness:
+          include: db
+        liveness:
+          include: livenessState
+    info:
+      access: read-only
+    prometheus:
+      access: read-only
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: jornadas-service
+    version: 0.1.0

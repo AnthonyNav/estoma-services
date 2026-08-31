@@ -1,0 +1,36 @@
+# Local development only. estoma-infra owns real deployment manifests
+# (see root README.md) -- this file exists so `./mvnw spring-boot:run`
+# has something to talk to using nothing but the defaults already baked
+# into src/main/resources/application.yml (no env vars required).
+#
+# Postgres is published on host port 5433, not 5432: on at least one dev
+# machine in this project a pre-existing Homebrew postgresql@14 service
+# already owns 127.0.0.1:5432, and colima's port-forward (a wildcard bind)
+# loses that race silently -- the app would connect to the wrong Postgres
+# entirely. Run with JORNADAS_DB_URL=jdbc:postgresql://localhost:5433/jornadas_db
+# (see README.md "Local Development").
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: jornadas_db
+      POSTGRES_USER: jornadas_service
+      POSTGRES_PASSWORD: jornadas_service
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jornadas_service -d jornadas_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672" # AMQP
+      - "15672:15672" # management UI: http://localhost:15672 (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
