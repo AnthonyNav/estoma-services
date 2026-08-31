@@ -12,7 +12,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Exercises the concrete recovery-query encoders against Authorization's strict inbound validator.
- * A producer may not add null-valued fields for another actor variant.
+ * A producer may not add null-valued fields for another actor variant or optional query value.
  */
 class CanonicalRecoveryEnvelopeContractTest {
 
@@ -39,6 +39,7 @@ class CanonicalRecoveryEnvelopeContractTest {
     assertThat(wire.has("idempotencyKey")).isFalse();
     assertThat(wire.has("aggregateId")).isFalse();
     assertThat(wire.has("aggregateVersion")).isFalse();
+    assertThat(wire.path("payload").has("cursor")).isFalse();
     assertThatCode(() -> validator.validate(wire, com.estoma.authorization.contracts.MessageKind.QUERY,
         Set.of(RECOVERY_QUERY))).doesNotThrowAnyException();
   }
@@ -69,7 +70,11 @@ class CanonicalRecoveryEnvelopeContractTest {
   }
 
   private JsonNode recoveryPayload() {
-    return mapper.createObjectNode().put("limit", 100).put("systemCode", "LAVADO_ULTRASONICO");
+    return mapper
+        .createObjectNode()
+        .putNull("cursor")
+        .put("limit", 100)
+        .put("systemCode", "LAVADO_ULTRASONICO");
   }
 
   private static Instant occurredAt() {

@@ -2,6 +2,9 @@ package com.estoma.washadministration.infrastructure.messaging;
 
 import com.estoma.washadministration.contracts.Actor;
 import com.estoma.washadministration.contracts.MessageEnvelope;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -42,7 +45,7 @@ public final class EnvelopeJsonCodec {
       root.set("actor", actorNode(envelope.actor()));
     }
     if (envelope.payload() != null) {
-      root.set("payload", envelope.payload());
+      root.set("payload", withoutNullObjectFields(envelope.payload()));
     }
     return mapper.writeValueAsBytes(root);
   }
@@ -88,6 +91,42 @@ public final class EnvelopeJsonCodec {
       throw new IllegalArgumentException("unsupported actor type: " + actor.type());
     }
     return node;
+  }
+
+  private JsonNode withoutNullObjectFields(JsonNode value) {
+    if (!value.isObject()) {
+      throw new IllegalArgumentException("payload must be an object");
+    }
+    ObjectNode copy = (ObjectNode) value.deepCopy();
+    removeNullObjectFields(copy);
+    return copy;
+  }
+
+  private static void removeNullObjectFields(ObjectNode object) {
+    List<String> nullFields = new ArrayList<>();
+    for (Map.Entry<String, JsonNode> field : object.properties()) {
+      if (field.getValue().isNull()) {
+        nullFields.add(field.getKey());
+      } else if (field.getValue().isObject()) {
+        removeNullObjectFields((ObjectNode) field.getValue());
+      } else if (field.getValue().isArray()) {
+        removeNullArrayItems(field.getValue());
+      }
+    }
+    object.remove(nullFields);
+  }
+
+  private static void removeNullArrayItems(JsonNode array) {
+    for (JsonNode item : array) {
+      if (item.isNull()) {
+        throw new IllegalArgumentException("payload arrays must not contain null values");
+      }
+      if (item.isObject()) {
+        removeNullObjectFields((ObjectNode) item);
+      } else if (item.isArray()) {
+        removeNullArrayItems(item);
+      }
+    }
   }
 
   private static void putUuid(ObjectNode root, String field, UUID value) {
