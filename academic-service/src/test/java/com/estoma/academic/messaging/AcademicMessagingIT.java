@@ -23,6 +23,7 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -87,7 +88,7 @@ class AcademicMessagingIT {
       scheduledTasksStopped = true;
     }
 
-    jdbc.sql("TRUNCATE TABLE authorization_projection_degraded_accounts,projection_recovery_not_found_conflicts,projection_recovery_jobs,outbox_messages,processed_messages,idempotency_records,student_import_validation_work,student_import_validation_rows,student_import_validation_errors,student_import_plan_item_rebases,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
+    truncateAfterStoppingWorkers();
     jdbc.sql("""
         INSERT INTO academic_projection_recovery_state (projection_type,status,active_job_id,updated_at)
         VALUES ('AUTHORIZATION','READY',NULL,now())
@@ -113,6 +114,23 @@ class AcademicMessagingIT {
         "events.academic.retry.1", "events.academic.retry.2", "events.academic.dlq"
     }) {
       admin.purgeQueue(queue);
+    }
+  }
+
+  private void truncateAfterStoppingWorkers() {
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        jdbc.sql("TRUNCATE TABLE authorization_projection_degraded_accounts,projection_recovery_not_found_conflicts,projection_recovery_jobs,outbox_messages,processed_messages,idempotency_records,student_import_validation_work,student_import_validation_rows,student_import_validation_errors,student_import_plan_item_rebases,student_import_plan_items,student_import_processes,student_course_sections,course_sections,student_academic_eligibilities,student_number_change_history,student_academic_profiles,academic_periods,person_status_projection,account_status_projection,authorization_context_projection,system_access_context_projection CASCADE").update();
+        return;
+      } catch (PessimisticLockingFailureException exception) {
+        if (attempt == 3) throw exception;
+        try {
+          Thread.sleep(100);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException("interrupted while waiting for stopped scheduled workers", interrupted);
+        }
+      }
     }
   }
 
