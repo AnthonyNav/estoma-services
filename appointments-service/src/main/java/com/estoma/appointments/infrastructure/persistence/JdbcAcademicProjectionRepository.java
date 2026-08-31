@@ -53,6 +53,10 @@ public class JdbcAcademicProjectionRepository implements AcademicProjectionRepos
     return jdbc.sql("SELECT " + PROFILE_COLUMNS + " FROM student_academic_profile_projection WHERE student_account_id=:student")
       .param("student",studentAccountId).query(JdbcAcademicProjectionRepository::mapProfile).optional();
   }
+  @Override public Optional<StudentAcademicProfileProjection> findStudentProfileForUpdate(UUID studentAccountId) {
+    return jdbc.sql("SELECT " + PROFILE_COLUMNS + " FROM student_academic_profile_projection WHERE student_account_id=:student FOR UPDATE")
+      .param("student",studentAccountId).query(JdbcAcademicProjectionRepository::mapProfile).optional();
+  }
   @Override public Optional<CourseSectionProjection> findCourseSection(UUID id) {
     return jdbc.sql("SELECT " + SECTION_COLUMNS + " FROM course_section_projection WHERE course_section_id=:id")
       .param("id",id).query(JdbcAcademicProjectionRepository::mapSection).optional();

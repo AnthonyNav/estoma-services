@@ -3,6 +3,7 @@ package com.estoma.appointments.infrastructure.persistence;
 import com.estoma.appointments.application.port.out.ExceptionalAppointmentAuthorizationRepository;
 import com.estoma.appointments.domain.model.ExceptionalAppointmentAuthorization;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -28,7 +29,7 @@ public class JdbcExceptionalAppointmentAuthorizationRepository implements Except
       .param("authorizedBy", a.authorizedByAccountId())
       .param("reason", a.reason())
       .param("granted", Timestamps.toTimestamp(a.grantedAt()))
-      .param("expires", Timestamps.toTimestamp(a.expiresAt()))
+      .param("expires", null)
       .param("cancelledBy", a.cancelledByAccountId())
       .param("cancellationReason", a.cancellationReason())
       .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt()))
@@ -45,10 +46,9 @@ public class JdbcExceptionalAppointmentAuthorizationRepository implements Except
     return find("exceptional_authorization_id=:id", "id", id, true);
   }
 
-  @Override public Optional<ExceptionalAppointmentAuthorization> findByStudentAndDate(UUID student, LocalDate date) {
+  @Override public List<ExceptionalAppointmentAuthorization> findByStudentAndDate(UUID student, LocalDate date) {
     return jdbc.sql("SELECT " + COLUMNS + " FROM exceptional_appointment_authorizations WHERE student_account_id=:student AND service_date=:date")
-        .param("student", student).param("date", date)
-        .query(JdbcExceptionalAppointmentAuthorizationRepository::map).optional();
+        .param("student", student).param("date", date).query(JdbcExceptionalAppointmentAuthorizationRepository::map).list();
   }
 
   private Optional<ExceptionalAppointmentAuthorization> find(String predicate, String name, Object value, boolean lock) {
@@ -82,7 +82,7 @@ public class JdbcExceptionalAppointmentAuthorizationRepository implements Except
         updated_at=now()
       WHERE exceptional_authorization_id=:id AND version=:expectedVersion
       """)
-      .param("expires", Timestamps.toTimestamp(a.expiresAt()))
+      .param("expires", null)
       .param("cancelledBy", a.cancelledByAccountId())
       .param("cancellationReason", a.cancellationReason())
       .param("cancelledAt", Timestamps.toTimestamp(a.cancelledAt()))

@@ -3,12 +3,14 @@ package com.estoma.appointments.application.usecase;
 import com.estoma.appointments.application.model.ApplicationResult;
 import com.estoma.appointments.application.port.in.GrantExceptionalAppointmentAuthorizationUseCase;
 import com.estoma.appointments.application.port.out.AcademicProjectionRepository;
+import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.AuthorizationProjectionRepository;
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
 import com.estoma.appointments.application.port.out.ExceptionalAppointmentAuthorizationRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
 import com.estoma.appointments.domain.model.ExceptionalAppointmentAuthorization;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class GrantExceptionalAppointmentAuthorizationHandler
     implements GrantExceptionalAppointmentAuthorizationUseCase {
   private final ExceptionalAppointmentAuthorizationRepository authorizations;
+  private final AppointmentRepository appointments;
   private final AcademicProjectionRepository academic;
   private final CommandIdempotencyRepository idempotency;
   private final OutboxRepository outbox;
@@ -25,9 +28,11 @@ public class GrantExceptionalAppointmentAuthorizationHandler
 
   public GrantExceptionalAppointmentAuthorizationHandler(
       ExceptionalAppointmentAuthorizationRepository authorizations,
-      AcademicProjectionRepository academic, CommandIdempotencyRepository idempotency,
+      AppointmentRepository appointments, AcademicProjectionRepository academic,
+      CommandIdempotencyRepository idempotency,
       OutboxRepository outbox, AuthorizationProjectionRepository authorization) {
     this.authorizations = authorizations;
+    this.appointments = appointments;
     this.academic = academic;
     this.idempotency = idempotency;
     this.outbox = outbox;
@@ -54,18 +59,20 @@ public class GrantExceptionalAppointmentAuthorizationHandler
       } else if (!academic.reliable()) {
         result = ApplicationResult.rejected("ACADEMIC_PROJECTION_UNRELIABLE",
             "student academic state cannot be trusted");
-      } else if (academic.findStudentProfile(command.studentAccountId())
+      } else if (academic.findStudentProfileForUpdate(command.studentAccountId())
           .filter(profile -> profile.reliable() && "ACTIVE".equals(profile.academicStatus())).isEmpty()) {
         result = ApplicationResult.rejected("STUDENT_NOT_ACTIVE", "student must have an active academic profile");
-      } else if (authorizations.findByStudentAndDate(
-          command.studentAccountId(), command.serviceDate()).isPresent()) {
+      } else if (OperationalDatePolicy.hasConcluded(command.serviceDate(), now)) {
+        result = ApplicationResult.rejected("AUTHORIZATION_DATE_CONCLUDED",
+            "the authorization date has already concluded");
+      } else if (hasAvailableAuthorization(command.studentAccountId(), command.serviceDate(), now)) {
         result = ApplicationResult.rejected("AUTHORIZATION_ALREADY_EXISTS",
-            "student already has an authorization for that date");
+            "student already has an available authorization for that date");
       } else {
         ExceptionalAppointmentAuthorization authorization = ExceptionalAppointmentAuthorization.grant(
             command.authorizationId() == null ? UUID.randomUUID() : command.authorizationId(),
             command.studentAccountId(), command.serviceDate(), command.metadata().actor().accountId(),
-            command.reason(), now, command.expiresAt());
+            command.reason(), now, null);
         authorizations.save(authorization);
         ApplicationSupport.appendEvent(outbox, command.metadata(),
             "ExceptionalAppointmentAuthorizationGranted", authorization.exceptionalAuthorizationId(),
@@ -82,5 +89,12 @@ public class GrantExceptionalAppointmentAuthorizationHandler
     ApplicationSupport.complete(idempotency, command.metadata(),
         "GrantExceptionalAppointmentAuthorization", result, now);
     return result;
+  }
+
+  private boolean hasAvailableAuthorization(UUID studentAccountId, LocalDate serviceDate, Instant now) {
+    return authorizations.findByStudentAndDate(studentAccountId, serviceDate).stream()
+        .anyMatch(authorization -> authorization.isAvailableOn(serviceDate, now)
+            && appointments.findActiveByExceptionalAuthorizationForUpdate(
+                authorization.exceptionalAuthorizationId()).isEmpty());
   }
 }

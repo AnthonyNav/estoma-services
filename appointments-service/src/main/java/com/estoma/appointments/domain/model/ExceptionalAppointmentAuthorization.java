@@ -71,7 +71,7 @@ public final class ExceptionalAppointmentAuthorization {
   }
 
   public boolean isAvailableOn(LocalDate date, Instant now) {
-    return !isCancelled() && serviceDate.equals(date) && (expiresAt == null || !now.isAfter(expiresAt));
+    return !isCancelled() && serviceDate.equals(date);
   }
 
   public boolean isUsableAt(LocalDate date, Instant now) { return isAvailableOn(date, now); }
