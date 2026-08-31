@@ -17,12 +17,13 @@ import com.estoma.platformbff.api.mailbox.MailboxController;
 import com.estoma.platformbff.api.wash.WashController;
 import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.mailbox.MailboxQueryService;
+import com.estoma.platformbff.application.security.EffectiveSystemService;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
 import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.mailbox.MailboxMessagesResponse;
-import com.estoma.platformbff.contracts.http.mailbox.MailboxSummaryResponse;
+import com.estoma.platformbff.contracts.http.mailbox.MailboxSystemSummaryResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSection;
@@ -52,6 +53,7 @@ class PublicApiMvcTest {
 
   @Mock PublicCommandAdapter commands;
   @Mock LocalAuthorizationService authorization;
+  @Mock EffectiveSystemService effectiveSystems;
   @Mock MailboxQueryService mailboxQueries;
   @Mock WashSupervisionQueryService supervision;
   @Mock WashStudentQueryService studentQueries;
@@ -68,12 +70,14 @@ class PublicApiMvcTest {
     when(commands.submitEnriched(any(), anyString(), anyString(), anyMap(), anyMap(), anyString(),
         any(), any(), any(), any())).thenReturn(accepted);
     when(authorization.requireAuthenticatedAccount()).thenReturn(UUID.randomUUID());
-    when(mailboxQueries.messages()).thenReturn(new MailboxMessagesResponse(List.of()));
-    when(mailboxQueries.summary()).thenReturn(new MailboxSummaryResponse(0, 0, List.of()));
+    when(mailboxQueries.messages(anyString(), org.mockito.ArgumentMatchers.anyInt(), nullable(String.class)))
+        .thenReturn(new MailboxMessagesResponse(List.of(), null));
+    when(mailboxQueries.summary(anyString())).thenReturn(
+        new MailboxSystemSummaryResponse("LAVADO_ULTRASONICO", 0, 0, null));
     when(supervision.pendingReassignments()).thenReturn(new PendingReassignmentsResponse(List.of()));
     Clock clock = Clock.fixed(Instant.parse("2026-08-01T10:00:00Z"), java.time.ZoneOffset.UTC);
     mailboxMvc = MockMvcBuilders.standaloneSetup(
-        new MailboxController(mailboxQueries, authorization, commands, clock))
+        new MailboxController(mailboxQueries, authorization, effectiveSystems, commands, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
     washMvc = MockMvcBuilders.standaloneSetup(
@@ -84,9 +88,9 @@ class PublicApiMvcTest {
 
   @Test
   void mailboxEndpointsExposeOnlyTheDocumentedSurfaceAndRequireIdempotencyForWrites() throws Exception {
-    mailboxMvc.perform(get("/api/v1/mailbox/messages"))
+    mailboxMvc.perform(get("/api/v1/mailbox/messages").param("systemCode", "LAVADO_ULTRASONICO"))
         .andExpect(status().isOk());
-    mailboxMvc.perform(get("/api/v1/mailbox/summary"))
+    mailboxMvc.perform(get("/api/v1/mailbox/summary").param("systemCode", "LAVADO_ULTRASONICO"))
         .andExpect(status().isOk());
     mailboxMvc.perform(post("/api/v1/mailbox/visits")
             .contentType(MediaType.APPLICATION_JSON)

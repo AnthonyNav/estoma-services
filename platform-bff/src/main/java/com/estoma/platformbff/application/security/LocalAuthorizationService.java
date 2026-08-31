@@ -21,12 +21,14 @@ public class LocalAuthorizationService {
   private final CurrentActor currentActor;
   private final ProjectionQueryPort projections;
   private final ProjectionReadinessService readiness;
+  private final EffectiveSystemService effectiveSystems;
 
   public LocalAuthorizationService(CurrentActor currentActor, ProjectionQueryPort projections,
-      ProjectionReadinessService readiness) {
+      ProjectionReadinessService readiness, EffectiveSystemService effectiveSystems) {
     this.currentActor = currentActor;
     this.projections = projections;
     this.readiness = readiness;
+    this.effectiveSystems = effectiveSystems;
   }
 
   public UUID requireAuthenticatedAccount() {
@@ -62,9 +64,10 @@ public class LocalAuthorizationService {
     boolean roleMatches = projections.findRoleCode(accountId)
         .filter(role -> WASH_ADMINISTRATOR_ROLE.equals(role) || SUPERADMIN_ROLE.equals(role))
         .isPresent();
-    if (!roleMatches || !projections.hasActiveSystemAccess(accountId, WASH_SYSTEM_CODE)) {
+    if (!roleMatches) {
       throw new AuthorizationDeniedException();
     }
+    effectiveSystems.requireEffectiveSystem(accountId, WASH_SYSTEM_CODE);
     return accountId;
   }
 
@@ -88,9 +91,10 @@ public class LocalAuthorizationService {
   private void requireRoleAndWashAccess(UUID accountId, String expectedRole) {
     readiness.requireAuthorizationReady();
     boolean roleMatches = projections.findRoleCode(accountId).filter(expectedRole::equals).isPresent();
-    if (!roleMatches || !projections.hasActiveSystemAccess(accountId, WASH_SYSTEM_CODE)) {
+    if (!roleMatches) {
       throw new AuthorizationDeniedException();
     }
+    effectiveSystems.requireEffectiveSystem(accountId, WASH_SYSTEM_CODE);
   }
 
   public static class AuthorizationDeniedException extends RuntimeException {

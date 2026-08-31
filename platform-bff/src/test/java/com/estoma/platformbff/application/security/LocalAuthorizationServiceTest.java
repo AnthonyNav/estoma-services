@@ -21,13 +21,14 @@ class LocalAuthorizationServiceTest {
   @Mock CurrentActor actor;
   @Mock ProjectionQueryPort projections;
   @Mock ProjectionReadinessService readiness;
+  @Mock EffectiveSystemService effectiveSystems;
 
   private final UUID accountId = UUID.randomUUID();
   private LocalAuthorizationService authorization;
 
   @BeforeEach
   void setUp() {
-    authorization = new LocalAuthorizationService(actor, projections, readiness);
+    authorization = new LocalAuthorizationService(actor, projections, readiness, effectiveSystems);
     when(actor.accountId()).thenReturn(Optional.of(accountId));
   }
 
@@ -41,10 +42,8 @@ class LocalAuthorizationServiceTest {
   }
 
   @Test
-  void washAdminRequiresCompatibleRoleAndActiveWashAccess() {
+  void washAdminRequiresCompatibleRoleAndEffectiveWashAccess() {
     when(projections.findRoleCode(accountId)).thenReturn(Optional.of("ADMINISTRADOR_LAVADO"));
-    when(projections.hasActiveSystemAccess(accountId, LocalAuthorizationService.WASH_SYSTEM_CODE))
-        .thenReturn(true);
 
     assertThat(authorization.requireWashAdministrator()).isEqualTo(accountId);
 
@@ -52,10 +51,10 @@ class LocalAuthorizationServiceTest {
   }
 
   @Test
-  void washAdminFailsClosedWhenTheGeneralAccessIsNotActive() {
+  void washAdminFailsClosedWhenTheEffectiveSystemIsNotAvailable() {
     when(projections.findRoleCode(accountId)).thenReturn(Optional.of("SUPERADMIN"));
-    when(projections.hasActiveSystemAccess(accountId, LocalAuthorizationService.WASH_SYSTEM_CODE))
-        .thenReturn(false);
+    org.mockito.Mockito.doThrow(new LocalAuthorizationService.AuthorizationDeniedException())
+        .when(effectiveSystems).requireEffectiveSystem(accountId, LocalAuthorizationService.WASH_SYSTEM_CODE);
 
     assertThatThrownBy(() -> authorization.requireWashAdministrator())
         .isInstanceOf(LocalAuthorizationService.AuthorizationDeniedException.class);
