@@ -35,6 +35,7 @@ public class AcademicQueryDispatcher {
       case "ListStudentAcademicEligibilitySnapshotsPage" -> listEligibility(query);
       case "GetAppointmentAcademicConfiguration" -> getAppointmentConfiguration(query);
       case "ListStudentAppointmentAcademicSnapshotsPage" -> listAppointmentStudents(query);
+      case "GetActiveAcademicPeriodSnapshot" -> getActiveAcademicPeriod(query);
       default -> throw new IllegalArgumentException("unsupported Academic Query");
     }
   }
@@ -104,6 +105,26 @@ public class AcademicQueryDispatcher {
         active==null?null:active.version(),Map.of("status","SUCCEEDED","data",data));
   }
 
+  private void getActiveAcademicPeriod(MessageEnvelope query) {
+    ActiveAcademicPeriod period = jdbc.sql("""
+        SELECT academic_period_id,code,status::text,start_date,end_date,version
+        FROM academic_periods
+        WHERE status='ACTIVE'
+        """)
+        .query((rs, n) -> new ActiveAcademicPeriod(
+            rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
+            rs.getObject(4, java.time.LocalDate.class), rs.getObject(5, java.time.LocalDate.class),
+            rs.getInt(6)))
+        .optional()
+        .orElse(null);
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("status", period == null ? "NOT_FOUND" : "FOUND");
+    result.put("data", period == null ? null : period.data());
+    appendResult(query, "GetActiveAcademicPeriodSnapshotResult",
+        period == null ? null : period.academicPeriodId(),
+        period == null ? null : period.sourceVersion(), result);
+  }
+
   private void listAppointmentStudents(MessageEnvelope query) {
     JsonNode payload=query.payload(); UUID periodId=uuid(payload,"academicPeriodId"); UUID cursor=uuid(payload,"cursor"); int limit=payload.path("limit").asInt();
     if(jdbc.sql("SELECT count(*) FROM academic_periods WHERE academic_period_id=:period").param("period",periodId).query(Long.class).single()==0){
@@ -162,6 +183,20 @@ public class AcademicQueryDispatcher {
   private static UUID uuid(JsonNode payload,String field){if(!payload.hasNonNull(field))return null;try{return UUID.fromString(payload.path(field).asString());}catch(IllegalArgumentException ex){throw new IllegalArgumentException("invalid "+field,ex);}}
 
   private record Period(UUID academicPeriodId,String code,String status,int version){Map<String,Object> data(){Map<String,Object>d=new LinkedHashMap<>();d.put("academicPeriodId",academicPeriodId);d.put("code",code);d.put("status",status);d.put("version",version);return d;}}
+  private record ActiveAcademicPeriod(UUID academicPeriodId, String code, String status,
+      java.time.LocalDate startDate, java.time.LocalDate endDate, int sourceVersion) {
+    Map<String, Object> data() {
+      Map<String, Object> result = new LinkedHashMap<>();
+      result.put("academicPeriodId", academicPeriodId);
+      result.put("code", code);
+      result.put("status", status);
+      result.put("startDate", startDate);
+      result.put("endDate", endDate);
+      result.put("sourceVersion", sourceVersion);
+      result.put("snapshotGeneratedAt", Instant.now());
+      return result;
+    }
+  }
   private record StudentSnapshot(UUID studentAcademicProfileId,UUID accountId,int currentSemester,String academicStatus,int profileVersion){Map<String,Object> data(List<Map<String,Object>> enrollments){Map<String,Object>d=new LinkedHashMap<>();d.put("studentAcademicProfileId",studentAcademicProfileId);d.put("accountId",accountId);d.put("currentSemester",currentSemester);d.put("academicStatus",academicStatus);d.put("profileVersion",profileVersion);d.put("enrollments",enrollments);return d;}}
   private record Eligibility(UUID eligibilityId,UUID studentAcademicProfileId,UUID accountId,String systemCode,boolean eligible,int policyVersion,int eligibilityVersion,int academicProfileVersion,Instant evaluatedAt,Instant updatedAt){Map<String,Object> data(){Map<String,Object>d=new LinkedHashMap<>();d.put("eligibilityId",eligibilityId);d.put("studentAcademicProfileId",studentAcademicProfileId);d.put("accountId",accountId);d.put("systemCode",systemCode);d.put("eligible",eligible);d.put("policyVersion",policyVersion);d.put("eligibilityVersion",eligibilityVersion);d.put("academicProfileVersion",academicProfileVersion);d.put("evaluatedAt",evaluatedAt);d.put("updatedAt",updatedAt);return d;}}
 }

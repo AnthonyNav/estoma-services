@@ -26,8 +26,9 @@ Business operations are durable RabbitMQ commands on `commands.academic`. The se
 
 The service also owns the durable `student-import-process` module for `FULL` academic imports: frozen object references and SHA-256 integrity checks, bounded streaming XLSX validation, authoritative Person resolution, deterministic Plan Items, coordinated `SYSTEM/academic` Commands, Result correlation and retry fencing, controlled `ResumeStudentImport` recovery, audited expected-version rebases, local Academic effects/eligibility, and atomic `COMPLETED + READY` finalization.
 
-PR3 adds the durable recovery boundary: `queries.academic` serves the two
-eligibility snapshot Queries for Authorization, `results.academic` dispatches
+PR3 adds the durable recovery boundary: `queries.academic` serves eligibility
+snapshots for Authorization, appointment configuration snapshots, and the
+active Academic Period snapshot for Communications. `results.academic` dispatches
 import Results separately from Authorization recovery Results, and
 `projection_recovery_jobs` persists entity/full rebuild progress, cursors,
 attempts and query correlation. The machine-readable contract is

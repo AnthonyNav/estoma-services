@@ -4,7 +4,7 @@ info:
   title: academic-service PR3 messaging contract
   version: 1.0.0
   description: >
-    Executable V1 contract for Academic eligibility recovery Queries,
+    Executable V1 contract for Academic eligibility and active-period recovery Queries,
     Student Import coordinated Results, and Authorization projection recovery.
     Normative prose remains in estomatologia-platform-docs/main.
 
@@ -19,6 +19,8 @@ channels:
         $ref: '#/components/messages/GetStudentAcademicEligibilitySnapshot'
       listEligibility:
         $ref: '#/components/messages/ListStudentAcademicEligibilitySnapshotsPage'
+      getActiveAcademicPeriod:
+        $ref: '#/components/messages/GetActiveAcademicPeriodSnapshot'
     bindings:
       amqp:
         is: queue
@@ -86,9 +88,11 @@ channels:
         $ref: '#/components/messages/GetStudentAcademicEligibilitySnapshotResult'
       eligibilityPageResult:
         $ref: '#/components/messages/ListStudentAcademicEligibilitySnapshotsPageResult'
+      activeAcademicPeriodResult:
+        $ref: '#/components/messages/GetActiveAcademicPeriodSnapshotResult'
 
 operations:
-  receiveEligibilityQueries:
+  receiveAcademicRecoveryQueries:
     action: receive
     channel:
       $ref: '#/channels/queries.academic'
@@ -100,7 +104,7 @@ operations:
     action: send
     channel:
       $ref: '#/channels/platform.queries'
-  sendEligibilityQueryResults:
+  sendAcademicRecoveryQueryResults:
     action: send
     channel:
       $ref: '#/channels/platform.results'
@@ -127,6 +131,16 @@ components:
               payload:
                 $ref: '#/components/schemas/ListEligibilityPayload'
 
+    GetActiveAcademicPeriodSnapshot:
+      name: GetActiveAcademicPeriodSnapshot
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/CommunicationsQueryEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/GetActiveAcademicPeriodPayload'
+
     GetStudentAcademicEligibilitySnapshotResult:
       name: GetStudentAcademicEligibilitySnapshotResult
       payload:
@@ -146,6 +160,16 @@ components:
             properties:
               payload:
                 $ref: '#/components/schemas/ListEligibilityResultPayload'
+
+    GetActiveAcademicPeriodSnapshotResult:
+      name: GetActiveAcademicPeriodSnapshotResult
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/AcademicPeriodResultEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/GetActiveAcademicPeriodResultPayload'
 
     GetAccountAuthorizationSnapshot:
       name: GetAccountAuthorizationSnapshot
@@ -284,6 +308,14 @@ components:
         service: {type: string, const: authorization}
         accountId: {type: ['string', 'null'], format: uuid}
 
+    CommunicationsSystemActor:
+      type: object
+      required: [type, service]
+      properties:
+        type: {type: string, const: SYSTEM}
+        service: {type: string, const: communications}
+        accountId: {type: ['string', 'null'], format: uuid}
+
     BaseEnvelope:
       type: object
       required:
@@ -315,6 +347,15 @@ components:
             producer: {type: string, const: authorization}
             actor: {$ref: '#/components/schemas/AuthorizationSystemActor'}
 
+    CommunicationsQueryEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          properties:
+            messageKind: {type: string, const: QUERY}
+            producer: {type: string, const: communications}
+            actor: {$ref: '#/components/schemas/CommunicationsSystemActor'}
+
     AcademicRecoveryQueryEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
@@ -340,6 +381,16 @@ components:
           properties:
             producer: {type: string, const: academic}
             actor: {$ref: '#/components/schemas/AuthorizationSystemActor'}
+
+    AcademicPeriodResultEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/BaseEnvelope'
+        - type: object
+          required: [causationId]
+          properties:
+            messageKind: {type: string, const: RESULT}
+            producer: {type: string, const: academic}
+            actor: {$ref: '#/components/schemas/CommunicationsSystemActor'}
 
     AuthorizationRecoveryResultEnvelope:
       allOf:
@@ -457,6 +508,36 @@ components:
                   items: {$ref: '#/components/schemas/EligibilitySnapshot'}
                 nextCursor: {type: ['string', 'null'], format: uuid}
                 hasMore: {type: boolean}
+        - $ref: '#/components/schemas/RejectedOrFailedPayload'
+
+    GetActiveAcademicPeriodPayload:
+      type: object
+      maxProperties: 0
+
+    ActiveAcademicPeriodSnapshot:
+      type: object
+      required:
+        [academicPeriodId, code, status, startDate, endDate, sourceVersion, snapshotGeneratedAt]
+      properties:
+        academicPeriodId: {type: string, format: uuid}
+        code: {type: string}
+        status: {type: string, const: ACTIVE}
+        startDate: {type: string, format: date}
+        endDate: {type: string, format: date}
+        sourceVersion: {type: integer, minimum: 1}
+        snapshotGeneratedAt: {type: string, format: date-time}
+
+    GetActiveAcademicPeriodResultPayload:
+      oneOf:
+        - type: object
+          required: [status, data]
+          properties:
+            status: {type: string, const: FOUND}
+            data: {$ref: '#/components/schemas/ActiveAcademicPeriodSnapshot'}
+        - type: object
+          required: [status]
+          properties:
+            status: {type: string, const: NOT_FOUND}
         - $ref: '#/components/schemas/RejectedOrFailedPayload'
 
     GetAuthorizationPayload:

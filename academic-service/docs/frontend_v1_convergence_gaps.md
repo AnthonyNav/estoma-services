@@ -1,13 +1,13 @@
 # Frontend V1 Backend Convergence Gaps — academic-service
 
-Status: `PLANNED`
+Status: `IMPLEMENTED` — consumer adoption remains in `communications-service`.
 
 Scope: Academic owner data required by the closed Front V1 session-context and Wash mailbox retention flows.
 
 This document intentionally separates two concerns that must not be conflated:
 
 - student/system academic eligibility is already sufficiently modeled and recoverable for the BFF;
-- the current Academic Period is not yet recoverable with the full date information required by Communications.
+- the current Academic Period is recoverable with the full date information required by Communications.
 
 ## Architectural boundary
 
@@ -24,21 +24,16 @@ Therefore this convergence work does **not** require a new eligibility Event or 
 ## GAP-ACADEMIC-01 — Current Academic Period cannot be fully reconstructed with its retention dates
 
 - Severity: `HIGH`
-- Status: `OPEN`
+- Status: `CLOSED` — owner contract implemented by `GetActiveAcademicPeriodSnapshot`.
 - Owner: `academic-service`
 - Consumer: `communications-service`
 - Affected flow: Wash Mailbox V1 semester retention
 
 ### Current state
 
-Academic already publishes the lifecycle fact that an Academic Period has been activated, including the period's date information. However, the current recovery/query surface does not provide a fresh or rebuilding Communications instance with a complete authoritative snapshot of the active period and the dates needed to reconstruct retention behavior.
+`GetActiveAcademicPeriodSnapshot` is requester-scoped to `communications` and returns the authoritative active period as `FOUND`, with `academicPeriodId`, `code`, `status`, `startDate`, `endDate` and `sourceVersion`. It returns `NOT_FOUND` when no period is `ACTIVE`.
 
-This creates an asymmetry:
-
-- a consumer that happened to observe the activation Event can know the active period;
-- a consumer bootstrapped later, rebuilt from empty state, or repairing a missing projection cannot deterministically recover the same information.
-
-That violates the platform requirement that incremental projection and rebuilt projection converge to the same state.
+The Result preserves the aggregate ID and source version in the envelope, so a consumer can protect its local projection from stale or duplicate recovery data.
 
 ### Impact
 
@@ -52,9 +47,7 @@ All three are incompatible with the desired V1 architecture.
 
 ### Proposed solution
 
-Extend the existing Academic recovery model with an authoritative **current Academic Period snapshot** suitable for local consumer reconstruction.
-
-The exact Query/Result names should follow the current Academic recovery conventions, but the recoverable period item must contain the semantic data needed by consumers, including at least:
+The implemented owner contract is an authoritative **current Academic Period snapshot** suitable for local consumer reconstruction:
 
 ```text
 academicPeriodId
@@ -65,7 +58,7 @@ endDate
 sourceVersion
 ```
 
-If the domain distinguishes additional canonical lifecycle timestamps that are required to determine the active period unambiguously, those may be included. The recovery contract must identify whether there is a current active period and must not require a consumer to infer dates from unrelated Events.
+The snapshot also includes `snapshotGeneratedAt`. The recovery contract identifies authoritative absence without requiring the consumer to infer dates from unrelated Events.
 
 ### Recovery semantics
 
