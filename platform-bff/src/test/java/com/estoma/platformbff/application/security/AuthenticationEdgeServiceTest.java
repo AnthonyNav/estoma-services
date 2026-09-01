@@ -1,17 +1,20 @@
 package com.estoma.platformbff.application.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import com.estoma.platformbff.application.commands.CommandGatewayService;
 import com.estoma.platformbff.application.port.MessageSerializer;
 import com.estoma.platformbff.contracts.http.auth.LoginRequest;
+import com.estoma.platformbff.contracts.http.auth.ChangePasswordRequest;
 import com.estoma.platformbff.contracts.http.auth.RefreshRequest;
 import com.estoma.platformbff.contracts.messaging.ActorContext;
 import com.estoma.platformbff.infrastructure.messaging.MessageEnvelopeCodec;
@@ -102,5 +105,57 @@ class AuthenticationEdgeServiceTest {
     verify(rpc).call(
         eq("RevokeSession"), eq(ActorContext.account(accountId, "SELF", null)),
         eq(accountId), isNull(), anyString());
+  }
+
+  @Test
+  void voluntaryPasswordChangeUsesOnlyTheCurrentPrincipalAndRotatesTheSameSessionOnce() {
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    when(principal.current()).thenReturn(Optional.of(
+        new CurrentSecurityPrincipal.Principal(accountId, personId, sessionId, "NORMAL")));
+    when(rpc.call(eq("ChangePassword"), eq(ActorContext.account(accountId, "SELF", null)),
+        eq(accountId), isNull(), anyString())).thenReturn(new SecurityRpcPort.RpcCallResult(
+            "SUCCEEDED", "{\"sessionId\":\"" + sessionId + "\",\"accessToken\":\"new-access\","
+                + "\"refreshToken\":\"new-refresh\",\"authState\":\"NORMAL\"}", null));
+
+    var response = service.changePassword(new ChangePasswordRequest("old-secret", "new-secret"));
+
+    assertThat(response.accountId()).isEqualTo(accountId);
+    assertThat(response.sessionId()).isEqualTo(sessionId);
+    assertThat(response.accessToken()).isEqualTo("new-access");
+    assertThat(response.refreshToken()).isEqualTo("new-refresh");
+    verify(rpc, times(1)).call(eq("ChangePassword"), eq(ActorContext.account(accountId, "SELF", null)),
+        eq(accountId), isNull(), anyString());
+  }
+
+  @Test
+  void voluntaryPasswordChangeRejectsAChangedSessionOrIncompleteRotation() {
+    UUID accountId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    when(principal.current()).thenReturn(Optional.of(
+        new CurrentSecurityPrincipal.Principal(accountId, UUID.randomUUID(), sessionId, "NORMAL")));
+    when(rpc.call(eq("ChangePassword"), eq(ActorContext.account(accountId, "SELF", null)),
+        eq(accountId), isNull(), anyString())).thenReturn(new SecurityRpcPort.RpcCallResult(
+            "SUCCEEDED", "{\"sessionId\":\"" + UUID.randomUUID() + "\",\"accessToken\":\"\","
+                + "\"refreshToken\":\"new-refresh\",\"authState\":\"NORMAL\"}", null));
+
+    assertThatThrownBy(() -> service.changePassword(new ChangePasswordRequest("old", "new")))
+        .isInstanceOf(SecurityRpcUnavailableException.class);
+    verify(rpc, times(1)).call(eq("ChangePassword"), eq(ActorContext.account(accountId, "SELF", null)),
+        eq(accountId), isNull(), anyString());
+  }
+
+  @Test
+  void voluntaryPasswordChangePreservesTheSharedOwnerRejectionMapping() {
+    UUID accountId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    when(principal.current()).thenReturn(Optional.of(
+        new CurrentSecurityPrincipal.Principal(accountId, UUID.randomUUID(), sessionId, "NORMAL")));
+    when(rpc.call(eq("ChangePassword"), eq(ActorContext.account(accountId, "SELF", null)),
+        eq(accountId), isNull(), anyString())).thenReturn(new SecurityRpcPort.RpcCallResult("REJECTED", null, null));
+
+    assertThatThrownBy(() -> service.changePassword(new ChangePasswordRequest("old", "new")))
+        .isInstanceOf(AuthenticationRejectedException.class);
   }
 }

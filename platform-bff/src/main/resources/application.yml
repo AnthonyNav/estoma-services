@@ -81,3 +81,6 @@ platform:
   genesis:
     enabled: ${BFF_GENESIS_ENABLED:false}
     environment-fresh: ${BFF_GENESIS_ENVIRONMENT_FRESH:false}
+  recovery:
+    enabled: ${BFF_RECOVERY_ENABLED:true}
+    system-catalog-refresh-codes: ${BFF_SYSTEM_CATALOG_REFRESH_CODES:}

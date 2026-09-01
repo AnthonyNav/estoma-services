@@ -2,15 +2,26 @@ package com.estoma.platformbff.application.operations;
 
 import com.estoma.platformbff.application.commands.CommandRegistry;
 import com.estoma.platformbff.application.projection.AuthorizationRecoveryService;
+import com.estoma.platformbff.application.projection.AccountPresentationRecoveryService;
+import com.estoma.platformbff.application.projection.PersonPresentationRecoveryService;
+import com.estoma.platformbff.application.projection.SystemCatalogRecoveryService;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ResultDispatcher {
-  private static final Set<String> RECOVERY_RESULT_TYPES = Set.of(
+  private static final Set<String> AUTHORIZATION_RECOVERY_RESULT_TYPES = Set.of(
       "GetAccountAuthorizationSnapshotResult",
       "ListAccountAuthorizationSnapshotsPageResult");
+  private static final Set<String> ACCOUNT_PRESENTATION_RECOVERY_RESULT_TYPES = Set.of(
+      "GetAccountPresentationSnapshotResult",
+      "ListAccountPresentationSnapshotsPageResult");
+  private static final Set<String> SYSTEM_CATALOG_RECOVERY_RESULT_TYPES = Set.of(
+      "GetSystemCatalogSnapshotResult",
+      "ListSystemCatalogSnapshotsPageResult");
+  private static final Set<String> PERSON_PRESENTATION_RECOVERY_RESULT_TYPES = Set.of(
+      "ListPersonPresentationSnapshotsPageResult");
 
   public enum DispatchOutcome {
     APPLIED,
@@ -20,22 +31,52 @@ public class ResultDispatcher {
 
   private final CommandRegistry registry;
   private final ResultApplicationService commandResults;
-  private final AuthorizationRecoveryService recovery;
+  private final AuthorizationRecoveryService authorizationRecovery;
+  private final AccountPresentationRecoveryService accountPresentationRecovery;
+  private final PersonPresentationRecoveryService personPresentationRecovery;
+  private final SystemCatalogRecoveryService systemCatalogRecovery;
 
   public ResultDispatcher(CommandRegistry registry, ResultApplicationService commandResults,
-      AuthorizationRecoveryService recovery) {
+      AuthorizationRecoveryService authorizationRecovery,
+      AccountPresentationRecoveryService accountPresentationRecovery,
+      PersonPresentationRecoveryService personPresentationRecovery,
+      SystemCatalogRecoveryService systemCatalogRecovery) {
     this.registry = registry;
     this.commandResults = commandResults;
-    this.recovery = recovery;
+    this.authorizationRecovery = authorizationRecovery;
+    this.accountPresentationRecovery = accountPresentationRecovery;
+    this.personPresentationRecovery = personPresentationRecovery;
+    this.systemCatalogRecovery = systemCatalogRecovery;
   }
 
   public DispatchOutcome dispatch(IncomingResult result) {
     if (result == null || result.messageKind() != MessageKind.RESULT) {
       return DispatchOutcome.UNTRUSTED;
     }
-    if (RECOVERY_RESULT_TYPES.contains(result.messageType())) {
+    if (AUTHORIZATION_RECOVERY_RESULT_TYPES.contains(result.messageType())) {
       try {
-        return recovery.applyResult(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
+        return authorizationRecovery.applyResult(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
+      } catch (IllegalArgumentException invalid) {
+        return DispatchOutcome.UNTRUSTED;
+      }
+    }
+    if (ACCOUNT_PRESENTATION_RECOVERY_RESULT_TYPES.contains(result.messageType())) {
+      try {
+        return accountPresentationRecovery.applyResult(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
+      } catch (IllegalArgumentException invalid) {
+        return DispatchOutcome.UNTRUSTED;
+      }
+    }
+    if (PERSON_PRESENTATION_RECOVERY_RESULT_TYPES.contains(result.messageType())) {
+      try {
+        return personPresentationRecovery.applyResult(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
+      } catch (IllegalArgumentException invalid) {
+        return DispatchOutcome.UNTRUSTED;
+      }
+    }
+    if (SYSTEM_CATALOG_RECOVERY_RESULT_TYPES.contains(result.messageType())) {
+      try {
+        return systemCatalogRecovery.applyResult(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
       } catch (IllegalArgumentException invalid) {
         return DispatchOutcome.UNTRUSTED;
       }

@@ -56,6 +56,7 @@ public class AmqpTopologyConfig {
     return new Declarables(
         queue,
         BindingBuilder.bind(queue).to(eventsExchange).with("authentication.account.created"),
+        BindingBuilder.bind(queue).to(eventsExchange).with("authentication.account.presentation-updated"),
         BindingBuilder.bind(queue).to(eventsExchange).with("authentication.account.deactivated"),
         BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.revoked"),
         BindingBuilder.bind(queue).to(eventsExchange).with("authentication.session.all-revoked"),

@@ -5,6 +5,7 @@ import com.estoma.platformbff.domain.projection.ProjectionState;
 import com.estoma.platformbff.domain.projection.ProjectionStatus;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.Optional;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -48,6 +49,20 @@ public class JdbcProjectionStatusRepository implements ProjectionStatusRepositor
         .param("projectionName", projectionName)
         .query((rs, rowNum) -> map(rs))
         .optional();
+  }
+
+  @Override
+  public boolean claimBootstrapping(String projectionName, long expectedGeneration, Instant now) {
+    return jdbc.sql("""
+        UPDATE projection_status
+        SET status = 'REBUILDING', generation = :nextGeneration,
+            last_applied_at = NULL, last_error_code = NULL, updated_at = :updatedAt
+        WHERE projection_name = :projectionName
+          AND status = 'BOOTSTRAPPING'
+          AND generation = :expectedGeneration
+        """).param("projectionName", projectionName).param("expectedGeneration", expectedGeneration)
+        .param("nextGeneration", expectedGeneration + 1).param("updatedAt", JdbcTimes.timestamp(now))
+        .update() == 1;
   }
 
   private static ProjectionState map(ResultSet rs) throws SQLException {

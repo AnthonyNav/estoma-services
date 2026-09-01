@@ -51,11 +51,12 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
     if (type.equals("PersonCreated") || type.equals("PersonUpdated")) {
       readModels.upsert(new ProjectionReadModel.Person(
           personId, text(p, "firstName"), text(p, "paternalSurname"),
-          optionalText(p, "maternalSurname"), null,
+          optionalText(p, "maternalSurname"), optionalText(p, "institutionalEmail"),
+          p.containsKey("institutionalEmail"),
           optionalText(p, "status"), version, event.occurredAt()));
     } else {
       readModels.upsert(new ProjectionReadModel.Person(
-          personId, null, null, null, null, text(p, "status"), version, event.occurredAt()));
+          personId, null, null, null, null, false, text(p, "status"), version, event.occurredAt()));
     }
     if (type.equals("PersonDeactivated")) {
       projectPersonRevocation(event, personId, p);
@@ -116,7 +117,7 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
         aggregate(event, id);
         readModels.upsert(new ProjectionReadModel.StudentEligibility(
             id, uuid(p, "studentAcademicProfileId"), text(p, "systemCode"), bool(p, "eligible"),
-            optionalText(p, "policyVersion"), number(p, "eligibilityVersion"),
+            String.valueOf(number(p, "policyVersion")), number(p, "eligibilityVersion"),
             number(p, "academicProfileVersion"), instant(p, "evaluatedAt"), event.occurredAt()));
       }
       case "CourseSectionRegistered", "CourseSectionUpdated", "CourseSectionStatusChanged" -> {
@@ -390,6 +391,13 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
         event.producer(), event.occurredAt(), event.correlationId(), event.causationId(),
         event.aggregateId(), event.aggregateVersion());
     switch (event.messageType()) {
+      case "AccountPresentationUpdated" -> {
+        UUID accountId = uuid(p, "accountId");
+        aggregate(event, accountId);
+        readModels.upsert(new ProjectionReadModel.AccountPresentation(
+            accountId, uuid(p, "personId"), text(p, "loginType"), text(p, "loginIdentifier"),
+            text(p, "status"), aggregateVersion(event), instant(p, "updatedAt")));
+      }
       case "AccountCreated" -> {
         UUID accountId = uuid(p, "accountId");
         aggregate(event, accountId);

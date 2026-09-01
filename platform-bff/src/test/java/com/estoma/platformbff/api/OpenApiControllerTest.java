@@ -64,6 +64,22 @@ class OpenApiControllerTest {
         .anySatisfy(parameter -> assertThat(parameter).containsEntry("name", "Idempotency-Key")
             .containsEntry("in", "header").containsEntry("required", true));
     assertThat((Map<String, Object>) temporaryPassword.get("responses")).containsKey("200");
+
+    Map<String, Object> me = operation(paths, "/api/v1/me", "get");
+    Map<String, Object> meSchema = responseSchema(me, "200");
+    assertThat((Map<String, Object>) meSchema.get("properties"))
+        .containsKeys("accountId", "personId", "displayName", "loginType", "loginIdentifier",
+            "institutionalEmail", "roleCode", "availableSystemCodes");
+    assertThat((java.util.List<String>) meSchema.get("required"))
+        .containsExactlyInAnyOrder("accountId", "personId", "displayName", "loginType", "loginIdentifier",
+            "institutionalEmail", "roleCode", "availableSystemCodes");
+
+    Map<String, Object> mailbox = operation(paths, "/api/v1/mailbox/messages", "get");
+    assertThat((java.util.List<Map<String, Object>>) mailbox.get("parameters"))
+        .anySatisfy(parameter -> assertThat(parameter).containsEntry("name", "systemCode")
+            .containsEntry("in", "query").containsEntry("required", true))
+        .anySatisfy(parameter -> assertThat(parameter).containsEntry("name", "limit")
+            .containsEntry("in", "query").containsEntry("required", false));
   }
 
   @Test

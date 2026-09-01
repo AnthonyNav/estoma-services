@@ -4196,6 +4196,34 @@
     "/api/v1/mailbox/messages" : {
       "get" : {
         "operationId" : "MailboxController_messages_get__api_v1_mailbox_messages",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "systemCode",
+          "required" : true,
+          "schema" : {
+            "maxLength" : 160,
+            "minLength" : 1,
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "maximum" : 50,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "maxLength" : 512,
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "content" : {
@@ -4203,7 +4231,7 @@
                 "schema" : {
                   "additionalProperties" : false,
                   "properties" : {
-                    "messages" : {
+                    "items" : {
                       "items" : {
                         "additionalProperties" : false,
                         "properties" : {
@@ -4238,9 +4266,13 @@
                         },
                         "type" : "object"
                       },
-                      "type" : [ "array", "null" ]
+                      "type" : "array"
+                    },
+                    "nextCursor" : {
+                      "type" : [ "string", "null" ]
                     }
                   },
+                  "required" : [ "items", "nextCursor" ],
                   "type" : "object"
                 }
               }
@@ -4266,6 +4298,16 @@
     "/api/v1/mailbox/summary" : {
       "get" : {
         "operationId" : "MailboxController_summary_get__api_v1_mailbox_summary",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "systemCode",
+          "required" : true,
+          "schema" : {
+            "maxLength" : 160,
+            "minLength" : 1,
+            "type" : "string"
+          }
+        } ],
         "responses" : {
           "200" : {
             "content" : {
@@ -4273,37 +4315,21 @@
                 "schema" : {
                   "additionalProperties" : false,
                   "properties" : {
+                    "lastVisitedAt" : {
+                      "format" : "date-time",
+                      "type" : [ "string", "null" ]
+                    },
                     "messageCount" : {
                       "type" : "integer"
                     },
                     "newMessageCount" : {
                       "type" : "integer"
                     },
-                    "systems" : {
-                      "items" : {
-                        "additionalProperties" : false,
-                        "properties" : {
-                          "lastVisitedAt" : {
-                            "format" : "date-time",
-                            "type" : [ "string", "null" ]
-                          },
-                          "messageCount" : {
-                            "type" : "integer"
-                          },
-                          "newMessageCount" : {
-                            "type" : "integer"
-                          },
-                          "systemCode" : {
-                            "type" : [ "string", "null" ]
-                          }
-                        },
-                        "required" : [ "messageCount", "newMessageCount" ],
-                        "type" : "object"
-                      },
-                      "type" : [ "array", "null" ]
+                    "systemCode" : {
+                      "type" : "string"
                     }
                   },
-                  "required" : [ "messageCount", "newMessageCount" ],
+                  "required" : [ "systemCode", "messageCount", "newMessageCount" ],
                   "type" : "object"
                 }
               }
@@ -4363,6 +4389,69 @@
               }
             },
             "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/me" : {
+      "get" : {
+        "operationId" : "MeController_current_get__api_v1_me",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "accountId" : {
+                      "format" : "uuid",
+                      "type" : "string"
+                    },
+                    "availableSystemCodes" : {
+                      "items" : {
+                        "type" : "string"
+                      },
+                      "type" : "array"
+                    },
+                    "displayName" : {
+                      "type" : "string"
+                    },
+                    "institutionalEmail" : {
+                      "type" : "string"
+                    },
+                    "loginIdentifier" : {
+                      "type" : "string"
+                    },
+                    "loginType" : {
+                      "type" : "string"
+                    },
+                    "personId" : {
+                      "format" : "uuid",
+                      "type" : "string"
+                    },
+                    "roleCode" : {
+                      "type" : "string"
+                    }
+                  },
+                  "required" : [ "accountId", "personId", "displayName", "loginType", "loginIdentifier", "institutionalEmail", "roleCode", "availableSystemCodes" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
           },
           "default" : {
             "content" : {

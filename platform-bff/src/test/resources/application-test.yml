@@ -11,3 +11,5 @@ spring:
         auto-startup: false
 platform:
   component-id: bff
+  recovery:
+    enabled: false

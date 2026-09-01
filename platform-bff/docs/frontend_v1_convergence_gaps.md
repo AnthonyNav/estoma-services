@@ -1,6 +1,6 @@
 # Frontend V1 Backend Convergence Gaps — platform-bff
 
-Status: `PLANNED`
+Status: `IN PROGRESS` — GAP-BFF-01 requires the separate Users Person Presentation recovery producer before the BFF can safely recover historical rows.
 
 Scope: BFF convergence required by the closed Front V1 flows for real session context (`GET /api/v1/me`), Wash Mailbox V1 and voluntary password change (`AUTH-04`).
 
@@ -33,9 +33,9 @@ Remaining BFF work is therefore projection/composition/edge hardening, plus cons
 ## GAP-BFF-01 — Person projection discards `institutionalEmail`
 
 - Severity: `HIGH`
-- Status: `OPEN`
+- Status: `IN PROGRESS` — incremental projection is implemented; historical recovery is pending the Users Person Presentation contract.
 - Owner: `platform-bff`
-- Upstream owner: `users-service` — no owner change required
+- Upstream dependency: `users-service` Person Presentation recovery contract
 - Affected flows: `GET /api/v1/me`, WASH-ADM-04 presentation
 
 ### Current state
@@ -44,9 +44,13 @@ The BFF Person read model/persistence already has an `institutionalEmail` field,
 
 This is a consumer projection bug, not a Users contract gap.
 
-### Proposed solution
+### Required solution
 
 Project the actual `institutionalEmail` from the Users owner Event into the existing Person read model for both creation and update paths, and ensure recovery/rebuild applies the same semantic value.
+
+The existing Users Status Snapshot cannot close the recovery obligation because it contains
+only status/version fields. The owner must publish a separate Person Presentation snapshot;
+the BFF must rebuild this local read model from that contract before declaring `person` READY.
 
 ### Acceptance criteria
 
@@ -60,7 +64,7 @@ Project the actual `institutionalEmail` from the Users owner Event into the exis
 ## GAP-BFF-02 — No recoverable Account Presentation read model
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `IMPLEMENTED` — deployment depends on Authentication GAP-AUTH-01 / PR #118.
 - Owner: `platform-bff`
 - Upstream dependency: `authentication-service` GAP-AUTH-01
 - Affected flows: `GET /api/v1/me`, WASH-ADM-04 presentation
@@ -80,7 +84,7 @@ accountId
 personId
 loginType
 loginIdentifier
-accountStatus
+status
 sourceVersion
 ```
 
@@ -97,7 +101,7 @@ It must participate in the BFF's projection bootstrap/recovery/readiness model a
 ## GAP-BFF-03 — Effective-system composition is incomplete and not reusable
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `IMPLEMENTED`
 - Owner: `platform-bff`
 - Upstream dependency: `authorization-service` GAP-AUTHZ-01
 - Existing inputs: recoverable SystemAccess and Academic eligibility
@@ -150,7 +154,7 @@ Do not:
 ## GAP-BFF-04 — `GET /api/v1/me` real session context is absent
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `IMPLEMENTED` — deployment depends on GAP-BFF-01, GAP-BFF-02 and GAP-BFF-03 being authoritative.
 - Owner: `platform-bff`
 - Dependencies: GAP-BFF-01, GAP-BFF-02, GAP-BFF-03
 - Affected flow: shared authenticated shell / system selection
@@ -199,7 +203,7 @@ If a required projection is `BOOTSTRAPPING`, `REBUILDING`, `DEGRADED` or otherwi
 ## GAP-BFF-05 — Mailbox messages are account-scoped instead of system-scoped and lack cursor pagination
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `IMPLEMENTED`
 - Owner: `platform-bff`
 - Affected flow: `PLATFORM-01` Wash Mailbox V1
 
@@ -253,7 +257,7 @@ Mailbox summary/badge calculation must also be filtered so inaccessible systems 
 ## GAP-BFF-06 — Mailbox reads and visit registration do not enforce shared effective-system access
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `IMPLEMENTED` — deployment depends on the effective-system projections being authoritative.
 - Owner: `platform-bff`
 - Dependency: GAP-BFF-03
 - Affected flow: `PLATFORM-01` Wash Mailbox V1
@@ -289,7 +293,7 @@ The existing visit timestamp boundary must be retained: capture server-side `T_o
 ## GAP-BFF-07 — AUTH-04 edge/OpenAPI regression coverage is incomplete
 
 - Severity: `MEDIUM`
-- Status: `PARTIAL` — endpoint and owner call already exist
+- Status: `IMPLEMENTED`
 - Owner: `platform-bff`
 - Affected flow: `AUTH-04`
 

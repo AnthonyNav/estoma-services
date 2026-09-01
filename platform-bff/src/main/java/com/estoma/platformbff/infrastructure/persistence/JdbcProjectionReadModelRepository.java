@@ -1,8 +1,11 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
 import com.estoma.platformbff.application.port.AuthorizationRecoveryPort;
+import com.estoma.platformbff.application.port.AccountPresentationRecoveryPort;
+import com.estoma.platformbff.application.port.PersonPresentationRecoveryPort;
 import com.estoma.platformbff.application.port.ProjectionQueryPort;
 import com.estoma.platformbff.application.port.ProjectionReadModelPort;
+import com.estoma.platformbff.application.port.SystemCatalogRecoveryPort;
 import com.estoma.platformbff.application.projection.ProjectionReadModel;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -16,7 +19,7 @@ import org.springframework.stereotype.Repository;
 /** JDBC adapter for the typed PR4 read models. Fencing is local to each row/stream. */
 @Repository
 public class JdbcProjectionReadModelRepository implements ProjectionReadModelPort, AuthorizationRecoveryPort,
-    ProjectionQueryPort {
+    AccountPresentationRecoveryPort, PersonPresentationRecoveryPort, SystemCatalogRecoveryPort, ProjectionQueryPort {
   private final JdbcClient jdbc;
 
   public JdbcProjectionReadModelRepository(JdbcClient jdbc) {
@@ -27,8 +30,10 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   public void upsert(ProjectionReadModel model) {
     switch (model) {
       case ProjectionReadModel.Person value -> person(value);
+      case ProjectionReadModel.AccountPresentation value -> accountPresentation(value);
       case ProjectionReadModel.AuthorizationRole value -> role(value);
       case ProjectionReadModel.AuthorizationAccess value -> access(value);
+      case ProjectionReadModel.SystemCatalog value -> systemCatalog(value);
       case ProjectionReadModel.AcademicPeriod value -> academicPeriod(value);
       case ProjectionReadModel.StudentProfile value -> studentProfile(value);
       case ProjectionReadModel.StudentEligibility value -> eligibility(value);
@@ -78,46 +83,169 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   }
 
   @Override
-  public List<MailboxMessage> findVisibleMailboxMessages(UUID recipientAccountId) {
-    return jdbc.sql("""
+  public void clearAccountPresentationProjection() {
+    jdbc.sql("DELETE FROM account_presentation_read_model").update();
+  }
+
+  @Override
+  public boolean hasAccountPresentation(UUID accountId) {
+    return jdbc.sql("SELECT EXISTS(SELECT 1 FROM account_presentation_read_model WHERE account_id = :accountId)")
+        .param("accountId", accountId).query(Boolean.class).single();
+  }
+
+  @Override
+  public void upsertAccountPresentationSnapshot(ProjectionReadModel.AccountPresentation presentation) {
+    accountPresentation(presentation);
+  }
+
+  @Override
+  public void clearPersonPresentationProjection() {
+    jdbc.sql("DELETE FROM person_presentation_read_model").update();
+  }
+
+  @Override
+  public void upsertPersonPresentationSnapshot(ProjectionReadModel.Person presentation) {
+    person(presentation);
+  }
+
+  @Override
+  public void clearSystemCatalogProjection() {
+    jdbc.sql("DELETE FROM authorization_system_catalog_read_model").update();
+  }
+
+  @Override
+  public void markSystemCatalogUntrusted(String systemCode) {
+    jdbc.sql("""
+        UPDATE authorization_system_catalog_read_model
+        SET trusted = FALSE
+        WHERE system_code = :systemCode
+        """).param("systemCode", systemCode).update();
+  }
+
+  @Override
+  public void upsertSystemCatalogSnapshot(ProjectionReadModel.SystemCatalog catalog) {
+    systemCatalog(catalog);
+  }
+
+  @Override
+  public MailboxPage findVisibleMailboxMessages(UUID recipientAccountId, String systemCode, int limit,
+      MailboxCursor cursor) {
+    String cursorPredicate = cursor == null ? "" : """
+          AND (created_at < :cursorCreatedAt
+               OR (created_at = :cursorCreatedAt AND inbox_message_id > :cursorMessageId))
+        """;
+    var statement = jdbc.sql("""
         SELECT inbox_message_id, communication_id, system_code, communication_type, title, body,
                created_at, expires_at
         FROM mailbox_messages_read_model
         WHERE recipient_account_id = :accountId
+          AND system_code = :systemCode
           AND communication_id IS NOT NULL
           AND expired_at IS NULL
+        """ + cursorPredicate + """
         ORDER BY created_at DESC, inbox_message_id ASC
+        LIMIT :limit
         """)
-        .param("accountId", recipientAccountId)
+        .param("accountId", recipientAccountId).param("systemCode", systemCode)
+        .param("limit", limit + 1);
+    if (cursor != null) {
+      statement.param("cursorCreatedAt", JdbcTimes.timestamp(cursor.createdAt()))
+          .param("cursorMessageId", cursor.inboxMessageId());
+    }
+    List<MailboxMessage> rows = statement
         .query((rs, rowNum) -> new MailboxMessage(
             uuid(rs, "inbox_message_id"), uuid(rs, "communication_id"), rs.getString("system_code"),
             rs.getString("communication_type"), rs.getString("title"), rs.getString("body"),
             instant(rs, "created_at"), instant(rs, "expires_at")))
         .list();
+    boolean hasMore = rows.size() > limit;
+    List<MailboxMessage> items = hasMore ? rows.subList(0, limit) : rows;
+    MailboxCursor next = hasMore && !items.isEmpty()
+        ? new MailboxCursor(items.getLast().createdAt(), items.getLast().inboxMessageId()) : null;
+    return new MailboxPage(List.copyOf(items), next);
   }
 
   @Override
-  public List<MailboxSummary> summarizeMailbox(UUID recipientAccountId) {
+  public MailboxSummary summarizeMailbox(UUID recipientAccountId, String systemCode) {
     return jdbc.sql("""
-        SELECT m.system_code,
-               COUNT(*) AS message_count,
-               SUM(CASE WHEN v.last_visited_at IS NULL OR m.created_at > v.last_visited_at
-                        THEN 1 ELSE 0 END) AS new_message_count,
-               v.last_visited_at
+        SELECT :systemCode AS system_code,
+               COUNT(m.inbox_message_id) AS message_count,
+               COALESCE(SUM(CASE WHEN
+                 (SELECT last_visited_at FROM mailbox_visits_read_model
+                  WHERE account_id = :accountId AND system_code = :systemCode) IS NULL
+                 OR m.created_at > (SELECT last_visited_at FROM mailbox_visits_read_model
+                                    WHERE account_id = :accountId AND system_code = :systemCode)
+                 THEN 1 ELSE 0 END), 0) AS new_message_count,
+               (SELECT last_visited_at FROM mailbox_visits_read_model
+                WHERE account_id = :accountId AND system_code = :systemCode) AS last_visited_at
         FROM mailbox_messages_read_model m
-        LEFT JOIN mailbox_visits_read_model v
-          ON v.account_id = m.recipient_account_id AND v.system_code = m.system_code
         WHERE m.recipient_account_id = :accountId
+          AND m.system_code = :systemCode
           AND m.communication_id IS NOT NULL
           AND m.expired_at IS NULL
-        GROUP BY m.system_code, v.last_visited_at
-        ORDER BY m.system_code ASC
         """)
-        .param("accountId", recipientAccountId)
+        .param("accountId", recipientAccountId).param("systemCode", systemCode)
         .query((rs, rowNum) -> new MailboxSummary(
             rs.getString("system_code"), rs.getLong("message_count"),
             rs.getLong("new_message_count"), instant(rs, "last_visited_at")))
-        .list();
+        .single();
+  }
+
+  @Override
+  public Optional<PersonPresentation> findPersonPresentation(UUID personId) {
+    return jdbc.sql("""
+        SELECT person_id, first_name, paternal_surname, maternal_surname, institutional_email, status
+        FROM person_presentation_read_model WHERE person_id = :personId
+        """).param("personId", personId)
+        .query((rs, rowNum) -> new PersonPresentation(uuid(rs, "person_id"), rs.getString("first_name"),
+            rs.getString("paternal_surname"), rs.getString("maternal_surname"),
+            rs.getString("institutional_email"), rs.getString("status")))
+        .optional();
+  }
+
+  @Override
+  public Optional<AccountPresentation> findAccountPresentation(UUID accountId) {
+    return jdbc.sql("""
+        SELECT account_id, person_id, login_type, login_identifier, account_status
+        FROM account_presentation_read_model WHERE account_id = :accountId
+        """).param("accountId", accountId)
+        .query((rs, rowNum) -> new AccountPresentation(uuid(rs, "account_id"), uuid(rs, "person_id"),
+            rs.getString("login_type"), rs.getString("login_identifier"), rs.getString("account_status")))
+        .optional();
+  }
+
+  @Override
+  public List<String> findActiveSystemCandidates(UUID accountId) {
+    return jdbc.sql("""
+        SELECT catalog.system_code
+        FROM authorization_access_projection access
+        JOIN authorization_system_catalog_read_model catalog
+          ON catalog.system_id = access.system_id AND catalog.system_code = access.system_code
+        WHERE access.account_id = :accountId
+          AND access.status = 'ACTIVE'
+          AND catalog.status = 'ACTIVE'
+          AND catalog.trusted = TRUE
+        ORDER BY CASE catalog.system_code
+          WHEN 'LAVADO_ULTRASONICO' THEN 1
+          WHEN 'PRACTICAS_PROFESIONALES' THEN 2
+          ELSE 3 END, catalog.system_code ASC
+        """).param("accountId", accountId).query(String.class).list();
+  }
+
+  @Override
+  public boolean hasEligibleAcademicSystem(UUID accountId, String systemCode) {
+    return jdbc.sql("""
+        SELECT EXISTS(
+          SELECT 1
+          FROM student_academic_profile_read_model profile
+          JOIN student_academic_eligibility_read_model eligibility
+            ON eligibility.student_academic_profile_id = profile.student_academic_profile_id
+          WHERE profile.account_id = :accountId
+            AND eligibility.system_code = :systemCode
+            AND eligibility.eligible = TRUE
+            AND eligibility.policy_version = '1')
+        """).param("accountId", accountId).param("systemCode", systemCode)
+        .query(Boolean.class).single();
   }
 
   @Override
@@ -238,14 +366,47 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
           first_name = COALESCE(EXCLUDED.first_name, person_presentation_read_model.first_name),
           paternal_surname = COALESCE(EXCLUDED.paternal_surname, person_presentation_read_model.paternal_surname),
           maternal_surname = COALESCE(EXCLUDED.maternal_surname, person_presentation_read_model.maternal_surname),
-          institutional_email = COALESCE(EXCLUDED.institutional_email, person_presentation_read_model.institutional_email),
+          institutional_email = CASE WHEN :emailAuthoritative THEN EXCLUDED.institutional_email
+                                     ELSE person_presentation_read_model.institutional_email END,
           status = COALESCE(EXCLUDED.status, person_presentation_read_model.status),
           source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
         WHERE person_presentation_read_model.source_version <= EXCLUDED.source_version
         """)
         .param("id", v.personId()).param("firstName", v.firstName()).param("paternalSurname", v.paternalSurname())
-        .param("maternalSurname", v.maternalSurname()).param("email", v.institutionalEmail()).param("status", v.status())
+        .param("maternalSurname", v.maternalSurname()).param("email", v.institutionalEmail())
+        .param("emailAuthoritative", v.institutionalEmailAuthoritative()).param("status", v.status())
         .param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  private void accountPresentation(ProjectionReadModel.AccountPresentation v) {
+    jdbc.sql("""
+        INSERT INTO account_presentation_read_model
+          (account_id, person_id, login_type, login_identifier, account_status, source_version, updated_at)
+        VALUES (:accountId, :personId, :loginType, :loginIdentifier, :accountStatus, :version, :updatedAt)
+        ON CONFLICT (account_id) DO UPDATE SET
+          person_id = EXCLUDED.person_id, login_type = EXCLUDED.login_type,
+          login_identifier = EXCLUDED.login_identifier, account_status = EXCLUDED.account_status,
+          source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
+        WHERE account_presentation_read_model.source_version <= EXCLUDED.source_version
+        """).param("accountId", v.accountId()).param("personId", v.personId())
+        .param("loginType", v.loginType()).param("loginIdentifier", v.loginIdentifier())
+        .param("accountStatus", v.accountStatus()).param("version", v.sourceVersion())
+        .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  private void systemCatalog(ProjectionReadModel.SystemCatalog v) {
+    jdbc.sql("""
+        INSERT INTO authorization_system_catalog_read_model
+          (system_id, system_code, status, source_version, trusted, updated_at)
+        VALUES (:systemId, :systemCode, :status, :version, :trusted, :updatedAt)
+        ON CONFLICT (system_code) DO UPDATE SET
+          system_id = EXCLUDED.system_id, status = EXCLUDED.status,
+          source_version = EXCLUDED.source_version, trusted = EXCLUDED.trusted,
+          updated_at = EXCLUDED.updated_at
+        WHERE authorization_system_catalog_read_model.source_version <= EXCLUDED.source_version
+        """).param("systemId", v.systemId()).param("systemCode", v.systemCode()).param("status", v.status())
+        .param("version", v.sourceVersion()).param("trusted", v.trusted())
+        .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
   }
 
   private void role(ProjectionReadModel.AuthorizationRole v) {

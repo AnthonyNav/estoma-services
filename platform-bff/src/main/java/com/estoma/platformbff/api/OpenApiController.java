@@ -1,6 +1,8 @@
 package com.estoma.platformbff.api;
 
 import com.estoma.platformbff.api.admin.AdminController;
+import com.estoma.platformbff.contracts.http.Required;
+import com.estoma.platformbff.contracts.http.RequiredNullable;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -35,6 +37,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -130,6 +133,7 @@ public class OpenApiController {
     }
     List<Map<String, Object>> parameters = new ArrayList<>();
     requestHeaders(handler, parameters);
+    requestParameters(handler, parameters);
     Matcher matcher = PATH_VARIABLE.matcher(path);
     while (matcher.find()) {
       String name = matcher.group(1);
@@ -167,6 +171,24 @@ public class OpenApiController {
       String name = header.name().isBlank() ? header.value() : header.name();
       parameters.add(Map.of("name", name, "in", "header", "required", header.required(),
           "schema", schemaFor(parameter.getParameterizedType())));
+    }
+  }
+
+  /** Query parameters are part of the public surface just like path variables and idempotency headers. */
+  private static void requestParameters(HandlerMethod handler, List<Map<String, Object>> parameters) {
+    for (Parameter parameter : handler.getMethod().getParameters()) {
+      RequestParam query = parameter.getAnnotation(RequestParam.class);
+      if (query == null) continue;
+      String name = query.name().isBlank()
+          ? (query.value().isBlank() ? parameter.getName() : query.value()) : query.name();
+      boolean required = query.required() && query.defaultValue().equals(
+          org.springframework.web.bind.annotation.ValueConstants.DEFAULT_NONE);
+      Map<String, Object> schema = new LinkedHashMap<>(schemaFor(parameter.getParameterizedType()));
+      applyValidation(parameter, schema);
+      if (!query.defaultValue().equals(org.springframework.web.bind.annotation.ValueConstants.DEFAULT_NONE)) {
+        schema.put("default", defaultValue(query.defaultValue(), parameter.getType()));
+      }
+      parameters.add(Map.of("name", name, "in", "query", "required", required, "schema", schema));
     }
   }
 
@@ -223,11 +245,13 @@ public class OpenApiController {
     for (RecordComponent component : recordType.getRecordComponents()) {
       Map<String, Object> property = new LinkedHashMap<>(schemaFor(component.getGenericType()));
       applyValidation(component, property);
+      boolean requiredNullable = component.isAnnotationPresent(RequiredNullable.class);
       boolean mandatory = component.getType().isPrimitive()
           || component.isAnnotationPresent(NotNull.class)
           || component.isAnnotationPresent(NotBlank.class)
-          || component.isAnnotationPresent(NotEmpty.class);
-      properties.put(component.getName(), mandatory ? property : nullable(property));
+          || component.isAnnotationPresent(NotEmpty.class)
+          || component.isAnnotationPresent(Required.class) || requiredNullable;
+      properties.put(component.getName(), mandatory && !requiredNullable ? property : nullable(property));
       if (mandatory) required.add(component.getName());
     }
     Map<String, Object> schema = new LinkedHashMap<>();
@@ -271,6 +295,24 @@ public class OpenApiController {
       }
     }
   }
+
+  private static void applyValidation(Parameter parameter, Map<String, Object> schema) {
+    jakarta.validation.constraints.Min min = parameter.getAnnotation(jakarta.validation.constraints.Min.class);
+    if (min != null) schema.put("minimum", min.value());
+    jakarta.validation.constraints.Max max = parameter.getAnnotation(jakarta.validation.constraints.Max.class);
+    if (max != null) schema.put("maximum", max.value());
+    jakarta.validation.constraints.Size size = parameter.getAnnotation(jakarta.validation.constraints.Size.class);
+    if (size != null && size.max() < Integer.MAX_VALUE) schema.put("maxLength", size.max());
+    if (parameter.isAnnotationPresent(jakarta.validation.constraints.NotBlank.class)) schema.put("minLength", 1);
+  }
+
+  private static Object defaultValue(String value, Class<?> type) {
+    if (type == int.class || type == Integer.class) return Integer.parseInt(value);
+    if (type == long.class || type == Long.class) return Long.parseLong(value);
+    if (type == boolean.class || type == Boolean.class) return Boolean.parseBoolean(value);
+    return value;
+  }
+
 
   private static Type typeArgument(Type type, int index) {
     if (type instanceof ParameterizedType parameterized

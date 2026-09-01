@@ -74,12 +74,32 @@ class ProjectionQueriesPostgresIT {
     projections.upsert(new ProjectionReadModel.MailboxVisit(
         accountId, "LAVADO_ULTRASONICO", visit, visit));
 
-    assertThat(projections.findVisibleMailboxMessages(accountId))
+    assertThat(projections.findVisibleMailboxMessages(accountId, "LAVADO_ULTRASONICO", 20, null).items())
         .extracting(item -> item.inboxMessageId())
         .containsExactly(newerId, oldId);
-    assertThat(projections.summarizeMailbox(accountId))
-        .containsExactly(new com.estoma.platformbff.application.port.ProjectionQueryPort.MailboxSummary(
+    assertThat(projections.summarizeMailbox(accountId, "LAVADO_ULTRASONICO"))
+        .isEqualTo(new com.estoma.platformbff.application.port.ProjectionQueryPort.MailboxSummary(
             "LAVADO_ULTRASONICO", 2, 1, visit));
+  }
+
+  @Test
+  void mailboxPaginationIsSystemScopedAndUsesCreatedAtThenMessageIdAsTheStableCursorOrder() {
+    UUID accountId = UUID.randomUUID();
+    Instant createdAt = Instant.parse("2026-08-01T12:00:00Z");
+    UUID first = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    UUID second = UUID.fromString("00000000-0000-0000-0000-000000000002");
+    projections.upsert(message(first, accountId, "LAVADO_ULTRASONICO", createdAt));
+    projections.upsert(message(second, accountId, "LAVADO_ULTRASONICO", createdAt));
+    projections.upsert(message(UUID.randomUUID(), accountId, "PRACTICAS_PROFESIONALES", createdAt.plusSeconds(1)));
+
+    var firstPage = projections.findVisibleMailboxMessages(accountId, "LAVADO_ULTRASONICO", 1, null);
+    var secondPage = projections.findVisibleMailboxMessages(accountId, "LAVADO_ULTRASONICO", 1,
+        firstPage.nextCursor());
+
+    assertThat(firstPage.items()).extracting(item -> item.inboxMessageId()).containsExactly(first);
+    assertThat(firstPage.nextCursor()).isNotNull();
+    assertThat(secondPage.items()).extracting(item -> item.inboxMessageId()).containsExactly(second);
+    assertThat(secondPage.nextCursor()).isNull();
   }
 
   @Test
@@ -147,8 +167,12 @@ class ProjectionQueriesPostgresIT {
   }
 
   private static ProjectionReadModel.MailboxMessage message(UUID id, UUID accountId, Instant createdAt) {
+    return message(id, accountId, "LAVADO_ULTRASONICO", createdAt);
+  }
+
+  private static ProjectionReadModel.MailboxMessage message(UUID id, UUID accountId, String systemCode, Instant createdAt) {
     return new ProjectionReadModel.MailboxMessage(id, UUID.randomUUID(), accountId,
-        "LAVADO_ULTRASONICO", "APPOINTMENT", "A title", "A body", createdAt, null, null, createdAt);
+        systemCode, "APPOINTMENT", "A title", "A body", createdAt, null, null, createdAt);
   }
 
   private static ProjectionReadModel.WashExecution execution(UUID id, Instant authorizedAt) {

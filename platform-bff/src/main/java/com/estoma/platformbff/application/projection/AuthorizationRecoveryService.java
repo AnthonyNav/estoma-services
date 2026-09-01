@@ -81,6 +81,24 @@ public class AuthorizationRecoveryService {
     return jobId;
   }
 
+  /** Atomically claims the initial BOOTSTRAPPING state before publishing the first full Query. */
+  @Transactional
+  public boolean startFullIfBootstrapping() {
+    var state = statuses.findByName(PROJECTION).orElse(null);
+    if (state == null || state.status() != ProjectionStatus.BOOTSTRAPPING) return false;
+    Instant now = Instant.now();
+    if (!statuses.claimBootstrapping(PROJECTION, state.generation(), now)) return false;
+    UUID jobId = UUID.randomUUID();
+    UUID queryId = UUID.randomUUID();
+    long generation = state.generation() + 1;
+    RecoveryJob job = new RecoveryJob(jobId, PROJECTION, "FULL", null, generation, OWNER,
+        "ListAccountAuthorizationSnapshotsPage", jobId, null, "RUNNING", now, now, null, null, queryId);
+    projection.clearAuthorizationProjection();
+    jobs.insert(job);
+    queries.insert(query(queryId, job, "ListAccountAuthorizationSnapshotsPage", Map.of("limit", PAGE_LIMIT)));
+    return true;
+  }
+
   @Transactional
   public boolean applyResult(IncomingResult result) {
     if (!valid(result)) return false;

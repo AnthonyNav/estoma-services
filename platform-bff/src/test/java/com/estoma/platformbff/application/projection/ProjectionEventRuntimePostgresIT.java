@@ -55,6 +55,7 @@ class ProjectionEventRuntimePostgresIT {
   void clear() {
     jdbc.sql("""
         TRUNCATE TABLE inbox_messages, person_presentation_read_model,
+          account_presentation_read_model,
           authorization_role_projection, authorization_access_projection,
           mailbox_messages_read_model, mailbox_visits_read_model,
           wash_execution_read_model, wash_resource_assignment_read_model CASCADE
@@ -237,7 +238,7 @@ class ProjectionEventRuntimePostgresIT {
             "status", "ACTIVE", "createdAt", now())));
 
     assertThat(jdbc.sql("SELECT institutional_email FROM person_presentation_read_model WHERE person_id = :id")
-        .param("id", personId).query(String.class).optional()).isEmpty();
+        .param("id", personId).query(String.class).optional()).contains("ada@example.invalid");
 
     byte[] sensitiveBody = "title=private&body=confidential".getBytes(StandardCharsets.UTF_8);
     UUID quarantineMessageId = UUID.randomUUID();
@@ -250,16 +251,38 @@ class ProjectionEventRuntimePostgresIT {
     assertThat(storedDigest).doesNotContain("private", "confidential");
   }
 
+  @Test
+  void personEmailAndAccountPresentationUseIndependentOwnerVersionFences() {
+    UUID personId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    runtime.dispatch(personCreated(UUID.randomUUID(), personId, 1, "ACTIVE"));
+    runtime.dispatch(event("PersonUpdated", "users", UUID.randomUUID(), personId, 2,
+        Map.of("personId", personId.toString(), "firstName", "Ada", "paternalSurname", "Nav",
+            "institutionalEmail", "ada.updated@example.invalid", "status", "ACTIVE", "updatedAt", now())));
+    runtime.dispatch(event("AccountPresentationUpdated", "authentication", UUID.randomUUID(), accountId, 2,
+        Map.of("accountId", accountId.toString(), "personId", personId.toString(), "loginType", "MATRICULA",
+            "loginIdentifier", "202257019", "status", "ACTIVE", "updatedAt", now())));
+    runtime.dispatch(event("AccountPresentationUpdated", "authentication", UUID.randomUUID(), accountId, 1,
+        Map.of("accountId", accountId.toString(), "personId", personId.toString(), "loginType", "MATRICULA",
+            "loginIdentifier", "stale", "status", "INACTIVE", "updatedAt", now())));
+
+    assertThat(jdbc.sql("SELECT institutional_email FROM person_presentation_read_model WHERE person_id = :id")
+        .param("id", personId).query(String.class).single()).isEqualTo("ada.updated@example.invalid");
+    assertThat(jdbc.sql("SELECT login_identifier, account_status FROM account_presentation_read_model WHERE account_id = :id")
+        .param("id", accountId).query((rs, row) -> rs.getString("login_identifier") + ":" + rs.getString("account_status"))
+        .single()).isEqualTo("202257019:ACTIVE");
+  }
+
   private static ProjectionEvent personCreated(UUID messageId, UUID personId, int version, String status) {
     return event("PersonCreated", "users", messageId, personId, version,
         Map.of("personId", personId.toString(), "firstName", "Ada", "paternalSurname", "Nav",
-            "status", status, "createdAt", now()));
+            "institutionalEmail", "ada@example.invalid", "status", status, "createdAt", now()));
   }
 
   private static ProjectionEvent personUpdated(UUID messageId, UUID personId, int version, String status) {
     return event("PersonUpdated", "users", messageId, personId, version,
         Map.of("personId", personId.toString(), "firstName", "Ada", "paternalSurname", "Nav",
-            "status", status, "updatedAt", now()));
+            "institutionalEmail", "ada@example.invalid", "status", status, "updatedAt", now()));
   }
 
   private static ProjectionEvent event(String type, String producer, UUID messageId, UUID aggregateId,
