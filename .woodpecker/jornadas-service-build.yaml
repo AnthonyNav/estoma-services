@@ -1,4 +1,6 @@
 when:
+  # Touching this workflow is the controlled recovery path for an immutable
+  # develop image when its initial push webhook was coalesced with another merge.
   - event: manual
     branch: develop
   - event: push
