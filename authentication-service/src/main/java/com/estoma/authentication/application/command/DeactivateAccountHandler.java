@@ -9,6 +9,7 @@ import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.command.DeactivateAccountCommand;
 import com.estoma.authentication.contracts.event.AccountDeactivatedPayload;
+import com.estoma.authentication.contracts.event.AccountPresentationUpdatedPayload;
 import com.estoma.authentication.contracts.event.AllAccountSessionsRevokedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
@@ -77,13 +78,21 @@ class DeactivateAccountHandler implements CommandHandler {
     AccountDeactivatedPayload accountEvent = new AccountDeactivatedPayload(
         deactivated.accountId(), deactivated.personId(), account.status().name(),
         deactivated.status().name(), reason.name(), command.reasonDetail(), now);
+    AccountPresentationUpdatedPayload presentation = presentation(deactivated);
     AllAccountSessionsRevokedPayload sessionsEvent =
         new AllAccountSessionsRevokedPayload(deactivated.accountId(), "ACCOUNT_DEACTIVATED", now);
 
     return CommandHandlerResult.of(
         deactivated.accountId(), deactivated.version(),
         new EventToAppend(AuthenticationEvent.ACCOUNT_DEACTIVATED.wireName(), accountEvent),
+        new EventToAppend(AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName(), presentation),
         new EventToAppend(AuthenticationEvent.ALL_ACCOUNT_SESSIONS_REVOKED.wireName(), sessionsEvent));
+  }
+
+  private static AccountPresentationUpdatedPayload presentation(Account account) {
+    return new AccountPresentationUpdatedPayload(
+        account.accountId(), account.personId(), account.loginIdentifier().type(),
+        account.loginIdentifier().value(), account.status().name(), account.updatedAt());
   }
 
   private static AccountDeactivationReason parseReason(String reasonCode) {

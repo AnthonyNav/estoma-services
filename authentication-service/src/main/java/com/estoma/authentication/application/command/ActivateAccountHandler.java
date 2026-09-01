@@ -11,6 +11,7 @@ import com.estoma.authentication.contracts.LoginType;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.command.ActivateAccountCommand;
 import com.estoma.authentication.contracts.event.AccountActivatedPayload;
+import com.estoma.authentication.contracts.event.AccountPresentationUpdatedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
@@ -93,9 +94,17 @@ class ActivateAccountHandler implements CommandHandler {
     AccountActivatedPayload eventPayload = new AccountActivatedPayload(
         activated.accountId(), activated.personId(), account.status().name(),
         activated.status().name(), activationReason, now);
+    AccountPresentationUpdatedPayload presentation = presentation(activated);
     return CommandHandlerResult.of(
         activated.accountId(), activated.version(),
-        new EventToAppend(AuthenticationEvent.ACCOUNT_ACTIVATED.wireName(), eventPayload));
+        new EventToAppend(AuthenticationEvent.ACCOUNT_ACTIVATED.wireName(), eventPayload),
+        new EventToAppend(AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName(), presentation));
+  }
+
+  private static AccountPresentationUpdatedPayload presentation(Account account) {
+    return new AccountPresentationUpdatedPayload(
+        account.accountId(), account.personId(), account.loginIdentifier().type(),
+        account.loginIdentifier().value(), account.status().name(), account.updatedAt());
   }
 
   private static boolean isAcademicImport(MessageEnvelope envelope) {

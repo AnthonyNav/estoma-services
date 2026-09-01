@@ -3,6 +3,7 @@ package com.estoma.authentication.infrastructure.messaging.inbound;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.estoma.authentication.application.AccountStatusSnapshotQueryService;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.contracts.AuthenticationCommand;
@@ -16,6 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 class EnvelopeValidatorTest {
 
   private final EnvelopeValidator validator = new EnvelopeValidator();
+  private final QueryEnvelopeValidator queryValidator = new QueryEnvelopeValidator();
   private final ObjectMapper mapper = new ObjectMapper();
 
   @Test
@@ -109,9 +111,37 @@ class EnvelopeValidatorTest {
         .isInstanceOf(InvalidMessageException.class);
   }
 
+  @Test
+  void acceptsTheBffAccountPresentationRecoveryQuery() {
+    UUID accountId = UUID.randomUUID();
+    var payload = mapper.createObjectNode();
+    payload.put("accountId", accountId.toString());
+
+    assertThatCode(() -> queryValidator.validate(query(
+        AccountStatusSnapshotQueryService.GET_PRESENTATION, "bff", payload)))
+        .doesNotThrowAnyException();
+  }
+
+  @Test
+  void rejectsAnAuthorizationCallerForTheBffPresentationSnapshot() {
+    UUID accountId = UUID.randomUUID();
+    var payload = mapper.createObjectNode();
+    payload.put("accountId", accountId.toString());
+
+    assertThatThrownBy(() -> queryValidator.validate(query(
+        AccountStatusSnapshotQueryService.GET_PRESENTATION, "authorization", payload)))
+        .isInstanceOf(InvalidMessageException.class);
+  }
+
   private MessageEnvelope event(String type, String producer, UUID aggregateId, tools.jackson.databind.JsonNode payload) {
     return new MessageEnvelope(
         UUID.randomUUID(), type, 1, MessageKind.EVENT, producer, Instant.now(), UUID.randomUUID(), UUID.randomUUID(),
         null, null, aggregateId, 1, null, payload);
+  }
+
+  private MessageEnvelope query(String type, String requester, tools.jackson.databind.JsonNode payload) {
+    return new MessageEnvelope(
+        UUID.randomUUID(), type, 1, MessageKind.QUERY, requester, Instant.now(), UUID.randomUUID(), null,
+        UUID.randomUUID(), null, null, null, new Actor("SYSTEM", null, requester, null, null), payload);
   }
 }

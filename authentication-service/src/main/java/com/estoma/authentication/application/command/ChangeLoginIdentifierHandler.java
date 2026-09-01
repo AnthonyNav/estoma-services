@@ -6,6 +6,7 @@ import com.estoma.authentication.contracts.AuthenticationCommand;
 import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.command.ChangeLoginIdentifierCommand;
+import com.estoma.authentication.contracts.event.AccountPresentationUpdatedPayload;
 import com.estoma.authentication.contracts.event.LoginIdentifierChangedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
@@ -54,7 +55,18 @@ class ChangeLoginIdentifierHandler implements CommandHandler {
       AccountUpdateGuard.rejectForFailedUpdate(accountRepository, command.accountId(), command.expectedVersion());
     }
 
-    LoginIdentifierChangedPayload eventPayload = new LoginIdentifierChangedPayload(updated.accountId(), updated.loginIdentifier().type(), "ADMINISTRATIVE", now);
-    return CommandHandlerResult.of(updated.accountId(), updated.version(), new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), eventPayload));
+    LoginIdentifierChangedPayload eventPayload = new LoginIdentifierChangedPayload(
+        updated.accountId(), updated.loginIdentifier().type(), "ADMINISTRATIVE", now);
+    AccountPresentationUpdatedPayload presentation = presentation(updated);
+    return CommandHandlerResult.of(
+        updated.accountId(), updated.version(),
+        new EventToAppend(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), eventPayload),
+        new EventToAppend(AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName(), presentation));
+  }
+
+  private static AccountPresentationUpdatedPayload presentation(Account account) {
+    return new AccountPresentationUpdatedPayload(
+        account.accountId(), account.personId(), account.loginIdentifier().type(),
+        account.loginIdentifier().value(), account.status().name(), account.updatedAt());
   }
 }

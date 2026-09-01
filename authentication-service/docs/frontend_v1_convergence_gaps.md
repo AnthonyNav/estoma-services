@@ -1,6 +1,6 @@
 # Frontend V1 Backend Convergence Gaps — authentication-service
 
-Status: `PLANNED`
+Status: `CLOSED`
 
 Scope: backend convergence required by the closed Front V1 flows for real session context (`GET /api/v1/me`), Wash administration account presentation reuse, and voluntary password change (`AUTH-04`).
 
@@ -15,7 +15,7 @@ The BFF must not call Authentication synchronously to compose `/api/v1/me` or WA
 ## GAP-AUTH-01 — Account presentation is not deterministically reconstructible
 
 - Severity: `BLOCKER`
-- Status: `OPEN`
+- Status: `CLOSED`
 - Owner: `authentication-service`
 - Consumers: `platform-bff`
 - Affected flows: `GET /api/v1/me`, WASH-ADM-04 account presentation
@@ -47,22 +47,31 @@ availableSystemCodes
 
 The same missing datum affects administrative account presentation. Solving `/me` and WASH-ADM-04 independently would duplicate the same root problem and create divergent account views.
 
-### Proposed solution
+### Resolution
 
-Create one Authentication-owned **Account Presentation projection contract** that is both incrementally maintainable and recoverable.
+Authentication now exposes one owner-authoritative Account Presentation
+projection contract, documented in
+[`account_presentation_recovery.md`](account_presentation_recovery.md). It is
+incrementally maintainable through `AccountPresentationUpdated` and recoverable
+through BFF-only Queries:
 
-The exact wire shape may follow the service's existing Event/Query/Result recovery conventions, but it must expose enough owner data to reconstruct the current account presentation deterministically, including at least:
+```text
+GetAccountPresentationSnapshot(accountId)
+ListAccountPresentationSnapshotsPage(cursor?, limit=200)
+```
+
+The recoverable item contains:
 
 ```text
 accountId
 personId
 loginType
 loginIdentifier
-accountStatus
+status
 sourceVersion
 ```
 
-Implementation must support both:
+The contract supports both:
 
 1. incremental changes when account presentation changes; and
 2. authoritative recovery/snapshot reconstruction for bootstrap, rebuild and reconciliation.
@@ -97,7 +106,7 @@ Do not:
 ## GAP-AUTH-02 — AUTH-04 needs dedicated integration and concurrency regression coverage
 
 - Severity: `HIGH`
-- Status: `PARTIAL` — core behavior is already implemented
+- Status: `CLOSED` — core behavior and dedicated regression coverage are implemented
 - Owner: `authentication-service`
 - Affected flow: `AUTH-04` voluntary password change
 

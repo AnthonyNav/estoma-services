@@ -10,6 +10,7 @@ import com.estoma.authentication.contracts.AuthenticationEvent;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.command.CreateAccountCommand;
 import com.estoma.authentication.contracts.event.AccountCreatedPayload;
+import com.estoma.authentication.contracts.event.AccountPresentationUpdatedPayload;
 import com.estoma.authentication.domain.AuthenticationRejectedException;
 import com.estoma.authentication.domain.RejectionCode;
 import com.estoma.authentication.domain.account.Account;
@@ -74,9 +75,17 @@ class CreateAccountHandler implements CommandHandler {
     AccountCreatedPayload eventPayload = new AccountCreatedPayload(
         account.accountId(), account.personId(), account.loginIdentifier().type(),
         account.status().name(), account.createdAt());
+    AccountPresentationUpdatedPayload presentation = presentation(account);
     return CommandHandlerResult.of(
         account.accountId(), account.version(),
-        new EventToAppend(AuthenticationEvent.ACCOUNT_CREATED.wireName(), eventPayload));
+        new EventToAppend(AuthenticationEvent.ACCOUNT_CREATED.wireName(), eventPayload),
+        new EventToAppend(AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName(), presentation));
+  }
+
+  private static AccountPresentationUpdatedPayload presentation(Account account) {
+    return new AccountPresentationUpdatedPayload(
+        account.accountId(), account.personId(), account.loginIdentifier().type(),
+        account.loginIdentifier().value(), account.status().name(), account.updatedAt());
   }
 
   private static String academicPendingReason(MessageEnvelope envelope, UUID personId) {

@@ -52,6 +52,29 @@ class AccountStatusSnapshotQueryServiceTest {
   }
 
   @Test
+  void presentationSnapshotsExposeTheCurrentIdentifierOnlyToBff() {
+    UUID accountId = UUID.randomUUID();
+    Account account = account(accountId);
+    when(accounts.findById(accountId)).thenReturn(Optional.of(account));
+
+    service.respond(query(
+        AccountStatusSnapshotQueryService.GET_PRESENTATION,
+        "bff",
+        Map.of("accountId", accountId.toString())));
+
+    OutboxAppendRequest result = captured();
+    assertThat(result.messageType()).isEqualTo("GetAccountPresentationSnapshotResult");
+    assertThat(result.resultRequester()).isEqualTo("bff");
+    JsonNode payload = codec.readTree(result.payloadJson());
+    assertThat(payload.path("status").asString()).isEqualTo("FOUND");
+    assertThat(payload.path("data").path("loginIdentifier").asString())
+        .isEqualTo(account.loginIdentifier().value());
+    assertThat(payload.path("data").path("status").asString()).isEqualTo("INACTIVE");
+    assertThat(payload.path("data").has("accountStatus")).isFalse();
+    assertThat(payload.path("data").path("sourceVersion").asInt()).isEqualTo(account.version());
+  }
+
+  @Test
   void pointSnapshotCanReturnNotFound() {
     UUID accountId = UUID.randomUUID();
     when(accounts.findById(accountId)).thenReturn(Optional.empty());
@@ -77,6 +100,19 @@ class AccountStatusSnapshotQueryServiceTest {
   }
 
   @Test
+  void presentationPageUsesTheSameStableKeysetAndBffRouting() {
+    when(accounts.listAfter(null, 201)).thenReturn(List.of(account(UUID.randomUUID())));
+
+    service.respond(query(AccountStatusSnapshotQueryService.LIST_PRESENTATION, "bff", Map.of("limit", 200)));
+
+    OutboxAppendRequest result = captured();
+    assertThat(result.messageType()).isEqualTo("ListAccountPresentationSnapshotsPageResult");
+    assertThat(result.resultRequester()).isEqualTo("bff");
+    JsonNode payload = codec.readTree(result.payloadJson());
+    assertThat(payload.path("data").path("items").get(0).path("loginIdentifier").asText()).isNotBlank();
+  }
+
+  @Test
   void failedQueryPersistsTerminalFailedResultForAuthorization() {
     MessageEnvelope query = query(
         AccountStatusSnapshotQueryService.GET,
@@ -98,10 +134,14 @@ class AccountStatusSnapshotQueryServiceTest {
   }
 
   private MessageEnvelope query(String type, Object payload) {
+    return query(type, "authorization", payload);
+  }
+
+  private MessageEnvelope query(String type, String requester, Object payload) {
     return new MessageEnvelope(
-        UUID.randomUUID(), type, 1, MessageKind.QUERY, "authorization", Instant.now(),
+        UUID.randomUUID(), type, 1, MessageKind.QUERY, requester, Instant.now(),
         UUID.randomUUID(), null, UUID.randomUUID(), null, null, null,
-        new Actor("SYSTEM", null, "authorization", null, null), codec.toJsonNode(payload));
+        new Actor("SYSTEM", null, requester, null, null), codec.toJsonNode(payload));
   }
 
   private OutboxAppendRequest captured() {

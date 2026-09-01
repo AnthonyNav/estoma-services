@@ -5,6 +5,7 @@ public enum AuthenticationEvent {
   ACCOUNT_ACTIVATED("AccountActivated"),
   ACCOUNT_DEACTIVATED("AccountDeactivated"),
   LOGIN_IDENTIFIER_CHANGED("LoginIdentifierChanged"),
+  ACCOUNT_PRESENTATION_UPDATED("AccountPresentationUpdated"),
   STUDENT_LOGIN_IDENTIFIER_SYNCHRONIZATION_FAILED("StudentLoginIdentifierSynchronizationFailed"),
   PASSWORD_CHANGED("PasswordChanged"),
   TEMPORARY_PASSWORD_SET("TemporaryPasswordSet"),

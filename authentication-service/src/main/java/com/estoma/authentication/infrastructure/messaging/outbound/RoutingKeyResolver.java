@@ -29,6 +29,9 @@ public class RoutingKeyResolver {
           Map.entry(AuthenticationEvent.ACCOUNT_DEACTIVATED.wireName(), AmqpNames.ROUTING_KEY_ACCOUNT_DEACTIVATED),
           Map.entry(AuthenticationEvent.LOGIN_IDENTIFIER_CHANGED.wireName(), AmqpNames.ROUTING_KEY_LOGIN_IDENTIFIER_CHANGED),
           Map.entry(
+              AuthenticationEvent.ACCOUNT_PRESENTATION_UPDATED.wireName(),
+              AmqpNames.ROUTING_KEY_ACCOUNT_PRESENTATION_UPDATED),
+          Map.entry(
               AuthenticationEvent.STUDENT_LOGIN_IDENTIFIER_SYNCHRONIZATION_FAILED.wireName(),
               AmqpNames.ROUTING_KEY_STUDENT_LOGIN_SYNC_FAILED),
           Map.entry(AuthenticationEvent.PASSWORD_CHANGED.wireName(), AmqpNames.ROUTING_KEY_PASSWORD_CHANGED),
