@@ -153,7 +153,7 @@ components:
     ListPersonPresentationSnapshotsPage:
       name: ListPersonPresentationSnapshotsPage
       payload:
-        $ref: '#/components/schemas/QueryEnvelope'
+        $ref: '#/components/schemas/ListPersonPresentationSnapshotsPageQueryEnvelope'
 
     CreatePersonResult:
       name: CreatePersonResult
@@ -178,7 +178,7 @@ components:
     ListPersonPresentationSnapshotsPageResult:
       name: ListPersonPresentationSnapshotsPageResult
       payload:
-        $ref: '#/components/schemas/ResultEnvelope'
+        $ref: '#/components/schemas/ListPersonPresentationSnapshotsPageResultEnvelope'
 
     PersonCreated:
       name: PersonCreated
@@ -307,6 +307,25 @@ components:
             messageKind:
               const: QUERY
 
+    ListPersonPresentationSnapshotsPageQueryEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/QueryEnvelope'
+        - type: object
+          properties:
+            messageType:
+              const: ListPersonPresentationSnapshotsPage
+            producer:
+              const: bff
+            payload:
+              type: object
+              additionalProperties: false
+              required: [limit]
+              properties:
+                limit:
+                  const: 200
+                cursor:
+                  $ref: '#/components/schemas/Uuid'
+
     ResultEnvelope:
       allOf:
         - $ref: '#/components/schemas/BaseEnvelope'
@@ -317,6 +336,16 @@ components:
               const: RESULT
             producer:
               const: users
+
+    ListPersonPresentationSnapshotsPageResultEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/ResultEnvelope'
+        - type: object
+          properties:
+            messageType:
+              const: ListPersonPresentationSnapshotsPageResult
+            payload:
+              $ref: '#/components/schemas/PersonPresentationSnapshotsPageResultPayload'
 
     EventEnvelope:
       allOf:
@@ -387,6 +416,48 @@ components:
           minimum: 1
         updatedAt:
           $ref: '#/components/schemas/Timestamp'
+
+    PersonPresentationSnapshotsPage:
+      type: object
+      additionalProperties: false
+      required: [items, hasMore]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PersonPresentationSnapshot'
+        hasMore:
+          type: boolean
+        nextCursor:
+          $ref: '#/components/schemas/Uuid'
+
+    ResultError:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 1
+
+    PersonPresentationSnapshotsPageResultPayload:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [status, data]
+          properties:
+            status:
+              const: SUCCEEDED
+            data:
+              $ref: '#/components/schemas/PersonPresentationSnapshotsPage'
+        - type: object
+          additionalProperties: false
+          required: [status, error]
+          properties:
+            status:
+              const: FAILED
+            error:
+              $ref: '#/components/schemas/ResultError'
 
     AcademicResultData:
       type: object
