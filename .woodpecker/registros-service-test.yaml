@@ -1,0 +1,27 @@
+when:
+  - event: manual
+    branch: develop
+  - event: pull_request
+    path:
+      include:
+        - registros-service/**
+        - .woodpecker/registros-service-test.yaml
+        - .woodpecker/registros-service-build.yaml
+        - .woodpecker/registros-service-gitops.yaml
+        - scripts/woodpecker/**
+  - event: push
+    branch: develop
+    path:
+      include:
+        - registros-service/**
+        - .woodpecker/registros-service-test.yaml
+        - .woodpecker/registros-service-build.yaml
+        - .woodpecker/registros-service-gitops.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: registros-service
+    commands:
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify
