@@ -82,6 +82,28 @@ class AuthorizationRecoveryQueryTest {
   }
 
   @Test
+  void bffPresentationRecoveryPageReturnsTheProfileRequiredBySessionContext() {
+    UUID personId = UUID.fromString("00000000-0000-0000-0000-000000000103");
+    when(persons.listAfter(null, 201)).thenReturn(List.of(person(personId)));
+
+    dispatcher.resolve(query(
+        "bff",
+        MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE,
+        java.util.Map.of("limit", 200)));
+
+    verify(persons).listAfter(null, 201);
+    OutboxAppendRequest result = captured();
+    assertThat(result.messageType()).isEqualTo(MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE_RESULT);
+    JsonNode item = codec.parseJson(result.payloadJson()).path("data").path("items").get(0);
+    assertThat(item.path("personId").asString()).isEqualTo(personId.toString());
+    assertThat(item.path("firstName").asString()).isEqualTo("Ada");
+    assertThat(item.path("paternalSurname").asString()).isEqualTo("Lovelace");
+    assertThat(item.path("institutionalEmail").asString()).isEqualTo(personId + "@estoma.mx");
+    assertThat(item.path("status").asString()).isEqualTo("ACTIVE");
+    assertThat(item.path("sourceVersion").asInt()).isEqualTo(1);
+  }
+
+  @Test
   void terminalTechnicalFailureProducesFailedRecoveryResult() {
     MessageEnvelope query = query(
         MessageTypes.GET_PERSON_STATUS_SNAPSHOT,
@@ -98,10 +120,14 @@ class AuthorizationRecoveryQueryTest {
   }
 
   private MessageEnvelope query(String type, Object payload) {
+    return query("authorization", type, payload);
+  }
+
+  private MessageEnvelope query(String producer, String type, Object payload) {
     return new MessageEnvelope(
-        UUID.randomUUID(), type, 1, MessageKind.QUERY, "authorization", Instant.now(),
+        UUID.randomUUID(), type, 1, MessageKind.QUERY, producer, Instant.now(),
         UUID.randomUUID(), null, UUID.randomUUID(), null, null, null,
-        new Actor.System("authorization"), codec.toJsonNode(payload));
+        new Actor.System(producer), codec.toJsonNode(payload));
   }
 
   private OutboxAppendRequest captured() {

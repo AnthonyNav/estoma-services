@@ -34,10 +34,12 @@ public final class MessageTypes {
   public static final String RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL = "ResolvePersonByInstitutionalEmail";
   public static final String GET_PERSON_STATUS_SNAPSHOT = "GetPersonStatusSnapshot";
   public static final String LIST_PERSON_STATUS_SNAPSHOTS_PAGE = "ListPersonStatusSnapshotsPage";
+  public static final String LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE = "ListPersonPresentationSnapshotsPage";
 
   public static final String RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL_RESULT = "ResolvePersonByInstitutionalEmailResult";
   public static final String GET_PERSON_STATUS_SNAPSHOT_RESULT = "GetPersonStatusSnapshotResult";
   public static final String LIST_PERSON_STATUS_SNAPSHOTS_PAGE_RESULT = "ListPersonStatusSnapshotsPageResult";
+  public static final String LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE_RESULT = "ListPersonPresentationSnapshotsPageResult";
 
   public static final Set<String> COMMANDS = Set.of(CREATE_PERSON, UPDATE_PERSON, ACTIVATE_PERSON, DEACTIVATE_PERSON);
   public static final Set<String> RESULTS = Set.of(
@@ -50,11 +52,13 @@ public final class MessageTypes {
   public static final Set<String> QUERIES = Set.of(
       RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL,
       GET_PERSON_STATUS_SNAPSHOT,
-      LIST_PERSON_STATUS_SNAPSHOTS_PAGE);
+      LIST_PERSON_STATUS_SNAPSHOTS_PAGE,
+      LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE);
   public static final Set<String> QUERY_RESULTS = Set.of(
       RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL_RESULT,
       GET_PERSON_STATUS_SNAPSHOT_RESULT,
-      LIST_PERSON_STATUS_SNAPSHOTS_PAGE_RESULT);
+      LIST_PERSON_STATUS_SNAPSHOTS_PAGE_RESULT,
+      LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE_RESULT);
 
   public static final Set<String> ALL;
   static {

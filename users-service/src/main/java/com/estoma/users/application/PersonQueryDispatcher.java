@@ -47,6 +47,7 @@ public class PersonQueryDispatcher {
       case MessageTypes.RESOLVE_PERSON_BY_INSTITUTIONAL_EMAIL -> resolveEmail(envelope);
       case MessageTypes.GET_PERSON_STATUS_SNAPSHOT -> resolveStatusSnapshot(envelope);
       case MessageTypes.LIST_PERSON_STATUS_SNAPSHOTS_PAGE -> listStatusSnapshots(envelope);
+      case MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE -> listPresentationSnapshots(envelope);
       default -> throw new InvalidMessageException("unsupported query " + envelope.messageType());
     }
   }
@@ -95,29 +96,46 @@ public class PersonQueryDispatcher {
   }
 
   private void listStatusSnapshots(MessageEnvelope envelope) {
+    RecoveryPage page = recoveryPage(envelope, MessageTypes.LIST_PERSON_STATUS_SNAPSHOTS_PAGE);
+    List<Map<String, Object>> items = new ArrayList<>(page.visible().size());
+    page.visible().forEach(person -> items.add(snapshot(person)));
+    appendRecoveryPage(envelope, MessageTypes.LIST_PERSON_STATUS_SNAPSHOTS_PAGE_RESULT, page, items);
+  }
+
+  private void listPresentationSnapshots(MessageEnvelope envelope) {
+    RecoveryPage page = recoveryPage(envelope, MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE);
+    List<Map<String, Object>> items = new ArrayList<>(page.visible().size());
+    page.visible().forEach(person -> items.add(presentationSnapshot(person)));
+    appendRecoveryPage(envelope, MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE_RESULT, page, items);
+  }
+
+  private RecoveryPage recoveryPage(MessageEnvelope envelope, String messageType) {
     int limit = envelope.payload().path("limit").asInt(-1);
     if (limit != RECOVERY_PAGE_LIMIT) {
-      throw new InvalidMessageException("ListPersonStatusSnapshotsPage requires limit=200");
+      throw new InvalidMessageException(messageType + " requires limit=200");
     }
     UUID cursor = envelope.payload().hasNonNull("cursor") ? uuid(envelope.payload(), "cursor") : null;
     List<Person> page = personRepository.listAfter(cursor, limit + 1);
     boolean hasMore = page.size() > limit;
-    List<Person> visible = hasMore ? page.subList(0, limit) : page;
-    List<Map<String, Object>> items = new ArrayList<>(visible.size());
-    visible.forEach(person -> items.add(snapshot(person)));
+    return new RecoveryPage(hasMore ? page.subList(0, limit) : page, hasMore);
+  }
 
+  private void appendRecoveryPage(
+      MessageEnvelope envelope, String resultType, RecoveryPage page, List<Map<String, Object>> items) {
     Map<String, Object> data = new LinkedHashMap<>();
     data.put("items", items);
-    data.put("hasMore", hasMore);
-    if (hasMore && !visible.isEmpty()) {
-      data.put("nextCursor", visible.getLast().personId());
+    data.put("hasMore", page.hasMore());
+    if (page.hasMore() && !page.visible().isEmpty()) {
+      data.put("nextCursor", page.visible().getLast().personId());
     }
     Map<String, Object> payload = new LinkedHashMap<>();
     payload.put("status", "SUCCEEDED");
     payload.put("data", data);
-    appendResult(envelope, MessageTypes.LIST_PERSON_STATUS_SNAPSHOTS_PAGE_RESULT,
+    appendResult(envelope, resultType,
         payload, null, new Actor.System("users"));
   }
+
+  private record RecoveryPage(List<Person> visible, boolean hasMore) {}
 
   private static Map<String, Object> snapshot(Person person) {
     Map<String, Object> data = new LinkedHashMap<>();
@@ -125,6 +143,17 @@ public class PersonQueryDispatcher {
     data.put("status", person.status().name());
     data.put("sourceVersion", person.version());
     data.put("updatedAt", person.updatedAt());
+    return data;
+  }
+
+  private static Map<String, Object> presentationSnapshot(Person person) {
+    Map<String, Object> data = snapshot(person);
+    data.put("firstName", person.firstName());
+    data.put("paternalSurname", person.paternalSurname());
+    if (person.maternalSurname() != null) {
+      data.put("maternalSurname", person.maternalSurname());
+    }
+    data.put("institutionalEmail", person.email().value());
     return data;
   }
 

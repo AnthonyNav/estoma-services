@@ -16,6 +16,8 @@ public class QueryEnvelopeValidator {
   private static final Set<String> AUTHORIZATION_QUERIES = Set.of(
       MessageTypes.GET_PERSON_STATUS_SNAPSHOT,
       MessageTypes.LIST_PERSON_STATUS_SNAPSHOTS_PAGE);
+  private static final Set<String> BFF_QUERIES = Set.of(
+      MessageTypes.LIST_PERSON_PRESENTATION_SNAPSHOTS_PAGE);
 
   private final MessagingProperties properties;
 
@@ -60,6 +62,9 @@ public class QueryEnvelopeValidator {
     if (AUTHORIZATION_QUERIES.contains(envelope.messageType())
         && !"authorization".equals(envelope.producer())) {
       throw new InvalidMessageException("person status recovery queries are restricted to authorization");
+    }
+    if (BFF_QUERIES.contains(envelope.messageType()) && !"bff".equals(envelope.producer())) {
+      throw new InvalidMessageException("person presentation recovery queries are restricted to bff");
     }
   }
 
