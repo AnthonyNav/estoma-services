@@ -261,10 +261,10 @@ class ProjectionEventRuntimePostgresIT {
             "institutionalEmail", "ada.updated@example.invalid", "status", "ACTIVE", "updatedAt", now())));
     runtime.dispatch(event("AccountPresentationUpdated", "authentication", UUID.randomUUID(), accountId, 2,
         Map.of("accountId", accountId.toString(), "personId", personId.toString(), "loginType", "MATRICULA",
-            "loginIdentifier", "202257019", "accountStatus", "ACTIVE", "updatedAt", now())));
+            "loginIdentifier", "202257019", "status", "ACTIVE", "updatedAt", now())));
     runtime.dispatch(event("AccountPresentationUpdated", "authentication", UUID.randomUUID(), accountId, 1,
         Map.of("accountId", accountId.toString(), "personId", personId.toString(), "loginType", "MATRICULA",
-            "loginIdentifier", "stale", "accountStatus", "INACTIVE", "updatedAt", now())));
+            "loginIdentifier", "stale", "status", "INACTIVE", "updatedAt", now())));
 
     assertThat(jdbc.sql("SELECT institutional_email FROM person_presentation_read_model WHERE person_id = :id")
         .param("id", personId).query(String.class).single()).isEqualTo("ada.updated@example.invalid");

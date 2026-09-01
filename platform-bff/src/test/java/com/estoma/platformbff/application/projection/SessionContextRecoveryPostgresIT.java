@@ -72,7 +72,7 @@ class SessionContextRecoveryPostgresIT {
     assertThat(accounts.applyResult(result("authentication", "ListAccountPresentationSnapshotsPageResult", accountJob,
         "SUCCEEDED", Map.of("items", List.of(Map.of(
             "accountId", accountId.toString(), "personId", personId.toString(), "loginType", "MATRICULA",
-            "loginIdentifier", "202257019", "accountStatus", "ACTIVE", "sourceVersion", 4,
+            "loginIdentifier", "202257019", "status", "ACTIVE", "sourceVersion", 4,
             "updatedAt", NOW)), "hasMore", false)))).isTrue();
 
     UUID catalogJobId = systems.startFull();

@@ -159,7 +159,7 @@ public class AccountPresentationRecoveryService {
     if (data == null) throw new IllegalArgumentException("snapshot data is required");
     projection.upsertAccountPresentationSnapshot(new ProjectionReadModel.AccountPresentation(
         uuid(data, "accountId"), uuid(data, "personId"), text(data, "loginType"),
-        text(data, "loginIdentifier"), text(data, "accountStatus"), number(data, "sourceVersion"),
+        text(data, "loginIdentifier"), text(data, "status"), number(data, "sourceVersion"),
         data.containsKey("updatedAt") ? ProjectionPayloads.instant(data, "updatedAt") : fallbackTime));
   }
 

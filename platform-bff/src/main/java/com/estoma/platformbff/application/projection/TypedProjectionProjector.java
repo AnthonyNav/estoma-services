@@ -396,7 +396,7 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
         aggregate(event, accountId);
         readModels.upsert(new ProjectionReadModel.AccountPresentation(
             accountId, uuid(p, "personId"), text(p, "loginType"), text(p, "loginIdentifier"),
-            text(p, "accountStatus"), aggregateVersion(event), instant(p, "updatedAt")));
+            text(p, "status"), aggregateVersion(event), instant(p, "updatedAt")));
       }
       case "AccountCreated" -> {
         UUID accountId = uuid(p, "accountId");
