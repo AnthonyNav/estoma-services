@@ -1,0 +1,27 @@
+when:
+  - event: manual
+    branch: develop
+  - event: pull_request
+    path:
+      include:
+        - jornadas-service/**
+        - .woodpecker/jornadas-service-test.yaml
+        - .woodpecker/jornadas-service-build.yaml
+        - .woodpecker/jornadas-service-gitops.yaml
+        - scripts/woodpecker/**
+  - event: push
+    branch: develop
+    path:
+      include:
+        - jornadas-service/**
+        - .woodpecker/jornadas-service-test.yaml
+        - .woodpecker/jornadas-service-build.yaml
+        - .woodpecker/jornadas-service-gitops.yaml
+        - scripts/woodpecker/**
+
+steps:
+  - name: test
+    image: maven:3.9.16-eclipse-temurin-25
+    directory: jornadas-service
+    commands:
+      - mvn -s "$CI_WORKSPACE/.woodpecker/maven-settings.xml" -B clean verify

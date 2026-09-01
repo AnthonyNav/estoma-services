@@ -1,0 +1,38 @@
+when:
+  - event: push
+    branch: develop
+    path:
+      include:
+        - jornadas-service/**
+        - .woodpecker/jornadas-service-test.yaml
+        - .woodpecker/jornadas-service-build.yaml
+        - .woodpecker/jornadas-service-gitops.yaml
+        - scripts/woodpecker/**
+
+depends_on:
+  - jornadas-service-build
+
+concurrency:
+  limit: 1
+  group: estoma-infra-develop-update
+
+steps:
+  - name: update-develop-gitops
+    image: python:3.13-alpine
+    environment:
+      ESTOMA_INFRA_TOKEN:
+        from_secret: ESTOMA_INFRA_TOKEN
+    commands:
+      - >-
+        sh scripts/woodpecker/update-develop-infra.sh jornadas-service
+        ghcr.io/anthonynav/jornadas-service
+        apps/jornadas-service/overlays/develop/kustomization.yaml
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi

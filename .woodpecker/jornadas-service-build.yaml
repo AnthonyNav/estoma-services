@@ -1,0 +1,40 @@
+when:
+  - event: manual
+    branch: develop
+  - event: push
+    branch: develop
+    path:
+      include:
+        - jornadas-service/**
+        - .woodpecker/jornadas-service-test.yaml
+        - .woodpecker/jornadas-service-build.yaml
+        - .woodpecker/jornadas-service-gitops.yaml
+        - scripts/woodpecker/**
+
+depends_on:
+  - jornadas-service-test
+
+steps:
+  - name: build-and-push
+    image: woodpeckerci/plugin-kaniko:2.3.2
+    settings:
+      registry: ghcr.io
+      repo: anthonynav/jornadas-service
+      context: jornadas-service
+      dockerfile: jornadas-service/Dockerfile
+      username:
+        from_secret: GHCR_USERNAME
+      password:
+        from_secret: GHCR_TOKEN
+      tags:
+        - develop-${CI_COMMIT_SHA:0:7}
+        - develop
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 750m
+            memory: 1Gi
