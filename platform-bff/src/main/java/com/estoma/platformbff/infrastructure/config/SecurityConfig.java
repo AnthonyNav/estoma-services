@@ -1,6 +1,9 @@
 package com.estoma.platformbff.infrastructure.config;
 
 import com.estoma.platformbff.infrastructure.security.JwtAuthenticationFilter;
+import com.estoma.platformbff.infrastructure.security.SecurityProblemWriter;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -41,6 +44,17 @@ public class SecurityConfig {
             .requestMatchers("/api/v1/**")
               .hasAuthority("AUTH_STATE_NORMAL")
             .anyRequest().permitAll())
+        .exceptionHandling(exceptions -> exceptions
+            .authenticationEntryPoint((request, response, failure) ->
+                SecurityProblemWriter.authenticationRequired(response))
+            .accessDeniedHandler((request, response, failure) -> {
+              var authentication = SecurityContextHolder.getContext().getAuthentication();
+              if (authentication == null || authentication instanceof AnonymousAuthenticationToken) {
+                SecurityProblemWriter.authenticationRequired(response);
+              } else {
+                SecurityProblemWriter.accessDenied(response);
+              }
+            }))
         .build();
   }
 }

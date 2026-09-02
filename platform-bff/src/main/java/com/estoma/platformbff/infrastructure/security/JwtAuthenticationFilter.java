@@ -128,9 +128,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   }
 
   private static void reject(HttpServletResponse response) throws IOException {
-    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-    response.setContentType("application/problem+json");
-    response.getWriter().write(
-        "{\"type\":\"about:blank\",\"title\":\"Unauthorized\",\"status\":401}");
+    SecurityProblemWriter.invalidToken(response);
   }
 }
