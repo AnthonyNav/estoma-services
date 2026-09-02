@@ -13,6 +13,8 @@ public interface AcademicProjectionRepository {
   Optional<AcademicPeriodProjection> findPeriod(UUID academicPeriodId);
   Optional<AcademicPeriodProjection> findActivePeriod();
   Optional<StudentAcademicProfileProjection> findStudentProfile(UUID studentAccountId);
+  /** Serializes exceptional-authorization grants on the required student projection row. */
+  Optional<StudentAcademicProfileProjection> findStudentProfileForUpdate(UUID studentAccountId);
   Optional<CourseSectionProjection> findCourseSection(UUID courseSectionId);
   Optional<StudentCourseSectionProjection> findStudentCourse(UUID studentAccountId, UUID courseSectionId);
   boolean reliable();

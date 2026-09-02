@@ -49,12 +49,18 @@ public class CancelExceptionalAppointmentAuthorizationHandler
       } else if (!policy.canGrantExceptionalAuthorization(command.metadata())) {
         result = ApplicationResult.rejected("FORBIDDEN",
             "only an authorized wash supervisor can cancel exceptional authorization");
+      } else if (current.isCancelled()) {
+        result = ApplicationResult.rejected("AUTHORIZATION_ALREADY_CANCELLED",
+            "authorization has already been cancelled");
+      } else if (current.isSuperseded()) {
+        result = ApplicationResult.rejected("AUTHORIZATION_SUPERSEDED",
+            "a later supervisor decision superseded this authorization");
+      } else if (OperationalDatePolicy.hasConcluded(current.authorizationDate(), now)) {
+        result = ApplicationResult.rejected("AUTHORIZATION_DATE_CONCLUDED",
+            "the authorization date has already concluded");
       } else if (appointments.findActiveByExceptionalAuthorizationForUpdate(command.authorizationId()).isPresent()) {
         result = ApplicationResult.rejected("AUTHORIZATION_IN_USE",
             "an appointment still consumes this authorization");
-      } else if (current.isCancelled()) {
-        result = ApplicationResult.applied(current.exceptionalAuthorizationId(), current.version(),
-            "authorization already cancelled");
       } else {
         var cancelled = current.cancel(command.metadata().actor().accountId(), command.reason(), now);
         if (!authorizations.updateIfVersion(cancelled, current.version())) {

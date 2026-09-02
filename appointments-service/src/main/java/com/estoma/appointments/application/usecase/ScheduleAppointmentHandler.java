@@ -133,7 +133,7 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
       var authorization = authorizations.findByIdForUpdate(authorizationId).orElse(null);
       if (authorization == null) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_NOT_FOUND", "exceptional authorization was not found");
       if (!authorization.studentAccountId().equals(command.studentAccountId())) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_STUDENT_MISMATCH", "authorization belongs to another student");
-      if (!authorization.isUsableAt(slot.serviceDate(), command.now())) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_UNAVAILABLE", "exceptional authorization is cancelled or expired");
+      if (!authorization.isUsableAt(slot.serviceDate(), command.now())) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_UNAVAILABLE", "exceptional authorization is not available");
       if (appointments.findActiveByExceptionalAuthorizationForUpdate(authorizationId).isPresent()) return ApplicationResult.rejected("EXCEPTIONAL_AUTHORIZATION_ALREADY_USED", "exceptional authorization is already consumed");
     }
 
