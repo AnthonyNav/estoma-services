@@ -18,6 +18,9 @@ public class FailureRouter {
   public static final Topology EVENTS = new Topology(
       List.of(MessagingNames.EVENT_RETRY_5S, MessagingNames.EVENT_RETRY_30S, MessagingNames.EVENT_RETRY_300S),
       MessagingNames.EVENT_DLQ);
+  public static final Topology RESULTS = new Topology(
+      List.of(MessagingNames.RESULT_RETRY_5S, MessagingNames.RESULT_RETRY_30S, MessagingNames.RESULT_RETRY_300S),
+      MessagingNames.RESULT_DLQ);
 
   private static final Set<String> PASSTHROUGH_HEADERS = Set.of("traceparent", "tracestate", "baggage");
   private final ConfirmedRabbitPublisher publisher;

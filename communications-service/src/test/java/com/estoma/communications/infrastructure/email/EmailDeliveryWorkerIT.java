@@ -353,7 +353,7 @@ class EmailDeliveryWorkerIT extends AbstractPostgresIT {
   private UUID insertCommunication() {
     Communication communication =
         Communication.requested(
-            UUID.randomUUID(), UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
+            UUID.randomUUID(), UUID.randomUUID(), "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
             "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, java.util.List.of("EMAIL"),
             UUID.randomUUID(), UUID.randomUUID(), "fingerprint", UUID.randomUUID(), null, Instant.now());
     communicationRepository.insert(communication);

@@ -2,6 +2,7 @@ package com.estoma.communications.application.adapter;
 
 import com.estoma.communications.application.command.CommandHandlerResult;
 import com.estoma.communications.application.command.RequestCommunicationService;
+import com.estoma.communications.application.projection.AcademicPeriodRetentionPolicy;
 import com.estoma.communications.application.projection.ProjectionHandler;
 import com.estoma.communications.application.projection.ProjectionHandlerResult;
 import com.estoma.communications.contracts.CommunicationPriority;
@@ -20,14 +21,17 @@ import org.springframework.stereotype.Component;
 @Component
 class AppointmentCancelledAdapter implements ProjectionHandler {
 
-  private static final String SYSTEM_CODE = "wash-ultrasonico";
+  private static final String SYSTEM_CODE = "LAVADO_ULTRASONICO";
   private static final String COMMUNICATION_TYPE = "AppointmentCancelledByClinic";
 
   private final RequestCommunicationService service;
+  private final AcademicPeriodRetentionPolicy retentionPolicy;
   private final EnvelopeJsonCodec codec;
 
-  AppointmentCancelledAdapter(RequestCommunicationService service, EnvelopeJsonCodec codec) {
+  AppointmentCancelledAdapter(
+      RequestCommunicationService service, AcademicPeriodRetentionPolicy retentionPolicy, EnvelopeJsonCodec codec) {
     this.service = service;
+    this.retentionPolicy = retentionPolicy;
     this.codec = codec;
   }
 
@@ -47,14 +51,22 @@ class AppointmentCancelledAdapter implements ProjectionHandler {
     if (!"CLINIC".equals(payload.cancellationType()) || !"CAPACITY_LOSS".equals(payload.cancellationSubreason())) {
       return ProjectionHandlerResult.NONE;
     }
+    if (payload.appointmentId() == null || payload.studentAccountId() == null) {
+      throw new IllegalArgumentException("qualifying AppointmentCancelled requires appointmentId and studentAccountId");
+    }
 
     RequestCommunicationCommand command =
         new RequestCommunicationCommand(
             payload.studentAccountId(), SYSTEM_CODE, COMMUNICATION_TYPE, CommunicationPriority.NORMAL, "appointments", "AppointmentCancelled",
-            payload.appointmentId().toString(), null, null,
+            payload.appointmentId().toString(), null,
+            new RequestCommunicationCommand.InboxContent(
+                "Cancelación de cita",
+                "Tu cita fue cancelada debido a una reducción de capacidad operativa de la clínica.",
+                retentionPolicy.resolveWashInboxExpiresAt()),
             new RequestCommunicationCommand.EmailContent(
                 EmailContentMode.GENERIC, null, "Tu cita fue cancelada",
-                "Tu cita fue cancelada por una falla o reducción de capacidad de la clínica. Te contactaremos para reprogramarla.", null, null, null));
+                "Tu cita fue cancelada debido a una reducción de capacidad operativa de la clínica.", null, null, null),
+            List.of("INBOX", "EMAIL"));
 
     try {
       MessageEnvelope boundary = new MessageEnvelope(

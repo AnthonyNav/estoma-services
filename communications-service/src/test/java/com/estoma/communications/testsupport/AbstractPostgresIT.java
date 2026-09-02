@@ -15,6 +15,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
     "spring.task.scheduling.enabled=false",
     "estoma.messaging.topology-declare=false",
     "estoma.messaging.listeners-enabled=false",
+    "estoma.communications.academic-period.recovery-enabled=false",
     "estoma.communications.email.worker.enabled=false",
     "estoma.communications.email.worker.poll-interval-ms=3600000",
     "estoma.communications.email.worker.sweeper-interval-ms=3600000"

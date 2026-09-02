@@ -15,6 +15,8 @@ public final class ConsumerNames {
   public static final String RECIPIENT_PROJECTION = "communications-service.recipient-projection";
   public static final String APPOINTMENT_CANCELLED_ADAPTER = "communications-service.appointment-cancelled-adapter";
   public static final String PASSWORD_RECOVERY_ADAPTER = "communications-service.password-recovery-adapter";
+  public static final String ACADEMIC_PERIOD_PROJECTION = "communications-service.academic-period-projection";
+  public static final String ACADEMIC_PERIOD_RECOVERY = "communications-service.academic-period-recovery";
 
   private ConsumerNames() {}
 }

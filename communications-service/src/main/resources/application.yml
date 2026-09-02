@@ -43,6 +43,11 @@ estoma:
   messaging:
     outbox-relay-delay: ${COMM_OUTBOX_RELAY_DELAY:500ms}
   communications:
+    academic-period:
+      recovery-enabled: ${COMM_ACADEMIC_PERIOD_RECOVERY_ENABLED:true}
+      recovery-retry-delay: ${COMM_ACADEMIC_PERIOD_RECOVERY_RETRY_DELAY:60000}
+    wash:
+      institutional-time-zone: ${COMM_WASH_INSTITUTIONAL_TIME_ZONE:America/Mexico_City}
     email:
       default-sender-name: ${COMM_EMAIL_DEFAULT_SENDER_NAME:Estoma}
       default-sender-address: ${COMM_EMAIL_DEFAULT_SENDER_ADDRESS:no-reply@estoma.edu}
@@ -93,7 +98,7 @@ management:
         startup:
           include: db, schemaVersion
         readiness:
-          include: db, emailWorker, commandConsumer, outboxRelay
+          include: db, emailWorker, commandConsumer, outboxRelay, academicPeriodProjection
         liveness:
           include: livenessState
     info:

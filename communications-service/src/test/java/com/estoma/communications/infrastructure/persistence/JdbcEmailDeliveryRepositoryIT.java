@@ -68,7 +68,7 @@ class JdbcEmailDeliveryRepositoryIT extends AbstractPostgresIT {
   private EmailDelivery newPendingDelivery() {
     Communication communication =
         Communication.requested(
-            UUID.randomUUID(), UUID.randomUUID(), "wash-ultrasonico", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
+            UUID.randomUUID(), UUID.randomUUID(), "LAVADO_ULTRASONICO", "AppointmentCancelledNotice", CommunicationPriority.NORMAL,
             "appointments-service", "AppointmentCancelled", "appt-" + UUID.randomUUID(), null, Instant.now());
     communicationRepository.insert(communication);
     return EmailDelivery.generic(

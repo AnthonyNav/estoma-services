@@ -26,7 +26,9 @@ public class CommandConsumerHealthIndicator implements HealthIndicator {
     }
     var commands = registry.getListenerContainer("commandConsumer");
     var events = registry.getListenerContainer("eventConsumer");
-    boolean running = commands != null && commands.isRunning() && events != null && events.isRunning();
+    var results = registry.getListenerContainer("resultConsumer");
+    boolean running = commands != null && commands.isRunning() && events != null && events.isRunning()
+        && results != null && results.isRunning();
     return running ? Health.up().build() : Health.down().withDetail("consumersRunning", false).build();
   }
 }

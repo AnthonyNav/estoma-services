@@ -65,6 +65,36 @@ class EnvelopeValidatorTest {
         .isInstanceOf(IllegalArgumentException.class);
   }
 
+  @Test
+  void acceptsFencedAcademicPeriodRecoveryResult() {
+    UUID periodId = UUID.randomUUID();
+    UUID queryId = UUID.randomUUID();
+    var payload = MAPPER.createObjectNode().put("status", "FOUND");
+    payload.putObject("data")
+        .put("academicPeriodId", periodId.toString()).put("code", "2030-B").put("status", "ACTIVE")
+        .put("startDate", "2030-08-01").put("endDate", "2030-12-31")
+        .put("sourceVersion", 3).put("snapshotGeneratedAt", "2030-08-01T00:00:00Z");
+    validator.validateAcademicPeriodRecoveryResult(new MessageEnvelope(
+        UUID.randomUUID(), "GetActiveAcademicPeriodSnapshotResult", 1, MessageKind.RESULT, "academic", Instant.now(),
+        queryId, queryId, UUID.randomUUID(), null, periodId, 3, Actor.system("communications"),
+        payload));
+  }
+
+  @Test
+  void rejectsAcademicPeriodRecoveryResultForAnotherRequester() {
+    UUID periodId = UUID.randomUUID();
+    var payload = MAPPER.createObjectNode().put("status", "FOUND");
+    payload.putObject("data")
+        .put("academicPeriodId", periodId.toString()).put("code", "2030-B").put("status", "ACTIVE")
+        .put("startDate", "2030-08-01").put("endDate", "2030-12-31")
+        .put("sourceVersion", 1).put("snapshotGeneratedAt", "2030-08-01T00:00:00Z");
+    assertThatThrownBy(() -> validator.validateAcademicPeriodRecoveryResult(new MessageEnvelope(
+        UUID.randomUUID(), "GetActiveAcademicPeriodSnapshotResult", 1, MessageKind.RESULT, "academic", Instant.now(),
+        UUID.randomUUID(), UUID.randomUUID(), null, null, periodId, 1, Actor.system("bff"),
+        payload)))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
   private static MessageEnvelope event(
       String type, String producer, UUID aggregateId, Integer aggregateVersion, tools.jackson.databind.JsonNode payload) {
     return new MessageEnvelope(

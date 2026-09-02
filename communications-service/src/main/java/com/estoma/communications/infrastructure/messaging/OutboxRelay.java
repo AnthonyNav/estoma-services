@@ -88,6 +88,13 @@ public class OutboxRelay {
       publisher.publishEvent(MessagingNames.EVENTS_EXCHANGE, eventRoutingKeys.resolve(row.messageType()), message);
       return;
     }
-    throw new IllegalStateException("Outbox Relay may publish only RESULT or EVENT rows, got " + kind);
+    if (kind == MessageKind.QUERY) {
+      if (row.destination() == null || row.destination().isBlank()) {
+        throw new IllegalStateException("QUERY Outbox row requires destination");
+      }
+      publisher.publishRequiredRoute(MessagingNames.QUERIES_EXCHANGE, row.destination(), message);
+      return;
+    }
+    throw new IllegalStateException("Outbox Relay may publish only RESULT, EVENT or QUERY rows, got " + kind);
   }
 }

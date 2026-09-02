@@ -15,5 +15,8 @@ public final class ConsumedEventTypes {
 
   public static final String APPOINTMENT_CANCELLED = "AppointmentCancelled";
 
+  public static final String ACADEMIC_PERIOD_ACTIVATED = "AcademicPeriodActivated";
+  public static final String ACADEMIC_PERIOD_CLOSED = "AcademicPeriodClosed";
+
   private ConsumedEventTypes() {}
 }

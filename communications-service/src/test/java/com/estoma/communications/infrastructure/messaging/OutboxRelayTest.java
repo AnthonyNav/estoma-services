@@ -46,6 +46,17 @@ class OutboxRelayTest {
   }
 
   @Test
+  void queryUsesTheAcademicRequiredRoute() {
+    var row = row("GetActiveAcademicPeriodSnapshot", "QUERY", "academic");
+    when(repository.claim(eq(50), any(Instant.class))).thenReturn(List.of(row));
+
+    relay.relay();
+
+    verify(publisher).publishRequiredRoute(eq("platform.queries"), eq("academic"), any());
+    verify(repository).markPublished(eq(row.messageId()), any(Instant.class));
+  }
+
+  @Test
   void unconfirmedPublicationReturnsRowToDurableBackoff() {
     var row = row("CommunicationRequested", "EVENT", null);
     when(repository.claim(eq(50), any(Instant.class))).thenReturn(List.of(row));
