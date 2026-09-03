@@ -1,0 +1,149 @@
+{
+  "info": {
+    "name": "platform-bff E2E",
+    "description": "Executable black-box checks for the Platform BFF. Requests exercise only its public HTTP boundary.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://platform-bff.develop.svc.cluster.local"
+    },
+    {
+      "key": "expectedOpenApiVersion",
+      "value": "3.1.1"
+    },
+    {
+      "key": "minimumPathCount",
+      "value": "84"
+    },
+    {
+      "key": "invalidLoginIdentifier",
+      "value": "e2e-nonexistent-account"
+    }
+  ],
+  "item": [
+    {
+      "name": "Preflight",
+      "item": [
+        {
+          "name": "health is available",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('identifies the BFF health contract', () => {",
+                  "  pm.expect(body).to.deep.equal({ status: 'ok', service: 'platform-bff' });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "runtime OpenAPI is complete",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/openapi"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns 200', () => pm.response.to.have.status(200));",
+                  "const document = pm.response.json();",
+                  "pm.test('uses the expected OpenAPI version', () => {",
+                  "  pm.expect(document.openapi).to.eql(pm.collectionVariables.get('expectedOpenApiVersion'));",
+                  "});",
+                  "pm.test('retains the public baseline routes', () => {",
+                  "  const paths = document.paths || {};",
+                  "  pm.expect(Object.keys(paths).length).to.be.at.least(Number(pm.collectionVariables.get('minimumPathCount')));",
+                  "  ['/api/v1/auth/login', '/api/v1/me', '/api/v1/operations/{operationId}', '/api/v1/wash/student/home'].forEach((path) => pm.expect(paths).to.have.property(path));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AUTH-01 boundary",
+      "item": [
+        {
+          "name": "invalid credentials are generic and sanitized",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"USERNAME\",\n  \"loginIdentifier\": \"{{invalidLoginIdentifier}}\",\n  \"password\": \"not-a-real-password\",\n  \"deviceName\": \"platform-bff-e2e\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns generic 401', () => pm.response.to.have.status(401));",
+                  "pm.test('uses the public problem representation', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "const problem = pm.response.json();",
+                  "pm.test('does not disclose account state', () => {",
+                  "  pm.expect(problem).to.include({ status: 401, code: 'BFF.AUTHENTICATION_INVALID' });",
+                  "  pm.expect(problem.traceId).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Protected boundary",
+      "item": [
+        {
+          "name": "session context requires authentication",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('returns contractually normalized 401', () => pm.response.to.have.status(401));",
+                  "pm.test('uses application/problem+json', () => pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json'));",
+                  "const problem = pm.response.json();",
+                  "pm.test('identifies authentication as required', () => {",
+                  "  pm.expect(problem).to.include({ status: 401, code: 'BFF.AUTHENTICATION_REQUIRED' });",
+                  "  pm.expect(problem.traceId).to.be.a('string').and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

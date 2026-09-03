@@ -91,6 +91,9 @@ class JwtAuthenticationFilterTest {
         revokedResponse,
         new MockFilterChain());
     assertThat(revokedResponse.getStatus()).isEqualTo(401);
+    assertThat(revokedResponse.getContentType()).isEqualTo("application/problem+json;charset=UTF-8");
+    assertThat(revokedResponse.getContentAsString()).contains(
+        "\"status\":401", "\"code\":\"BFF.AUTHENTICATION_REQUIRED\"", "\"traceId\"");
 
     SecurityContextHolder.clearContext();
     var audienceFilter = filter((account, person, session, issuedAt) -> false);
@@ -100,6 +103,8 @@ class JwtAuthenticationFilterTest {
         audienceResponse,
         new MockFilterChain());
     assertThat(audienceResponse.getStatus()).isEqualTo(401);
+    assertThat(audienceResponse.getContentAsString()).contains(
+        "\"code\":\"BFF.AUTHENTICATION_REQUIRED\"");
   }
 
   private JwtAuthenticationFilter filter(SessionRevocationChecker checker) {
