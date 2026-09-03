@@ -1,5 +1,6 @@
 package com.estoma.platformbff.infrastructure.messaging;
 
+import com.estoma.platformbff.contracts.messaging.ActorContext;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import com.estoma.platformbff.contracts.messaging.QueryEnvelope;
 import com.estoma.platformbff.domain.projection.RecoveryQuery;
@@ -30,9 +31,12 @@ public class DefaultRecoveryQueryPublisher implements RecoveryQueryPublisher {
 
   @Override
   public void publish(RecoveryQuery query) {
+    // Owner services validate recovery queries as BFF technical work. Older recovery rows did
+    // not persist an actor; treating those as anonymous made every owner reject the request.
+    ActorContext actor = query.actorJson() == null ? ActorContext.system("bff") : codec.readActor(query.actorJson());
     QueryEnvelope envelope = new QueryEnvelope(query.messageId(), query.messageType(), query.messageVersion(),
         MessageKind.QUERY, "bff", query.createdAt(), query.correlationId(), query.causationId(),
-        query.recoveryJobId(), query.idempotencyKey(), null, null, codec.readActor(query.actorJson()),
+        query.recoveryJobId(), query.idempotencyKey(), null, null, actor,
         codec.readTree(codec.write(query.payload())));
     var properties = new MessageProperties();
     properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
