@@ -5,10 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.platformbff.application.security.ProjectionEventQuarantineService;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.security.MessageDigest;
 import java.util.HexFormat;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +55,7 @@ class ProjectionEventRuntimePostgresIT {
   @BeforeEach
   void clear() {
     jdbc.sql("""
-        TRUNCATE TABLE inbox_messages, person_presentation_read_model,
+        TRUNCATE TABLE inbox_messages, session_revocations, person_presentation_read_model,
           account_presentation_read_model,
           authorization_role_projection, authorization_access_projection,
           mailbox_messages_read_model, mailbox_visits_read_model,
@@ -153,6 +154,47 @@ class ProjectionEventRuntimePostgresIT {
         WHERE account_id = :accountId AND system_code = 'LAVADO_ULTRASONICO'
         """).param("accountId", accountId).query(OffsetDateTime.class).single();
     assertThat(stored.toInstant()).isEqualTo(newer);
+  }
+
+  @Test
+  void canonicalSessionRevokedV1PayloadIsAccepted() {
+    UUID messageId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    Instant revokedAt = Instant.parse("2026-08-23T20:00:00Z");
+    ProjectionEvent event = new ProjectionEvent(
+        messageId, "SessionRevoked", 1, "authentication", revokedAt,
+        UUID.randomUUID(), UUID.randomUUID(), sessionId, null,
+        Map.of("sessionId", sessionId.toString(), "accountId", accountId.toString(),
+            "reasonCode", "USER_REQUESTED", "revokedAt", revokedAt.toString()));
+
+    assertThat(runtime.dispatch(event)).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(jdbc.sql("""
+        SELECT reason_code FROM session_revocations
+        WHERE session_id = :sessionId AND source_message_id = :messageId
+        """).param("sessionId", sessionId).param("messageId", messageId)
+        .query(String.class).single()).isEqualTo("USER_REQUESTED");
+  }
+
+  @Test
+  void sessionRevokedWithUnexpectedFieldIsRejectedBeforeInboxOrProjection() {
+    UUID messageId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    Map<String, Object> payload = new HashMap<>(Map.of(
+        "sessionId", sessionId.toString(),
+        "accountId", UUID.randomUUID().toString(),
+        "reasonCode", "USER_REQUESTED",
+        "revokedAt", "2026-08-23T20:00:00Z"));
+    payload.put("unexpected", "must-not-cross-the-trust-boundary");
+    ProjectionEvent event = new ProjectionEvent(
+        messageId, "SessionRevoked", 1, "authentication", Instant.parse(now()),
+        UUID.randomUUID(), UUID.randomUUID(), sessionId, null, payload);
+
+    assertThat(runtime.dispatch(event)).isEqualTo(ProjectionEventRuntime.DispatchOutcome.UNTRUSTED);
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :id")
+        .param("id", messageId).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM session_revocations WHERE session_id = :id")
+        .param("id", sessionId).query(Long.class).single()).isZero();
   }
 
   @Test
