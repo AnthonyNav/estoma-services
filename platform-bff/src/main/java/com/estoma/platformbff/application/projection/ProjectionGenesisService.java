@@ -7,6 +7,8 @@ import com.estoma.platformbff.domain.projection.ProjectionStatus;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,18 +37,33 @@ public class ProjectionGenesisService {
     // environment has not removed its deployment flag yet. The marker also prevents the current
     // READY state from being misreported as an unsafe second genesis attempt.
     if (genesis.exists(MARKER)) return false;
-    for (String target : TARGETS) {
-      ProjectionState state = genesis.findStatus(target)
-          .orElseThrow(() -> new IllegalStateException("missing projection status: " + target));
-      if (state.status() != ProjectionStatus.BOOTSTRAPPING || state.generation() != 0) {
-        throw new IllegalStateException("projection genesis is unsafe for " + target);
+    Map<String, ProjectionState> states = TARGETS.stream().collect(Collectors.toMap(
+        target -> target,
+        target -> genesis.findStatus(target)
+            .orElseThrow(() -> new IllegalStateException("missing projection status: " + target))));
+    for (ProjectionState state : states.values()) {
+      if (!isInitial(state) && !isRecoveredPerson(state)) {
+        throw new IllegalStateException("projection genesis is unsafe for " + state.projectionName());
       }
     }
     Instant now = clock.instant();
     if (!genesis.claim(MARKER, now)) return false;
-    for (String target : TARGETS) {
-      statuses.upsert(new ProjectionState(target, ProjectionStatus.READY, null, null, 0, now));
+    for (ProjectionState state : states.values()) {
+      if (isInitial(state)) {
+        statuses.upsert(new ProjectionState(state.projectionName(), ProjectionStatus.READY, null, null, 0, now));
+      }
     }
     return true;
+  }
+
+  private static boolean isInitial(ProjectionState state) {
+    return state.status() == ProjectionStatus.BOOTSTRAPPING && state.generation() == 0;
+  }
+
+  /** Person can already be recovered from Users before a newly introduced non-recoverable baseline. */
+  private static boolean isRecoveredPerson(ProjectionState state) {
+    return "person".equals(state.projectionName())
+        && state.status() == ProjectionStatus.READY
+        && state.generation() > 0;
   }
 }
