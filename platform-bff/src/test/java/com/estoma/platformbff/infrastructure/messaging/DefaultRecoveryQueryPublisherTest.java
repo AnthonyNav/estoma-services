@@ -43,6 +43,7 @@ class DefaultRecoveryQueryPublisherTest {
     assertThat(envelope.path("actor").path("type").asText()).isEqualTo("SYSTEM");
     assertThat(envelope.path("actor").path("service").asText()).isEqualTo("bff");
     assertThat(envelope.path("actor").size()).isEqualTo(2);
+    assertThat(envelope.path("idempotencyKey").isNull()).isTrue();
   }
 
   private static RecoveryQuery query(String actorJson) {

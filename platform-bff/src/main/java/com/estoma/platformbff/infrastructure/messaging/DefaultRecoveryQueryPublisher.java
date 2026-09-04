@@ -36,7 +36,7 @@ public class DefaultRecoveryQueryPublisher implements RecoveryQueryPublisher {
     ActorContext actor = query.actorJson() == null ? ActorContext.system("bff") : codec.readActor(query.actorJson());
     QueryEnvelope envelope = new QueryEnvelope(query.messageId(), query.messageType(), query.messageVersion(),
         MessageKind.QUERY, "bff", query.createdAt(), query.correlationId(), query.causationId(),
-        query.recoveryJobId(), query.idempotencyKey(), null, null, actor,
+        query.recoveryJobId(), null, null, null, actor,
         codec.readTree(codec.write(query.payload())));
     var properties = new MessageProperties();
     properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
