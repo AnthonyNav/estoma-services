@@ -2,7 +2,7 @@
 
 Spring Boot service that manages the pre-registro lifecycle for Registro de Jornadas / Prácticas Profesionales.
 
-**Status:** V1 implemented and manually verified end-to-end (crear/confirmar/rechazar/cancelar, cupo en tiempo real, cascada por Jornada cancelada, rechazo funcional por falta de cupo/semestre no permitido) against a local Postgres + the shared platform RabbitMQ. Deliberate V1 simplifications — see "Known simplifications" below.
+**Status:** V1 implemented and manually verified end-to-end (crear/confirmar/rechazar/cancelar, cupo en tiempo real, cascada por Jornada cancelada, cierre automático a Completado cuando la Jornada finaliza, rechazo funcional por falta de cupo/semestre no permitido) against a local Postgres + the shared platform RabbitMQ. Deliberate V1 simplifications — see "Known simplifications" below.
 
 ## Owns
 
@@ -23,14 +23,13 @@ Spring Boot service that manages the pre-registro lifecycle for Registro de Jorn
 
 Business operations are durable RabbitMQ commands on `commands.registros`: `CrearRegistro`, `ConfirmarRegistro`, `RechazarRegistro`, `CancelarRegistroPorAlumno`. The service owns a PostgreSQL/Flyway schema (`src/main/resources/db/migration/V1__registros_core.sql`) and consumes jornadas-service's domain events (`events.registros`, bound to `platform.events` with routing key `jornadas.#`) to keep its local Jornada projection (cupo, semestres permitidos, estado) current — it never joins across service databases.
 
-`registros` publishes confirmed facts (`RegistroCreado`, `RegistroConfirmado`, `RegistroRechazado`, `RegistroCanceladoPorAlumno`, `RegistroCanceladoPorJornadaCancelada`) on `platform.events`. The machine-readable contract is [`docs/asyncapi.yaml`](docs/asyncapi.yaml); the operational-only HTTP surface is [`docs/openapi.yaml`](docs/openapi.yaml).
+`registros` publishes confirmed facts (`RegistroCreado`, `RegistroConfirmado`, `RegistroRechazado`, `RegistroCanceladoPorAlumno`, `RegistroCanceladoPorJornadaCancelada`, `RegistroCompletado`) on `platform.events`. The machine-readable contract is [`docs/asyncapi.yaml`](docs/asyncapi.yaml); the operational-only HTTP surface is [`docs/openapi.yaml`](docs/openapi.yaml).
 
 ## Known simplifications (V1, to harden before this goes beyond a demo)
 
 - **No lista de espera.** `CrearRegistro` is rejected outright (`REGISTROS.SIN_CUPO_DISPONIBLE`) when there is no cupo, instead of queueing the Alumno and auto-assigning later. `RegistroIngresoListaEspera`/`RegistroAsignadoDesdeListaEspera` are not implemented.
 - **No `cumplimiento-documental` validation.** That service does not exist yet — `CrearRegistro` does not check the Alumno's documentación general vigente.
 - **No `academic-service` semester projection.** `semestreAlumno` travels explicit in the `CrearRegistro` payload instead of being resolved from a local projection fed by `StudentSemesterChanged` — the BFF is expected to fill it from the session in the meantime.
-- **`JornadaFinalizada` blocks new `CrearRegistro`** (projection moves to `FINALIZADA`), but `RegistroCompletado` for already-registered Alumnos is not implemented — an explicit V1 simplification.
 - **No Transactional Outbox / Consumer Inbox / idempotency records**, same simplification as `jornadas-service` — the schema has `outbox_messages`/`processed_messages`/`idempotency_records` sized for it, unused in V1.
 
 ## Local Development

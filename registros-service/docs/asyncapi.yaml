@@ -52,6 +52,8 @@ channels:
         $ref: '#/components/messages/JornadaEditadaConsumed'
       jornadaCancelada:
         $ref: '#/components/messages/JornadaCanceladaConsumed'
+      jornadaFinalizada:
+        $ref: '#/components/messages/JornadaFinalizadaConsumed'
     bindings:
       amqp:
         is: queue
@@ -91,6 +93,8 @@ channels:
         $ref: '#/components/messages/RegistroCanceladoPorAlumno'
       registroCanceladoPorJornadaCancelada:
         $ref: '#/components/messages/RegistroCanceladoPorJornadaCancelada'
+      registroCompletado:
+        $ref: '#/components/messages/RegistroCompletado'
 
 operations:
   receiveRegistrosCommands:
@@ -245,6 +249,20 @@ components:
               payload:
                 $ref: '#/components/schemas/RegistroCanceladoPorJornadaPayload'
 
+    RegistroCompletado:
+      name: RegistroCompletado
+      description: >
+        Un Registro Confirmado transicionó automáticamente a Completado
+        porque su Jornada finalizó (JornadaFinalizada). RegistroIdPayload
+        reutiliza el mismo shape que RegistroCanceladoPorAlumno.
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/RegistroEventEnvelope'
+          - type: object
+            properties:
+              payload:
+                $ref: '#/components/schemas/RegistroCanceladoPorJornadaPayload'
+
     JornadaPublicadaConsumed:
       name: JornadaPublicada
       description: Consumed from jornadas-service. Authoritative shape lives in jornadas-service/docs/asyncapi.yaml.
@@ -258,6 +276,12 @@ components:
 
     JornadaCanceladaConsumed:
       name: JornadaCancelada
+      payload:
+        type: object
+
+    JornadaFinalizadaConsumed:
+      name: JornadaFinalizada
+      description: Consumed from jornadas-service. Authoritative shape lives in jornadas-service/docs/asyncapi.yaml.
       payload:
         type: object
 

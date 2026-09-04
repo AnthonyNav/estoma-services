@@ -22,8 +22,8 @@ import tools.jackson.databind.JsonNode;
  * Keeps the local, read-only Jornada projection current — registros never
  * joins across service databases (data-model.md §2 de registros).
  * JornadaFinalizada marks the projection FINALIZADA (blocking new
- * CrearRegistro); transitioning existing registros to RegistroCompletado is
- * an explicit V1 simplification, not implemented yet (see README).
+ * CrearRegistro) and completes every Registro Confirmado of that Jornada,
+ * publishing RegistroCompletado for each.
  */
 @Component
 public class JornadasEventListener {
@@ -90,8 +90,22 @@ public class JornadasEventListener {
     UUID jornadaId = envelope.aggregateId();
     int sourceVersion = envelope.aggregateVersion() != null ? envelope.aggregateVersion() : 1;
     // Blocks new CrearRegistro (RegistroCommandService only accepts estado PUBLICADA).
-    // RegistroCompletado for ya-registrados is an explicit V1 simplification (see README).
     jornadaProyeccionRepository.marcarFinalizada(jornadaId, sourceVersion);
+
+    List<Registro> completados = registroRepository.completarPorJornadaFinalizada(jornadaId);
+    for (Registro registro : completados) {
+      Map<String, Object> payload = new LinkedHashMap<>();
+      payload.put("registroId", registro.registroId().toString());
+      payload.put("jornadaId", registro.jornadaId().toString());
+      publisher.publishEvent(
+          "RegistroCompletado",
+          AmqpNames.ROUTING_KEY_REGISTRO_COMPLETADO,
+          envelope.correlationId(),
+          envelope.messageId(),
+          registro.registroId(),
+          registro.version(),
+          payload);
+    }
   }
 
   private static LocalDate optionalDate(JsonNode payload, String field) {
