@@ -1,5 +1,6 @@
 package com.estoma.platformbff.contracts.http.wash;
 
+import com.estoma.platformbff.contracts.http.Required;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import java.time.Instant;
@@ -20,6 +21,9 @@ public final class WashStudentResponses {
   public record StudentHomeAppointment(
       @NotNull UUID appointmentId,
       @NotNull @Pattern(regexp = "SCHEDULED|CANCELLED|MISSED|ENTRY_REJECTED|IN_PROGRESS|COMPLETED") String appointmentStatus,
+      long appointmentVersion,
+      boolean usesExceptionalAuthorization,
+      @Required StudentCancellationAction studentCancellationAction,
       @NotNull @Pattern(regexp = "NORMAL|JOURNEY|IMMUNOCOMPROMISED") String appointmentType,
       Integer instrumentCount,
       @Pattern(regexp = "HIGH_SPEED|LOW_SPEED|CONTRA_ANGLE") String pieceType,
@@ -29,10 +33,16 @@ public final class WashStudentResponses {
       @NotNull @Pattern(regexp = "ENTRY|STUDENT_EXIT|SUPERVISOR_EXIT_REVIEW|NONE") String qrUsageContext,
       String qrRepresentation) {}
 
+  public enum StudentCancellationAction {
+    AVAILABLE,
+    DEADLINE_PASSED,
+    NOT_APPLICABLE
+  }
+
   public record CourseSection(UUID courseSectionId, String nrc, String name) {}
 
   public record AppointmentTimeSlot(UUID appointmentTimeSlotId, Instant startsAt, Instant endsAt,
-                                    String timezone) {}
+                                    String timezone, Instant cancellationDeadlineAt) {}
 
   /** Execution state intentionally matches the student and supervisor front-end read models. */
   public record WashExecution(

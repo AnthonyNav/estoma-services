@@ -44,6 +44,21 @@ class OpenApiControllerTest {
         .get("student");
     assertThat((java.util.List<String>) student.get("type")).containsExactly("object", "null");
 
+    Map<String, Object> home = operation(paths, "/api/v1/wash/student/home", "get");
+    Map<String, Object> homeSchema = responseSchema(home, "200");
+    Map<String, Object> appointment = (Map<String, Object>) ((Map<String, Object>) homeSchema.get("properties"))
+        .get("appointment");
+    Map<String, Object> appointmentProperties = (Map<String, Object>) appointment.get("properties");
+    assertThat(appointmentProperties)
+        .containsKeys("appointmentVersion", "usesExceptionalAuthorization", "studentCancellationAction");
+    assertThat((java.util.List<String>) appointment.get("required"))
+        .contains("appointmentVersion", "usesExceptionalAuthorization", "studentCancellationAction");
+    assertThat((java.util.List<String>) ((Map<String, Object>) appointmentProperties
+        .get("studentCancellationAction")).get("enum"))
+        .containsExactly("AVAILABLE", "DEADLINE_PASSED", "NOT_APPLICABLE");
+    Map<String, Object> timeSlot = (Map<String, Object>) appointmentProperties.get("timeSlot");
+    assertThat((Map<String, Object>) timeSlot.get("properties")).containsKey("cancellationDeadlineAt");
+
     Map<String, Object> admin = operation(paths, "/api/v1/admin/wash/calendars", "post");
     assertThat((java.util.List<Map<String, Object>>) admin.get("parameters"))
         .anySatisfy(parameter -> assertThat(parameter).containsEntry("name", "Idempotency-Key"));

@@ -12,6 +12,7 @@ import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.FormStude
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeAppointment;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeStudent;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentCancellationAction;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.SupervisorEntryLookupResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.WashExecution;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryLookupRequest;
@@ -97,7 +98,8 @@ public class WashStudentQueryService {
     CourseSection course = value.courseSectionId() == null ? null
         : new CourseSection(value.courseSectionId(), value.courseNrc(), value.courseName());
     AppointmentTimeSlot slot = value.appointmentTimeSlotId() == null ? null
-        : new AppointmentTimeSlot(value.appointmentTimeSlotId(), value.startsAt(), value.endsAt(), value.timezone());
+        : new AppointmentTimeSlot(value.appointmentTimeSlotId(), value.startsAt(), value.endsAt(), value.timezone(),
+            value.cancellationDeadlineAt());
     ActiveResourceAssignment assignment = value.resourceAssignmentId() == null ? null
         : new ActiveResourceAssignment(value.resourceAssignmentId(), value.cabinId(), value.cabinCode(),
             value.cabinName(), value.tankId(), value.tankCode(), value.tankName());
@@ -105,9 +107,19 @@ public class WashStudentQueryService {
         : new WashExecution(value.washExecutionId(), value.washExecutionStatus(),
             value.washExecutionVersion(), value.washExecutionArrivedAt(),
             value.washExecutionRejectionReason(), assignment);
-    return new StudentHomeAppointment(value.appointmentId(), value.appointmentStatus(),
+    return new StudentHomeAppointment(value.appointmentId(), value.appointmentStatus(), value.appointmentVersion(),
+        value.exceptionalAuthorizationId() != null, studentCancellationAction(value, clock),
         value.appointmentType(), value.instrumentCount(), value.pieceType(), course, slot, execution,
         qrUsageContext(value, clock), null);
+  }
+
+  private static StudentCancellationAction studentCancellationAction(WashStudentQueryPort.Appointment value,
+      Clock clock) {
+    if (!"SCHEDULED".equals(value.appointmentStatus()) || !value.exceptionalAuthorizationContextKnown()
+        || value.appointmentTimeSlotId() == null
+        || value.cancellationDeadlineAt() == null) return StudentCancellationAction.NOT_APPLICABLE;
+    return clock.instant().isAfter(value.cancellationDeadlineAt())
+        ? StudentCancellationAction.DEADLINE_PASSED : StudentCancellationAction.AVAILABLE;
   }
 
   private static String qrUsageContext(WashStudentQueryPort.Appointment value, Clock clock) {

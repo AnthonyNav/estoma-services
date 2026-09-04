@@ -288,7 +288,10 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
         readModels.upsert(new ProjectionReadModel.Appointment(
             id, appointmentSlotId(p), uuid(p, "studentAccountId"), optionalText(p, "appointmentType"),
             optionalUuid(p, "courseSectionId"), optionalInteger(p, "instrumentCount"), optionalText(p, "pieceType"),
-            appointmentStatus(event.messageType(), p), optionalText(p, "cancellationType"), version,
+            optionalUuid(p, "exceptionalAuthorizationId"),
+            event.messageType().equals("AppointmentScheduled") ? Boolean.TRUE : null,
+            appointmentStatus(event.messageType(), p),
+            optionalText(p, "cancellationType"), version,
             event.occurredAt()));
       }
       case "ExceptionalAppointmentAuthorizationGranted", "ExceptionalAppointmentAuthorizationCancelled" -> {

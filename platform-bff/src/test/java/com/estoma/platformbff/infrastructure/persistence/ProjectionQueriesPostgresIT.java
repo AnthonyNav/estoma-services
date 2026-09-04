@@ -166,6 +166,49 @@ class ProjectionQueriesPostgresIT {
         .map(item -> item.appointmentId()).contains(inProgress);
   }
 
+  @Test
+  void laterAppointmentEventsPreserveSchedulingContextAndRejectStaleVersions() {
+    UUID accountId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    UUID sectionId = UUID.randomUUID();
+    UUID exceptionalAuthorizationId = UUID.randomUUID();
+    Instant startsAt = Instant.parse("2026-08-01T10:00:00Z");
+    Instant cancellationDeadline = startsAt.minusSeconds(3600);
+    jdbc.sql("""
+        INSERT INTO appointment_time_slot_read_model (
+          appointment_time_slot_id, service_date, starts_at, ends_at, timezone,
+          cancellation_deadline_at, status, updated_at)
+        VALUES (:id, '2026-08-01', :startsAt, :endsAt, 'America/Mexico_City',
+          :deadline, 'ACTIVE', :updatedAt)
+        """)
+        .param("id", slotId).param("startsAt", java.sql.Timestamp.from(startsAt))
+        .param("endsAt", java.sql.Timestamp.from(startsAt.plusSeconds(1800)))
+        .param("deadline", java.sql.Timestamp.from(cancellationDeadline))
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+
+    projections.upsert(new ProjectionReadModel.Appointment(appointmentId, slotId, accountId,
+        "NORMAL", sectionId, 8, "HIGH_SPEED", exceptionalAuthorizationId, true,
+        "SCHEDULED", null, 1, startsAt));
+    projections.upsert(new ProjectionReadModel.Appointment(appointmentId, slotId, accountId,
+        null, null, null, null, null, null, "CANCELLED", "STUDENT", 3, startsAt.plusSeconds(120)));
+    projections.upsert(new ProjectionReadModel.Appointment(appointmentId, slotId, accountId,
+        "JOURNEY", UUID.randomUUID(), 1, "LOW_SPEED", UUID.randomUUID(), true,
+        "SCHEDULED", null, 2, startsAt.plusSeconds(60)));
+
+    var projected = studentQueries.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 1))
+        .orElseThrow();
+    assertThat(projected.appointmentStatus()).isEqualTo("CANCELLED");
+    assertThat(projected.appointmentVersion()).isEqualTo(3L);
+    assertThat(projected.appointmentType()).isEqualTo("NORMAL");
+    assertThat(projected.courseSectionId()).isEqualTo(sectionId);
+    assertThat(projected.instrumentCount()).isEqualTo(8);
+    assertThat(projected.pieceType()).isEqualTo("HIGH_SPEED");
+    assertThat(projected.exceptionalAuthorizationId()).isEqualTo(exceptionalAuthorizationId);
+    assertThat(projected.exceptionalAuthorizationContextKnown()).isTrue();
+    assertThat(projected.cancellationDeadlineAt()).isEqualTo(cancellationDeadline);
+  }
+
   private static ProjectionReadModel.MailboxMessage message(UUID id, UUID accountId, Instant createdAt) {
     return message(id, accountId, "LAVADO_ULTRASONICO", createdAt);
   }
