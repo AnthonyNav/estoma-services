@@ -49,6 +49,28 @@ class ProjectionGenesisServiceTest {
   }
 
   @Test
+  void establishesTheBaselineWhenOnlyPersonWasRecoveredBeforeTheInitialAttestation() {
+    service = new ProjectionGenesisService(genesis, statuses, Clock.fixed(NOW, ZoneOffset.UTC));
+    ProjectionGenesisService.TARGETS.forEach(name -> {
+      ProjectionState state = "person".equals(name)
+          ? new ProjectionState(name, ProjectionStatus.READY, NOW, null, 2, NOW.minusSeconds(1))
+          : new ProjectionState(name, ProjectionStatus.BOOTSTRAPPING, null, null, 0, NOW.minusSeconds(1));
+      when(genesis.findStatus(name)).thenReturn(Optional.of(state));
+    });
+    when(genesis.exists(ProjectionGenesisService.MARKER)).thenReturn(false);
+    when(genesis.claim(ProjectionGenesisService.MARKER, NOW)).thenReturn(true);
+
+    assertThat(service.establishFreshBaseline()).isTrue();
+
+    verify(genesis).claim(ProjectionGenesisService.MARKER, NOW);
+    for (String name : ProjectionGenesisService.TARGETS) {
+      if ("person".equals(name)) continue;
+      verify(statuses).upsert(new ProjectionState(name, ProjectionStatus.READY, null, null, 0, NOW));
+    }
+    verify(statuses, never()).upsert(new ProjectionState("person", ProjectionStatus.READY, null, null, 0, NOW));
+  }
+
+  @Test
   void refusesToPromoteAnExistingOrPartiallyRecoveredEnvironment() {
     service = new ProjectionGenesisService(genesis, statuses, Clock.fixed(NOW, ZoneOffset.UTC));
     when(genesis.findStatus(anyString())).thenAnswer(invocation -> {
