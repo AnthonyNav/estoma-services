@@ -258,12 +258,37 @@ def main():
     jornada_2_version = results[0]["payload"]["data"]["version"]
     time.sleep(1.0)
 
+    alumno_3 = str(uuid.uuid4())
+    results, _ = run(
+        "8b) [registros] CrearRegistro -> Alumno 3 se registra en la segunda Jornada",
+        "registros",
+        envelope("CrearRegistro", {"jornadaId": jornada_2_id, "alumnoId": alumno_3, "semestreAlumno": 7}),
+        expect_events=1,
+    )
+    registro_3_id = results[0]["payload"]["data"]["registroId"]
+
+    run(
+        "8c) [registros] ConfirmarRegistro -> Alumno 3 queda CONFIRMADO antes de que la Jornada finalice",
+        "registros",
+        envelope("ConfirmarRegistro", {}, aggregate_id=registro_3_id),
+        expect_events=1,
+    )
+
     publish_fake_event("jornadas.jornada.finalizada", "JornadaFinalizada",
                         jornada_2_id, jornada_2_version + 1, {"jornadaId": jornada_2_id})
     time.sleep(1.0)
 
+    completado_events = drain("demo.events.registros", expect=1, timeout=4)
+    for e in completado_events:
+        print(f"  Event  [{e['messageType']}]: {e['payload']}")
+    assert completado_events and completado_events[0]["messageType"] == "RegistroCompletado", \
+        f"Se esperaba RegistroCompletado tras JornadaFinalizada: {completado_events}"
+    assert completado_events[0]["payload"]["registroId"] == registro_3_id, \
+        "RegistroCompletado debe apuntar al Registro que estaba CONFIRMADO en esa Jornada"
+    print("  OK: el Registro CONFIRMADO de la Jornada finalizada paso automaticamente a COMPLETADO.")
+
     run(
-        "8b) [registros] CrearRegistro -> debe rechazarse, la Jornada ya no esta PUBLICADA",
+        "8d) [registros] CrearRegistro -> debe rechazarse, la Jornada ya no esta PUBLICADA",
         "registros",
         envelope("CrearRegistro", {"jornadaId": jornada_2_id, "alumnoId": str(uuid.uuid4()), "semestreAlumno": 7}),
     )

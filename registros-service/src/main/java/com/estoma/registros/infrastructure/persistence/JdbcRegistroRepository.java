@@ -106,6 +106,16 @@ public class JdbcRegistroRepository {
         Timestamp.from(Instant.now()), jornadaId);
   }
 
+  /** Completes every Confirmado Registro of a finalized Jornada; returns the affected rows. */
+  public List<Registro> completarPorJornadaFinalizada(UUID jornadaId) {
+    return jdbc.query(
+        "UPDATE registro SET estado = 'COMPLETADO', version = version + 1, updated_at = ? "
+            + "WHERE jornada_id = ? AND estado = 'CONFIRMADO' "
+            + "RETURNING registro_id, jornada_id, alumno_id, estado, motivo_rechazo, version",
+        ROW_MAPPER,
+        Timestamp.from(Instant.now()), jornadaId);
+  }
+
   private static Registro mapRow(ResultSet rs, int rowNum) throws SQLException {
     return new Registro(
         (UUID) rs.getObject("registro_id"),

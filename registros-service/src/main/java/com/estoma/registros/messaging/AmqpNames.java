@@ -32,4 +32,5 @@ public final class AmqpNames {
   public static final String ROUTING_KEY_REGISTRO_RECHAZADO = "registros.registro.rechazado";
   public static final String ROUTING_KEY_REGISTRO_CANCELADO_ALUMNO = "registros.registro.cancelado-alumno";
   public static final String ROUTING_KEY_REGISTRO_CANCELADO_JORNADA = "registros.registro.cancelado-jornada-cancelada";
+  public static final String ROUTING_KEY_REGISTRO_COMPLETADO = "registros.registro.completado";
 }
