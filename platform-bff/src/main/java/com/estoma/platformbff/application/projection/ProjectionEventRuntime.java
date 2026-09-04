@@ -94,8 +94,9 @@ public class ProjectionEventRuntime {
     register(entries, "authentication", "AccountPresentationUpdated",
         Set.of("accountId", "personId", "loginType", "loginIdentifier", "status", "updatedAt"),
         Set.of("accountId", "personId", "loginType", "loginIdentifier", "status", "updatedAt"), true);
-    register(entries, "authentication", "SessionRevoked", Set.of("sessionId", "revokedAt", "reasonCode"),
-        Set.of("sessionId", "revokedAt", "reasonCode"), false);
+    register(entries, "authentication", "SessionRevoked",
+        Set.of("sessionId", "accountId", "revokedAt", "reasonCode"),
+        Set.of("sessionId", "accountId", "revokedAt", "reasonCode"), false);
     register(entries, "authentication", "AllAccountSessionsRevoked", Set.of("accountId", "revokedAt", "reasonCode"),
         Set.of("accountId", "revokedAt", "reasonCode"), false);
     register(entries, "authentication", "OtherAccountSessionsRevoked", Set.of("accountId", "currentSessionId", "revokedAt", "reasonCode"),
