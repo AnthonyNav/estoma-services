@@ -5560,6 +5560,9 @@
                         "appointmentType" : {
                           "type" : [ "string", "null" ]
                         },
+                        "appointmentVersion" : {
+                          "type" : "integer"
+                        },
                         "courseSection" : {
                           "additionalProperties" : false,
                           "properties" : {
@@ -5588,11 +5591,19 @@
                         "qrUsageContext" : {
                           "type" : [ "string", "null" ]
                         },
+                        "studentCancellationAction" : {
+                          "enum" : [ "AVAILABLE", "DEADLINE_PASSED", "NOT_APPLICABLE" ],
+                          "type" : "string"
+                        },
                         "timeSlot" : {
                           "additionalProperties" : false,
                           "properties" : {
                             "appointmentTimeSlotId" : {
                               "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "cancellationDeadlineAt" : {
+                              "format" : "date-time",
                               "type" : [ "string", "null" ]
                             },
                             "endsAt" : {
@@ -5608,6 +5619,9 @@
                             }
                           },
                           "type" : [ "object", "null" ]
+                        },
+                        "usesExceptionalAuthorization" : {
+                          "type" : "boolean"
                         },
                         "washExecution" : {
                           "additionalProperties" : false,
@@ -5663,6 +5677,7 @@
                           "type" : [ "object", "null" ]
                         }
                       },
+                      "required" : [ "appointmentVersion", "usesExceptionalAuthorization", "studentCancellationAction" ],
                       "type" : [ "object", "null" ]
                     },
                     "serviceDate" : {
@@ -5756,6 +5771,9 @@
                         "appointmentType" : {
                           "type" : [ "string", "null" ]
                         },
+                        "appointmentVersion" : {
+                          "type" : "integer"
+                        },
                         "courseSection" : {
                           "additionalProperties" : false,
                           "properties" : {
@@ -5784,11 +5802,19 @@
                         "qrUsageContext" : {
                           "type" : [ "string", "null" ]
                         },
+                        "studentCancellationAction" : {
+                          "enum" : [ "AVAILABLE", "DEADLINE_PASSED", "NOT_APPLICABLE" ],
+                          "type" : "string"
+                        },
                         "timeSlot" : {
                           "additionalProperties" : false,
                           "properties" : {
                             "appointmentTimeSlotId" : {
                               "format" : "uuid",
+                              "type" : [ "string", "null" ]
+                            },
+                            "cancellationDeadlineAt" : {
+                              "format" : "date-time",
                               "type" : [ "string", "null" ]
                             },
                             "endsAt" : {
@@ -5804,6 +5830,9 @@
                             }
                           },
                           "type" : [ "object", "null" ]
+                        },
+                        "usesExceptionalAuthorization" : {
+                          "type" : "boolean"
                         },
                         "washExecution" : {
                           "additionalProperties" : false,
@@ -5859,6 +5888,7 @@
                           "type" : [ "object", "null" ]
                         }
                       },
+                      "required" : [ "appointmentVersion", "usesExceptionalAuthorization", "studentCancellationAction" ],
                       "type" : [ "object", "null" ]
                     },
                     "serviceDate" : {

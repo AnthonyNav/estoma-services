@@ -44,9 +44,10 @@ class WashStudentQueryServiceTest {
     UUID appointmentId = UUID.randomUUID();
     UUID executionId = UUID.randomUUID();
     when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
-        .thenReturn(Optional.of(new WashStudentQueryPort.Appointment(appointmentId, "IN_PROGRESS", "NORMAL",
+        .thenReturn(Optional.of(new WashStudentQueryPort.Appointment(appointmentId, "IN_PROGRESS", 3L, "NORMAL",
             10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
-            NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(600), executionId,
+            NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
+            NOW.plusSeconds(600), null, true, executionId,
             "IN_PROGRESS", 3L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
             "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1")));
 
@@ -58,7 +59,66 @@ class WashStudentQueryServiceTest {
     assertThat(response.appointment().washExecution().version()).isEqualTo(3L);
     assertThat(response.appointment().washExecution().activeResourceAssignment().cabinCode()).isEqualTo("C-01");
     assertThat(response.appointment().qrUsageContext()).isEqualTo("STUDENT_EXIT");
+    assertThat(response.appointment().studentCancellationAction().name()).isEqualTo("NOT_APPLICABLE");
     verify(readiness).requireReady("person", "academic", "appointments", "wash-execution");
+  }
+
+  @Test
+  void scheduledAppointmentExposesOwnerVersionExceptionalUsageAndInclusiveCancellationDeadline() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    UUID exceptionalAuthorizationId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(scheduledAppointment(appointmentId, 7L, NOW, exceptionalAuthorizationId)));
+
+    var response = service.home();
+
+    assertThat(response.appointment().appointmentId()).isEqualTo(appointmentId);
+    assertThat(response.appointment().appointmentVersion()).isEqualTo(7L);
+    assertThat(response.appointment().usesExceptionalAuthorization()).isTrue();
+    assertThat(response.appointment().studentCancellationAction().name()).isEqualTo("AVAILABLE");
+    assertThat(response.appointment().timeSlot().cancellationDeadlineAt()).isEqualTo(NOW);
+  }
+
+  @Test
+  void scheduledAppointmentAfterCancellationDeadlineIsDeadlinePassed() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(scheduledAppointment(UUID.randomUUID(), 2L, NOW.minusNanos(1), null)));
+
+    var appointment = service.home().appointment();
+    assertThat(appointment.usesExceptionalAuthorization()).isFalse();
+    assertThat(appointment.studentCancellationAction().name()).isEqualTo("DEADLINE_PASSED");
+  }
+
+  @Test
+  void missingCancellationDeadlineFailsClosed() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(scheduledAppointment(UUID.randomUUID(), 2L, null, null)));
+
+    assertThat(service.home().appointment().studentCancellationAction().name()).isEqualTo("NOT_APPLICABLE");
+  }
+
+  @Test
+  void historicalAppointmentWithoutExceptionalUsageContextFailsClosed() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(scheduledAppointment(UUID.randomUUID(), 2L, NOW.plusSeconds(60), null, false)));
+
+    assertThat(service.home().appointment().studentCancellationAction().name()).isEqualTo("NOT_APPLICABLE");
   }
 
   @Test
@@ -78,9 +138,10 @@ class WashStudentQueryServiceTest {
     when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
     when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
     when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
-        .thenReturn(Optional.of(new WashStudentQueryPort.Appointment(appointmentId, started.status(), "NORMAL",
+        .thenReturn(Optional.of(new WashStudentQueryPort.Appointment(appointmentId, started.status(), 3L, "NORMAL",
             10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", slotId,
-            NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(600), UUID.randomUUID(),
+            NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
+            NOW.plusSeconds(600), null, true, UUID.randomUUID(),
             "IN_PROGRESS", 3L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
             "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1")));
 
@@ -139,9 +200,10 @@ class WashStudentQueryServiceTest {
     when(projections.findAccountIdByStudentEnrollment("201945678")).thenReturn(Optional.of(accountId));
     when(projections.findStudent(accountId)).thenReturn(Optional.of(student()));
     when(projections.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 27)))
-        .thenReturn(Optional.of(new WashStudentQueryPort.Appointment(UUID.randomUUID(), "IN_PROGRESS", "NORMAL",
+        .thenReturn(Optional.of(new WashStudentQueryPort.Appointment(UUID.randomUUID(), "IN_PROGRESS", 3L, "NORMAL",
             10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
-            NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(600), executionId,
+            NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
+            NOW.plusSeconds(600), null, true, executionId,
             "EXIT_SUBMITTED", 4L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
             "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1")));
 
@@ -159,11 +221,26 @@ class WashStudentQueryServiceTest {
   }
 
   private static WashStudentQueryPort.Appointment appointment(UUID executionId) {
-    return new WashStudentQueryPort.Appointment(UUID.randomUUID(), "IN_PROGRESS", "NORMAL",
+    return new WashStudentQueryPort.Appointment(UUID.randomUUID(), "IN_PROGRESS", 3L, "NORMAL",
         10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
-        NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(600), executionId,
+        NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
+        NOW.plusSeconds(600), null, true, executionId,
         "IN_PROGRESS", 3L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
         "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1");
+  }
+
+  private static WashStudentQueryPort.Appointment scheduledAppointment(UUID appointmentId, long version,
+      Instant cancellationDeadlineAt, UUID exceptionalAuthorizationId) {
+    return scheduledAppointment(appointmentId, version, cancellationDeadlineAt, exceptionalAuthorizationId, true);
+  }
+
+  private static WashStudentQueryPort.Appointment scheduledAppointment(UUID appointmentId, long version,
+      Instant cancellationDeadlineAt, UUID exceptionalAuthorizationId, boolean exceptionalContextKnown) {
+    return new WashStudentQueryPort.Appointment(appointmentId, "SCHEDULED", version, "NORMAL",
+        10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
+        NOW, NOW.plusSeconds(3600), "America/Mexico_City", cancellationDeadlineAt,
+        NOW.plusSeconds(600), exceptionalAuthorizationId, exceptionalContextKnown, null, null, null, null, null,
+        null, null, null, null, null, null, null);
   }
 
   private static WashStudentQueryPort.Student student() {

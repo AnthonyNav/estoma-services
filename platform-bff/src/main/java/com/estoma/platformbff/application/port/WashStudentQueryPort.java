@@ -22,6 +22,7 @@ public interface WashStudentQueryPort {
   record Appointment(
       UUID appointmentId,
       String appointmentStatus,
+      long appointmentVersion,
       String appointmentType,
       Integer instrumentCount,
       String pieceType,
@@ -32,7 +33,10 @@ public interface WashStudentQueryPort {
       Instant startsAt,
       Instant endsAt,
       String timezone,
+      Instant cancellationDeadlineAt,
       Instant arrivalToleranceUntil,
+      UUID exceptionalAuthorizationId,
+      boolean exceptionalAuthorizationContextKnown,
       UUID washExecutionId,
       String washExecutionStatus,
       Long washExecutionVersion,

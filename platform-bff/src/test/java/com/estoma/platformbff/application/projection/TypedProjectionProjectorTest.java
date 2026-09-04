@@ -141,4 +141,25 @@ class TypedProjectionProjectorTest {
     assertEquals("ENTRY_REJECTED", execution.status());
     assertEquals(rejectionReason, execution.rejectionReason());
   }
+
+  @Test
+  void appointmentScheduledProjectsExceptionalAuthorizationAndOwnerVersion() {
+    List<ProjectionReadModel> projected = new ArrayList<>();
+    TypedProjectionProjector projector = new TypedProjectionProjector(projected::add, null);
+    UUID appointmentId = UUID.randomUUID();
+    UUID exceptionalAuthorizationId = UUID.randomUUID();
+
+    projector.project(new ProjectionEvent(
+        UUID.randomUUID(), "AppointmentScheduled", 1, "appointments",
+        Instant.parse("2026-08-27T12:00:00Z"), UUID.randomUUID(), UUID.randomUUID(), appointmentId, 7,
+        Map.of("appointmentId", appointmentId, "appointmentTimeSlotId", UUID.randomUUID(),
+            "studentAccountId", UUID.randomUUID(), "appointmentType", "NORMAL",
+            "exceptionalAuthorizationId", exceptionalAuthorizationId)));
+
+    ProjectionReadModel.Appointment appointment = (ProjectionReadModel.Appointment) projected.getFirst();
+    assertEquals(exceptionalAuthorizationId, appointment.exceptionalAuthorizationId());
+    assertEquals(Boolean.TRUE, appointment.exceptionalAuthorizationContextKnown());
+    assertEquals(7, appointment.sourceVersion());
+    assertEquals("SCHEDULED", appointment.status());
+  }
 }

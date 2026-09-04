@@ -50,10 +50,13 @@ public class JdbcWashStudentQueryRepository implements WashStudentQueryPort {
   @Override
   public Optional<Appointment> findPrimaryAppointment(UUID accountId, LocalDate serviceDate) {
     return jdbc.sql("""
-        SELECT a.appointment_id, a.status AS appointment_status, a.appointment_type,
+        SELECT a.appointment_id, a.status AS appointment_status, a.source_version AS appointment_version,
+               a.appointment_type,
                a.instrument_count, a.piece_type, a.course_section_id, c.nrc AS course_nrc,
                c.name AS course_name, a.appointment_time_slot_id, ats.starts_at, ats.ends_at,
-               ats.timezone, ats.arrival_tolerance_until, e.wash_execution_id,
+               ats.timezone, ats.cancellation_deadline_at, ats.arrival_tolerance_until,
+               a.exceptional_authorization_id, a.exceptional_authorization_context_known,
+               e.wash_execution_id,
                e.status AS wash_execution_status, e.execution_version AS wash_execution_version,
                e.arrived_at AS wash_execution_arrived_at,
                e.rejection_reason AS wash_execution_rejection_reason,
@@ -90,11 +93,14 @@ public class JdbcWashStudentQueryRepository implements WashStudentQueryPort {
         .param("accountId", accountId)
         .param("serviceDate", serviceDate)
         .query((rs, rowNum) -> new Appointment(uuid(rs, "appointment_id"),
-            rs.getString("appointment_status"), rs.getString("appointment_type"),
+            rs.getString("appointment_status"), rs.getLong("appointment_version"),
+            rs.getString("appointment_type"),
             integer(rs, "instrument_count"), rs.getString("piece_type"),
             uuid(rs, "course_section_id"), rs.getString("course_nrc"), rs.getString("course_name"),
             uuid(rs, "appointment_time_slot_id"), instant(rs, "starts_at"), instant(rs, "ends_at"),
-            rs.getString("timezone"), instant(rs, "arrival_tolerance_until"),
+            rs.getString("timezone"), instant(rs, "cancellation_deadline_at"),
+            instant(rs, "arrival_tolerance_until"), uuid(rs, "exceptional_authorization_id"),
+            rs.getBoolean("exceptional_authorization_context_known"),
             uuid(rs, "wash_execution_id"), rs.getString("wash_execution_status"),
             longObject(rs, "wash_execution_version"), instant(rs, "wash_execution_arrived_at"),
             rs.getString("wash_execution_rejection_reason"), uuid(rs, "resource_assignment_id"),

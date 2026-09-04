@@ -718,14 +718,14 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
 
   private void appointment(ProjectionReadModel.Appointment v) {
     jdbc.sql("""
-        INSERT INTO appointment_read_model(appointment_id, appointment_time_slot_id, student_account_id, appointment_type, instrument_count, piece_type, course_section_id, status, cancellation_type, source_version, updated_at)
-        VALUES (:id, :slotId, :accountId, :type, :instrumentCount, :pieceType, :sectionId, :status, :cancellationType, :version, :updatedAt)
-        ON CONFLICT (appointment_id) DO UPDATE SET appointment_time_slot_id = EXCLUDED.appointment_time_slot_id, student_account_id = EXCLUDED.student_account_id,
+        INSERT INTO appointment_read_model(appointment_id, appointment_time_slot_id, student_account_id, appointment_type, instrument_count, piece_type, course_section_id, exceptional_authorization_id, exceptional_authorization_context_known, status, cancellation_type, source_version, updated_at)
+        VALUES (:id, :slotId, :accountId, :type, :instrumentCount, :pieceType, :sectionId, :exceptionalAuthorizationId, COALESCE(:exceptionalContextKnown, FALSE), :status, :cancellationType, :version, :updatedAt)
+        ON CONFLICT (appointment_id) DO UPDATE SET appointment_time_slot_id = COALESCE(EXCLUDED.appointment_time_slot_id, appointment_read_model.appointment_time_slot_id), student_account_id = COALESCE(EXCLUDED.student_account_id, appointment_read_model.student_account_id),
           appointment_type = COALESCE(EXCLUDED.appointment_type, appointment_read_model.appointment_type), instrument_count = COALESCE(EXCLUDED.instrument_count, appointment_read_model.instrument_count),
-          piece_type = COALESCE(EXCLUDED.piece_type, appointment_read_model.piece_type), course_section_id = COALESCE(EXCLUDED.course_section_id, appointment_read_model.course_section_id), status = EXCLUDED.status,
+          piece_type = COALESCE(EXCLUDED.piece_type, appointment_read_model.piece_type), course_section_id = COALESCE(EXCLUDED.course_section_id, appointment_read_model.course_section_id), exceptional_authorization_id = COALESCE(EXCLUDED.exceptional_authorization_id, appointment_read_model.exceptional_authorization_id), exceptional_authorization_context_known = COALESCE(:exceptionalContextKnown, appointment_read_model.exceptional_authorization_context_known), status = EXCLUDED.status,
           cancellation_type = COALESCE(EXCLUDED.cancellation_type, appointment_read_model.cancellation_type), source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
         WHERE appointment_read_model.source_version <= EXCLUDED.source_version
-        """).param("id", v.appointmentId()).param("slotId", v.appointmentTimeSlotId()).param("accountId", v.studentAccountId()).param("type", v.appointmentType()).param("instrumentCount", v.instrumentCount()).param("pieceType", v.pieceType()).param("sectionId", v.courseSectionId()).param("status", v.status()).param("cancellationType", v.cancellationType()).param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+        """).param("id", v.appointmentId()).param("slotId", v.appointmentTimeSlotId()).param("accountId", v.studentAccountId()).param("type", v.appointmentType()).param("instrumentCount", v.instrumentCount()).param("pieceType", v.pieceType()).param("sectionId", v.courseSectionId()).param("exceptionalAuthorizationId", v.exceptionalAuthorizationId()).param("exceptionalContextKnown", v.exceptionalAuthorizationContextKnown()).param("status", v.status()).param("cancellationType", v.cancellationType()).param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
   }
 
   private void exceptional(ProjectionReadModel.ExceptionalAuthorization v) {

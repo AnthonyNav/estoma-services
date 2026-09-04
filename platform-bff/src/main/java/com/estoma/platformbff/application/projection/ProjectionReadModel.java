@@ -267,6 +267,8 @@ public sealed interface ProjectionReadModel permits
       UUID courseSectionId,
       Integer instrumentCount,
       String pieceType,
+      UUID exceptionalAuthorizationId,
+      Boolean exceptionalAuthorizationContextKnown,
       String status,
       String cancellationType,
       long sourceVersion,
