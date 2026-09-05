@@ -1,0 +1,58 @@
+{
+  "name": "platform-bff-auth-front-v1-example",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "normalLoginType",
+      "value": "USERNAME",
+      "enabled": true
+    },
+    {
+      "key": "normalLoginIdentifier",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "normalPassword",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "normalNewPassword",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "temporaryLoginType",
+      "value": "USERNAME",
+      "enabled": true
+    },
+    {
+      "key": "temporaryLoginIdentifier",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "temporaryPassword",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "requiredNewPassword",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "deviceName",
+      "value": "Postman Front V1 E2E",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "_postman_exported_at": "2026-09-04T00:00:00.000Z",
+  "_postman_exported_using": "Codex"
+}
