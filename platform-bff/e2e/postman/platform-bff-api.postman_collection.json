@@ -15230,6 +15230,352 @@
                       }
                     },
                     {
+                      "name": "availability",
+                      "description": "",
+                      "item": [
+                        {
+                          "name": "Wash Controller appointment Availability get api v1 wash appointments availability",
+                          "request": {
+                            "name": "Wash Controller appointment Availability get api v1 wash appointments availability",
+                            "description": {
+                              "content": "Owner-derived cache-aside snapshot. A miss or stale snapshot returns 503 with Retry-After after durably scheduling an asynchronous refresh.",
+                              "type": "text/plain"
+                            },
+                            "url": {
+                              "path": [
+                                "api",
+                                "v1",
+                                "wash",
+                                "appointments",
+                                "availability"
+                              ],
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "query": [
+                                {
+                                  "disabled": false,
+                                  "description": {
+                                    "content": "(Required)  (This can only be one of NORMAL,JOURNEY,IMMUNOCOMPROMISED)",
+                                    "type": "text/plain"
+                                  },
+                                  "key": "appointmentType",
+                                  "value": "NORMAL"
+                                },
+                                {
+                                  "disabled": false,
+                                  "description": {
+                                    "content": "(Required) ",
+                                    "type": "text/plain"
+                                  },
+                                  "key": "instrumentCount",
+                                  "value": "1"
+                                },
+                                {
+                                  "disabled": false,
+                                  "description": {
+                                    "content": "(Required)  (This can only be one of HIGH_SPEED,LOW_SPEED,CONTRA_ANGLE)",
+                                    "type": "text/plain"
+                                  },
+                                  "key": "pieceType",
+                                  "value": "HIGH_SPEED"
+                                },
+                                {
+                                  "disabled": false,
+                                  "description": {
+                                    "content": "(Required) ",
+                                    "type": "text/plain"
+                                  },
+                                  "key": "courseSectionId",
+                                  "value": "{{courseSectionId}}"
+                                }
+                              ],
+                              "variable": []
+                            },
+                            "header": [
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "method": "GET",
+                            "body": {},
+                            "auth": {
+                              "type": "bearer",
+                              "bearer": [
+                                {
+                                  "key": "token",
+                                  "value": "{{bearerToken}}"
+                                }
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Successful response",
+                              "originalRequest": {
+                                "url": {
+                                  "path": [
+                                    "api",
+                                    "v1",
+                                    "wash",
+                                    "appointments",
+                                    "availability"
+                                  ],
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "query": [
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required)  (This can only be one of NORMAL,JOURNEY,IMMUNOCOMPROMISED)",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "appointmentType",
+                                      "value": "NORMAL"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required) ",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "instrumentCount",
+                                      "value": "1"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required)  (This can only be one of HIGH_SPEED,LOW_SPEED,CONTRA_ANGLE)",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "pieceType",
+                                      "value": "HIGH_SPEED"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required) ",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "courseSectionId",
+                                      "value": "{{courseSectionId}}"
+                                    }
+                                  ],
+                                  "variable": []
+                                },
+                                "header": [
+                                  {
+                                    "key": "Accept",
+                                    "value": "application/json"
+                                  },
+                                  {
+                                    "description": {
+                                      "content": "Added as a part of security scheme: bearer",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "method": "GET",
+                                "body": {}
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "header": [
+                                {
+                                  "key": "Content-Type",
+                                  "value": "application/json"
+                                }
+                              ],
+                              "body": "{\n  \"canSchedule\": \"<boolean>\",\n  \"blockingReasons\": [\n    \"ACADEMIC_ENROLLMENT_INVALID\",\n    \"DAILY_COMPLETED_LIMIT\"\n  ],\n  \"dailyPenaltyPoints\": \"<integer>\",\n  \"dailyCompletedAppointments\": \"<integer>\",\n  \"exceptionalAuthorizationRequired\": \"<boolean>\",\n  \"exceptionalAuthorizationAvailable\": \"<boolean>\",\n  \"exceptionalAuthorizationId\": \"<string,null-uuid>\",\n  \"availableTimeSlots\": [\n    {\n      \"appointmentTimeSlotId\": \"<uuid>\",\n      \"startsAt\": \"<dateTime>\",\n      \"endsAt\": \"<dateTime>\",\n      \"availableCapacity\": \"<integer>\",\n      \"bookingDeadlineAt\": \"<dateTime>\"\n    },\n    {\n      \"appointmentTimeSlotId\": \"<uuid>\",\n      \"startsAt\": \"<dateTime>\",\n      \"endsAt\": \"<dateTime>\",\n      \"availableCapacity\": \"<integer>\",\n      \"bookingDeadlineAt\": \"<dateTime>\"\n    }\n  ]\n}",
+                              "cookie": [],
+                              "_postman_previewlanguage": "json"
+                            },
+                            {
+                              "name": "Owner snapshot is being refreshed",
+                              "originalRequest": {
+                                "url": {
+                                  "path": [
+                                    "api",
+                                    "v1",
+                                    "wash",
+                                    "appointments",
+                                    "availability"
+                                  ],
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "query": [
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required)  (This can only be one of NORMAL,JOURNEY,IMMUNOCOMPROMISED)",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "appointmentType",
+                                      "value": "NORMAL"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required) ",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "instrumentCount",
+                                      "value": "1"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required)  (This can only be one of HIGH_SPEED,LOW_SPEED,CONTRA_ANGLE)",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "pieceType",
+                                      "value": "HIGH_SPEED"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required) ",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "courseSectionId",
+                                      "value": "{{courseSectionId}}"
+                                    }
+                                  ],
+                                  "variable": []
+                                },
+                                "header": [
+                                  {
+                                    "key": "Accept",
+                                    "value": "application/problem+json"
+                                  },
+                                  {
+                                    "description": {
+                                      "content": "Added as a part of security scheme: bearer",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "method": "GET",
+                                "body": {}
+                              },
+                              "status": "Service Unavailable",
+                              "code": 503,
+                              "header": [
+                                {
+                                  "key": "Content-Type",
+                                  "value": "application/problem+json"
+                                },
+                                {
+                                  "disabled": false,
+                                  "description": {
+                                    "content": "(Required) ",
+                                    "type": "text/plain"
+                                  },
+                                  "key": "Retry-After",
+                                  "value": "<integer>"
+                                }
+                              ],
+                              "body": "{\n  \"type\": \"<string>\",\n  \"title\": \"<string>\",\n  \"status\": \"<integer>\",\n  \"code\": \"<string>\",\n  \"detail\": \"<string>\",\n  \"traceId\": \"<string>\"\n}",
+                              "cookie": [],
+                              "_postman_previewlanguage": "json"
+                            },
+                            {
+                              "name": "Problem response",
+                              "originalRequest": {
+                                "url": {
+                                  "path": [
+                                    "api",
+                                    "v1",
+                                    "wash",
+                                    "appointments",
+                                    "availability"
+                                  ],
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "query": [
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required)  (This can only be one of NORMAL,JOURNEY,IMMUNOCOMPROMISED)",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "appointmentType",
+                                      "value": "NORMAL"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required) ",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "instrumentCount",
+                                      "value": "1"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required)  (This can only be one of HIGH_SPEED,LOW_SPEED,CONTRA_ANGLE)",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "pieceType",
+                                      "value": "HIGH_SPEED"
+                                    },
+                                    {
+                                      "disabled": false,
+                                      "description": {
+                                        "content": "(Required) ",
+                                        "type": "text/plain"
+                                      },
+                                      "key": "courseSectionId",
+                                      "value": "{{courseSectionId}}"
+                                    }
+                                  ],
+                                  "variable": []
+                                },
+                                "header": [
+                                  {
+                                    "key": "Accept",
+                                    "value": "application/problem+json"
+                                  },
+                                  {
+                                    "description": {
+                                      "content": "Added as a part of security scheme: bearer",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "method": "GET",
+                                "body": {}
+                              },
+                              "header": [
+                                {
+                                  "key": "Content-Type",
+                                  "value": "application/problem+json"
+                                }
+                              ],
+                              "body": "{\n  \"type\": \"<string>\",\n  \"title\": \"<string>\",\n  \"status\": \"<integer>\",\n  \"code\": \"<string>\",\n  \"detail\": \"<string>\",\n  \"traceId\": \"<string>\"\n}",
+                              "cookie": [],
+                              "_postman_previewlanguage": "json"
+                            }
+                          ],
+                          "event": [],
+                          "protocolProfileBehavior": {
+                            "disableBodyPruning": true
+                          }
+                        }
+                      ]
+                    },
+                    {
                       "name": "form-context",
                       "description": "",
                       "item": [

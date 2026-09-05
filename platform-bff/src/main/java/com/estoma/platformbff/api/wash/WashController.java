@@ -4,9 +4,13 @@ import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
 import com.estoma.platformbff.application.wash.WashStudentQueryService;
+import com.estoma.platformbff.application.wash.AppointmentAvailabilityService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentAvailabilityResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentType;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.PieceType;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelAppointmentRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CancelExceptionalAuthorizationRequest;
@@ -36,6 +40,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -45,14 +50,17 @@ public class WashController {
   private final LocalAuthorizationService authorization;
   private final WashSupervisionQueryService supervision;
   private final WashStudentQueryService studentQueries;
+  private final AppointmentAvailabilityService appointmentAvailability;
   private final Clock clock;
 
   public WashController(PublicCommandAdapter commands, LocalAuthorizationService authorization,
-      WashSupervisionQueryService supervision, WashStudentQueryService studentQueries, Clock clock) {
+      WashSupervisionQueryService supervision, WashStudentQueryService studentQueries,
+      AppointmentAvailabilityService appointmentAvailability, Clock clock) {
     this.commands = commands;
     this.authorization = authorization;
     this.supervision = supervision;
     this.studentQueries = studentQueries;
+    this.appointmentAvailability = appointmentAvailability;
     this.clock = clock;
   }
 
@@ -271,6 +279,17 @@ public class WashController {
   @GetMapping("/appointments/form-context")
   public AppointmentFormContextResponse appointmentFormContext() {
     return studentQueries.formContext();
+  }
+
+  @GetMapping("/appointments/availability")
+  public AppointmentAvailabilityResponse appointmentAvailability(
+      @RequestParam AppointmentType appointmentType,
+      @RequestParam @jakarta.validation.constraints.Min(1)
+      @jakarta.validation.constraints.Max(80) int instrumentCount,
+      @RequestParam PieceType pieceType,
+      @RequestParam UUID courseSectionId) {
+    return appointmentAvailability.availability(
+        appointmentType, instrumentCount, pieceType, courseSectionId);
   }
 
   private static ResponseEntity<AcceptedOperationResponse> accepted(AcceptedOperationResponse response) {

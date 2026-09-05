@@ -110,9 +110,15 @@ qrUsageContext = NONE
 GET /api/v1/wash/appointments/availability
 ```
 
-permanece intencionalmente ausente mientras Appointments no publique el contrato owner-derived
-consumible por BFF. No se calcula `capacity - demand`, no se reutilizan Queries de recovery y no se
-hace HTTP/gRPC al owner.
+queda habilitado por el contrato owner-derived V1 de Appointments. Recibe `appointmentType`,
+`instrumentCount`, `pieceType` y `courseSectionId`; `studentAccountId` y `serviceDate` se derivan en
+servidor. Un snapshot fresco se responde con `200`. Si falta o venció, el BFF registra un refresh
+durable y responde `503` para que el cliente reintente; no mantiene abierta la request esperando
+RabbitMQ.
+
+No se calcula `capacity - demand`, no se reutilizan Queries de recovery y no se hace HTTP/gRPC al
+owner. La respuesta omite metadata interna de mensajería y expone únicamente la decisión y los slots
+derivados por Appointments.
 
 ## Gaps que permanecen fuera de esta corrección
 

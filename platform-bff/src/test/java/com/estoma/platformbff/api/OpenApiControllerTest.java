@@ -28,12 +28,42 @@ class OpenApiControllerTest {
 
   @Test
   @SuppressWarnings("unchecked")
-  void documentHasEveryLivePublicRouteWithConcreteSchemasAndNoAvailabilityPlaceholder() {
+  void documentHasEveryLivePublicRouteWithConcreteSchemasAndAvailabilityProvider() {
     Map<String, Object> document = openApi.document();
     Map<String, Object> paths = (Map<String, Object>) document.get("paths");
 
     assertThat(paths.keySet()).containsExactlyInAnyOrderElementsOf(documentedMappings());
-    assertThat(paths).doesNotContainKey("/api/v1/wash/appointments/availability");
+    assertThat(paths).containsKey("/api/v1/wash/appointments/availability");
+
+    Map<String, Object> availability = operation(paths,
+        "/api/v1/wash/appointments/availability", "get");
+    assertThat((java.util.List<Map<String, Object>>) availability.get("parameters"))
+        .allSatisfy(parameter -> assertThat(parameter).containsEntry("required", true))
+        .anySatisfy(parameter -> {
+          assertThat(parameter).containsEntry("name", "instrumentCount");
+          assertThat((Map<String, Object>) parameter.get("schema"))
+              .containsEntry("minimum", 1L).containsEntry("maximum", 80L);
+        });
+    Map<String, Object> availabilitySchema = responseSchema(availability, "200");
+    assertThat((java.util.List<String>) availabilitySchema.get("required"))
+        .containsExactlyInAnyOrder("canSchedule", "blockingReasons", "dailyPenaltyPoints",
+            "dailyCompletedAppointments", "exceptionalAuthorizationRequired",
+            "exceptionalAuthorizationAvailable", "exceptionalAuthorizationId",
+            "availableTimeSlots");
+    Map<String, Object> availabilityProperties =
+        (Map<String, Object>) availabilitySchema.get("properties");
+    assertThat((Map<String, Object>) availabilityProperties.get("blockingReasons"))
+        .containsEntry("type", "array");
+    assertThat((Map<String, Object>) availabilityProperties.get("availableTimeSlots"))
+        .containsEntry("type", "array");
+    Map<String, Object> slot = (Map<String, Object>) ((Map<String, Object>)
+        availabilityProperties.get("availableTimeSlots")).get("items");
+    assertThat((java.util.List<String>) slot.get("required"))
+        .containsExactlyInAnyOrder("appointmentTimeSlotId", "startsAt", "endsAt",
+            "availableCapacity", "bookingDeadlineAt");
+    Map<String, Object> unavailable = (Map<String, Object>)
+        ((Map<String, Object>) availability.get("responses")).get("503");
+    assertThat((Map<String, Object>) unavailable.get("headers")).containsKey("Retry-After");
 
     Map<String, Object> formContext = operation(paths, "/api/v1/wash/appointments/form-context", "get");
     Map<String, Object> responseSchema = responseSchema(formContext, "200");

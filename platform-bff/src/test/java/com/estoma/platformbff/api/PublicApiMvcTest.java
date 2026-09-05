@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -21,11 +22,14 @@ import com.estoma.platformbff.application.security.EffectiveSystemService;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
 import com.estoma.platformbff.application.wash.WashStudentQueryService;
+import com.estoma.platformbff.application.wash.AppointmentAvailabilityService;
+import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.mailbox.MailboxMessagesResponse;
 import com.estoma.platformbff.contracts.http.mailbox.MailboxSystemSummaryResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentAvailabilityResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSection;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.FormStudent;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
@@ -57,6 +61,7 @@ class PublicApiMvcTest {
   @Mock MailboxQueryService mailboxQueries;
   @Mock WashSupervisionQueryService supervision;
   @Mock WashStudentQueryService studentQueries;
+  @Mock AppointmentAvailabilityService appointmentAvailability;
 
   private MockMvc mailboxMvc;
   private MockMvc washMvc;
@@ -81,7 +86,8 @@ class PublicApiMvcTest {
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
     washMvc = MockMvcBuilders.standaloneSetup(
-        new WashController(commands, authorization, supervision, studentQueries, clock))
+        new WashController(commands, authorization, supervision, studentQueries,
+            appointmentAvailability, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
@@ -157,11 +163,34 @@ class PublicApiMvcTest {
   }
 
   @Test
-  void supervisionIsAvailableButAppointmentAvailabilityHasNoController() throws Exception {
+  void supervisionAndOwnerDerivedAppointmentAvailabilityAreAvailable() throws Exception {
     washMvc.perform(get("/api/v1/wash/supervision/pending-reassignments"))
         .andExpect(status().isOk());
-    washMvc.perform(get("/api/v1/wash/appointments/availability"))
-        .andExpect(status().isNotFound());
+    when(appointmentAvailability.availability(any(), eq(15), any(), any()))
+        .thenReturn(new AppointmentAvailabilityResponse(true, List.of(), 0, 0,
+            false, false, null, List.of()));
+    washMvc.perform(get("/api/v1/wash/appointments/availability")
+            .param("appointmentType", "NORMAL")
+            .param("instrumentCount", "15")
+            .param("pieceType", "HIGH_SPEED")
+            .param("courseSectionId", "00000000-0000-0000-0000-000000000001"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.canSchedule").value(true));
+  }
+
+  @Test
+  void appointmentAvailabilityRefreshReturns503WithRetryAfter() throws Exception {
+    when(appointmentAvailability.availability(any(), eq(15), any(), any()))
+        .thenThrow(new AppointmentAvailabilityRefreshingException(1));
+
+    washMvc.perform(get("/api/v1/wash/appointments/availability")
+            .param("appointmentType", "NORMAL")
+            .param("instrumentCount", "15")
+            .param("pieceType", "HIGH_SPEED")
+            .param("courseSectionId", "00000000-0000-0000-0000-000000000001"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(header().string("Retry-After", "1"))
+        .andExpect(jsonPath("$.code").value("BFF.PROJECTION_UNAVAILABLE"));
   }
 
   @Test

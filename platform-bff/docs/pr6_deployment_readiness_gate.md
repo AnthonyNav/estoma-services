@@ -193,7 +193,8 @@ Requisitos:
 - ningún endpoint funcional puede quedar fuera del OpenAPI;
 - prueba automática de drift entre el inventario HTTP soportado y el spec.
 
-`GET /api/v1/wash/appointments/availability` permanece fuera de la superficie ejecutable mientras siga `GATED_BY_APPOINTMENTS_OWNER_CONTRACT`.
+`GET /api/v1/wash/appointments/availability` forma parte de la superficie ejecutable mediante el
+contrato owner V1 y debe permanecer sincronizado con OpenAPI.
 
 ### 3.5 Hardening operativo y E2E
 
@@ -235,7 +236,8 @@ Cobertura mínima obligatoria:
 19. OpenAPI sin drift;
 20. Docker image build/start smoke.
 
-No se exige incorporar Availability a este E2E mientras el owner gate siga abierto.
+Availability debe incorporarse al E2E coordinado con el owner: miss/stale `503 + Retry-After`,
+Query/Result correlacionados y posterior hit fresco `200`.
 
 ---
 
@@ -245,10 +247,11 @@ No se exige incorporar Availability a este E2E mientras el owner gate siga abier
 GET /api/v1/wash/appointments/availability
 ```
 
-no es blocker del deployment-readiness del BFF mientras siga formalmente:
+dejó de estar bloqueado porque Appointments publicó:
 
 ```text
-GATED_BY_APPOINTMENTS_OWNER_CONTRACT
+GetAppointmentAvailability v1
+GetAppointmentAvailabilityResult v1
 ```
 
 Motivo:
@@ -256,12 +259,11 @@ Motivo:
 - Appointments es owner del matching/disponibilidad;
 - el BFF no puede copiar `AppointmentCapacityMatcher`;
 - el BFF no puede aproximar `capacity - demand`;
-- el BFF no puede inventar un Query owner;
+- el BFF consume exclusivamente el Query owner publicado;
 - Queries de recovery existentes no se reutilizan como API de disponibilidad.
 
-Si antes de PR6 se cierra en documentación canónica un contrato owner-derived específico para Availability y ya existe owner implementation compatible, PR6 debe incorporarlo. Si no, la ruta continúa ausente y el OpenAPI debe reflejar la ausencia.
-
-Esto no crea deuda BFF: el gate pertenece al owner Appointments.
+El adapter incorporado es cache-aside asíncrono y no duplica el matching. La evidencia detallada está
+en [`appointment_availability_gate_resolution.md`](appointment_availability_gate_resolution.md).
 
 ---
 

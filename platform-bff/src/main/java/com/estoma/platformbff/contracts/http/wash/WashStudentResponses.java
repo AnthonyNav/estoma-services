@@ -1,6 +1,7 @@
 package com.estoma.platformbff.contracts.http.wash;
 
 import com.estoma.platformbff.contracts.http.Required;
+import com.estoma.platformbff.contracts.http.RequiredNullable;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import java.time.Instant;
@@ -69,6 +70,37 @@ public final class WashStudentResponses {
 
   public record FormStudent(@NotNull String fullName, @NotNull String studentEnrollment,
                             @NotNull Integer currentSemester) {}
+
+  public enum AppointmentType { NORMAL, JOURNEY, IMMUNOCOMPROMISED }
+
+  public enum PieceType { HIGH_SPEED, LOW_SPEED, CONTRA_ANGLE }
+
+  public enum AvailabilityBlockingReason {
+    ACTIVE_APPOINTMENT_EXISTS,
+    STUDENT_BLOCKED,
+    DAILY_COMPLETED_LIMIT,
+    EXCEPTIONAL_AUTHORIZATION_REQUIRED,
+    ACADEMIC_ENROLLMENT_INVALID,
+    STUDENT_ACCESS_DENIED
+  }
+
+  /** Owner-derived availability photograph. Reading it never reserves capacity. */
+  public record AppointmentAvailabilityResponse(
+      @Required boolean canSchedule,
+      @Required List<AvailabilityBlockingReason> blockingReasons,
+      @Required int dailyPenaltyPoints,
+      @Required int dailyCompletedAppointments,
+      @Required boolean exceptionalAuthorizationRequired,
+      @Required boolean exceptionalAuthorizationAvailable,
+      @RequiredNullable UUID exceptionalAuthorizationId,
+      @Required List<AvailableAppointmentTimeSlot> availableTimeSlots) {}
+
+  public record AvailableAppointmentTimeSlot(
+      @Required UUID appointmentTimeSlotId,
+      @Required Instant startsAt,
+      @Required Instant endsAt,
+      @Required @jakarta.validation.constraints.Positive int availableCapacity,
+      @Required Instant bookingDeadlineAt) {}
 
   /** Side-effect-free WASH-STU-03 manual supervisor lookup response. */
   public record SupervisorEntryLookupResponse(

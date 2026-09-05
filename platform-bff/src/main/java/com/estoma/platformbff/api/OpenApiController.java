@@ -147,12 +147,23 @@ public class OpenApiController {
     Map<String, Object> successSchema = accepted
         ? Map.of("$ref", "#/components/schemas/AcceptedOperation")
         : schemaFor(responseType(handler));
-    operation.put("responses", Map.of(
-        success, Map.of("description", accepted ? "Accepted" : "Successful response", "content", Map.of(
-            MediaType.APPLICATION_JSON_VALUE, Map.of("schema", successSchema))),
-        "default", Map.of("description", "Problem response", "content", Map.of(
-            MediaType.APPLICATION_PROBLEM_JSON_VALUE,
-            Map.of("schema", Map.of("$ref", "#/components/schemas/Problem"))))));
+    Map<String, Object> responses = new LinkedHashMap<>();
+    responses.put(success, Map.of("description", accepted ? "Accepted" : "Successful response",
+        "content", Map.of(MediaType.APPLICATION_JSON_VALUE, Map.of("schema", successSchema))));
+    if (handler.getMethod().getName().equals("appointmentAvailability")) {
+      operation.put("description", "Owner-derived cache-aside snapshot. A miss or stale snapshot "
+          + "returns 503 with Retry-After after durably scheduling an asynchronous refresh.");
+      responses.put("503", Map.of(
+          "description", "Owner snapshot is being refreshed",
+          "headers", Map.of("Retry-After", Map.of("required", true,
+              "schema", Map.of("type", "integer", "minimum", 1))),
+          "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
+    }
+    responses.put("default", Map.of("description", "Problem response", "content", Map.of(
+        MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+        Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
+    operation.put("responses", responses);
     return operation;
   }
 
