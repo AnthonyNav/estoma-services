@@ -3,7 +3,7 @@
 The harness has two deliberately different collections:
 
 - `postman/platform-bff-e2e.postman_collection.json` is the safe smoke suite: health, runtime OpenAPI and unauthenticated boundary checks. It can be used against a local BFF or an approved `develop` endpoint.
-- `postman/platform-bff-api.postman_collection.json` is a generated-style catalogue of the current 85 public OpenAPI operations. It is **not** a workflow suite and contains state-changing requests; run the static contract gate rather than running it blindly.
+- `postman/platform-bff-api.postman_collection.json` is a generated-style catalogue of the current 86 public OpenAPI operations. It is **not** a workflow suite and contains state-changing requests; run the static contract gate rather than running it blindly.
 - `postman/workflows/` contains fixture-backed Front V1 workflows only after their contracts have been exercised. Authentication coverage and its fixture requirements are documented in `postman/workflows/README.md`.
 
 ## Static contract gate

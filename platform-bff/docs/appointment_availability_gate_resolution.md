@@ -1,6 +1,7 @@
 # Platform BFF — Appointment Availability Gate Resolution
 
-**Estado:** resuelto de forma coordinada con el owner; ambos cambios son interdependientes  
+**Estado:** resuelto de forma coordinada con el owner; ambos cambios son interdependientes
+
 **Ruta HTTP:** `GET /api/v1/wash/appointments/availability`
 
 ## Por qué el gate puede abrirse
