@@ -18,7 +18,12 @@ final class LocalAuthorizationPolicy {
   boolean canSchedule(CommandMetadata metadata, UUID studentId) {
     ActorContext actor = metadata.actor();
     return actor.isAccount() && actor.accountId().equals(studentId)
-        && hasRoleAndAccess(actor.accountId(), Set.of("ALUMNO"));
+        && canStudentSchedule(studentId);
+  }
+
+  /** Evaluates the target student's owner-local authorization without impersonating a SYSTEM actor. */
+  boolean canStudentSchedule(UUID studentId) {
+    return studentId != null && hasRoleAndAccess(studentId, Set.of("ALUMNO"));
   }
 
   boolean canCancelOwn(CommandMetadata metadata, UUID studentId) {

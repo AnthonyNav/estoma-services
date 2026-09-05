@@ -1,0 +1,312 @@
+asyncapi: 3.0.0
+
+info:
+  title: appointments-service availability V1 messaging contract
+  version: 1.0.0
+  description: >
+    Executable wire contract for the durable, owner-derived availability snapshot consumed by
+    platform-bff. Normative business rules remain in estomatologia-platform-docs/main. This
+    document intentionally describes the availability Query/Result introduced to resolve the
+    Front V1 WASH-STU-02 provider gate.
+
+defaultContentType: application/json
+
+channels:
+  queries.appointments:
+    address: queries.appointments
+    description: Durable queue bound to platform.queries with routing key appointments.
+    messages:
+      getAppointmentAvailability:
+        $ref: '#/components/messages/GetAppointmentAvailability'
+    bindings:
+      amqp:
+        is: queue
+        queue:
+          name: queries.appointments
+          durable: true
+          exclusive: false
+          autoDelete: false
+          arguments:
+            x-dead-letter-exchange: platform.dlx
+            x-dead-letter-routing-key: queries.appointments.dlq
+
+  platform.results.bff:
+    address: platform.results
+    description: Direct exchange publication with routing key bff.
+    messages:
+      getAppointmentAvailabilityResult:
+        $ref: '#/components/messages/GetAppointmentAvailabilityResult'
+
+operations:
+  receiveAppointmentAvailabilityQuery:
+    action: receive
+    channel:
+      $ref: '#/channels/queries.appointments'
+  sendAppointmentAvailabilityResult:
+    action: send
+    channel:
+      $ref: '#/channels/platform.results.bff'
+
+components:
+  messages:
+    GetAppointmentAvailability:
+      name: GetAppointmentAvailability
+      payload:
+        $ref: '#/components/schemas/GetAppointmentAvailabilityEnvelope'
+    GetAppointmentAvailabilityResult:
+      name: GetAppointmentAvailabilityResult
+      payload:
+        $ref: '#/components/schemas/GetAppointmentAvailabilityResultEnvelope'
+
+  schemas:
+    Uuid:
+      type: string
+      format: uuid
+    Instant:
+      type: string
+      format: date-time
+    SystemActor:
+      type: object
+      additionalProperties: false
+      required: [type, service]
+      properties:
+        type:
+          const: SYSTEM
+        service:
+          type: string
+
+    GetAppointmentAvailabilityEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - messageId
+        - messageType
+        - messageVersion
+        - messageKind
+        - producer
+        - occurredAt
+        - correlationId
+        - actor
+        - payload
+      properties:
+        messageId:
+          $ref: '#/components/schemas/Uuid'
+        messageType:
+          const: GetAppointmentAvailability
+        messageVersion:
+          const: 1
+        messageKind:
+          const: QUERY
+        producer:
+          const: bff
+        occurredAt:
+          $ref: '#/components/schemas/Instant'
+        correlationId:
+          $ref: '#/components/schemas/Uuid'
+        causationId:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        operationId:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        idempotencyKey:
+          type: 'null'
+        aggregateId:
+          type: 'null'
+        aggregateVersion:
+          type: 'null'
+        actor:
+          allOf:
+            - $ref: '#/components/schemas/SystemActor'
+            - type: object
+              properties:
+                service:
+                  const: bff
+        payload:
+          $ref: '#/components/schemas/AvailabilityRequestContext'
+
+    AvailabilityRequestContext:
+      type: object
+      additionalProperties: false
+      required:
+        - studentAccountId
+        - serviceDate
+        - appointmentType
+        - instrumentCount
+        - pieceType
+        - courseSectionId
+      properties:
+        studentAccountId:
+          $ref: '#/components/schemas/Uuid'
+        serviceDate:
+          type: string
+          format: date
+        appointmentType:
+          enum: [NORMAL, JOURNEY, IMMUNOCOMPROMISED]
+        instrumentCount:
+          type: integer
+          minimum: 1
+          maximum: 80
+        pieceType:
+          enum: [HIGH_SPEED, LOW_SPEED, CONTRA_ANGLE]
+        courseSectionId:
+          $ref: '#/components/schemas/Uuid'
+
+    GetAppointmentAvailabilityResultEnvelope:
+      type: object
+      additionalProperties: false
+      required:
+        - messageId
+        - messageType
+        - messageVersion
+        - messageKind
+        - producer
+        - occurredAt
+        - correlationId
+        - causationId
+        - actor
+        - payload
+      properties:
+        messageId:
+          $ref: '#/components/schemas/Uuid'
+        messageType:
+          const: GetAppointmentAvailabilityResult
+        messageVersion:
+          const: 1
+        messageKind:
+          const: RESULT
+        producer:
+          const: appointments
+        occurredAt:
+          $ref: '#/components/schemas/Instant'
+        correlationId:
+          $ref: '#/components/schemas/Uuid'
+        causationId:
+          $ref: '#/components/schemas/Uuid'
+        operationId:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        idempotencyKey:
+          type: 'null'
+        aggregateId:
+          type: 'null'
+        aggregateVersion:
+          type: 'null'
+        actor:
+          allOf:
+            - $ref: '#/components/schemas/SystemActor'
+            - type: object
+              properties:
+                service:
+                  const: appointments
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/AvailabilitySucceededPayload'
+            - $ref: '#/components/schemas/AvailabilityRejectedPayload'
+
+    AvailabilitySucceededPayload:
+      type: object
+      additionalProperties: false
+      required: [status, data]
+      properties:
+        status:
+          const: SUCCEEDED
+        data:
+          $ref: '#/components/schemas/AvailabilitySnapshot'
+
+    AvailabilityRejectedPayload:
+      type: object
+      additionalProperties: false
+      required: [status, error]
+      properties:
+        status:
+          const: REJECTED
+        error:
+          type: object
+          additionalProperties: false
+          required: [code]
+          properties:
+            code:
+              const: INVALID_AVAILABILITY_CONTEXT
+
+    AvailabilitySnapshot:
+      type: object
+      additionalProperties: false
+      required:
+        - snapshotId
+        - snapshotGeneratedAt
+        - freshUntil
+        - requestContext
+        - canSchedule
+        - blockingReasons
+        - dailyPenaltyPoints
+        - dailyCompletedAppointments
+        - exceptionalAuthorizationRequired
+        - exceptionalAuthorizationAvailable
+        - exceptionalAuthorizationId
+        - availableTimeSlots
+      properties:
+        snapshotId:
+          $ref: '#/components/schemas/Uuid'
+        snapshotGeneratedAt:
+          $ref: '#/components/schemas/Instant'
+        freshUntil:
+          $ref: '#/components/schemas/Instant'
+        requestContext:
+          $ref: '#/components/schemas/AvailabilityRequestContext'
+        canSchedule:
+          type: boolean
+        blockingReasons:
+          type: array
+          uniqueItems: true
+          items:
+            enum:
+              - ACTIVE_APPOINTMENT_EXISTS
+              - STUDENT_BLOCKED
+              - DAILY_COMPLETED_LIMIT
+              - EXCEPTIONAL_AUTHORIZATION_REQUIRED
+              - ACADEMIC_ENROLLMENT_INVALID
+              - STUDENT_ACCESS_DENIED
+        dailyPenaltyPoints:
+          type: integer
+          minimum: 0
+        dailyCompletedAppointments:
+          type: integer
+          minimum: 0
+        exceptionalAuthorizationRequired:
+          type: boolean
+        exceptionalAuthorizationAvailable:
+          type: boolean
+        exceptionalAuthorizationId:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+        availableTimeSlots:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvailableTimeSlot'
+
+    AvailableTimeSlot:
+      type: object
+      additionalProperties: false
+      required:
+        - appointmentTimeSlotId
+        - startsAt
+        - endsAt
+        - availableCapacity
+        - bookingDeadlineAt
+      properties:
+        appointmentTimeSlotId:
+          $ref: '#/components/schemas/Uuid'
+        startsAt:
+          $ref: '#/components/schemas/Instant'
+        endsAt:
+          $ref: '#/components/schemas/Instant'
+        availableCapacity:
+          type: integer
+          minimum: 1
+        bookingDeadlineAt:
+          $ref: '#/components/schemas/Instant'
