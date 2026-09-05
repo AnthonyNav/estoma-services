@@ -13,8 +13,34 @@ mock_sql() {
     platform_bff_db:*"FROM client_operations"*"status='PENDING'"*) printf '0\n' ;;
     wash_execution_db:*"status <> 'PUBLISHED'"*) printf '0\n0\n' ;;
     appointments_db:*"pending_wash_execution_events"*) printf '0\n0\n' ;;
-    wash_execution_db:*"DELETE FROM resource_assignments"*) : > "$state_dir/owner-cleaned" ;;
-    platform_bff_db:*"DELETE FROM wash_resource_assignment_read_model"*) : > "$state_dir/bff-cleaned" ;;
+    appointments_db:*"entry_authorized_source_event_id"*"WashExecutionStarted"*)
+      : > "$state_dir/appointments-consumption-checked"
+      printf '%s\n' "${E2E_MOCK_APPOINTMENTS_CONSUMED:-1}" ;;
+    appointments_db:*"arrival_source_event_id"*"WashArrivalRegistered"*)
+      : > "$state_dir/appointments-consumption-checked"
+      printf '%s\n' "${E2E_MOCK_APPOINTMENTS_CONSUMED:-1}" ;;
+    platform_bff_db:*"consumer_name='bff-projection-runtime'"*"WashResourceAssigned"*)
+      : > "$state_dir/bff-consumption-checked"
+      if [ "${E2E_MOCK_BFF_CONSUMED:-1}" = 0 ]; then printf '0|0|0|0\n'
+      elif [ "${E2E_MOCK_EXECUTION_STATE:-}" = 'PENDING_ENTRY|1' ]; then printf '1|0|0|0\n'
+      else printf '1|1|1|1\n'; fi ;;
+    wash_execution_db:*"DELETE FROM resource_assignments"*)
+      case "$input" in *"LOCK TABLE wash_executions, entry_validations, resource_assignments"*) ;; *) exit 1 ;; esac
+      case "$input" in *"cabin_id='00000000-0000-4000-8000-000000000007'::uuid OR code='E2E-authorized-retry-CABIN'"*) ;; *) exit 1 ;; esac
+      case "$input" in *"execution changed after cleanup proof"*) ;; *) exit 1 ;; esac
+      case "$input" in *"message_type='WashExecutionStarted'"*"idempotency_key='e2e-wash-authorized-retry-decide-entry'"*) ;; *) exit 1 ;; esac
+      [ "${E2E_MOCK_ALTERED_RESOURCE:-0}" = 0 ] || exit 1
+      [ "${E2E_MOCK_CHANGED_AFTER_PROOF:-0}" = 0 ] || exit 1
+      : > "$state_dir/owner-cleaned"
+      ;;
+    platform_bff_db:*"DELETE FROM wash_resource_assignment_read_model"*)
+      case "$input" in *"LOCK TABLE client_operations, inbox_messages"*) ;; *) exit 1 ;; esac
+      case "$input" in *"cabin_id='00000000-0000-4000-8000-000000000007'::uuid OR code='E2E-authorized-retry-CABIN'"*) ;; *) exit 1 ;; esac
+      case "$input" in *"BFF execution changed after cleanup proof"*) ;; *) exit 1 ;; esac
+      case "$input" in *"a.source_version=2"*) ;; *) exit 1 ;; esac
+      [ "${E2E_MOCK_ALTERED_BFF_RESOURCE:-0}" = 0 ] || exit 1
+      : > "$state_dir/bff-cleaned"
+      ;;
     wash_execution_db:*"SELECT wash_execution_id FROM wash_executions"*)
       [ -f "$state_dir/owner-cleaned" ] || printf '00000000-0000-4000-8000-000000000020\n' ;;
     wash_execution_db:*"SELECT status || '|' || version FROM wash_executions"*)
@@ -27,10 +53,6 @@ mock_sql() {
       if [ "${E2E_MOCK_EXECUTION_STATE:-}" = 'PENDING_ENTRY|1' ]; then printf 'SCHEDULED|1\n'; else printf 'IN_PROGRESS|3\n'; fi ;;
     platform_bff_db:*"source_version FROM appointment_read_model"*)
       if [ "${E2E_MOCK_EXECUTION_STATE:-}" = 'PENDING_ENTRY|1' ]; then printf 'SCHEDULED|1\n'; else printf 'IN_PROGRESS|3\n'; fi ;;
-    wash_execution_db:*"FROM cabin_projection"*"FROM tank_projection"*)
-      if [ -f "$state_dir/owner-cleaned" ]; then printf '0|0\n'; else printf '1|1\n'; fi ;;
-    platform_bff_db:*"FROM wash_cabin_read_model"*"FROM wash_tank_read_model"*)
-      if [ -f "$state_dir/bff-cleaned" ]; then printf '0|0\n'; else printf '1|1\n'; fi ;;
     *) printf 'unexpected mock SQL for %s:\n%s\n' "$database" "$input" >&2; exit 1 ;;
   esac
 }
@@ -85,6 +107,9 @@ fi
 [ -f "$state_dir/owner-cleaned" ] && [ ! -f "$state_dir/bff-cleaned" ] && [ -f "$manifest" ] || {
   printf 'owner phase was not safely retryable\n' >&2; exit 1;
 }
+[ -f "$state_dir/appointments-consumption-checked" ] && [ -f "$state_dir/bff-consumption-checked" ] || {
+  printf 'cleanup skipped a downstream source-event consumption barrier\n' >&2; exit 1;
+}
 run_cleanup >/dev/null
 [ -f "$state_dir/bff-cleaned" ] && [ ! -f "$manifest" ] || { printf 'retry failed\n' >&2; exit 1; }
 
@@ -102,6 +127,29 @@ if E2E_MOCK_EXECUTION_STATE='ENTRY_REJECTED|2' run_cleanup >/dev/null 2>&1; then
 fi
 [ ! -f "$state_dir/owner-cleaned" ] && [ -f "$manifest" ] || {
   printf 'unsafe execution was changed or lost its manifest\n' >&2; exit 1;
+}
+
+rm -f "$state_dir/owner-cleaned" "$state_dir/bff-cleaned"
+cp "$state_dir/original-manifest" "$manifest"
+if E2E_MOCK_ALTERED_RESOURCE=1 run_cleanup >/dev/null 2>&1; then
+  printf 'cleanup accepted an altered owner resource\n' >&2; exit 1
+fi
+[ ! -f "$state_dir/owner-cleaned" ] && [ -f "$manifest" ] || {
+  printf 'altered owner resource was deleted or lost its manifest\n' >&2; exit 1;
+}
+
+if E2E_MOCK_CHANGED_AFTER_PROOF=1 run_cleanup >/dev/null 2>&1; then
+  printf 'cleanup accepted an execution changed after its read proof\n' >&2; exit 1
+fi
+[ ! -f "$state_dir/owner-cleaned" ] && [ -f "$manifest" ] || {
+  printf 'concurrently changed execution was deleted or lost its manifest\n' >&2; exit 1;
+}
+
+if E2E_MOCK_ALTERED_BFF_RESOURCE=1 run_cleanup >/dev/null 2>&1; then
+  printf 'cleanup accepted an altered BFF resource\n' >&2; exit 1
+fi
+[ -f "$state_dir/owner-cleaned" ] && [ ! -f "$state_dir/bff-cleaned" ] && [ -f "$manifest" ] || {
+  printf 'altered BFF resource did not preserve retry state\n' >&2; exit 1;
 }
 
 if E2E_ISOLATED_NAMESPACE=production E2E_ENTRY_FIXTURE_MANIFEST="$manifest" \

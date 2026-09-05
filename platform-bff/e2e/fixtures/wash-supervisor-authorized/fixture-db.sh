@@ -216,6 +216,40 @@ SQL
 SELECT status || '|' || source_version FROM appointment_read_model WHERE appointment_id='$APPOINTMENT_ID'::uuid;
 SQL
   )" = 'IN_PROGRESS|3' ] || fail "BFF appointment projection did not converge"
+  arrival_message_id=$(sql "$execution_database" <<SQL
+SELECT message_id FROM outbox_messages WHERE aggregate_id='$execution_id'::uuid
+ AND message_type='WashArrivalRegistered' AND message_kind='EVENT' AND aggregate_version=1;
+SQL
+  )
+  authorized_message_id=$(sql "$execution_database" <<SQL
+SELECT message_id FROM outbox_messages WHERE aggregate_id='$execution_id'::uuid
+ AND message_type='WashEntryAuthorized' AND message_kind='EVENT' AND aggregate_version=2;
+SQL
+  )
+  assignment_message_id=$(sql "$execution_database" <<SQL
+SELECT message_id FROM outbox_messages WHERE aggregate_id='$execution_id'::uuid
+ AND message_type='WashResourceAssigned' AND message_kind='EVENT' AND aggregate_version=2;
+SQL
+  )
+  started_message_id=$(sql "$execution_database" <<SQL
+SELECT message_id FROM outbox_messages WHERE aggregate_id='$execution_id'::uuid
+ AND message_type='WashExecutionStarted' AND message_kind='EVENT' AND aggregate_version=2;
+SQL
+  )
+  require_uuid "$arrival_message_id" ARRIVAL_MESSAGE_ID
+  require_uuid "$authorized_message_id" AUTHORIZED_MESSAGE_ID
+  require_uuid "$assignment_message_id" ASSIGNMENT_MESSAGE_ID
+  require_uuid "$started_message_id" STARTED_MESSAGE_ID
+  umask 077
+  cp "$manifest" "$report_dir/entry-audit.env"
+  {
+    printf 'WASH_EXECUTION_ID=%s\n' "$execution_id"
+    printf 'RESOURCE_ASSIGNMENT_ID=%s\n' "$resource_assignment_id"
+    printf 'ARRIVAL_MESSAGE_ID=%s\n' "$arrival_message_id"
+    printf 'AUTHORIZED_MESSAGE_ID=%s\n' "$authorized_message_id"
+    printf 'ASSIGNMENT_MESSAGE_ID=%s\n' "$assignment_message_id"
+    printf 'STARTED_MESSAGE_ID=%s\n' "$started_message_id"
+  } >> "$report_dir/entry-audit.env"
   printf 'Authorized supervisor entry audit passed.\n'
 }
 
@@ -280,6 +314,7 @@ SQL
         )
         [ "$proof" = 1 ] || fail "cleanup refused: IN_PROGRESS execution is not the exact authorized fixture"
         expected_execution='IN_PROGRESS|2'; expected_appointment='IN_PROGRESS|3'
+        expected_bff_consumed='1|1|1|1'
         ;;
       'PENDING_ENTRY|1')
         proof=$(sql "$execution_database" <<SQL
@@ -294,6 +329,7 @@ SQL
         )
         [ "$proof" = 1 ] || fail "cleanup refused: pending execution is not this run's untouched arrival"
         expected_execution='PENDING_ENTRY|1'; expected_appointment='SCHEDULED|1'
+        expected_bff_consumed='1|0|0|0'
         ;;
       *) fail "cleanup refused for execution outside the isolated authorized path" ;;
     esac
@@ -311,31 +347,121 @@ SQL
 SELECT status || '|' || source_version FROM appointment_read_model WHERE appointment_id='$APPOINTMENT_ID'::uuid;
 SQL
       )
+      if [ "$expected_execution" = 'IN_PROGRESS|2' ]; then
+        appointments_consumed=$(sql "$appointments_database" <<SQL
+SELECT count(*) FROM wash_execution_evidence_projection e
+JOIN processed_messages arrival ON arrival.message_id=e.arrival_source_event_id
+JOIN processed_messages authorized ON authorized.message_id=e.entry_authorized_source_event_id
+JOIN wash_execution_transition_projection started
+  ON started.wash_execution_id=e.wash_execution_id AND started.appointment_id=e.appointment_id
+JOIN processed_messages started_message ON started_message.message_id=started.source_event_id
+WHERE e.appointment_id='$APPOINTMENT_ID'::uuid AND e.wash_execution_id='$execution_id'::uuid
+ AND e.arrival_execution_version=1 AND e.entry_authorized_execution_version=2
+ AND arrival.message_type='WashArrivalRegistered' AND arrival.status='APPLIED'
+ AND authorized.message_type='WashEntryAuthorized' AND authorized.status='APPLIED'
+ AND started.event_type='WashExecutionStarted' AND started.execution_version=2 AND started.state='IN_PROGRESS'
+ AND started_message.message_type='WashExecutionStarted' AND started_message.status='APPLIED';
+SQL
+        )
+      else
+        appointments_consumed=$(sql "$appointments_database" <<SQL
+SELECT count(*) FROM wash_execution_evidence_projection e
+JOIN processed_messages arrival ON arrival.message_id=e.arrival_source_event_id
+WHERE e.appointment_id='$APPOINTMENT_ID'::uuid AND e.wash_execution_id='$execution_id'::uuid
+ AND e.arrival_execution_version=1
+ AND arrival.message_type='WashArrivalRegistered' AND arrival.status='APPLIED';
+SQL
+        )
+      fi
+      bff_consumed=$(sql "$bff_database" <<SQL
+SELECT
+ (SELECT count(*) FROM inbox_messages WHERE consumer_name='bff-projection-runtime'
+   AND aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
+   AND message_type='WashArrivalRegistered' AND aggregate_version=1) || '|' ||
+ (SELECT count(*) FROM inbox_messages WHERE consumer_name='bff-projection-runtime'
+   AND aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
+   AND message_type='WashEntryAuthorized' AND aggregate_version=2) || '|' ||
+ (SELECT count(*) FROM inbox_messages WHERE consumer_name='bff-projection-runtime'
+   AND aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
+   AND message_type='WashResourceAssigned' AND aggregate_version=2) || '|' ||
+ (SELECT count(*) FROM inbox_messages WHERE consumer_name='bff-projection-runtime'
+   AND aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
+   AND message_type='WashExecutionStarted' AND aggregate_version=2);
+SQL
+      )
       [ "$bff_state" = "$expected_execution" ] && [ "$owner_state" = "$expected_appointment" ] \
-        && [ "$bff_appointment" = "$expected_appointment" ] && break
+        && [ "$bff_appointment" = "$expected_appointment" ] && [ "$appointments_consumed" = 1 ] \
+        && [ "$bff_consumed" = "$expected_bff_consumed" ] && break
       attempts=$((attempts+1)); [ "$attempts" -lt 30 ] || fail "cleanup refused before entry convergence"; sleep 1
     done
   fi
 
-  resource_state=$(sql "$execution_database" <<SQL
-SELECT (SELECT count(*) FROM cabin_projection WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE'
- AND name='$CABIN_NAME' AND cabin_type='NORMAL' AND status='ACTIVE' AND source_version=1) || '|' ||
- (SELECT count(*) FROM tank_projection WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid
- AND code='$TANK_CODE' AND name='$TANK_NAME' AND configured_capacity=1 AND status='ACTIVE' AND source_version=1);
-SQL
-  )
-  case "$resource_state" in '1|1'| '0|0') ;; *) fail "fixture resource state no longer matches manifest" ;; esac
-  bff_resource_state=$(sql "$bff_database" <<SQL
-SELECT (SELECT count(*) FROM wash_cabin_read_model WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE'
- AND name='$CABIN_NAME' AND cabin_type='NORMAL' AND status='ACTIVE' AND source_version=1) || '|' ||
- (SELECT count(*) FROM wash_tank_read_model WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid
- AND code='$TANK_CODE' AND name='$TANK_NAME' AND configured_capacity=1 AND status='ACTIVE' AND source_version=1);
-SQL
-  )
-  case "$bff_resource_state" in '1|1'| '0|0') ;; *) fail "BFF fixture resource state no longer matches manifest" ;; esac
-
   sql "$execution_database" >/dev/null <<SQL
 BEGIN;
+LOCK TABLE wash_executions, entry_validations, resource_assignments,
+  resource_unavailability_affected_executions, cleaning_periods, outbox_messages,
+  cabin_projection, tank_projection IN SHARE ROW EXCLUSIVE MODE;
+CREATE TEMP TABLE e2e_execution_ids ON COMMIT DROP AS
+ SELECT wash_execution_id FROM wash_executions WHERE appointment_id='$APPOINTMENT_ID'::uuid;
+DO \$guard\$ BEGIN
+ IF NOT (
+   ((SELECT count(*) FROM cabin_projection WHERE cabin_id='$CABIN_ID'::uuid OR code='$CABIN_CODE')=0
+    AND (SELECT count(*) FROM tank_projection WHERE tank_id='$TANK_ID'::uuid OR code='$TANK_CODE')=0)
+   OR
+   ((SELECT count(*) FROM cabin_projection WHERE cabin_id='$CABIN_ID'::uuid OR code='$CABIN_CODE')=1
+    AND (SELECT count(*) FROM cabin_projection WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE'
+      AND name='$CABIN_NAME' AND cabin_type='NORMAL' AND status='ACTIVE' AND source_version=1)=1
+    AND (SELECT count(*) FROM tank_projection WHERE tank_id='$TANK_ID'::uuid OR code='$TANK_CODE')=1
+    AND (SELECT count(*) FROM tank_projection WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid
+      AND code='$TANK_CODE' AND name='$TANK_NAME' AND configured_capacity=1
+      AND status='ACTIVE' AND source_version=1)=1)
+ ) THEN RAISE EXCEPTION 'fixture resource state no longer matches manifest'; END IF;
+
+ IF EXISTS (SELECT 1 FROM e2e_execution_ids) AND NOT (
+   EXISTS (
+    SELECT 1 FROM wash_executions e
+    JOIN entry_validations v ON v.wash_execution_id=e.wash_execution_id
+    JOIN resource_assignments a ON a.wash_execution_id=e.wash_execution_id
+    WHERE e.wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids)
+      AND e.status='IN_PROGRESS' AND e.version=2 AND e.started_at IS NOT NULL
+      AND v.decision='AUTHORIZED' AND v.identity_confirmed AND v.requirements_satisfied
+      AND v.rejection_reason IS NULL AND v.decided_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
+      AND a.appointment_time_slot_id='$SLOT_ID'::uuid AND a.cabin_id='$CABIN_ID'::uuid
+      AND a.tank_id='$TANK_ID'::uuid AND a.assignment_type='INITIAL'
+      AND a.assigned_by_account_id IS NULL AND a.released_at IS NULL
+      AND (SELECT count(*) FROM resource_assignments x WHERE x.wash_execution_id=e.wash_execution_id)=1
+      AND (SELECT count(*) FROM outbox_messages m
+        WHERE m.aggregate_id=e.wash_execution_id AND m.message_kind='EVENT')=4
+      AND EXISTS (SELECT 1 FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+        AND m.message_type='WashArrivalRegistered' AND m.message_kind='EVENT' AND m.aggregate_version=1
+        AND m.idempotency_key='$REGISTER_KEY' AND m.status='PUBLISHED')
+      AND EXISTS (SELECT 1 FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+        AND m.message_type='WashEntryAuthorized' AND m.message_kind='EVENT' AND m.aggregate_version=2
+        AND m.idempotency_key='$DECIDE_KEY' AND m.status='PUBLISHED')
+      AND EXISTS (SELECT 1 FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+        AND m.message_type='WashResourceAssigned' AND m.message_kind='EVENT' AND m.aggregate_version=2
+        AND m.idempotency_key='$DECIDE_KEY' AND m.status='PUBLISHED')
+      AND EXISTS (SELECT 1 FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+        AND m.message_type='WashExecutionStarted' AND m.message_kind='EVENT' AND m.aggregate_version=2
+        AND m.idempotency_key='$DECIDE_KEY' AND m.status='PUBLISHED')
+   )
+   OR EXISTS (
+    SELECT 1 FROM wash_executions e
+    WHERE e.wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids)
+      AND e.status='PENDING_ENTRY' AND e.version=1 AND e.started_at IS NULL
+      AND EXISTS (SELECT 1 FROM appointment_projection p WHERE p.appointment_id=e.appointment_id
+        AND p.student_account_id='$STUDENT_ACCOUNT_ID'::uuid
+        AND p.appointment_time_slot_id='$SLOT_ID'::uuid)
+      AND NOT EXISTS (SELECT 1 FROM entry_validations v WHERE v.wash_execution_id=e.wash_execution_id)
+      AND NOT EXISTS (SELECT 1 FROM resource_assignments a WHERE a.wash_execution_id=e.wash_execution_id)
+      AND (SELECT count(*) FROM outbox_messages m
+        WHERE m.aggregate_id=e.wash_execution_id AND m.message_kind='EVENT')=1
+      AND EXISTS (SELECT 1 FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+        AND m.message_type='WashArrivalRegistered' AND m.message_kind='EVENT' AND m.aggregate_version=1
+        AND m.idempotency_key='$REGISTER_KEY' AND m.status='PUBLISHED')
+   )
+ ) THEN RAISE EXCEPTION 'execution changed after cleanup proof'; END IF;
+END \$guard\$;
 LOCK TABLE authorization_role_projection IN SHARE ROW EXCLUSIVE MODE;
 DO \$guard\$ BEGIN
  IF NOT (( $ROLE_WAS_ABSENT=1 AND NOT EXISTS (SELECT 1 FROM authorization_role_projection WHERE account_id='$SUPERVISOR_ACCOUNT_ID'::uuid))
@@ -346,8 +472,6 @@ DO \$guard\$ BEGIN
      AND updated_at=to_timestamp($ORIGINAL_ROLE_UPDATED_EPOCH))))) THEN
   RAISE EXCEPTION 'synthetic owner role changed before cleanup'; END IF;
 END \$guard\$;
-CREATE TEMP TABLE e2e_execution_ids ON COMMIT DROP AS
- SELECT wash_execution_id FROM wash_executions WHERE appointment_id='$APPOINTMENT_ID'::uuid;
 DELETE FROM resource_unavailability_affected_executions WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
 DELETE FROM cleaning_periods WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
 DELETE FROM resource_assignments WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids)
@@ -362,8 +486,10 @@ DELETE FROM wash_executions WHERE wash_execution_id IN (SELECT wash_execution_id
 DELETE FROM appointment_projection WHERE appointment_id='$APPOINTMENT_ID'::uuid
  AND student_account_id='$STUDENT_ACCOUNT_ID'::uuid AND appointment_time_slot_id='$SLOT_ID'::uuid;
 DELETE FROM appointment_time_slot_projection WHERE appointment_time_slot_id='$SLOT_ID'::uuid AND calendar_id='$CALENDAR_ID'::uuid;
-DELETE FROM tank_projection WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid AND code='$TANK_CODE';
-DELETE FROM cabin_projection WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE';
+DELETE FROM tank_projection WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid
+ AND code='$TANK_CODE' AND name='$TANK_NAME' AND configured_capacity=1 AND status='ACTIVE' AND source_version=1;
+DELETE FROM cabin_projection WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE'
+ AND name='$CABIN_NAME' AND cabin_type='NORMAL' AND status='ACTIVE' AND source_version=1;
 DELETE FROM authorization_access_projection WHERE account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
  AND system_id='$SYSTEM_ID'::uuid AND system_code='LAVADO_ULTRASONICO' AND access_status='ACTIVE' AND access_source_version=1;
 $(if [ "$ROLE_WAS_ABSENT" = 1 ]; then
@@ -378,20 +504,56 @@ SQL
 
   sql "$bff_database" >/dev/null <<SQL
 BEGIN;
+LOCK TABLE client_operations, inbox_messages, quarantined_messages, outbox_messages,
+  idempotency_records, wash_execution_read_model, wash_resource_assignment_read_model,
+  wash_cabin_read_model, wash_tank_read_model IN SHARE ROW EXCLUSIVE MODE;
 CREATE TEMP TABLE e2e_operation_ids ON COMMIT DROP AS SELECT operation_id FROM client_operations
  WHERE actor_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid AND idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY');
 CREATE TEMP TABLE e2e_execution_ids ON COMMIT DROP AS SELECT wash_execution_id FROM wash_execution_read_model
  WHERE appointment_id='$APPOINTMENT_ID'::uuid;
 CREATE TEMP TABLE e2e_message_ids ON COMMIT DROP AS SELECT message_id FROM outbox_messages
  WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);
+DO \$guard\$ BEGIN
+ IF NOT (
+   ((SELECT count(*) FROM wash_cabin_read_model WHERE cabin_id='$CABIN_ID'::uuid OR code='$CABIN_CODE')=0
+    AND (SELECT count(*) FROM wash_tank_read_model WHERE tank_id='$TANK_ID'::uuid OR code='$TANK_CODE')=0)
+   OR
+   ((SELECT count(*) FROM wash_cabin_read_model WHERE cabin_id='$CABIN_ID'::uuid OR code='$CABIN_CODE')=1
+    AND (SELECT count(*) FROM wash_cabin_read_model WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE'
+      AND name='$CABIN_NAME' AND cabin_type='NORMAL' AND status='ACTIVE' AND source_version=1)=1
+    AND (SELECT count(*) FROM wash_tank_read_model WHERE tank_id='$TANK_ID'::uuid OR code='$TANK_CODE')=1
+    AND (SELECT count(*) FROM wash_tank_read_model WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid
+      AND code='$TANK_CODE' AND name='$TANK_NAME' AND configured_capacity=1
+      AND status='ACTIVE' AND source_version=1)=1)
+ ) THEN RAISE EXCEPTION 'BFF fixture resource state no longer matches manifest'; END IF;
+
+ IF EXISTS (SELECT 1 FROM e2e_execution_ids) AND NOT (
+   EXISTS (SELECT 1 FROM wash_execution_read_model e
+    JOIN wash_resource_assignment_read_model a ON a.wash_execution_id=e.wash_execution_id
+    WHERE e.wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids)
+      AND e.status='IN_PROGRESS' AND e.execution_version=2
+      AND a.appointment_time_slot_id='$SLOT_ID'::uuid AND a.cabin_id='$CABIN_ID'::uuid
+      AND a.tank_id='$TANK_ID'::uuid AND a.assignment_type='INITIAL'
+      AND a.released_at IS NULL AND a.source_version=2
+      AND (SELECT count(*) FROM wash_resource_assignment_read_model x
+        WHERE x.wash_execution_id=e.wash_execution_id)=1)
+   OR EXISTS (SELECT 1 FROM wash_execution_read_model e
+    WHERE e.wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids)
+      AND e.status='PENDING_ENTRY' AND e.execution_version=1
+      AND NOT EXISTS (SELECT 1 FROM wash_resource_assignment_read_model a
+        WHERE a.wash_execution_id=e.wash_execution_id))
+ ) THEN RAISE EXCEPTION 'BFF execution changed after cleanup proof'; END IF;
+END \$guard\$;
 DELETE FROM inbox_messages WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids)
  OR aggregate_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
 DELETE FROM quarantined_messages WHERE message_id IN (SELECT message_id FROM e2e_message_ids);
 DELETE FROM wash_resource_assignment_read_model WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids)
  AND cabin_id='$CABIN_ID'::uuid AND tank_id='$TANK_ID'::uuid;
 DELETE FROM wash_execution_read_model WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
-DELETE FROM wash_tank_read_model WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid AND code='$TANK_CODE';
-DELETE FROM wash_cabin_read_model WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE';
+DELETE FROM wash_tank_read_model WHERE tank_id='$TANK_ID'::uuid AND cabin_id='$CABIN_ID'::uuid
+ AND code='$TANK_CODE' AND name='$TANK_NAME' AND configured_capacity=1 AND status='ACTIVE' AND source_version=1;
+DELETE FROM wash_cabin_read_model WHERE cabin_id='$CABIN_ID'::uuid AND code='$CABIN_CODE'
+ AND name='$CABIN_NAME' AND cabin_type='NORMAL' AND status='ACTIVE' AND source_version=1;
 DELETE FROM outbox_messages WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);
 DELETE FROM idempotency_records WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);
 DELETE FROM client_operations WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);
