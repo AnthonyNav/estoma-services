@@ -116,5 +116,13 @@ class AppointmentAvailabilityQueryContractTest {
         valid.correlationId(), valid.causationId(), valid.operationId(), valid.idempotencyKey(),
         valid.aggregateId(), valid.aggregateVersion(), valid.actor(), payload)))
         .isInstanceOf(InvalidMessageException.class);
+
+    payload.remove("unexpected");
+    payload.put("instrumentCount", 4_294_967_297L);
+    assertThatThrownBy(() -> service.answer(new MessageEnvelope(valid.messageId(), valid.messageType(),
+        valid.messageVersion(), valid.messageKind(), valid.producer(), valid.occurredAt(),
+        valid.correlationId(), valid.causationId(), valid.operationId(), valid.idempotencyKey(),
+        valid.aggregateId(), valid.aggregateVersion(), valid.actor(), payload)))
+        .isInstanceOf(InvalidMessageException.class);
   }
 }

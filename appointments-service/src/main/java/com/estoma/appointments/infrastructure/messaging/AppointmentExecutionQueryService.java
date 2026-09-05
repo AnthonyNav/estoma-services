@@ -263,7 +263,8 @@ public class AppointmentExecutionQueryService {
   }
 
   private static int requiredInt(tools.jackson.databind.JsonNode node, String field) {
-    if (!node.has(field) || !node.path(field).isIntegralNumber()) {
+    if (!node.has(field) || !node.path(field).isIntegralNumber()
+        || !node.path(field).canConvertToInt()) {
       throw new InvalidMessageException(field + " must be an integer");
     }
     return node.path(field).asInt();
