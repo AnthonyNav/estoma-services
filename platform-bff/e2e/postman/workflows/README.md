@@ -165,3 +165,58 @@ lookup returned the expected controlled `503` while the appointment had no wash 
 side-effect audit found no supervisor client-operation delta and no wash execution, and the
 independent post-run audit found zero transient BFF or Appointments rows. No credentials, tokens,
 fixture UUIDs or captured payloads are part of this evidence.
+
+## Wash supervisor arrival and rejected entry
+
+`wash-supervisor-entry-front-v1.postman_collection.json` extends the certified appointment
+precondition into the deterministic rejection branch of WASH-SUP-01:
+
+```text
+student schedules appointment
+→ private owner-projection barrier
+→ supervisor lookup returns ENTRY
+→ RegisterWashArrival succeeds
+→ lookup returns PENDING_ENTRY / ENTRY_DECISION
+→ DecideWashEntry(REJECTED) succeeds
+→ lookup returns ENTRY_REJECTED / NONE
+```
+
+The collection has separate `Prepare appointment` and `Arrival and rejected entry` folders
+because Wash Execution must consume the real `AppointmentScheduled` event before arrival.
+Runtime state crosses that barrier only through a private ephemeral Postman environment. The
+supported wrapper is `../../runner/run-wash-supervisor-entry.sh`; running one folder manually
+does not establish the fixture or cleanup guarantees.
+
+This branch matches the closed Front V1 rejection mapping: identity is confirmed, requirements are
+not satisfied, the free-text reason is required and the functional rejection still completes the
+durable command as `SUCCEEDED`. It deliberately excludes entry authorization, resource
+allocation, pending reassignment, exit/completion, QR and email. Those are separate workflows.
+
+The generated collection and blank example environment are updated with
+`node ../../scripts/generate-wash-supervisor-entry-workflow.mjs`; CI enforces `--check` plus
+the dedicated validator.
+
+### Sanitized live evidence — 2026-09-05
+
+The full wrapper passed against the already-deployed services:
+`platform-bff:develop-6ebf0f4`, `appointments-service:develop-2d7d63c` and
+`wash-execution-service:develop-6e5bc68`. Newman executed 18 requests (17 definitions plus one
+expected availability cache-miss retry) and all 42 assertions passed. Both commands returned
+`202`, their public operations reached `SUCCEEDED`, and lookup exposed
+`ENTRY -> ENTRY_DECISION -> NONE`. The appointment remains `SCHEDULED` while its execution is
+`PENDING_ENTRY v1`; rejection converges to `ENTRY_REJECTED v2` in both owners and BFF projections.
+
+The owner audit verified the rejected validation, both published Events and zero resource
+assignments. All three fixture cleanups completed, and an independent, read-only audit found zero
+run-scoped execution/appointment/projection/message rows in Wash Execution, Appointments and BFF;
+the previously absent owner role was absent again. This includes Appointments' consumed arrival
+message, whose evidence must be captured before deleting the appointment. All three manifests
+were removed only after cleanup. The three Deployments remained available `1/1`; their sampled
+15-minute logs contained no `ERROR`/`Exception` lines. Relevant Appointments/Wash Execution queues,
+retry queues and DLQs, plus `results.bff`, had zero ready/unacknowledged messages at inspection.
+
+The pinned Maven image passed `clean verify`: 53 integration tests, zero failures/errors.
+Static contract/generation gates, cleanup-retry regressions, interrupted-arrival cleanup and runner
+failure/dependency-retention tests also passed. These automated recovery tests use inert mocks;
+the live run certified the successful rejected-entry path, not an injected live failure.
+No credentials, tokens, runtime UUIDs or response captures are included here.

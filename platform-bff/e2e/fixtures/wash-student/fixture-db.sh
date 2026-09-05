@@ -8,6 +8,7 @@ report_dir=${E2E_REPORT_DIR:-$platform_dir/target/e2e/wash-student}
 manifest=${E2E_FIXTURE_MANIFEST:-$report_dir/fixture.env}
 bff_database=${E2E_BFF_DATABASE:-platform_bff_db}
 appointments_database=${E2E_APPOINTMENTS_DATABASE:-appointments_db}
+slot_profile=${E2E_WASH_SLOT_PROFILE:-appointment}
 
 fail() {
   printf 'wash-student fixture: %s\n' "$*" >&2
@@ -59,6 +60,23 @@ bootstrap() {
   require_uuid "$E2E_ACCOUNT_ID" E2E_ACCOUNT_ID
   require_fixture_login "$E2E_LOGIN_IDENTIFIER"
   [ ! -e "$manifest" ] || fail "fixture manifest already exists; run cleanup first"
+  case "$slot_profile" in
+    appointment)
+      slot_start_offset=40
+      slot_end_offset=70
+      booking_deadline_offset=30
+      cancellation_deadline_offset=25
+      arrival_tolerance_offset=50
+      ;;
+    arrival)
+      slot_start_offset=10
+      slot_end_offset=40
+      booking_deadline_offset=5
+      cancellation_deadline_offset=5
+      arrival_tolerance_offset=20
+      ;;
+    *) fail "E2E_WASH_SLOT_PROFILE must be appointment or arrival" ;;
+  esac
 
   person_id=$(sql "$bff_database" <<SQL
 SELECT person_id
@@ -185,7 +203,7 @@ BEGIN
     ) projection WHERE reliable = FALSE) THEN
     RAISE EXCEPTION 'Appointments has an unreliable academic or authorization projection';
   END IF;
-  IF ((CURRENT_TIMESTAMP + INTERVAL '70 minutes') AT TIME ZONE 'America/Mexico_City')::date
+  IF ((CURRENT_TIMESTAMP + make_interval(mins => $slot_end_offset)) AT TIME ZONE 'America/Mexico_City')::date
       <> (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date THEN
     RAISE EXCEPTION 'the complete E2E slot would cross the current service date';
   END IF;
@@ -207,11 +225,11 @@ SQL
   times=$(sql "$appointments_database" <<SQL
 SELECT
   (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date || '|' ||
-  (CURRENT_TIMESTAMP + INTERVAL '40 minutes')::text || '|' ||
-  (CURRENT_TIMESTAMP + INTERVAL '70 minutes')::text || '|' ||
-  (CURRENT_TIMESTAMP + INTERVAL '30 minutes')::text || '|' ||
-  (CURRENT_TIMESTAMP + INTERVAL '25 minutes')::text || '|' ||
-  (CURRENT_TIMESTAMP + INTERVAL '50 minutes')::text;
+  (CURRENT_TIMESTAMP + make_interval(mins => $slot_start_offset))::text || '|' ||
+  (CURRENT_TIMESTAMP + make_interval(mins => $slot_end_offset))::text || '|' ||
+  (CURRENT_TIMESTAMP + make_interval(mins => $booking_deadline_offset))::text || '|' ||
+  (CURRENT_TIMESTAMP + make_interval(mins => $cancellation_deadline_offset))::text || '|' ||
+  (CURRENT_TIMESTAMP + make_interval(mins => $arrival_tolerance_offset))::text;
 SQL
   )
   prior_ifs=$IFS
@@ -460,7 +478,10 @@ WHERE student_account_id = '$ACCOUNT_ID'::uuid
 CREATE TEMP TABLE e2e_inbound_message_ids ON COMMIT DROP AS
 SELECT causation_id AS message_id FROM outbox_messages
 WHERE aggregate_id IN (SELECT appointment_id FROM e2e_appointment_ids)
-   OR payload #>> '{data,requestContext,studentAccountId}' = '$ACCOUNT_ID';
+   OR payload #>> '{data,requestContext,studentAccountId}' = '$ACCOUNT_ID'
+UNION
+SELECT arrival_source_event_id FROM wash_execution_evidence_projection
+WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
 
 DELETE FROM missed_evaluation_confirmations WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
 DELETE FROM pending_capacity_evaluation WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
