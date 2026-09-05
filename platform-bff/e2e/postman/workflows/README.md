@@ -1,4 +1,6 @@
-# Front V1 authentication workflows
+# Front V1 workflows
+
+## Authentication
 
 `platform-bff-auth-front-v1.postman_collection.json` is an ordered, mutating black-box suite for the public Platform BFF HTTP boundary. It covers:
 
@@ -70,3 +72,50 @@ AUTH-02:
 ## Sanitized live evidence
 
 Before this collection was authored, both journeys were exercised against the deployed `develop` BFF on 2026-09-04 with isolated synthetic fixtures. Every status and state transition above matched, session revocation reached the BFF, and the projection quarantine delta remained zero. This is evidence for the backend behavior mirrored by the collection; it is not a claim that the committed collection contains or can recreate those fixtures.
+
+Do not add live credentials, fixture identifiers, email addresses, tokens, or captured responses.
+The catalogue at `../platform-bff-api.postman_collection.json` is a contract inventory, not a
+runnable workflow suite.
+
+## Wash student
+
+`wash-student-front-v1.postman_collection.json` covers the happy-path contract shared by
+WASH-STU-01, WASH-STU-02 and WASH-STU-05:
+
+```text
+login
+→ home without appointment
+→ form context
+→ availability (cache miss/retry is allowed)
+→ schedule + poll
+→ home scheduled with cancellation context
+→ cancel + poll
+→ home cancelled
+→ logout
+```
+
+This is a mutating suite. It may run only with the isolated fixture created by
+`../../fixtures/wash-student/fixture-db.sh`; the supported wrapper is
+`../../runner/run-wash-student.sh`. The example environment is intentionally blank.
+
+The Front-facing BFF surface exercised by the workflow is:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/auth/login` | Establish a `NORMAL` session. |
+| `GET` | `/api/v1/wash/student/home` | Read no-appointment, scheduled and cancelled states. |
+| `GET` | `/api/v1/wash/appointments/form-context` | Load student presentation and owned course-section choices. |
+| `GET` | `/api/v1/wash/appointments/availability` | Read the fresh Appointments-owned decision; `503 + Retry-After` is the cache-aside refresh state. |
+| `POST` | `/api/v1/wash/appointments` | Persist one idempotent schedule intent and return `202`. |
+| `GET` | `/api/v1/operations/{operationId}` | Poll schedule/cancel until a terminal owner Result. |
+| `POST` | `/api/v1/wash/appointments/{appointmentId}/cancel` | Persist one idempotent student-cancellation intent using the projected owner version. |
+| `POST` | `/api/v1/auth/logout` | Revoke the workflow session. |
+
+The collection derives account and service date server-side, selects only the exact synthetic NRC
+and slot IDs supplied by the runtime fixture, reuses one stable idempotency key per intent, and
+never sends student identity, arbitrary service date, cabin or tank data.
+
+Current certification state: prepared, not yet executed against `develop`. A live run is blocked
+until both the Appointments-owned availability Query/Result contract and the BFF cache-aside
+adapter are merged and deployed. In particular, do not treat the current absence of
+`GET /api/v1/wash/appointments/availability` on `develop` as a failed workflow.
