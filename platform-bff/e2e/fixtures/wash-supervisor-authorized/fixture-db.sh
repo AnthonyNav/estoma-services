@@ -175,7 +175,7 @@ SELECT decision || '|' || identity_confirmed || '|' || requirements_satisfied ||
 FROM entry_validations WHERE wash_execution_id='$execution_id'::uuid;
 SQL
   )
-  [ "$validation" = 'AUTHORIZED|t|t|no-reason' ] || fail "authorized validation is incomplete"
+  [ "$validation" = 'AUTHORIZED|true|true|no-reason' ] || fail "authorized validation is incomplete"
   event_count=$(sql "$execution_database" <<SQL
 SELECT count(*) FROM outbox_messages WHERE aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
  AND ((message_type='WashArrivalRegistered' AND aggregate_version=1)

@@ -19,12 +19,12 @@ case "$(basename "$0")" in
     case "$0" in
       */wash-student/*) fixture_manifest=$E2E_FIXTURE_MANIFEST; fixture_kind=student ;;
       */wash-supervisor/*) fixture_manifest=$E2E_SUPERVISOR_FIXTURE_MANIFEST; fixture_kind=supervisor ;;
-      */wash-supervisor-entry/*) fixture_manifest=$E2E_ENTRY_FIXTURE_MANIFEST; fixture_kind=entry ;;
+      */wash-supervisor-entry/*|*/wash-supervisor-authorized/*) fixture_manifest=$E2E_ENTRY_FIXTURE_MANIFEST; fixture_kind=entry ;;
     esac
     case "$1" in
       bootstrap)
         if [ "$fixture_kind" = entry ] && [ "$TEST_MODE" = bootstrap-failure ]; then exit 7; fi
-        printf 'RUN_KEY=e2e-wash-runner\nCOURSE_SECTION_ID=test\nSLOT_ID=test\nNRC=E2E-test\n' > "$fixture_manifest" ;;
+        printf 'RUN_KEY=e2e-wash-runner\nCOURSE_SECTION_ID=test\nSLOT_ID=test\nNRC=E2E-test\nCABIN_ID=test\nTANK_ID=test\n' > "$fixture_manifest" ;;
       cleanup)
         printf '%s\n' "$fixture_kind" >> "$TEST_STATE/cleanup-order"
         if [ "$fixture_kind" = entry ] && [ "$TEST_MODE" = cleanup-failure ]; then exit 8; fi
@@ -39,7 +39,7 @@ test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT INT TERM
 mkdir -p "$test_root/e2e/runner" "$test_root/bin" "$test_root/private" "$test_root/e2e/postman/workflows"
 cp "$script_dir/../runner/run-wash-supervisor-entry.sh" "$test_root/e2e/runner/"
-for fixture_kind in wash-student wash-supervisor wash-supervisor-entry; do
+for fixture_kind in wash-student wash-supervisor wash-supervisor-entry wash-supervisor-authorized; do
   mkdir -p "$test_root/e2e/fixtures/$fixture_kind"
   cp "$test_script" "$test_root/e2e/fixtures/$fixture_kind/fixture-db.sh"
   chmod +x "$test_root/e2e/fixtures/$fixture_kind/fixture-db.sh"
@@ -49,11 +49,13 @@ for mock in docker curl jq; do
   chmod +x "$test_root/bin/$mock"
 done
 
+for outcome in rejected authorized; do
 for test_mode in cleanup-failure bootstrap-failure decision-failure; do
-  test_state="$test_root/$test_mode"
+  test_state="$test_root/$outcome-$test_mode"
   mkdir -p "$test_state"
   if PATH="$test_root/bin:$PATH" TMPDIR="$test_root/private" \
       TEST_MODE="$test_mode" TEST_STATE="$test_state" \
+      E2E_ENTRY_OUTCOME="$outcome" E2E_ISOLATED_NAMESPACE=wash-e2e \
       BFF_BASE_URL=http://127.0.0.1:1 E2E_REPORT_DIR="$test_state" \
       E2E_STUDENT_LOGIN_IDENTIFIER=e2e-student E2E_STUDENT_PASSWORD=synthetic \
       E2E_SUPERVISOR_LOGIN_IDENTIFIER=e2e-supervisor E2E_SUPERVISOR_PASSWORD=synthetic \
@@ -74,4 +76,9 @@ for test_mode in cleanup-failure bootstrap-failure decision-failure; do
   esac
   [ -z "$(ls -A "$test_root/private")" ] || { printf 'runner leaked private runtime files\n' >&2; exit 1; }
 done
-printf 'Wash-supervisor-entry runner failure/recovery tests passed.\n'
+done
+if E2E_ENTRY_OUTCOME=authorized E2E_PSQL_EXEC=/bin/false \
+  sh "$test_root/e2e/runner/run-wash-supervisor-entry.sh" > "$test_root/refused" 2>&1; then
+  printf 'authorized runner accepted an executor that failed isolation checks\n' >&2; exit 1
+fi
+printf 'Rejected and authorized entry runner failure/recovery and isolation-refusal tests passed.\n'

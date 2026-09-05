@@ -5,6 +5,7 @@ COPY postman/environment.example.json /opt/e2e/environment.example.json
 COPY postman/workflows/wash-student-front-v1.postman_collection.json /opt/e2e/wash-student.json
 COPY postman/workflows/wash-supervisor-front-v1.postman_collection.json /opt/e2e/wash-supervisor.json
 COPY postman/workflows/wash-supervisor-entry-front-v1.postman_collection.json /opt/e2e/wash-supervisor-entry.json
+COPY postman/workflows/wash-supervisor-authorized-front-v1.postman_collection.json /opt/e2e/wash-supervisor-authorized.json
 COPY runner/run.sh /opt/e2e/run.sh
 
 ENTRYPOINT ["/bin/sh", "/opt/e2e/run.sh"]

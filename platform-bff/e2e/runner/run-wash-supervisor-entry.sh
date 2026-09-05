@@ -12,6 +12,19 @@ student_manifest="$report_dir/student-fixture.env"
 supervisor_manifest="$report_dir/supervisor-fixture.env"
 entry_manifest="$report_dir/entry-fixture.env"
 image=${E2E_RUNNER_IMAGE:-platform-bff-e2e:local}
+entry_outcome=${E2E_ENTRY_OUTCOME:-rejected}
+suite=wash-supervisor-entry
+case "$entry_outcome" in
+  rejected) ;;
+  authorized)
+    : "${E2E_PSQL_EXEC:?isolated executor required}"
+    "$E2E_PSQL_EXEC" --assert-isolated-wash
+    [ "${E2E_ISOLATED_NAMESPACE:-}" = wash-e2e ] || exit 2
+    entry_fixture="$e2e_dir/fixtures/wash-supervisor-authorized/fixture-db.sh"
+    suite=wash-supervisor-authorized
+    ;;
+  *) printf 'E2E_ENTRY_OUTCOME must be rejected or authorized\n' >&2; exit 2 ;;
+esac
 
 : "${BFF_BASE_URL:?BFF_BASE_URL is required}"
 : "${E2E_STUDENT_LOGIN_IDENTIFIER:?E2E_STUDENT_LOGIN_IDENTIFIER is required}"
@@ -121,7 +134,7 @@ run_phase() {
   phase=$1
   input_environment=$2
   output_environment=$3
-  docker run --rm --network host --user "$(id -u):$(id -g)" -e BFF_BASE_URL="$BFF_BASE_URL" -e E2E_SUITE=wash-supervisor-entry -e E2E_PHASE="$phase" -e E2E_ALLOW_MUTATIONS=isolated-wash-supervisor-entry-fixture -e E2E_POSTMAN_ENVIRONMENT=/run/secrets/postman-environment.json -e E2E_POSTMAN_STATE=/run/state/postman-environment-after.json -v "$input_environment:/run/secrets/postman-environment.json:ro" -v "$output_environment:/run/state/postman-environment-after.json" -v "$report_dir:/reports" "$image"
+  docker run --rm --network host --user "$(id -u):$(id -g)" -e BFF_BASE_URL="$BFF_BASE_URL" -e E2E_SUITE="$suite" -e E2E_PHASE="$phase" -e E2E_ALLOW_MUTATIONS="isolated-${suite}-fixture" -e E2E_POSTMAN_ENVIRONMENT=/run/secrets/postman-environment.json -e E2E_POSTMAN_STATE=/run/state/postman-environment-after.json -v "$input_environment:/run/secrets/postman-environment.json:ro" -v "$output_environment:/run/state/postman-environment-after.json" -v "$report_dir:/reports" "$image"
 }
 
 umask 077
@@ -168,4 +181,11 @@ run_phase prepare "$runtime_environment" "$prepare_state"
 E2E_REPORT_DIR="$report_dir" E2E_PSQL_EXEC="$E2E_PSQL_EXEC" E2E_STUDENT_FIXTURE_MANIFEST="$student_manifest" E2E_SUPERVISOR_FIXTURE_MANIFEST="$supervisor_manifest" E2E_ENTRY_FIXTURE_MANIFEST="$entry_manifest" E2E_BFF_DATABASE="${E2E_BFF_DATABASE:-platform_bff_db}" E2E_APPOINTMENTS_DATABASE="${E2E_APPOINTMENTS_DATABASE:-appointments_db}" E2E_WASH_EXECUTION_DATABASE="${E2E_WASH_EXECUTION_DATABASE:-wash_execution_db}" "$entry_fixture" bootstrap
 entry_ready=1
 
+if [ "$entry_outcome" = authorized ]; then
+  cabin_id=$(sed -n 's/^CABIN_ID=//p' "$entry_manifest")
+  tank_id=$(sed -n 's/^TANK_ID=//p' "$entry_manifest")
+  jq --arg cabin "$cabin_id" --arg tank "$tank_id" '.values += [{key:"fixtureCabinId",value:$cabin,enabled:true},{key:"fixtureTankId",value:$tank,enabled:true}]' "$prepare_state" > "$runtime_environment"
+  run_phase decision "$runtime_environment" "$decision_state"
+else
 run_phase decision "$prepare_state" "$decision_state"
+fi
