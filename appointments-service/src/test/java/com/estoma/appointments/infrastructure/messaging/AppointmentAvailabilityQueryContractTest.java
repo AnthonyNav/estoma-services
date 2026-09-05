@@ -50,12 +50,12 @@ class AppointmentAvailabilityQueryContractTest {
     UUID queryId = UUID.randomUUID();
     UUID correlationId = UUID.randomUUID();
     var payload = mapper.createObjectNode()
-        .put("studentAccountId", studentId.toString())
+        .put("studentAccountId", studentId.toString().toUpperCase(java.util.Locale.ROOT))
         .put("serviceDate", "2026-09-04")
         .put("appointmentType", "NORMAL")
         .put("instrumentCount", 15)
         .put("pieceType", "HIGH_SPEED")
-        .put("courseSectionId", courseSectionId.toString());
+        .put("courseSectionId", courseSectionId.toString().toUpperCase(java.util.Locale.ROOT));
     var query = new MessageEnvelope(queryId, "GetAppointmentAvailability", 1,
         MessageKind.QUERY, "bff", NOW, correlationId, null, null, null, null, null,
         new WireActor("SYSTEM", null, "bff"), payload);

@@ -81,7 +81,9 @@ public class AppointmentExecutionQueryService {
     data.put("snapshotId", snapshotId.toString());
     data.put("snapshotGeneratedAt", snapshot.snapshotGeneratedAt().toString());
     data.put("freshUntil", snapshot.freshUntil().toString());
-    data.set("requestContext", availabilityRequestNode(snapshot.requestContext()));
+    // The BFF fences the Result against the exact validated wire context it submitted. Preserve
+    // lexical details (for example, uppercase UUID text) instead of reserializing typed values.
+    data.set("requestContext", query.payload().deepCopy());
     data.put("canSchedule", snapshot.canSchedule());
     ArrayNode blockers = mapper.createArrayNode();
     snapshot.blockingReasons().forEach(blockers::add);
@@ -105,17 +107,6 @@ public class AppointmentExecutionQueryService {
     data.set("availableTimeSlots", availableSlots);
     payload.set("data", data);
     append(query, snapshotId, "GetAppointmentAvailabilityResult", null, null, payload);
-  }
-
-  private ObjectNode availabilityRequestNode(GetAppointmentAvailabilityUseCase.Request request) {
-    ObjectNode node = mapper.createObjectNode();
-    node.put("studentAccountId", request.studentAccountId().toString());
-    node.put("serviceDate", request.serviceDate().toString());
-    node.put("appointmentType", request.appointmentType().name());
-    node.put("instrumentCount", request.instrumentCount());
-    node.put("pieceType", request.pieceType().name());
-    node.put("courseSectionId", request.courseSectionId().toString());
-    return node;
   }
 
   private void answerOne(MessageEnvelope query) {
