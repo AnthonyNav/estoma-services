@@ -1,7 +1,9 @@
 package com.estoma.platformbff.application.wash;
 
 import com.estoma.platformbff.application.port.WashSupervisionQueryPort;
+import com.estoma.platformbff.application.port.WashStudentQueryPort;
 import com.estoma.platformbff.application.projection.ProjectionReadinessService;
+import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse.ActiveAssignmentResponse;
@@ -12,21 +14,90 @@ import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse.P
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse.ResourceResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse.StudentResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse.SubmittedExitMaterialsResponse;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.SupervisorLookupRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.LookupType;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.ActiveResourceAssignment;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.AppointmentTimeSlot;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.CourseSectionReference;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.NextAction;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SubmittedExitMaterials;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorAppointment;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeSummary;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorLookupResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorStudent;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorWashExecution;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 
 @Service
 public class WashSupervisionQueryService {
+  private static final ZoneId SERVICE_ZONE = ZoneId.of("America/Mexico_City");
+  private static final Set<String> ACTIVE_EXECUTION_STATUSES = Set.of(
+      "PENDING_ENTRY", "PENDING_REASSIGNMENT", "IN_PROGRESS", "EXIT_SUBMITTED");
+  private static final Set<String> TERMINAL_APPOINTMENT_STATUSES = Set.of(
+      "ENTRY_REJECTED", "COMPLETED", "CANCELLED", "MISSED");
+  private static final Set<String> TERMINAL_EXECUTION_STATUSES = Set.of(
+      "ENTRY_REJECTED", "COMPLETED", "CANCELLED");
+
   private final LocalAuthorizationService authorization;
   private final ProjectionReadinessService readiness;
   private final WashSupervisionQueryPort projections;
+  private final WashStudentQueryPort studentProjections;
+  private final Clock clock;
 
   public WashSupervisionQueryService(LocalAuthorizationService authorization,
-      ProjectionReadinessService readiness, WashSupervisionQueryPort projections) {
+      ProjectionReadinessService readiness, WashSupervisionQueryPort projections,
+      WashStudentQueryPort studentProjections, Clock clock) {
     this.authorization = authorization;
     this.readiness = readiness;
     this.projections = projections;
+    this.studentProjections = studentProjections;
+    this.clock = clock;
+  }
+
+  public SupervisorHomeResponse home() {
+    authorization.requireWashSupervisor();
+    readiness.requireReady("appointments", "wash-execution");
+    LocalDate serviceDate = serviceDate();
+    var snapshot = projections.summarizeHome(serviceDate);
+    return new SupervisorHomeResponse(serviceDate,
+        new SupervisorHomeSummary(snapshot.registeredAppointments(), snapshot.inProcessAppointments(),
+            snapshot.completedAppointments(), snapshot.deniedAppointments(), snapshot.cancelledAppointments()),
+        snapshot.pendingReassignmentsCount());
+  }
+
+  public SupervisorLookupResponse lookup(SupervisorLookupRequest request) {
+    authorization.requireWashSupervisor();
+    readiness.requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
+    if (request.lookupType() == LookupType.QR) {
+      throw new ProjectionUnavailableException("QR supervisor lookup is gated pending its local projection");
+    }
+    LocalDate serviceDate = serviceDate();
+    UUID accountId = studentProjections.findAccountIdByStudentEnrollment(request.studentEnrollment())
+        .orElseThrow(LookupNotFoundException::new);
+    List<WashSupervisionQueryPort.LookupCandidate> candidates =
+        projections.findAppointments(accountId, serviceDate);
+    if (candidates.isEmpty()) throw new LookupNotFoundException();
+
+    List<WashSupervisionQueryPort.LookupCandidate> active = candidates.stream()
+        .filter(this::isActive)
+        .toList();
+    if (active.size() > 1) {
+      throw new ProjectionUnavailableException("multiple active appointments contradict the supervisor lookup invariant");
+    }
+    WashSupervisionQueryPort.LookupCandidate selected = active.isEmpty()
+        ? candidates.stream().filter(this::isTerminal).findFirst()
+            .orElseThrow(() -> new ProjectionUnavailableException(
+                "the projected appointment state cannot be mapped safely"))
+        : active.getFirst();
+    return composeLookup(serviceDate, selected);
   }
 
   public PendingReassignmentsResponse pendingReassignments() {
@@ -61,6 +132,124 @@ public class WashSupervisionQueryService {
         "NONE");
   }
 
+  private SupervisorLookupResponse composeLookup(LocalDate serviceDate,
+      WashSupervisionQueryPort.LookupCandidate value) {
+    requireLookupContext(value);
+    NextAction action = nextAction(value);
+    SubmittedExitMaterials materials = lookupMaterials(value);
+    if (action == NextAction.EXIT_REVIEW && "EXIT_SUBMITTED".equals(value.executionStatus())
+        && (materials == null || value.exitSubmittedAt() == null)) {
+      throw new ProjectionUnavailableException("submitted exit context is incomplete");
+    }
+    if (action == NextAction.EXIT_REVIEW && value.resourceAssignmentId() == null) {
+      throw new ProjectionUnavailableException("active resource assignment is incomplete");
+    }
+
+    CourseSectionReference course = value.courseSectionId() == null ? null
+        : new CourseSectionReference(value.courseSectionId(), value.courseNrc(), value.courseName());
+    AppointmentTimeSlot slot = new AppointmentTimeSlot(value.appointmentTimeSlotId(),
+        value.slotStartsAt(), value.slotEndsAt(), value.slotTimezone());
+    SupervisorAppointment appointment = new SupervisorAppointment(value.appointmentId(),
+        value.appointmentStatus(), value.appointmentType(), value.instrumentCount(), value.pieceType(), course, slot);
+    SupervisorWashExecution execution = value.washExecutionId() == null ? null
+        : new SupervisorWashExecution(value.washExecutionId(), value.executionStatus(),
+            value.executionVersion(), value.arrivedAt(), value.rejectionReason(),
+            value.exitSubmittedAt(), materials);
+    ActiveResourceAssignment assignment = value.resourceAssignmentId() == null ? null
+        : new ActiveResourceAssignment(value.resourceAssignmentId(), value.assignmentType(),
+            lookupResource(value.cabinId(), value.cabinCode(), value.cabinName()),
+            lookupResource(value.tankId(), value.tankCode(), value.tankName()));
+    SupervisorStudent student = new SupervisorStudent(value.studentAccountId(), displayName(value),
+        value.studentNumber(), value.currentSemester());
+    return new SupervisorLookupResponse(serviceDate, action, student, appointment, execution, assignment);
+  }
+
+  private boolean isActive(WashSupervisionQueryPort.LookupCandidate value) {
+    if (TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus())) return false;
+    if (value.washExecutionId() == null) return "SCHEDULED".equals(value.appointmentStatus());
+    if (!ACTIVE_EXECUTION_STATUSES.contains(value.executionStatus())) return false;
+    return switch (value.executionStatus()) {
+      case "PENDING_ENTRY" -> "SCHEDULED".equals(value.appointmentStatus());
+      // Reassignment can happen before work starts or after an active resource is lost.
+      case "PENDING_REASSIGNMENT" -> "SCHEDULED".equals(value.appointmentStatus())
+          || "IN_PROGRESS".equals(value.appointmentStatus());
+      case "IN_PROGRESS", "EXIT_SUBMITTED" -> "IN_PROGRESS".equals(value.appointmentStatus());
+      default -> false;
+    };
+  }
+
+  private boolean isTerminal(WashSupervisionQueryPort.LookupCandidate value) {
+    return (value.appointmentStatus() != null && TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus()))
+        || (value.executionStatus() != null && TERMINAL_EXECUTION_STATUSES.contains(value.executionStatus()));
+  }
+
+  private NextAction nextAction(WashSupervisionQueryPort.LookupCandidate value) {
+    if (TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus())) {
+      if (ACTIVE_EXECUTION_STATUSES.contains(value.executionStatus())) {
+        throw new ProjectionUnavailableException("appointment and wash execution states contradict each other");
+      }
+      return NextAction.NONE;
+    }
+    if (value.washExecutionId() == null && "SCHEDULED".equals(value.appointmentStatus())) return NextAction.ENTRY;
+    if (value.executionStatus() == null) {
+      if (TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus())) return NextAction.NONE;
+      throw new ProjectionUnavailableException("the projected appointment state cannot be mapped safely");
+    }
+    return switch (value.executionStatus()) {
+      case "PENDING_ENTRY" -> NextAction.ENTRY_DECISION;
+      case "PENDING_REASSIGNMENT" -> NextAction.REASSIGNMENT;
+      case "IN_PROGRESS", "EXIT_SUBMITTED" -> NextAction.EXIT_REVIEW;
+      case "ENTRY_REJECTED", "COMPLETED", "CANCELLED" -> NextAction.NONE;
+      default -> throw new ProjectionUnavailableException(
+          "the projected appointment state cannot be mapped safely");
+    };
+  }
+
+  private static void requireLookupContext(WashSupervisionQueryPort.LookupCandidate value) {
+    if (value.studentAccountId() == null || value.personId() == null || value.firstName() == null
+        || value.studentNumber() == null || value.currentSemester() == null
+        || !"ACTIVE".equals(value.academicStatus())
+        || value.appointmentId() == null || value.appointmentStatus() == null
+        || value.appointmentType() == null || value.instrumentCount() == null || value.pieceType() == null
+        || value.courseSectionId() == null || value.courseNrc() == null || value.courseName() == null
+        || value.appointmentTimeSlotId() == null
+        || value.slotStartsAt() == null || value.slotEndsAt() == null || value.slotTimezone() == null) {
+      throw new ProjectionUnavailableException("supervisor lookup projection is incomplete");
+    }
+    if (value.washExecutionId() != null
+        && (value.executionStatus() == null || value.executionVersion() == null || value.arrivedAt() == null)) {
+      throw new ProjectionUnavailableException("wash execution projection is incomplete");
+    }
+    if (value.resourceAssignmentId() != null
+        && (value.assignmentType() == null || value.cabinId() == null || value.cabinCode() == null
+            || value.cabinName() == null || value.tankId() == null || value.tankCode() == null
+            || value.tankName() == null)) {
+      throw new ProjectionUnavailableException("active resource assignment projection is incomplete");
+    }
+  }
+
+  private static SubmittedExitMaterials lookupMaterials(WashSupervisionQueryPort.LookupCandidate value) {
+    List<Integer> counts = java.util.Arrays.asList(value.submittedPackageCount(),
+        value.submittedGreenPaperCassette8Count(), value.submittedGreenPaperCassette10Count(),
+        value.submittedWitnessTapePortionCount());
+    long present = counts.stream().filter(java.util.Objects::nonNull).count();
+    if (present == 0) return null;
+    if (present != counts.size()) {
+      throw new ProjectionUnavailableException("submitted exit materials projection is incomplete");
+    }
+    return new SubmittedExitMaterials(counts.get(0), counts.get(1), counts.get(2), counts.get(3));
+  }
+
+  private static com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.Resource lookupResource(
+      UUID id, String code, String name) {
+    return id == null ? null
+        : new com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.Resource(id, code, name);
+  }
+
+  private LocalDate serviceDate() {
+    return clock.instant().atZone(SERVICE_ZONE).toLocalDate();
+  }
+
   private static SubmittedExitMaterialsResponse submittedMaterials(
       WashSupervisionQueryPort.PendingReassignment value) {
     if (value.submittedPackageCount() == null
@@ -82,7 +271,18 @@ public class WashSupervisionQueryService {
     return name == null || name.isBlank() ? null : name;
   }
 
+  private static String displayName(WashSupervisionQueryPort.LookupCandidate value) {
+    return Stream.of(value.firstName(), value.paternalSurname(), value.maternalSurname())
+        .filter(part -> part != null && !part.isBlank())
+        .reduce((left, right) -> left + " " + right)
+        .orElseThrow(() -> new ProjectionUnavailableException("student presentation is incomplete"));
+  }
+
   private static ResourceResponse resource(java.util.UUID id, String code, String name) {
     return id == null ? null : new ResourceResponse(id, code, name);
+  }
+
+  public static class LookupNotFoundException extends RuntimeException {
+    public LookupNotFoundException() { super("No appointment was found for today."); }
   }
 }

@@ -7,7 +7,7 @@ import com.estoma.platformbff.application.security.AuthenticationRejectedExcepti
 import com.estoma.platformbff.application.security.AuthenticationRequiredException;
 import com.estoma.platformbff.application.security.SecurityRpcUnavailableException;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
-import com.estoma.platformbff.application.wash.WashStudentQueryService.EntryLookupNotFoundException;
+import com.estoma.platformbff.application.wash.WashSupervisionQueryService.LookupNotFoundException;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
@@ -58,7 +58,7 @@ public class ApiExceptionHandler {
             traceId()));
   }
 
-  @ExceptionHandler(EntryLookupNotFoundException.class)
+  @ExceptionHandler(LookupNotFoundException.class)
   ResponseEntity<ProblemResponse> entryLookupNotFound() {
     return problem(HttpStatus.NOT_FOUND, "BFF.WASH_ENTRY_NOT_FOUND", "Not Found",
         "No appointment was found for today.");

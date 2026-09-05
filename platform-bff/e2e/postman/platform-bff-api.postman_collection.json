@@ -18413,13 +18413,157 @@
                   "description": "",
                   "item": [
                     {
-                      "name": "entry-lookup",
+                      "name": "home",
                       "description": "",
                       "item": [
                         {
-                          "name": "Wash Controller entry Lookup post api v1 wash supervision entry lookup",
+                          "id": "cf002589-6fdf-4e20-96d9-cd5a32623de0",
+                          "name": "Wash Controller supervisor Home get api v1 wash supervision home",
                           "request": {
-                            "name": "Wash Controller entry Lookup post api v1 wash supervision entry lookup",
+                            "name": "Wash Controller supervisor Home get api v1 wash supervision home",
+                            "description": {},
+                            "url": {
+                              "path": [
+                                "api",
+                                "v1",
+                                "wash",
+                                "supervision",
+                                "home"
+                              ],
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "query": [],
+                              "variable": []
+                            },
+                            "header": [
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "method": "GET",
+                            "body": {},
+                            "auth": {
+                              "type": "bearer",
+                              "bearer": [
+                                {
+                                  "key": "token",
+                                  "value": "{{bearerToken}}"
+                                }
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "id": "82311254-9435-4b16-b674-88bfcbce2d2d",
+                              "name": "Successful response",
+                              "originalRequest": {
+                                "url": {
+                                  "path": [
+                                    "api",
+                                    "v1",
+                                    "wash",
+                                    "supervision",
+                                    "home"
+                                  ],
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "query": [],
+                                  "variable": []
+                                },
+                                "header": [
+                                  {
+                                    "key": "Accept",
+                                    "value": "application/json"
+                                  },
+                                  {
+                                    "description": {
+                                      "content": "Added as a part of security scheme: bearer",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "method": "GET",
+                                "body": {}
+                              },
+                              "status": "OK",
+                              "code": 200,
+                              "header": [
+                                {
+                                  "key": "Content-Type",
+                                  "value": "application/json"
+                                }
+                              ],
+                              "body": "{\n  \"serviceDate\": \"<date>\",\n  \"summary\": {\n    \"registeredAppointments\": \"<integer>\",\n    \"inProcessAppointments\": \"<integer>\",\n    \"completedAppointments\": \"<integer>\",\n    \"deniedAppointments\": \"<integer>\",\n    \"cancelledAppointments\": \"<integer>\"\n  },\n  \"pendingReassignmentsCount\": \"<integer>\"\n}",
+                              "cookie": [],
+                              "_postman_previewlanguage": "json"
+                            },
+                            {
+                              "id": "13572b67-12bb-481c-860d-3d0feb12374f",
+                              "name": "Problem response",
+                              "originalRequest": {
+                                "url": {
+                                  "path": [
+                                    "api",
+                                    "v1",
+                                    "wash",
+                                    "supervision",
+                                    "home"
+                                  ],
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "query": [],
+                                  "variable": []
+                                },
+                                "header": [
+                                  {
+                                    "key": "Accept",
+                                    "value": "application/problem+json"
+                                  },
+                                  {
+                                    "description": {
+                                      "content": "Added as a part of security scheme: bearer",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "method": "GET",
+                                "body": {}
+                              },
+                              "header": [
+                                {
+                                  "key": "Content-Type",
+                                  "value": "application/problem+json"
+                                }
+                              ],
+                              "body": "{\n  \"type\": \"<string>\",\n  \"title\": \"<string>\",\n  \"status\": \"<integer>\",\n  \"code\": \"<string>\",\n  \"detail\": \"<string>\",\n  \"traceId\": \"<string>\"\n}",
+                              "cookie": [],
+                              "_postman_previewlanguage": "json"
+                            }
+                          ],
+                          "event": [],
+                          "protocolProfileBehavior": {
+                            "disableBodyPruning": true
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "lookup",
+                      "description": "",
+                      "item": [
+                        {
+                          "id": "eb09efbd-27b8-4b2e-805e-0f420f55a7ed",
+                          "name": "Wash Controller supervisor Lookup post api v1 wash supervision lookup",
+                          "request": {
+                            "name": "Wash Controller supervisor Lookup post api v1 wash supervision lookup",
                             "description": {
                               "content": "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is explicitly gated until the owner-backed QR projection is available and returns 503.",
                               "type": "text/plain"
@@ -18430,7 +18574,7 @@
                                 "v1",
                                 "wash",
                                 "supervision",
-                                "entry-lookup"
+                                "lookup"
                               ],
                               "host": [
                                 "{{baseUrl}}"
@@ -18451,7 +18595,7 @@
                             "method": "POST",
                             "body": {
                               "mode": "raw",
-                              "raw": "{\n  \"lookupType\": \"<string,null>\",\n  \"qrRepresentation\": \"<string,null>\",\n  \"studentEnrollment\": \"<string,null>\"\n}",
+                              "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"qrRepresentation\": \"<string,null>\",\n  \"studentEnrollment\": \"<string,null>\"\n}",
                               "options": {
                                 "raw": {
                                   "headerFamily": "json",
@@ -18471,6 +18615,7 @@
                           },
                           "response": [
                             {
+                              "id": "18d16b5f-a9d3-4302-9206-57f8b6a5875e",
                               "name": "Successful response",
                               "originalRequest": {
                                 "url": {
@@ -18479,7 +18624,7 @@
                                     "v1",
                                     "wash",
                                     "supervision",
-                                    "entry-lookup"
+                                    "lookup"
                                   ],
                                   "host": [
                                     "{{baseUrl}}"
@@ -18508,7 +18653,7 @@
                                 "method": "POST",
                                 "body": {
                                   "mode": "raw",
-                                  "raw": "{\n  \"lookupType\": \"<string,null>\",\n  \"qrRepresentation\": \"<string,null>\",\n  \"studentEnrollment\": \"<string,null>\"\n}",
+                                  "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"qrRepresentation\": \"<string,null>\",\n  \"studentEnrollment\": \"<string,null>\"\n}",
                                   "options": {
                                     "raw": {
                                       "headerFamily": "json",
@@ -18525,11 +18670,12 @@
                                   "value": "application/json"
                                 }
                               ],
-                              "body": "{\n  \"appointment\": {\n    \"appointmentId\": \"<string,null-uuid>\",\n    \"appointmentStatus\": \"<string,null>\",\n    \"appointmentType\": \"<string,null>\",\n    \"courseSection\": null,\n    \"instrumentCount\": \"<integer,null>\",\n    \"pieceType\": \"<string,null>\",\n    \"qrRepresentation\": \"<string,null>\",\n    \"qrUsageContext\": \"<string,null>\",\n    \"timeSlot\": null,\n    \"washExecution\": {\n      \"activeResourceAssignment\": {\n        \"cabinCode\": \"<string,null>\",\n        \"cabinId\": \"<string,null-uuid>\",\n        \"cabinName\": \"<string,null>\",\n        \"resourceAssignmentId\": \"<string,null-uuid>\",\n        \"tankCode\": \"<string,null>\",\n        \"tankId\": \"<string,null-uuid>\",\n        \"tankName\": \"<string,null>\"\n      },\n      \"arrivedAt\": \"<string,null-date-time>\",\n      \"rejectionReason\": \"<string,null>\",\n      \"status\": \"<string,null>\",\n      \"version\": \"<integer,null>\",\n      \"washExecutionId\": \"<string,null-uuid>\"\n    }\n  },\n  \"serviceDate\": \"<string,null-date>\",\n  \"student\": null,\n  \"washExecution\": {\n    \"activeResourceAssignment\": {\n      \"cabinCode\": \"<string,null>\",\n      \"cabinId\": \"<string,null-uuid>\",\n      \"cabinName\": \"<string,null>\",\n      \"resourceAssignmentId\": \"<string,null-uuid>\",\n      \"tankCode\": \"<string,null>\",\n      \"tankId\": \"<string,null-uuid>\",\n      \"tankName\": \"<string,null>\"\n    },\n    \"arrivedAt\": \"<string,null-date-time>\",\n    \"rejectionReason\": \"<string,null>\",\n    \"status\": \"<string,null>\",\n    \"version\": \"<integer,null>\",\n    \"washExecutionId\": \"<string,null-uuid>\"\n  }\n}",
+                              "body": "{\n  \"serviceDate\": \"<date>\",\n  \"nextAction\": \"EXIT_REVIEW\",\n  \"student\": {\n    \"studentAccountId\": \"<uuid>\",\n    \"displayName\": \"<string>\",\n    \"studentEnrollment\": \"<string>\",\n    \"currentSemester\": \"<integer>\"\n  },\n  \"appointment\": {\n    \"appointmentId\": \"<uuid>\",\n    \"appointmentStatus\": \"MISSED\",\n    \"appointmentType\": \"NORMAL\",\n    \"instrumentCount\": \"<integer>\",\n    \"pieceType\": \"LOW_SPEED\",\n    \"courseSectionReference\": {\n      \"courseSectionId\": \"<uuid>\",\n      \"nrc\": \"<string>\",\n      \"name\": \"<string>\"\n    },\n    \"appointmentTimeSlot\": {\n      \"appointmentTimeSlotId\": \"<uuid>\",\n      \"startsAt\": \"<dateTime>\",\n      \"endsAt\": \"<dateTime>\",\n      \"timezone\": \"<string>\"\n    }\n  },\n  \"activeResourceAssignment\": {\n    \"resourceAssignmentId\": \"<uuid>\",\n    \"assignmentType\": \"<string>\",\n    \"cabin\": {\n      \"resourceId\": \"<uuid>\",\n      \"code\": \"<string>\",\n      \"name\": \"<string>\"\n    },\n    \"tank\": {\n      \"resourceId\": \"<uuid>\",\n      \"code\": \"<string>\",\n      \"name\": \"<string>\"\n    }\n  },\n  \"washExecution\": {\n    \"washExecutionId\": \"<uuid>\",\n    \"status\": \"PENDING_REASSIGNMENT\",\n    \"executionVersion\": \"<integer>\",\n    \"arrivedAt\": \"<dateTime>\",\n    \"exitSubmittedAt\": \"<string,null-date-time>\",\n    \"rejectionReason\": \"<string,null>\",\n    \"submittedExitMaterials\": {\n      \"packageCount\": \"<integer>\",\n      \"greenPaperCassette8Count\": \"<integer>\",\n      \"greenPaperCassette10Count\": \"<integer>\",\n      \"witnessTapePortionCount\": \"<integer>\"\n    }\n  }\n}",
                               "cookie": [],
                               "_postman_previewlanguage": "json"
                             },
                             {
+                              "id": "99a2d7cb-27ba-41d7-915d-dcb00c85735c",
                               "name": "Problem response",
                               "originalRequest": {
                                 "url": {
@@ -18538,7 +18684,7 @@
                                     "v1",
                                     "wash",
                                     "supervision",
-                                    "entry-lookup"
+                                    "lookup"
                                   ],
                                   "host": [
                                     "{{baseUrl}}"
@@ -18567,7 +18713,7 @@
                                 "method": "POST",
                                 "body": {
                                   "mode": "raw",
-                                  "raw": "{\n  \"lookupType\": \"<string,null>\",\n  \"qrRepresentation\": \"<string,null>\",\n  \"studentEnrollment\": \"<string,null>\"\n}",
+                                  "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"qrRepresentation\": \"<string,null>\",\n  \"studentEnrollment\": \"<string,null>\"\n}",
                                   "options": {
                                     "raw": {
                                       "headerFamily": "json",

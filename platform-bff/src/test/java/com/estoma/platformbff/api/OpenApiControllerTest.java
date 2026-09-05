@@ -95,13 +95,41 @@ class OpenApiControllerTest {
     assertThat(responseSchema(admin, "202"))
         .containsEntry("$ref", "#/components/schemas/AcceptedOperation");
 
-    Map<String, Object> lookup = operation(paths, "/api/v1/wash/supervision/entry-lookup", "post");
+    assertThat(paths).doesNotContainKey("/api/v1/wash/supervision/entry-lookup");
+    Map<String, Object> supervisorHome = operation(paths, "/api/v1/wash/supervision/home", "get");
+    Map<String, Object> supervisorHomeSchema = responseSchema(supervisorHome, "200");
+    assertThat((java.util.List<String>) supervisorHomeSchema.get("required"))
+        .containsExactlyInAnyOrder("serviceDate", "summary", "pendingReassignmentsCount");
+    Map<String, Object> summary = (Map<String, Object>)
+        ((Map<String, Object>) supervisorHomeSchema.get("properties")).get("summary");
+    assertThat((java.util.List<String>) summary.get("required"))
+        .containsExactlyInAnyOrder("registeredAppointments", "inProcessAppointments",
+            "completedAppointments", "deniedAppointments", "cancelledAppointments");
+
+    Map<String, Object> lookup = operation(paths, "/api/v1/wash/supervision/lookup", "post");
     assertThat(lookup).doesNotContainKey("parameters");
-    assertThat((Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>) lookup.get("requestBody"))
-        .get("content")).get("application/json")).isNotNull();
+    Map<String, Object> lookupRequest = (Map<String, Object>) ((Map<String, Object>)
+        ((Map<String, Object>) ((Map<String, Object>) lookup.get("requestBody")).get("content"))
+            .get("application/json")).get("schema");
+    assertThat((java.util.List<String>) lookupRequest.get("required")).contains("lookupType");
+    assertThat((java.util.List<String>) ((Map<String, Object>)
+        ((Map<String, Object>) lookupRequest.get("properties")).get("lookupType")).get("enum"))
+        .containsExactly("QR", "STUDENT_ENROLLMENT");
     assertThat(((Map<String, Object>) lookup.get("responses"))).containsKey("200");
     assertThat((Map<String, Boolean>) lookup.get("x-provider-ready"))
         .containsEntry("STUDENT_ENROLLMENT", true).containsEntry("QR", false);
+    Map<String, Object> lookupSchema = responseSchema(lookup, "200");
+    assertThat((java.util.List<String>) lookupSchema.get("required"))
+        .containsExactlyInAnyOrder("serviceDate", "nextAction", "student", "appointment");
+    Map<String, Object> nextAction = (Map<String, Object>)
+        ((Map<String, Object>) lookupSchema.get("properties")).get("nextAction");
+    assertThat((java.util.List<String>) nextAction.get("enum"))
+        .containsExactly("ENTRY", "ENTRY_DECISION", "REASSIGNMENT", "EXIT_REVIEW", "NONE");
+    Map<String, Object> supervisorAppointment = (Map<String, Object>)
+        ((Map<String, Object>) lookupSchema.get("properties")).get("appointment");
+    assertThat((java.util.List<String>) supervisorAppointment.get("required"))
+        .containsExactlyInAnyOrder("appointmentId", "appointmentStatus", "appointmentType",
+            "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot");
 
     Map<String, Object> temporaryPassword = operation(paths,
         "/api/v1/admin/accounts/{accountId}/temporary-password", "post");

@@ -147,6 +147,68 @@ class ProjectionQueriesPostgresIT {
   }
 
   @Test
+  void supervisorHomeCountsDistinctAppointmentsForTheServiceDateAndTheExistingPendingQueue() {
+    UUID scheduled = appointment(UUID.randomUUID(), "SCHEDULED", Instant.parse("2026-08-01T08:00:00Z"));
+    UUID inProgress = appointment(UUID.randomUUID(), "IN_PROGRESS", Instant.parse("2026-08-01T09:00:00Z"));
+    appointment(UUID.randomUUID(), "COMPLETED", Instant.parse("2026-08-01T10:00:00Z"));
+    appointment(UUID.randomUUID(), "ENTRY_REJECTED", Instant.parse("2026-08-01T11:00:00Z"));
+    appointment(UUID.randomUUID(), "CANCELLED", Instant.parse("2026-08-01T12:00:00Z"));
+    appointment(UUID.randomUUID(), "MISSED", Instant.parse("2026-08-01T13:00:00Z"));
+    insertExecution(scheduled, "PENDING_ENTRY", Instant.parse("2026-08-01T08:05:00Z"));
+    insertExecution(inProgress, "PENDING_REASSIGNMENT", Instant.parse("2026-08-01T09:05:00Z"));
+    appointment(UUID.randomUUID(), "COMPLETED", Instant.parse("2026-08-02T10:00:00Z"),
+        java.time.LocalDate.of(2026, 8, 2));
+
+    var snapshot = supervision.summarizeHome(java.time.LocalDate.of(2026, 8, 1));
+
+    assertThat(snapshot.registeredAppointments()).isEqualTo(6);
+    assertThat(snapshot.inProcessAppointments()).isEqualTo(2);
+    assertThat(snapshot.completedAppointments()).isEqualTo(1);
+    assertThat(snapshot.deniedAppointments()).isEqualTo(1);
+    assertThat(snapshot.cancelledAppointments()).isEqualTo(1);
+    assertThat(snapshot.pendingReassignmentsCount()).isEqualTo(1);
+  }
+
+  @Test
+  void supervisorLookupCandidatesReturnAllAppointmentsInDeterministicLatestFirstOrder() {
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    Instant old = Instant.parse("2026-08-01T08:00:00Z");
+    Instant latest = Instant.parse("2026-08-01T10:00:00Z");
+    jdbc.sql("""
+        INSERT INTO person_presentation_read_model (
+          person_id, first_name, paternal_surname, maternal_surname, status, source_version, updated_at)
+        VALUES (:personId, 'Ana', 'García', 'Reyes', 'ACTIVE', 1, :updatedAt)
+        """).param("personId", personId).param("updatedAt", java.sql.Timestamp.from(latest)).update();
+    jdbc.sql("""
+        INSERT INTO student_academic_profile_read_model (
+          student_academic_profile_id, person_id, account_id, student_number, current_semester,
+          academic_status, source_version, updated_at)
+        VALUES (:profileId, :personId, :accountId, '201945678', 7, 'ACTIVE', 1, :updatedAt)
+        """).param("profileId", UUID.randomUUID()).param("personId", personId)
+        .param("accountId", accountId).param("updatedAt", java.sql.Timestamp.from(latest)).update();
+    UUID completed = appointment(accountId, "COMPLETED", old);
+    UUID active = appointment(accountId, "IN_PROGRESS", latest);
+    jdbc.sql("""
+        UPDATE appointment_read_model
+        SET appointment_type = 'NORMAL', instrument_count = 15, piece_type = 'HIGH_SPEED'
+        WHERE appointment_id IN (:completed, :active)
+        """).param("completed", completed).param("active", active).update();
+    UUID executionId = insertExecution(active, "EXIT_SUBMITTED", latest.plusSeconds(60));
+    exitMaterials.projectSubmittedExitMaterials(executionId, 1, 2, 3, 4, 2, latest.plusSeconds(90));
+
+    var candidates = supervision.findAppointments(accountId, java.time.LocalDate.of(2026, 8, 1));
+
+    assertThat(candidates).extracting(item -> item.appointmentId()).containsExactly(active, completed);
+    var selected = candidates.getFirst();
+    assertThat(selected.firstName()).isEqualTo("Ana");
+    assertThat(selected.studentNumber()).isEqualTo("201945678");
+    assertThat(selected.executionStatus()).isEqualTo("EXIT_SUBMITTED");
+    assertThat(selected.exitSubmittedAt()).isEqualTo(latest.plusSeconds(60));
+    assertThat(selected.submittedWitnessTapePortionCount()).isEqualTo(4);
+  }
+
+  @Test
   void studentPrimaryAppointmentPrefersOperationalStatusesThenTheNewestTerminalState() {
     UUID accountId = UUID.randomUUID();
     Instant base = Instant.parse("2026-08-01T10:00:00Z");
@@ -224,6 +286,10 @@ class ProjectionQueriesPostgresIT {
   }
 
   private UUID appointment(UUID accountId, String status, Instant updatedAt) {
+    return appointment(accountId, status, updatedAt, java.time.LocalDate.of(2026, 8, 1));
+  }
+
+  private UUID appointment(UUID accountId, String status, Instant updatedAt, java.time.LocalDate serviceDate) {
     UUID appointmentId = UUID.randomUUID();
     UUID slotId = UUID.randomUUID();
     jdbc.sql("""
@@ -232,7 +298,7 @@ class ProjectionQueriesPostgresIT {
         VALUES (:id, :serviceDate, :startsAt, :endsAt, 'America/Mexico_City', 'ACTIVE', :updatedAt)
         """)
         .param("id", slotId)
-        .param("serviceDate", java.time.LocalDate.of(2026, 8, 1))
+        .param("serviceDate", serviceDate)
         .param("startsAt", java.sql.Timestamp.from(updatedAt))
         .param("endsAt", java.sql.Timestamp.from(updatedAt.plusSeconds(1800)))
         .param("updatedAt", java.sql.Timestamp.from(updatedAt))
@@ -249,5 +315,22 @@ class ProjectionQueriesPostgresIT {
         .param("updatedAt", java.sql.Timestamp.from(updatedAt))
         .update();
     return appointmentId;
+  }
+
+  private UUID insertExecution(UUID appointmentId, String status, Instant updatedAt) {
+    UUID executionId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model (
+          wash_execution_id, appointment_id, status, arrived_at, exit_submitted_at,
+          execution_version, updated_at)
+        VALUES (:executionId, :appointmentId, :status, :arrivedAt,
+          CASE WHEN :status = 'EXIT_SUBMITTED'
+            THEN CAST(:updatedAt AS TIMESTAMPTZ)
+            ELSE NULL::TIMESTAMPTZ
+          END, 2, :updatedAt)
+        """).param("executionId", executionId).param("appointmentId", appointmentId)
+        .param("status", status).param("arrivedAt", java.sql.Timestamp.from(updatedAt.minusSeconds(30)))
+        .param("updatedAt", java.sql.Timestamp.from(updatedAt)).update();
+    return executionId;
   }
 }

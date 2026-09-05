@@ -12,6 +12,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
+import java.lang.annotation.Annotation;
 import java.lang.reflect.Parameter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.RecordComponent;
@@ -126,7 +127,7 @@ public class OpenApiController {
       operation.put("requestBody", Map.of("required", true, "content", Map.of(
           MediaType.APPLICATION_JSON_VALUE, Map.of("schema", schemaFor(requestType)))));
     }
-    if (handler.getMethod().getName().equals("entryLookup")) {
+    if (handler.getMethod().getName().equals("supervisorLookup")) {
       operation.put("description", "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is "
           + "explicitly gated until the owner-backed QR projection is available and returns 503.");
       operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
@@ -258,9 +259,9 @@ public class OpenApiController {
       applyValidation(component, property);
       boolean requiredNullable = component.isAnnotationPresent(RequiredNullable.class);
       boolean mandatory = component.getType().isPrimitive()
-          || component.isAnnotationPresent(NotNull.class)
-          || component.isAnnotationPresent(NotBlank.class)
-          || component.isAnnotationPresent(NotEmpty.class)
+          || hasValidationAnnotation(component, NotNull.class)
+          || hasValidationAnnotation(component, NotBlank.class)
+          || hasValidationAnnotation(component, NotEmpty.class)
           || component.isAnnotationPresent(Required.class) || requiredNullable;
       properties.put(component.getName(), mandatory && !requiredNullable ? property : nullable(property));
       if (mandatory) required.add(component.getName());
@@ -283,20 +284,21 @@ public class OpenApiController {
   }
 
   private static void applyValidation(RecordComponent component, Map<String, Object> schema) {
-    if (component.isAnnotationPresent(NotBlank.class)) schema.put("minLength", 1);
-    Size size = component.getAnnotation(Size.class);
+    if (hasValidationAnnotation(component, NotBlank.class)) schema.put("minLength", 1);
+    Size size = validationAnnotation(component, Size.class);
     if (size != null) {
       boolean collection = Collection.class.isAssignableFrom(component.getType()) || component.getType().isArray();
       if (size.min() > 0) schema.put(collection ? "minItems" : "minLength", size.min());
       if (size.max() < Integer.MAX_VALUE) schema.put(collection ? "maxItems" : "maxLength", size.max());
     }
-    Min min = component.getAnnotation(Min.class);
+    Min min = validationAnnotation(component, Min.class);
     if (min != null) schema.put("minimum", min.value());
-    Max max = component.getAnnotation(Max.class);
+    Max max = validationAnnotation(component, Max.class);
     if (max != null) schema.put("maximum", max.value());
-    if (component.isAnnotationPresent(Positive.class)) schema.put("exclusiveMinimum", 0);
-    if (component.isAnnotationPresent(PositiveOrZero.class)) schema.put("minimum", 0);
-    jakarta.validation.constraints.Pattern pattern = component.getAnnotation(jakarta.validation.constraints.Pattern.class);
+    if (hasValidationAnnotation(component, Positive.class)) schema.put("exclusiveMinimum", 0);
+    if (hasValidationAnnotation(component, PositiveOrZero.class)) schema.put("minimum", 0);
+    jakarta.validation.constraints.Pattern pattern = validationAnnotation(
+        component, jakarta.validation.constraints.Pattern.class);
     if (pattern != null) {
       String expression = pattern.regexp();
       if (expression.matches("[A-Z0-9_]+(\\|[A-Z0-9_]+)+")) {
@@ -305,6 +307,17 @@ public class OpenApiController {
         schema.put("pattern", expression);
       }
     }
+  }
+
+  private static boolean hasValidationAnnotation(
+      RecordComponent component, Class<? extends Annotation> annotationType) {
+    return validationAnnotation(component, annotationType) != null;
+  }
+
+  private static <A extends Annotation> A validationAnnotation(
+      RecordComponent component, Class<A> annotationType) {
+    A annotation = component.getAnnotation(annotationType);
+    return annotation != null ? annotation : component.getAccessor().getAnnotation(annotationType);
   }
 
   private static void applyValidation(Parameter parameter, Map<String, Object> schema) {
