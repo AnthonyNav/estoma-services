@@ -60,7 +60,7 @@ Antes de implementar comportamiento debe considerarse cerrado [`system_contract.
 - revocación local por Events;
 - Authorization projection fail-closed;
 - BFF no es Process Manager;
-- disponibilidad de Appointments queda `GATED_BY_APPOINTMENTS_OWNER_CONTRACT`.
+- disponibilidad de Appointments usa el contrato owner V1 y cache-aside asíncrono.
 
 ---
 
@@ -709,13 +709,14 @@ POST /api/v1/wash/exceptional-authorizations
 POST /api/v1/wash/exceptional-authorizations/{authorizationId}/cancel
 ```
 
-Prohibido todavía:
+Disponible mediante contrato owner-derived:
 
 ```text
 GET /api/v1/wash/appointments/availability
 ```
 
-hasta resolución owner posterior.
+Un miss/stale responde `503` después de registrar un refresh durable; nunca bloquea la request
+esperando el Result.
 
 ## Wash Execution
 
@@ -764,7 +765,7 @@ No implementar saga automática dentro del BFF.
 - autorización general BFF + autorización específica owner;
 - DTO HTTP no filtra wire internals;
 - ninguna ruta usa HTTP/gRPC interno;
-- Availability permanece cerrada mientras el gate siga abierto;
+- Availability conserva ownership, freshness y fencing del contrato owner;
 - OpenAPI/documentación HTTP refleja exactamente lo expuesto.
 
 ---
@@ -859,7 +860,7 @@ Wash Execution Command disponible
 Authorization projection recovery
 ```
 
-Availability de Appointments solo entra al E2E cuando el owner cierre el gate documental y de implementación.
+Availability de Appointments entra al E2E coordinadamente con el owner que publica Query/Result V1.
 
 ## Definition of Done PR6
 
@@ -901,7 +902,7 @@ No resolver faltantes del owner dentro del BFF.
 
 ## 11. Gate especial de Appointments availability
 
-Estado inicial:
+Estado inicial, preservado como antecedente:
 
 ```text
 GET /api/v1/wash/appointments/availability
@@ -919,6 +920,17 @@ otra decisión arquitectónica aprobada
 ```
 
 No es válida una implementación BFF del matching.
+
+Estado actual:
+
+```text
+GetAppointmentAvailability v1 + GetAppointmentAvailabilityResult v1 publicados por Appointments
+→ OWNER_CONTRACT_READY
+→ adapter BFF cache-aside asíncrono permitido
+```
+
+La resolución detallada y las dependencias de merge están en
+[`appointment_availability_gate_resolution.md`](appointment_availability_gate_resolution.md).
 
 ---
 
@@ -949,5 +961,4 @@ short-wait por Result en la misma request
 cache avanzada
 separación en múltiples deployables
 Prácticas Profesionales fuera del alcance actual
-Appointments availability mientras siga gated
 ```

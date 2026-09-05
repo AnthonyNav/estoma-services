@@ -289,16 +289,11 @@ POST /api/v1/wash/executions/{washExecutionId}/clinic-cancel
 POST /api/v1/wash/operational-resources/disable
 POST /api/v1/wash/operational-resources/restore
 GET  /api/v1/wash/supervision/pending-reassignments
+GET  /api/v1/wash/appointments/availability
 ```
 
-Ruta reservada pero **no implementable todavía**:
-
-```text
-GET /api/v1/wash/appointments/availability
-→ GATED_BY_APPOINTMENTS_OWNER_CONTRACT
-```
-
-No debe existir controller funcional para esa ruta hasta que Appointments publique un contrato owner-derived consumible por BFF.
+Availability se rige por la resolución owner-derived de la sección 16. No realiza RPC síncrono ni
+calcula reglas de Appointments en el BFF.
 
 ---
 
@@ -777,7 +772,7 @@ JSON puede utilizarse de forma acotada para metadata técnica, envelope Outbox o
 
 ---
 
-## 16. Disponibilidad de Appointments — gate explícito
+## 16. Disponibilidad de Appointments — gate resuelto
 
 `appointments-service` es owner de `GetAppointmentAvailability` y del algoritmo determinista de matching.
 
@@ -789,32 +784,41 @@ capacity - demand
 
 ni copiar el algoritmo sin apropiarse de lógica de dominio.
 
-Las Queries actuales de Appointments:
+Las Queries de recovery de Appointments:
 
 ```text
 GetAppointmentExecutionContext
 ListAppointmentExecutionContextsPage
 ```
 
-son recovery para `wash-execution` y no son un contrato de interfaz para BFF.
+siguen siendo recovery para `wash-execution` y no se reutilizan como interfaz para BFF.
 
-Por tanto:
+El gate inicial quedó resuelto por el contrato owner V1 publicado en
+`appointments-service/docs/asyncapi.yaml` y `appointments-service/docs/system_contract.md`:
 
 ```text
-GET /api/v1/wash/appointments/availability
-= RESERVED HTTP CONTRACT
-= GATED_BY_APPOINTMENTS_OWNER_CONTRACT
+GetAppointmentAvailability v1
+platform.queries → appointments
+
+GetAppointmentAvailabilityResult v1
+platform.results → bff
 ```
 
-Hasta que el owner publique un contrato consumible por BFF está prohibido:
+La ruta HTTP usa cache-aside asíncrono. Un hit fresco sirve el snapshot owner-derived. Un miss o
+snapshot vencido registra duraderamente una Query y responde `503`; un reintento posterior puede
+servir el Result ya materializado. El BFF aplica fencing por Query/correlation/contexto, Inbox
+idempotente y sólo considera fresco el intervalo inclusivo
+`snapshotGeneratedAt <= now <= freshUntil`, limitado además a 30 segundos.
+
+Continúa prohibido:
 
 - implementar el endpoint con aproximaciones;
-- inventar `GetAppointmentAvailability` como Query RabbitMQ;
 - usar las Queries de recovery existentes;
 - duplicar matching;
 - consultar Appointments por HTTP/gRPC.
 
-Este gate no bloquea PR1 foundation ni otros adapters ya soportados por owners.
+La forma exacta del wire y la evidencia que resuelve el gate están en
+[`appointment_availability_gate_resolution.md`](appointment_availability_gate_resolution.md).
 
 ---
 
@@ -941,7 +945,7 @@ Security RPC foundation                = UNBLOCKED
 JWT/revocation foundation              = UNBLOCKED
 Authorization projection/recovery      = UNBLOCKED
 Typed read-model foundation            = UNBLOCKED
-Appointments availability adapter      = GATED_BY_APPOINTMENTS_OWNER_CONTRACT
+Appointments availability adapter      = OWNER_CONTRACT_READY
 Other owner adapters                   = gated by owner implementation readiness
 SSE                                     = OUT OF SCOPE V1 inicial
 BFF as Process Manager                  = FORBIDDEN

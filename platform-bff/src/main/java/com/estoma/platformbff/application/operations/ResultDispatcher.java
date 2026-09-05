@@ -5,6 +5,7 @@ import com.estoma.platformbff.application.projection.AuthorizationRecoveryServic
 import com.estoma.platformbff.application.projection.AccountPresentationRecoveryService;
 import com.estoma.platformbff.application.projection.PersonPresentationRecoveryService;
 import com.estoma.platformbff.application.projection.SystemCatalogRecoveryService;
+import com.estoma.platformbff.application.wash.AppointmentAvailabilityResultService;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -35,23 +36,33 @@ public class ResultDispatcher {
   private final AccountPresentationRecoveryService accountPresentationRecovery;
   private final PersonPresentationRecoveryService personPresentationRecovery;
   private final SystemCatalogRecoveryService systemCatalogRecovery;
+  private final AppointmentAvailabilityResultService appointmentAvailability;
 
   public ResultDispatcher(CommandRegistry registry, ResultApplicationService commandResults,
       AuthorizationRecoveryService authorizationRecovery,
       AccountPresentationRecoveryService accountPresentationRecovery,
       PersonPresentationRecoveryService personPresentationRecovery,
-      SystemCatalogRecoveryService systemCatalogRecovery) {
+      SystemCatalogRecoveryService systemCatalogRecovery,
+      AppointmentAvailabilityResultService appointmentAvailability) {
     this.registry = registry;
     this.commandResults = commandResults;
     this.authorizationRecovery = authorizationRecovery;
     this.accountPresentationRecovery = accountPresentationRecovery;
     this.personPresentationRecovery = personPresentationRecovery;
     this.systemCatalogRecovery = systemCatalogRecovery;
+    this.appointmentAvailability = appointmentAvailability;
   }
 
   public DispatchOutcome dispatch(IncomingResult result) {
     if (result == null || result.messageKind() != MessageKind.RESULT) {
       return DispatchOutcome.UNTRUSTED;
+    }
+    if ("GetAppointmentAvailabilityResult".equals(result.messageType())) {
+      try {
+        return appointmentAvailability.apply(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
+      } catch (IllegalArgumentException invalid) {
+        return DispatchOutcome.UNTRUSTED;
+      }
     }
     if (AUTHORIZATION_RECOVERY_RESULT_TYPES.contains(result.messageType())) {
       try {

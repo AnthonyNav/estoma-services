@@ -6,9 +6,11 @@ import com.estoma.platformbff.application.security.LocalAuthorizationService.Aut
 import com.estoma.platformbff.application.security.AuthenticationRejectedException;
 import com.estoma.platformbff.application.security.AuthenticationRequiredException;
 import com.estoma.platformbff.application.security.SecurityRpcUnavailableException;
+import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
 import com.estoma.platformbff.application.wash.WashStudentQueryService.EntryLookupNotFoundException;
 import java.util.UUID;
 import org.slf4j.MDC;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -44,6 +46,18 @@ public class ApiExceptionHandler {
         "Service Unavailable", "The required local projection is temporarily unavailable.");
   }
 
+  @ExceptionHandler(AppointmentAvailabilityRefreshingException.class)
+  ResponseEntity<ProblemResponse> availabilityRefreshing(
+      AppointmentAvailabilityRefreshingException refreshing) {
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .header(HttpHeaders.RETRY_AFTER, Long.toString(refreshing.retryAfterSeconds()))
+        .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+        .body(new ProblemResponse("urn:estoma:error:BFF.PROJECTION_UNAVAILABLE",
+            "Service Unavailable", HttpStatus.SERVICE_UNAVAILABLE.value(),
+            "BFF.PROJECTION_UNAVAILABLE", "Appointment availability is being refreshed.",
+            traceId()));
+  }
+
   @ExceptionHandler(EntryLookupNotFoundException.class)
   ResponseEntity<ProblemResponse> entryLookupNotFound() {
     return problem(HttpStatus.NOT_FOUND, "BFF.WASH_ENTRY_NOT_FOUND", "Not Found",
@@ -75,11 +89,15 @@ public class ApiExceptionHandler {
 
   private static ResponseEntity<ProblemResponse> problem(
       HttpStatus status, String code, String title, String detail) {
-    String traceId = MDC.get("traceId");
-    if (traceId == null || traceId.isBlank()) traceId = UUID.randomUUID().toString();
     return ResponseEntity.status(status)
         .contentType(MediaType.APPLICATION_PROBLEM_JSON)
-        .body(new ProblemResponse("urn:estoma:error:" + code, title, status.value(), code, detail, traceId));
+        .body(new ProblemResponse("urn:estoma:error:" + code, title, status.value(), code, detail,
+            traceId()));
+  }
+
+  private static String traceId() {
+    String traceId = MDC.get("traceId");
+    return traceId == null || traceId.isBlank() ? UUID.randomUUID().toString() : traceId;
   }
 
   public record ProblemResponse(

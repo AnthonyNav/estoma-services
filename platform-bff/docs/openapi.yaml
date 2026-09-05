@@ -4711,6 +4711,149 @@
         } ]
       }
     },
+    "/api/v1/wash/appointments/availability" : {
+      "get" : {
+        "description" : "Owner-derived cache-aside snapshot. A miss or stale snapshot returns 503 with Retry-After after durably scheduling an asynchronous refresh.",
+        "operationId" : "WashController_appointmentAvailability_get__api_v1_wash_appointments_availability",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "appointmentType",
+          "required" : true,
+          "schema" : {
+            "enum" : [ "NORMAL", "JOURNEY", "IMMUNOCOMPROMISED" ],
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "instrumentCount",
+          "required" : true,
+          "schema" : {
+            "maximum" : 80,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "pieceType",
+          "required" : true,
+          "schema" : {
+            "enum" : [ "HIGH_SPEED", "LOW_SPEED", "CONTRA_ANGLE" ],
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "courseSectionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "availableTimeSlots" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "appointmentTimeSlotId" : {
+                            "format" : "uuid",
+                            "type" : "string"
+                          },
+                          "availableCapacity" : {
+                            "type" : "integer"
+                          },
+                          "bookingDeadlineAt" : {
+                            "format" : "date-time",
+                            "type" : "string"
+                          },
+                          "endsAt" : {
+                            "format" : "date-time",
+                            "type" : "string"
+                          },
+                          "startsAt" : {
+                            "format" : "date-time",
+                            "type" : "string"
+                          }
+                        },
+                        "required" : [ "appointmentTimeSlotId", "startsAt", "endsAt", "availableCapacity", "bookingDeadlineAt" ],
+                        "type" : "object"
+                      },
+                      "type" : "array"
+                    },
+                    "blockingReasons" : {
+                      "items" : {
+                        "enum" : [ "ACTIVE_APPOINTMENT_EXISTS", "STUDENT_BLOCKED", "DAILY_COMPLETED_LIMIT", "EXCEPTIONAL_AUTHORIZATION_REQUIRED", "ACADEMIC_ENROLLMENT_INVALID", "STUDENT_ACCESS_DENIED" ],
+                        "type" : "string"
+                      },
+                      "type" : "array"
+                    },
+                    "canSchedule" : {
+                      "type" : "boolean"
+                    },
+                    "dailyCompletedAppointments" : {
+                      "type" : "integer"
+                    },
+                    "dailyPenaltyPoints" : {
+                      "type" : "integer"
+                    },
+                    "exceptionalAuthorizationAvailable" : {
+                      "type" : "boolean"
+                    },
+                    "exceptionalAuthorizationId" : {
+                      "format" : "uuid",
+                      "type" : [ "string", "null" ]
+                    },
+                    "exceptionalAuthorizationRequired" : {
+                      "type" : "boolean"
+                    }
+                  },
+                  "required" : [ "canSchedule", "blockingReasons", "dailyPenaltyPoints", "dailyCompletedAppointments", "exceptionalAuthorizationRequired", "exceptionalAuthorizationAvailable", "exceptionalAuthorizationId", "availableTimeSlots" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Owner snapshot is being refreshed",
+            "headers" : {
+              "Retry-After" : {
+                "required" : true,
+                "schema" : {
+                  "minimum" : 1,
+                  "type" : "integer"
+                }
+              }
+            }
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
     "/api/v1/wash/appointments/form-context" : {
       "get" : {
         "operationId" : "WashController_appointmentFormContext_get__api_v1_wash_appointments_form_context",

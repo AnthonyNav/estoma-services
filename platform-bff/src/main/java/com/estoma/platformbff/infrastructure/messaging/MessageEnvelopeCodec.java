@@ -73,9 +73,11 @@ public class MessageEnvelopeCodec implements MessageSerializer {
     return new IncomingResult(
         result.messageId(), result.messageType(), result.messageVersion(),
         result.messageKind(), result.producer(), result.occurredAt(), result.correlationId(),
-        result.causationId(), result.operationId(), result.aggregateId(), result.aggregateVersion(),
-        status, data == null || data.isNull() ? null : mapper.writeValueAsString(data),
-        errorCode, errorDetails, data == null || !data.isObject() ? null : object(data));
+        result.causationId(), result.operationId(), result.idempotencyKey(), result.aggregateId(),
+        result.aggregateVersion(), result.actor(), status,
+        data == null || data.isNull() ? null : mapper.writeValueAsString(data), errorCode,
+        errorDetails, data == null || !data.isObject() ? null : object(data),
+        payload == null || !payload.isObject() ? null : object(payload));
   }
 
   public String canonical(JsonNode value) {

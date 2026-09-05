@@ -84,3 +84,8 @@ platform:
   recovery:
     enabled: ${BFF_RECOVERY_ENABLED:true}
     system-catalog-refresh-codes: ${BFF_SYSTEM_CATALOG_REFRESH_CODES:}
+  appointments:
+    availability:
+      snapshot-ttl: ${BFF_APPOINTMENT_AVAILABILITY_SNAPSHOT_TTL:30s}
+      refresh-retry-after: ${BFF_APPOINTMENT_AVAILABILITY_REFRESH_RETRY_AFTER:30s}
+      client-retry-after-seconds: ${BFF_APPOINTMENT_AVAILABILITY_CLIENT_RETRY_AFTER_SECONDS:1}
