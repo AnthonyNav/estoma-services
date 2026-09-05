@@ -29,6 +29,14 @@
           "}",
           "if (pm.variables.get('temporaryPassword') === pm.variables.get('requiredNewPassword')) {",
           "  throw new Error('requiredNewPassword must differ from temporaryPassword');",
+          "}",
+          "const maxAttempts = Number(pm.variables.get('revocationPollMaxAttempts'));",
+          "const delayMs = Number(pm.variables.get('revocationPollDelayMs'));",
+          "if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {",
+          "  throw new Error('revocationPollMaxAttempts must be a positive integer');",
+          "}",
+          "if (!Number.isInteger(delayMs) || delayMs < 0) {",
+          "  throw new Error('revocationPollDelayMs must be a non-negative integer');",
           "}"
         ]
       }
@@ -45,6 +53,8 @@
     { "key": "temporaryPassword", "value": "" },
     { "key": "requiredNewPassword", "value": "" },
     { "key": "deviceName", "value": "Postman Front V1 E2E" },
+    { "key": "revocationPollMaxAttempts", "value": "30" },
+    { "key": "revocationPollDelayMs", "value": "500" },
     { "key": "auth04AccessToken", "value": "" },
     { "key": "auth04RefreshToken", "value": "" },
     { "key": "auth04SessionId", "value": "" },
@@ -66,7 +76,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "for (const key of ['auth04AccessToken', 'auth04RefreshToken', 'auth04SessionId', 'auth04AccountId']) {",
+                  "for (const key of ['auth04AccessToken', 'auth04RefreshToken', 'auth04SessionId', 'auth04AccountId', 'auth04RevocationPollAttempt']) {",
                   "  pm.collectionVariables.unset(key);",
                   "}"
                 ]
@@ -254,9 +264,23 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('AUTH-04 revoked token is rejected by /me', () => pm.response.to.have.status(401));",
-                  "for (const key of ['auth04AccessToken', 'auth04RefreshToken', 'auth04SessionId', 'auth04AccountId']) {",
-                  "  pm.collectionVariables.unset(key);",
+                  "const attemptKey = 'auth04RevocationPollAttempt';",
+                  "const attempt = Number(pm.collectionVariables.get(attemptKey) || 1);",
+                  "const maxAttempts = Number(pm.variables.get('revocationPollMaxAttempts'));",
+                  "const delayMs = Number(pm.variables.get('revocationPollDelayMs'));",
+                  "const runtimeKeys = ['auth04AccessToken', 'auth04RefreshToken', 'auth04SessionId', 'auth04AccountId', attemptKey];",
+                  "if (pm.response.code === 401) {",
+                  "  pm.test(`AUTH-04 revoked token is rejected by /me (attempt ${attempt})`, () => pm.response.to.have.status(401));",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
+                  "} else if (pm.response.code === 200 && attempt < maxAttempts) {",
+                  "  pm.test(`AUTH-04 revocation is still projecting (attempt ${attempt})`, () => pm.response.to.have.status(200));",
+                  "  pm.collectionVariables.set(attemptKey, String(attempt + 1));",
+                  "  setTimeout(() => pm.execution.setNextRequest(pm.info.requestName), delayMs);",
+                  "} else {",
+                  "  pm.test(`AUTH-04 revocation becomes visible within ${maxAttempts} attempts`, () => {",
+                  "    pm.expect(pm.response.code, `last status at attempt ${attempt}`).to.eql(401);",
+                  "  });",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
                   "}"
                 ]
               }
@@ -283,7 +307,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "for (const key of ['auth02AccessToken', 'auth02SessionId', 'auth02AccountId']) {",
+                  "for (const key of ['auth02AccessToken', 'auth02SessionId', 'auth02AccountId', 'auth02RevocationPollAttempt']) {",
                   "  pm.collectionVariables.unset(key);",
                   "}"
                 ]
@@ -438,9 +462,23 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('AUTH-02 revoked token is rejected by /me', () => pm.response.to.have.status(401));",
-                  "for (const key of ['auth02AccessToken', 'auth02SessionId', 'auth02AccountId']) {",
-                  "  pm.collectionVariables.unset(key);",
+                  "const attemptKey = 'auth02RevocationPollAttempt';",
+                  "const attempt = Number(pm.collectionVariables.get(attemptKey) || 1);",
+                  "const maxAttempts = Number(pm.variables.get('revocationPollMaxAttempts'));",
+                  "const delayMs = Number(pm.variables.get('revocationPollDelayMs'));",
+                  "const runtimeKeys = ['auth02AccessToken', 'auth02SessionId', 'auth02AccountId', attemptKey];",
+                  "if (pm.response.code === 401) {",
+                  "  pm.test(`AUTH-02 revoked token is rejected by /me (attempt ${attempt})`, () => pm.response.to.have.status(401));",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
+                  "} else if (pm.response.code === 200 && attempt < maxAttempts) {",
+                  "  pm.test(`AUTH-02 revocation is still projecting (attempt ${attempt})`, () => pm.response.to.have.status(200));",
+                  "  pm.collectionVariables.set(attemptKey, String(attempt + 1));",
+                  "  setTimeout(() => pm.execution.setNextRequest(pm.info.requestName), delayMs);",
+                  "} else {",
+                  "  pm.test(`AUTH-02 revocation becomes visible within ${maxAttempts} attempts`, () => {",
+                  "    pm.expect(pm.response.code, `last status at attempt ${attempt}`).to.eql(401);",
+                  "  });",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
                   "}"
                 ]
               }

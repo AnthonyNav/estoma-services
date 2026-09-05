@@ -50,6 +50,16 @@
       "key": "deviceName",
       "value": "Postman Front V1 E2E",
       "enabled": true
+    },
+    {
+      "key": "revocationPollMaxAttempts",
+      "value": "30",
+      "enabled": true
+    },
+    {
+      "key": "revocationPollDelayMs",
+      "value": "500",
+      "enabled": true
     }
   ],
   "_postman_variable_scope": "environment",

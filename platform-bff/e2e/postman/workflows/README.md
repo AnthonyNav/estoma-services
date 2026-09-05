@@ -29,6 +29,8 @@ Import the collection and `platform-bff-auth-front-v1.environment.example.json`.
 
 The collection stores access tokens and session identifiers only as transient runtime collection variables. The final assertion in each folder removes them. If a run stops early, clear the runner state before exporting or sharing anything.
 
+Session revocation is projected asynchronously back into the BFF. The final `/me` check therefore polls only while it still receives the valid transient `200`, waiting `revocationPollDelayMs` (default `500`) between attempts. It requires the terminal `401` within `revocationPollMaxAttempts` (default `30`, approximately 15 seconds); any other status fails immediately. These bounds can be lowered for local tests but should not be removed.
+
 ## Run with Newman
 
 Copy the blank environment to an ignored or temporary location, populate that private copy, and pass it to Newman. Keeping secrets in a private environment file avoids putting them in shell arguments.
@@ -55,7 +57,7 @@ AUTH-04:
 3. voluntary change returns `200`, remains `NORMAL`, preserves `sessionId` and rotates both tokens;
 4. login with the previous password returns `401`;
 5. `/me` accepts the rotated token;
-6. logout returns `revoked=true`, after which `/me` with that same token returns `401`.
+6. logout returns `revoked=true`, after which bounded polling of `/me` with that same token reaches `401`.
 
 AUTH-02:
 
@@ -63,7 +65,7 @@ AUTH-02:
 2. `/me` returns `403` while the session is restricted;
 3. change with `currentPassword: null` returns `200`, `NORMAL`, preserves `sessionId`, rotates the access token and issues a refresh token;
 4. `/me` accepts the promoted token;
-5. logout returns `revoked=true`, after which `/me` with that same token returns `401`.
+5. logout returns `revoked=true`, after which bounded polling of `/me` with that same token reaches `401`.
 
 ## Sanitized live evidence
 

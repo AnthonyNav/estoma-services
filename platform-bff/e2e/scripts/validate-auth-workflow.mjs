@@ -45,6 +45,14 @@ if ((environment.values ?? []).find((entry) => entry.key === "baseUrl")?.value !
   throw new Error("baseUrl must remain blank in the committed example environment");
 }
 
+const collectionVariables = new Map((collection.variable ?? []).map((entry) => [entry.key, entry.value]));
+if (collectionVariables.get("revocationPollMaxAttempts") !== "30") {
+  throw new Error("revocationPollMaxAttempts must default to 30");
+}
+if (collectionVariables.get("revocationPollDelayMs") !== "500") {
+  throw new Error("revocationPollDelayMs must default to 500");
+}
+
 const requests = [];
 const scripts = [];
 function visit(items) {
@@ -93,6 +101,20 @@ for (const script of scripts) {
   }
 }
 
+const revocationPollScripts = scripts.filter(({ source }) => source.includes("RevocationPollAttempt"));
+if (revocationPollScripts.length !== 4) {
+  throw new Error("Both authentication workflows must initialize and execute bounded revocation polling");
+}
+const revocationPollExecutors = revocationPollScripts.filter(({ source }) => source.includes("setNextRequest"));
+if (revocationPollExecutors.length !== 2) {
+  throw new Error("Both authentication workflows must execute revocation polling");
+}
+for (const script of revocationPollExecutors) {
+  if (!script.source.includes("attempt < maxAttempts") || !script.source.includes("setTimeout")) {
+    throw new Error(`Unbounded revocation polling in ${script.name}`);
+  }
+}
+
 const serialized = `${JSON.stringify(collection)}\n${JSON.stringify(environment)}`;
 if (/https?:\/\/(?!schema\.getpostman\.com)/i.test(serialized)) {
   throw new Error("A concrete HTTP host was found in the committed workflow artifacts");
@@ -101,4 +123,4 @@ if (/Bearer\s+[A-Za-z0-9._~-]{12,}/i.test(serialized)) {
   throw new Error("A concrete bearer token was found in the committed workflow artifacts");
 }
 
-console.log(`Validated Front V1 auth workflow: ${requests.length} requests, ${scripts.length} scripts, blank private inputs.`);
+console.log(`Validated Front V1 auth workflow: ${requests.length} request definitions, ${scripts.length} scripts, bounded revocation polling, blank private inputs.`);
