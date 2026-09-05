@@ -30,4 +30,3 @@ dependent rows. It refuses active sessions, pending Authentication outbox events
 authorization/academic/appointment data. Cleanup removes only the two manifest identities, their
 revoked session evidence and Authentication-owned session rows. It deletes both local files only
 after the database audit succeeds.
-

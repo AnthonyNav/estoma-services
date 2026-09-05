@@ -36,6 +36,8 @@ steps:
       - node e2e/scripts/validate-wash-supervisor-entry-workflow.mjs
       - node e2e/scripts/generate-wash-supervisor-authorized-workflow.mjs --check
       - node e2e/scripts/validate-wash-supervisor-authorized-workflow.mjs
+      - node --check e2e/runner/run-wash-supervisor-authorized.mjs
+      - node --check e2e/scripts/audit-wash-isolated-cleanup.mjs
       - sh -n e2e/fixtures/wash-student/fixture-db.sh
       - sh -n e2e/fixtures/wash-student/psql-exec.example.sh
       - sh -n e2e/fixtures/wash-supervisor/fixture-db.sh
