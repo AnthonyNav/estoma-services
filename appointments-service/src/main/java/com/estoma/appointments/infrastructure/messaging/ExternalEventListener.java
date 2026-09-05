@@ -29,7 +29,7 @@ public final class ExternalEventListener {
       "AdministrativeClosureCancelled", "CabinRegistered", "CabinUpdated", "CabinActivated",
       "CabinDeactivated", "CabinRetired", "TankRegistered", "TankUpdated", "TankActivated",
       "TankDeactivated", "TankRetired", "ResourcePriorityConfigured");
-  private static final Set<String> EXECUTION_EVENTS = Set.of(
+  static final Set<String> EXECUTION_EVENTS = Set.of(
       "WashArrivalRegistered", "WashEntryAuthorized", "WashEntryRejected",
       "WashExecutionStarted", "WashExecutionCompleted", "WashExecutionCancelled",
       "OperationalResourceDisabled", "OperationalResourceRestored",

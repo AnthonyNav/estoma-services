@@ -1,5 +1,7 @@
 package com.estoma.appointments.contracts;
 
+import java.util.Map;
+
 public final class MessagingNames {
   public static final String LOGICAL_COMPONENT_ID = "appointments";
   public static final String COMMANDS_EXCHANGE = "platform.commands";
@@ -23,5 +25,16 @@ public final class MessagingNames {
   public static final String RESULT_RETRY_1 = RESULT_QUEUE + ".retry.1";
   public static final String RESULT_RETRY_2 = RESULT_QUEUE + ".retry.2";
   public static final String RESULT_DLQ = RESULT_QUEUE + ".dlq";
+  public static final Map<String, String> WASH_EXECUTION_EVENT_ROUTES = Map.ofEntries(
+      Map.entry("WashArrivalRegistered", "wash-execution.execution.arrival-registered"),
+      Map.entry("WashEntryAuthorized", "wash-execution.entry.authorized"),
+      Map.entry("WashEntryRejected", "wash-execution.entry.rejected"),
+      Map.entry("WashExecutionStarted", "wash-execution.execution.started"),
+      Map.entry("WashExecutionCompleted", "wash-execution.execution.completed"),
+      Map.entry("WashExecutionCancelled", "wash-execution.execution.cancelled"),
+      Map.entry("OperationalResourceDisabled", "wash-execution.operational-resource.disabled"),
+      Map.entry("OperationalResourceRestored", "wash-execution.operational-resource.restored"),
+      Map.entry("CleaningPeriodStarted", "wash-execution.cleaning-period.started"),
+      Map.entry("CleaningPeriodCompleted", "wash-execution.cleaning-period.completed"));
   private MessagingNames() {}
 }

@@ -92,6 +92,23 @@ class RabbitMessagingIT extends AbstractPostgresIT {
   }
 
   @Test
+  void executionEventQueueRoutesOnlyTheTenConsumedOwnerEvents() {
+    assertThat(MessagingNames.WASH_EXECUTION_EVENT_ROUTES).hasSize(10);
+    assertThat(MessagingNames.WASH_EXECUTION_EVENT_ROUTES.keySet())
+        .containsExactlyInAnyOrderElementsOf(ExternalEventListener.EXECUTION_EVENTS);
+
+    MessagingNames.WASH_EXECUTION_EVENT_ROUTES.forEach((messageType, routingKey) -> {
+      rabbit.send(MessagingNames.EVENTS_EXCHANGE, routingKey, message(messageType));
+      assertThat(body(rabbit.receive(MessagingNames.EVENT_QUEUE, 2_000))).isEqualTo(messageType);
+    });
+
+    rabbit.send(MessagingNames.EVENTS_EXCHANGE, "wash-execution.resource.assigned",
+        message("WashResourceAssigned"));
+    assertThat(rabbit.receive(MessagingNames.EVENT_QUEUE, 500)).isNull();
+    assertThat(rabbit.receive(MessagingNames.EVENT_DLQ, 500)).isNull();
+  }
+
+  @Test
   void confirmedOutboxRelayPublishesInternalCommandToAppointmentsRoute() {
     UUID appointmentId = UUID.randomUUID();
     UUID messageId = UUID.randomUUID();

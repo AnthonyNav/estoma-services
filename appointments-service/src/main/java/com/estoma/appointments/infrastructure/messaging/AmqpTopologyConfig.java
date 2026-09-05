@@ -1,7 +1,10 @@
 package com.estoma.appointments.infrastructure.messaging;
 
 import com.estoma.appointments.contracts.MessagingNames;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.amqp.core.BindingBuilder;
+import org.springframework.amqp.core.Declarable;
 import org.springframework.amqp.core.Declarables;
 import org.springframework.amqp.core.DirectExchange;
 import org.springframework.amqp.core.Queue;
@@ -54,14 +57,21 @@ public class AmqpTopologyConfig {
     Queue retry1 = localRetry(MessagingNames.EVENT_RETRY_1, properties.retry1Ttl().toMillis(), MessagingNames.EVENT_QUEUE);
     Queue retry2 = localRetry(MessagingNames.EVENT_RETRY_2, properties.retry2Ttl().toMillis(), MessagingNames.EVENT_QUEUE);
     Queue dlq = QueueBuilder.durable(MessagingNames.EVENT_DLQ).build();
-    return new Declarables(main,
-        BindingBuilder.bind(main).to(appointmentsEventsExchange).with("academic.#"),
-        BindingBuilder.bind(main).to(appointmentsEventsExchange).with("authorization.#"),
-        BindingBuilder.bind(main).to(appointmentsEventsExchange).with("wash-administration.#"),
-        BindingBuilder.bind(main).to(appointmentsEventsExchange).with("wash-execution.#"),
-        retry1, BindingBuilder.bind(retry1).to(appointmentsDlxExchange).with(MessagingNames.EVENT_RETRY_1),
-        retry2, BindingBuilder.bind(retry2).to(appointmentsDlxExchange).with(MessagingNames.EVENT_RETRY_2),
-        dlq, BindingBuilder.bind(dlq).to(appointmentsDlxExchange).with(MessagingNames.EVENT_DLQ));
+    List<Declarable> values = new ArrayList<>();
+    values.add(main);
+    values.add(BindingBuilder.bind(main).to(appointmentsEventsExchange).with("academic.#"));
+    values.add(BindingBuilder.bind(main).to(appointmentsEventsExchange).with("authorization.#"));
+    values.add(BindingBuilder.bind(main).to(appointmentsEventsExchange).with("wash-administration.#"));
+    MessagingNames.WASH_EXECUTION_EVENT_ROUTES.values().stream().sorted()
+        .map(key -> BindingBuilder.bind(main).to(appointmentsEventsExchange).with(key))
+        .forEach(values::add);
+    values.add(retry1);
+    values.add(BindingBuilder.bind(retry1).to(appointmentsDlxExchange).with(MessagingNames.EVENT_RETRY_1));
+    values.add(retry2);
+    values.add(BindingBuilder.bind(retry2).to(appointmentsDlxExchange).with(MessagingNames.EVENT_RETRY_2));
+    values.add(dlq);
+    values.add(BindingBuilder.bind(dlq).to(appointmentsDlxExchange).with(MessagingNames.EVENT_DLQ));
+    return new Declarables(values);
   }
 
   @Bean Declarables appointmentsResultTopology(DirectExchange appointmentsResultsExchange,
