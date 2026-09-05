@@ -165,9 +165,9 @@ public class WashSupervisionQueryService {
   }
 
   private boolean isActive(WashSupervisionQueryPort.LookupCandidate value) {
-    if (TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus())) return false;
+    if (hasStatus(TERMINAL_APPOINTMENT_STATUSES, value.appointmentStatus())) return false;
     if (value.washExecutionId() == null) return "SCHEDULED".equals(value.appointmentStatus());
-    if (!ACTIVE_EXECUTION_STATUSES.contains(value.executionStatus())) return false;
+    if (!hasStatus(ACTIVE_EXECUTION_STATUSES, value.executionStatus())) return false;
     return switch (value.executionStatus()) {
       case "PENDING_ENTRY" -> "SCHEDULED".equals(value.appointmentStatus());
       // Reassignment can happen before work starts or after an active resource is lost.
@@ -179,20 +179,19 @@ public class WashSupervisionQueryService {
   }
 
   private boolean isTerminal(WashSupervisionQueryPort.LookupCandidate value) {
-    return (value.appointmentStatus() != null && TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus()))
-        || (value.executionStatus() != null && TERMINAL_EXECUTION_STATUSES.contains(value.executionStatus()));
+    return hasStatus(TERMINAL_APPOINTMENT_STATUSES, value.appointmentStatus())
+        || hasStatus(TERMINAL_EXECUTION_STATUSES, value.executionStatus());
   }
 
   private NextAction nextAction(WashSupervisionQueryPort.LookupCandidate value) {
-    if (TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus())) {
-      if (ACTIVE_EXECUTION_STATUSES.contains(value.executionStatus())) {
+    if (hasStatus(TERMINAL_APPOINTMENT_STATUSES, value.appointmentStatus())) {
+      if (hasStatus(ACTIVE_EXECUTION_STATUSES, value.executionStatus())) {
         throw new ProjectionUnavailableException("appointment and wash execution states contradict each other");
       }
       return NextAction.NONE;
     }
     if (value.washExecutionId() == null && "SCHEDULED".equals(value.appointmentStatus())) return NextAction.ENTRY;
     if (value.executionStatus() == null) {
-      if (TERMINAL_APPOINTMENT_STATUSES.contains(value.appointmentStatus())) return NextAction.NONE;
       throw new ProjectionUnavailableException("the projected appointment state cannot be mapped safely");
     }
     return switch (value.executionStatus()) {
@@ -203,6 +202,10 @@ public class WashSupervisionQueryService {
       default -> throw new ProjectionUnavailableException(
           "the projected appointment state cannot be mapped safely");
     };
+  }
+
+  private static boolean hasStatus(Set<String> statuses, String value) {
+    return value != null && statuses.contains(value);
   }
 
   private static void requireLookupContext(WashSupervisionQueryPort.LookupCandidate value) {

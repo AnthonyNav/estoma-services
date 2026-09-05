@@ -23,6 +23,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -77,6 +79,22 @@ class WashSupervisionQueryServiceTest {
     assertThat(response.appointment().appointmentId()).isEqualTo(active.appointmentId());
     assertThat(response.student().studentAccountId()).isEqualTo(ACCOUNT_ID);
     assertThat(response.student().displayName()).isEqualTo("Ana García Reyes");
+    assertThat(response.washExecution()).isNull();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"CANCELLED", "MISSED"})
+  void terminalAppointmentWithoutWashExecutionReturnsNone(String appointmentStatus) {
+    when(studentProjections.findAccountIdByStudentEnrollment("201945678"))
+        .thenReturn(Optional.of(ACCOUNT_ID));
+    var terminal = candidate(appointmentStatus, null, null, false, false);
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(terminal));
+
+    var response = service.lookup(
+        new SupervisorLookupRequest(LookupType.STUDENT_ENROLLMENT, null, "201945678"));
+
+    assertThat(response.nextAction()).isEqualTo(NextAction.NONE);
+    assertThat(response.appointment().appointmentStatus()).isEqualTo(appointmentStatus);
     assertThat(response.washExecution()).isNull();
   }
 
