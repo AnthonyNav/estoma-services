@@ -1,0 +1,497 @@
+{
+  "info": {
+    "name": "Platform BFF Front V1 - Authentication",
+    "description": "Ordered black-box workflow checks for AUTH-01, AUTH-02 and AUTH-04 through the public Platform BFF HTTP boundary. Requires resettable synthetic fixtures; contains no fixture data or secrets.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const required = [",
+          "  'baseUrl', 'normalLoginIdentifier', 'normalPassword', 'normalNewPassword',",
+          "  'temporaryLoginIdentifier', 'temporaryPassword', 'requiredNewPassword', 'deviceName'",
+          "];",
+          "const missing = required.filter((key) => !String(pm.variables.get(key) || '').trim());",
+          "if (missing.length) {",
+          "  throw new Error(`Missing private runtime variables: ${missing.join(', ')}`);",
+          "}",
+          "for (const key of ['normalLoginType', 'temporaryLoginType']) {",
+          "  const value = String(pm.variables.get(key) || '').toUpperCase();",
+          "  if (!['MATRICULA', 'USERNAME'].includes(value)) {",
+          "    throw new Error(`${key} must be MATRICULA or USERNAME`);",
+          "  }",
+          "}",
+          "if (pm.variables.get('normalPassword') === pm.variables.get('normalNewPassword')) {",
+          "  throw new Error('normalNewPassword must differ from normalPassword');",
+          "}",
+          "if (pm.variables.get('temporaryPassword') === pm.variables.get('requiredNewPassword')) {",
+          "  throw new Error('requiredNewPassword must differ from temporaryPassword');",
+          "}",
+          "const maxAttempts = Number(pm.variables.get('revocationPollMaxAttempts'));",
+          "const delayMs = Number(pm.variables.get('revocationPollDelayMs'));",
+          "if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {",
+          "  throw new Error('revocationPollMaxAttempts must be a positive integer');",
+          "}",
+          "if (!Number.isInteger(delayMs) || delayMs < 0) {",
+          "  throw new Error('revocationPollDelayMs must be a non-negative integer');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "" },
+    { "key": "normalLoginType", "value": "USERNAME" },
+    { "key": "normalLoginIdentifier", "value": "" },
+    { "key": "normalPassword", "value": "" },
+    { "key": "normalNewPassword", "value": "" },
+    { "key": "temporaryLoginType", "value": "USERNAME" },
+    { "key": "temporaryLoginIdentifier", "value": "" },
+    { "key": "temporaryPassword", "value": "" },
+    { "key": "requiredNewPassword", "value": "" },
+    { "key": "deviceName", "value": "Postman Front V1 E2E" },
+    { "key": "revocationPollMaxAttempts", "value": "30" },
+    { "key": "revocationPollDelayMs", "value": "500" },
+    { "key": "auth04AccessToken", "value": "" },
+    { "key": "auth04RefreshToken", "value": "" },
+    { "key": "auth04SessionId", "value": "" },
+    { "key": "auth04AccountId", "value": "" },
+    { "key": "auth02AccessToken", "value": "" },
+    { "key": "auth02SessionId", "value": "" },
+    { "key": "auth02AccountId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "AUTH-04 - Voluntary password change",
+      "description": "Consumes a resettable account in NORMAL state and replaces its permanent password.",
+      "item": [
+        {
+          "name": "1. Login with permanent password",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of ['auth04AccessToken', 'auth04RefreshToken', 'auth04SessionId', 'auth04AccountId', 'auth04RevocationPollAttempt']) {",
+                  "  pm.collectionVariables.unset(key);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-04 permanent login returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('AUTH-04 starts in NORMAL state', () => pm.expect(body.authState).to.eql('NORMAL'));",
+                  "pm.test('AUTH-04 login returns access and refresh tokens', () => {",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.test('AUTH-04 login returns UUID session and account identifiers', () => {",
+                  "  pm.expect(body.sessionId).to.match(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);",
+                  "  pm.expect(body.accountId).to.match(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);",
+                  "});",
+                  "pm.collectionVariables.set('auth04AccessToken', body.accessToken);",
+                  "pm.collectionVariables.set('auth04RefreshToken', body.refreshToken);",
+                  "pm.collectionVariables.set('auth04SessionId', body.sessionId);",
+                  "pm.collectionVariables.set('auth04AccountId', body.accountId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"{{normalLoginType}}\",\n  \"loginIdentifier\": \"{{normalLoginIdentifier}}\",\n  \"password\": \"{{normalPassword}}\",\n  \"deviceName\": \"{{deviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "2. Read current session before change",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-04 /me is available before password change', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('AUTH-04 /me belongs to the login account', () => pm.expect(body.accountId).to.eql(pm.collectionVariables.get('auth04AccountId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth04AccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/me"
+          }
+        },
+        {
+          "name": "3. Change password voluntarily",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-04 voluntary password change returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const previousAccessToken = pm.collectionVariables.get('auth04AccessToken');",
+                  "const previousRefreshToken = pm.collectionVariables.get('auth04RefreshToken');",
+                  "pm.test('AUTH-04 remains NORMAL and preserves the session', () => {",
+                  "  pm.expect(body.authState).to.eql('NORMAL');",
+                  "  pm.expect(body.sessionId).to.eql(pm.collectionVariables.get('auth04SessionId'));",
+                  "  pm.expect(body.accountId).to.eql(pm.collectionVariables.get('auth04AccountId'));",
+                  "});",
+                  "pm.test('AUTH-04 rotates both tokens', () => {",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.accessToken).to.not.eql(previousAccessToken);",
+                  "  pm.expect(body.refreshToken).to.not.eql(previousRefreshToken);",
+                  "});",
+                  "pm.collectionVariables.set('auth04AccessToken', body.accessToken);",
+                  "pm.collectionVariables.set('auth04RefreshToken', body.refreshToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth04AccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{normalPassword}}\",\n  \"newPassword\": \"{{normalNewPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/me/password"
+          }
+        },
+        {
+          "name": "4. Reject previous password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-04 previous password is rejected', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"{{normalLoginType}}\",\n  \"loginIdentifier\": \"{{normalLoginIdentifier}}\",\n  \"password\": \"{{normalPassword}}\",\n  \"deviceName\": \"{{deviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "5. Read current session with rotated token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-04 /me accepts the rotated token', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('AUTH-04 rotated token belongs to the same account', () => pm.expect(body.accountId).to.eql(pm.collectionVariables.get('auth04AccountId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth04AccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/me"
+          }
+        },
+        {
+          "name": "6. Logout rotated session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-04 logout returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('AUTH-04 logout reports the session revoked', () => pm.expect(body.revoked).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth04AccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          }
+        },
+        {
+          "name": "7. Reject revoked access token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const attemptKey = 'auth04RevocationPollAttempt';",
+                  "const attempt = Number(pm.collectionVariables.get(attemptKey) || 1);",
+                  "const maxAttempts = Number(pm.variables.get('revocationPollMaxAttempts'));",
+                  "const delayMs = Number(pm.variables.get('revocationPollDelayMs'));",
+                  "const runtimeKeys = ['auth04AccessToken', 'auth04RefreshToken', 'auth04SessionId', 'auth04AccountId', attemptKey];",
+                  "if (pm.response.code === 401) {",
+                  "  pm.test(`AUTH-04 revoked token is rejected by /me (attempt ${attempt})`, () => pm.response.to.have.status(401));",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
+                  "} else if (pm.response.code === 200 && attempt < maxAttempts) {",
+                  "  pm.test(`AUTH-04 revocation is still projecting (attempt ${attempt})`, () => pm.response.to.have.status(200));",
+                  "  pm.collectionVariables.set(attemptKey, String(attempt + 1));",
+                  "  setTimeout(() => pm.execution.setNextRequest(pm.info.requestName), delayMs);",
+                  "} else {",
+                  "  pm.test(`AUTH-04 revocation becomes visible within ${maxAttempts} attempts`, () => {",
+                  "    pm.expect(pm.response.code, `last status at attempt ${attempt}`).to.eql(401);",
+                  "  });",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth04AccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/me"
+          }
+        }
+      ]
+    },
+    {
+      "name": "AUTH-02 - Mandatory password change",
+      "description": "Consumes a resettable account with a valid temporary password and mandatory password change enabled.",
+      "item": [
+        {
+          "name": "1. Login with temporary password",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of ['auth02AccessToken', 'auth02SessionId', 'auth02AccountId', 'auth02RevocationPollAttempt']) {",
+                  "  pm.collectionVariables.unset(key);",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-02 temporary login returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('AUTH-02 starts in PASSWORD_CHANGE_REQUIRED state', () => pm.expect(body.authState).to.eql('PASSWORD_CHANGE_REQUIRED'));",
+                  "pm.test('AUTH-02 restricted login returns access token without refresh token', () => {",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.refreshToken === null || body.refreshToken === undefined || body.refreshToken === '').to.eql(true);",
+                  "});",
+                  "pm.test('AUTH-02 login returns UUID session and account identifiers', () => {",
+                  "  pm.expect(body.sessionId).to.match(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);",
+                  "  pm.expect(body.accountId).to.match(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i);",
+                  "});",
+                  "pm.collectionVariables.set('auth02AccessToken', body.accessToken);",
+                  "pm.collectionVariables.set('auth02SessionId', body.sessionId);",
+                  "pm.collectionVariables.set('auth02AccountId', body.accountId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"{{temporaryLoginType}}\",\n  \"loginIdentifier\": \"{{temporaryLoginIdentifier}}\",\n  \"password\": \"{{temporaryPassword}}\",\n  \"deviceName\": \"{{deviceName}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "2. Reject normal session surface while restricted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-02 restricted session cannot read /me', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth02AccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/me"
+          }
+        },
+        {
+          "name": "3. Complete mandatory password change",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-02 mandatory password change returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const restrictedAccessToken = pm.collectionVariables.get('auth02AccessToken');",
+                  "pm.test('AUTH-02 promotes the same session to NORMAL', () => {",
+                  "  pm.expect(body.authState).to.eql('NORMAL');",
+                  "  pm.expect(body.sessionId).to.eql(pm.collectionVariables.get('auth02SessionId'));",
+                  "  pm.expect(body.accountId).to.eql(pm.collectionVariables.get('auth02AccountId'));",
+                  "});",
+                  "pm.test('AUTH-02 rotates access and issues refresh token', () => {",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.accessToken).to.not.eql(restrictedAccessToken);",
+                  "  pm.expect(body.refreshToken).to.be.a('string').and.not.empty;",
+                  "});",
+                  "pm.collectionVariables.set('auth02AccessToken', body.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth02AccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": null,\n  \"newPassword\": \"{{requiredNewPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": "{{baseUrl}}/api/v1/me/password"
+          }
+        },
+        {
+          "name": "4. Read current session after promotion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-02 /me accepts the promoted token', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('AUTH-02 promoted token belongs to the same account', () => pm.expect(body.accountId).to.eql(pm.collectionVariables.get('auth02AccountId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth02AccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/me"
+          }
+        },
+        {
+          "name": "5. Logout promoted session",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('AUTH-02 logout returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('AUTH-02 logout reports the session revoked', () => pm.expect(body.revoked).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth02AccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          }
+        },
+        {
+          "name": "6. Reject revoked promoted token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const attemptKey = 'auth02RevocationPollAttempt';",
+                  "const attempt = Number(pm.collectionVariables.get(attemptKey) || 1);",
+                  "const maxAttempts = Number(pm.variables.get('revocationPollMaxAttempts'));",
+                  "const delayMs = Number(pm.variables.get('revocationPollDelayMs'));",
+                  "const runtimeKeys = ['auth02AccessToken', 'auth02SessionId', 'auth02AccountId', attemptKey];",
+                  "if (pm.response.code === 401) {",
+                  "  pm.test(`AUTH-02 revoked token is rejected by /me (attempt ${attempt})`, () => pm.response.to.have.status(401));",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
+                  "} else if (pm.response.code === 200 && attempt < maxAttempts) {",
+                  "  pm.test(`AUTH-02 revocation is still projecting (attempt ${attempt})`, () => pm.response.to.have.status(200));",
+                  "  pm.collectionVariables.set(attemptKey, String(attempt + 1));",
+                  "  setTimeout(() => pm.execution.setNextRequest(pm.info.requestName), delayMs);",
+                  "} else {",
+                  "  pm.test(`AUTH-02 revocation becomes visible within ${maxAttempts} attempts`, () => {",
+                  "    pm.expect(pm.response.code, `last status at attempt ${attempt}`).to.eql(401);",
+                  "  });",
+                  "  for (const key of runtimeKeys) pm.collectionVariables.unset(key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{auth02AccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/me"
+          }
+        }
+      ]
+    }
+  ]
+}
