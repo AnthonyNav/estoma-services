@@ -48,6 +48,28 @@ case "${E2E_SUITE:-smoke}" in
       --reporters cli,junit \
       --reporter-junit-export /reports/junit-wash-supervisor.xml
     ;;
+  wash-supervisor-entry)
+    : "${E2E_ALLOW_MUTATIONS:?E2E_ALLOW_MUTATIONS is required for the wash-supervisor-entry suite}"
+    [ "$E2E_ALLOW_MUTATIONS" = "isolated-wash-supervisor-entry-fixture" ] || {
+      echo "E2E_ALLOW_MUTATIONS does not authorize the isolated wash-supervisor-entry workflow" >&2
+      exit 2
+    }
+    : "${E2E_POSTMAN_ENVIRONMENT:?E2E_POSTMAN_ENVIRONMENT must point to the runtime-only environment file}"
+    : "${E2E_POSTMAN_STATE:?E2E_POSTMAN_STATE must point to the ephemeral exported environment}"
+    case "${E2E_PHASE:-}" in
+      prepare) folder='Prepare appointment' ;;
+      decision) folder='Arrival and rejected entry' ;;
+      *) echo "E2E_PHASE must be prepare or decision" >&2; exit 2 ;;
+    esac
+    umask 077
+    exec newman run /opt/e2e/wash-supervisor-entry.json \
+      --folder "$folder" \
+      --environment "$E2E_POSTMAN_ENVIRONMENT" \
+      --export-environment "$E2E_POSTMAN_STATE" \
+      --delay-request "${E2E_DELAY_MILLIS:-1000}" \
+      --bail --reporters cli,junit \
+      --reporter-junit-export "/reports/junit-wash-supervisor-entry-${E2E_PHASE}.xml"
+    ;;
   *)
     echo "unsupported E2E_SUITE: $E2E_SUITE" >&2
     exit 2

@@ -4,7 +4,7 @@ set -eu
 mode=${1:-}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 platform_dir=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
-report_dir=${E2E_REPORT_DIR:-$platform_dir/target/e2e/wash-supervisor}
+report_dir=${E2E_REPORT_DIR:-$platform_dir/target/e2e/wash-supervisor-entry}
 manifest=${E2E_ENTRY_FIXTURE_MANIFEST:-$report_dir/entry-fixture.env}
 student_manifest=${E2E_STUDENT_FIXTURE_MANIFEST:-$report_dir/student-fixture.env}
 supervisor_manifest=${E2E_SUPERVISOR_FIXTURE_MANIFEST:-$report_dir/supervisor-fixture.env}
@@ -195,6 +195,12 @@ WHERE appointment_id = '$appointment_id'::uuid
   AND appointment_status = 'SCHEDULED';")
   [ "$projected_appointment" = "$appointment_id" ] || fail "unexpected appointment projection"
 
+  fixture_role_updated_epoch=$(sql "$execution_database" <<SQL
+SELECT extract(epoch FROM clock_timestamp())::text;
+SQL
+  )
+  case "$fixture_role_updated_epoch" in *[!0-9.]*|'') fail "unsafe fixture timestamp" ;; esac
+
   mkdir -p "$report_dir"
   chmod 700 "$report_dir"
   umask 077
@@ -211,6 +217,7 @@ WHERE appointment_id = '$appointment_id'::uuid
     printf 'ROLE_WAS_ABSENT=%s\n' "$role_was_absent"
     printf 'ORIGINAL_ROLE_SOURCE_VERSION=%s\n' "$original_role_source_version"
     printf 'ORIGINAL_ROLE_UPDATED_EPOCH=%s\n' "$original_role_updated_epoch"
+    printf 'FIXTURE_ROLE_UPDATED_EPOCH=%s\n' "$fixture_role_updated_epoch"
   } > "$manifest"
 
   cleanup_on_error() {
@@ -221,11 +228,22 @@ WHERE appointment_id = '$appointment_id'::uuid
 
   sql "$execution_database" >/dev/null <<SQL
 BEGIN;
+LOCK TABLE authorization_role_projection IN SHARE ROW EXCLUSIVE MODE;
+DO \$guard\$ BEGIN
+  IF NOT (( $role_was_absent = 1 AND NOT EXISTS (
+    SELECT 1 FROM authorization_role_projection WHERE account_id = '$supervisor_account_id'::uuid))
+    OR ( $role_was_absent = 0 AND EXISTS (
+    SELECT 1 FROM authorization_role_projection WHERE account_id = '$supervisor_account_id'::uuid
+      AND role_code = 'E2E_TESTER' AND role_source_version = $original_role_source_version
+      AND updated_at = to_timestamp($original_role_updated_epoch)))) THEN
+    RAISE EXCEPTION 'synthetic owner role changed before bootstrap';
+  END IF;
+END \$guard\$;
 INSERT INTO authorization_role_projection
   (account_id, role_code, role_source_version, updated_at)
-VALUES ('$supervisor_account_id'::uuid, 'SUPERVISOR_LAVADO', 1, CURRENT_TIMESTAMP)
+VALUES ('$supervisor_account_id'::uuid, 'SUPERVISOR_LAVADO', 1, to_timestamp($fixture_role_updated_epoch))
 ON CONFLICT (account_id) DO UPDATE
-SET role_code = 'SUPERVISOR_LAVADO', updated_at = CURRENT_TIMESTAMP;
+SET role_code = 'SUPERVISOR_LAVADO', updated_at = EXCLUDED.updated_at;
 
 INSERT INTO authorization_access_projection
   (account_id, system_id, system_code, access_status, access_source_version, updated_at)
@@ -259,6 +277,7 @@ load_manifest() {
   ROLE_WAS_ABSENT=$(manifest_value ROLE_WAS_ABSENT)
   ORIGINAL_ROLE_SOURCE_VERSION=$(manifest_value ORIGINAL_ROLE_SOURCE_VERSION)
   ORIGINAL_ROLE_UPDATED_EPOCH=$(manifest_value ORIGINAL_ROLE_UPDATED_EPOCH)
+  FIXTURE_ROLE_UPDATED_EPOCH=$(manifest_value FIXTURE_ROLE_UPDATED_EPOCH)
   require_uuid "$SUPERVISOR_ACCOUNT_ID" SUPERVISOR_ACCOUNT_ID
   require_uuid "$STUDENT_ACCOUNT_ID" STUDENT_ACCOUNT_ID
   require_uuid "$APPOINTMENT_ID" APPOINTMENT_ID
@@ -270,6 +289,7 @@ load_manifest() {
   case "$ROLE_WAS_ABSENT" in 0|1) ;; *) fail "unsafe original role flag" ;; esac
   case "$ORIGINAL_ROLE_SOURCE_VERSION" in *[!0-9]*|'') fail "unsafe original role version" ;; esac
   case "$ORIGINAL_ROLE_UPDATED_EPOCH" in *[!0-9.]*|'') fail "unsafe original role timestamp" ;; esac
+  case "$FIXTURE_ROLE_UPDATED_EPOCH" in *[!0-9.]*|'') fail "unsafe fixture role timestamp" ;; esac
 }
 
 audit() {
@@ -328,6 +348,30 @@ WHERE appointment_id = '$APPOINTMENT_ID'::uuid;
 SQL
   )
   [ "$owner_state" = 'ENTRY_REJECTED|2' ] || fail "Appointments did not converge to ENTRY_REJECTED v2"
+  audit_execution_id=$(sql "$execution_database" <<SQL
+SELECT wash_execution_id FROM wash_executions WHERE appointment_id = '$APPOINTMENT_ID'::uuid;
+SQL
+  )
+  require_uuid "$audit_execution_id" audit_WASH_EXECUTION_ID
+  audit_arrival_id=$(sql "$execution_database" <<SQL
+SELECT message_id FROM outbox_messages WHERE aggregate_id = '$audit_execution_id'::uuid
+  AND message_type = 'WashArrivalRegistered' AND message_kind = 'EVENT';
+SQL
+  )
+  require_uuid "$audit_arrival_id" audit_ARRIVAL_MESSAGE_ID
+  audit_rejection_id=$(sql "$execution_database" <<SQL
+SELECT message_id FROM outbox_messages WHERE aggregate_id = '$audit_execution_id'::uuid
+  AND message_type = 'WashEntryRejected' AND message_kind = 'EVENT';
+SQL
+  )
+  require_uuid "$audit_rejection_id" audit_REJECTION_MESSAGE_ID
+  umask 077
+  cp "$manifest" "$report_dir/entry-audit.env"
+  {
+    printf 'WASH_EXECUTION_ID=%s\n' "$audit_execution_id"
+    printf 'ARRIVAL_MESSAGE_ID=%s\n' "$audit_arrival_id"
+    printf 'REJECTION_MESSAGE_ID=%s\n' "$audit_rejection_id"
+  } >> "$report_dir/entry-audit.env"
   printf 'Rejected supervisor entry audit passed.\n'
 }
 
@@ -351,7 +395,7 @@ SELECT count(*) FROM outbox_messages
 WHERE (idempotency_key IN ('$REGISTER_KEY', '$DECIDE_KEY')
     OR aggregate_id IN (SELECT wash_execution_id FROM wash_executions
       WHERE appointment_id = '$APPOINTMENT_ID'::uuid))
-  AND status IN ('PENDING','PROCESSING')
+  AND status <> 'PUBLISHED'
 UNION ALL
 SELECT count(*) FROM processed_messages
 WHERE idempotency_key IN ('$REGISTER_KEY', '$DECIDE_KEY') AND status = 'DEFERRED';
@@ -379,12 +423,38 @@ SQL
   )
   if [ -n "$execution_id" ]; then
     require_uuid "$execution_id" WASH_EXECUTION_ID
+    assignments=$(sql "$execution_database" <<SQL
+SELECT count(*) FROM resource_assignments
+WHERE wash_execution_id = '$execution_id'::uuid;
+SQL
+    )
+    [ "$assignments" = 0 ] || fail "cleanup refused: rejected fixture has resource assignments"
     final_state=$(sql "$execution_database" <<SQL
 SELECT status || '|' || version::text FROM wash_executions
 WHERE wash_execution_id = '$execution_id'::uuid;
 SQL
     )
-    [ "$final_state" = 'ENTRY_REJECTED|2' ] || fail "cleanup refused for non-rejected execution"
+    case "$final_state" in
+      'ENTRY_REJECTED|2') expected_execution='ENTRY_REJECTED|2'; expected_appointment='ENTRY_REJECTED|2' ;;
+      'PENDING_ENTRY|1')
+        pending_owned=$(sql "$execution_database" <<SQL
+SELECT count(*) FROM wash_executions e
+WHERE e.wash_execution_id = '$execution_id'::uuid
+  AND e.started_at IS NULL
+  AND EXISTS (SELECT 1 FROM appointment_projection p WHERE p.appointment_id = e.appointment_id
+    AND p.student_account_id = '$STUDENT_ACCOUNT_ID'::uuid
+    AND p.appointment_time_slot_id = '$SLOT_ID'::uuid)
+  AND NOT EXISTS (SELECT 1 FROM entry_validations v WHERE v.wash_execution_id = e.wash_execution_id)
+  AND EXISTS (SELECT 1 FROM outbox_messages m WHERE m.aggregate_id = e.wash_execution_id
+    AND m.message_type = 'WashArrivalRegistered' AND m.aggregate_version = 1
+    AND m.idempotency_key = '$REGISTER_KEY' AND m.status = 'PUBLISHED');
+SQL
+        )
+        [ "$pending_owned" = 1 ] || fail "pending execution is not an untouched arrival owned by this run"
+        expected_execution='PENDING_ENTRY|1'; expected_appointment='SCHEDULED|1'
+        ;;
+      *) fail "cleanup refused for execution outside the isolated rejection path" ;;
+    esac
     attempts=0
     while :; do
       bff_state=$(sql "$bff_database" <<SQL
@@ -402,8 +472,16 @@ SELECT status || '|' || source_version::text FROM appointment_read_model
 WHERE appointment_id = '$APPOINTMENT_ID'::uuid;
 SQL
       )
-      [ "$bff_state" = 'ENTRY_REJECTED|2' ] && [ "$owner_state" = 'ENTRY_REJECTED|2' ] \
-        && [ "$bff_appointment_state" = 'ENTRY_REJECTED|2' ] && break
+      arrival_consumed=$(sql "$appointments_database" <<SQL
+SELECT count(*) FROM wash_execution_evidence_projection e
+JOIN processed_messages m ON m.message_id = e.arrival_source_event_id
+WHERE e.appointment_id = '$APPOINTMENT_ID'::uuid
+  AND e.wash_execution_id = '$execution_id'::uuid
+  AND m.message_type = 'WashArrivalRegistered' AND m.status = 'APPLIED';
+SQL
+      )
+      [ "$bff_state" = "$expected_execution" ] && [ "$owner_state" = "$expected_appointment" ] \
+        && [ "$bff_appointment_state" = "$expected_appointment" ] && [ "$arrival_consumed" = 1 ] && break
       attempts=$((attempts + 1))
       [ "$attempts" -lt 30 ] || fail "cleanup refused before rejection converged"
       sleep 1
@@ -430,14 +508,23 @@ SQL
 
   sql "$execution_database" >/dev/null <<SQL
 BEGIN;
+LOCK TABLE authorization_role_projection IN SHARE ROW EXCLUSIVE MODE;
+DO \$guard\$ BEGIN
+  IF NOT (( $ROLE_WAS_ABSENT = 1 AND NOT EXISTS (
+    SELECT 1 FROM authorization_role_projection WHERE account_id = '$SUPERVISOR_ACCOUNT_ID'::uuid))
+    OR EXISTS (SELECT 1 FROM authorization_role_projection
+      WHERE account_id = '$SUPERVISOR_ACCOUNT_ID'::uuid AND (
+        (role_code = 'SUPERVISOR_LAVADO'
+          AND role_source_version = CASE WHEN $ROLE_WAS_ABSENT = 1 THEN 1 ELSE $ORIGINAL_ROLE_SOURCE_VERSION END
+          AND updated_at = to_timestamp($FIXTURE_ROLE_UPDATED_EPOCH))
+        OR ($ROLE_WAS_ABSENT = 0 AND role_code = 'E2E_TESTER'
+          AND role_source_version = $ORIGINAL_ROLE_SOURCE_VERSION
+          AND updated_at = to_timestamp($ORIGINAL_ROLE_UPDATED_EPOCH))))) THEN
+    RAISE EXCEPTION 'synthetic owner role changed before cleanup';
+  END IF;
+END \$guard\$;
 CREATE TEMP TABLE e2e_execution_ids ON COMMIT DROP AS
 SELECT wash_execution_id FROM wash_executions WHERE appointment_id = '$APPOINTMENT_ID'::uuid;
-DELETE FROM resource_unavailability_affected_executions
-WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
-DELETE FROM cleaning_periods
-WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
-DELETE FROM resource_assignments
-WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
 DELETE FROM entry_validations
 WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
 DELETE FROM outbox_messages
@@ -445,10 +532,17 @@ WHERE idempotency_key IN ('$REGISTER_KEY', '$DECIDE_KEY')
    OR aggregate_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
 DELETE FROM processed_messages
 WHERE idempotency_key IN ('$REGISTER_KEY', '$DECIDE_KEY');
+DELETE FROM processed_messages
+WHERE aggregate_id = '$APPOINTMENT_ID'::uuid
+  AND message_type = 'AppointmentScheduled';
 DELETE FROM command_idempotency_records
 WHERE producer = 'bff' AND idempotency_key IN ('$REGISTER_KEY', '$DECIDE_KEY');
 DELETE FROM wash_executions
 WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
+DELETE FROM appointment_projection
+WHERE appointment_id = '$APPOINTMENT_ID'::uuid
+  AND student_account_id = '$STUDENT_ACCOUNT_ID'::uuid
+  AND appointment_time_slot_id = '$SLOT_ID'::uuid;
 DELETE FROM appointment_time_slot_projection
 WHERE appointment_time_slot_id = '$SLOT_ID'::uuid AND calendar_id = '$CALENDAR_ID'::uuid;
 DELETE FROM authorization_access_projection

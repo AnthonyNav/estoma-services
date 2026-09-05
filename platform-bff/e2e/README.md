@@ -15,6 +15,8 @@ node e2e/scripts/validate-openapi-postman.mjs
 node e2e/scripts/validate-auth-workflow.mjs
 node e2e/scripts/generate-wash-supervisor-workflow.mjs --check
 node e2e/scripts/validate-wash-supervisor-workflow.mjs
+node e2e/scripts/generate-wash-supervisor-entry-workflow.mjs --check
+node e2e/scripts/validate-wash-supervisor-entry-workflow.mjs
 ```
 
 The gate requires an exact method/path inventory and checks `Idempotency-Key` and bearer-security requirements for every operation. `docs/openapi.yaml` is JSON-formatted OpenAPI despite its filename.
@@ -73,6 +75,28 @@ account receives only temporary BFF-local Supervisor authorization. The collecti
 baseline, waits for the appointment delta, exercises enrollment and controlled QR lookup, proves
 the terminal `NONE` mapping after cancellation and logs out both sessions. The exit trap audits
 that reads created no operation or wash execution before cleanup.
+
+To certify the next WASH-SUP-01 state transition, use the dedicated two-phase
+runner. It schedules with the student identity, waits for the appointment to
+reach the Wash Execution owner, and then registers arrival and rejects entry
+with the separate supervisor identity:
+
+```sh
+BFF_BASE_URL="$RUNTIME_BFF_URL" \
+E2E_STUDENT_LOGIN_IDENTIFIER="$RUNTIME_E2E_STUDENT_LOGIN" \
+E2E_STUDENT_PASSWORD="$RUNTIME_E2E_STUDENT_PASSWORD" \
+E2E_SUPERVISOR_LOGIN_IDENTIFIER="$RUNTIME_E2E_SUPERVISOR_LOGIN" \
+E2E_SUPERVISOR_PASSWORD="$RUNTIME_E2E_SUPERVISOR_PASSWORD" \
+E2E_PSQL_EXEC="$PRIVATE_PSQL_EXEC" \
+./e2e/runner/run-wash-supervisor-entry.sh
+```
+
+The opt-in arrival slot profile leaves the existing student and supervisor
+workflow defaults unchanged. The private barrier verifies the exact
+Appointment projection before the first arrival command. The expected public
+sequence is `ENTRY -> ENTRY_DECISION -> NONE`, with owner states
+`PENDING_ENTRY v1 -> ENTRY_REJECTED v2`. No cabin, tank, closure or resource
+assignment is created or modified.
 
 ## Real `develop`
 

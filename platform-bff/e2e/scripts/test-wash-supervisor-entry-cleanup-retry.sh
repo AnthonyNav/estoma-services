@@ -11,7 +11,10 @@ mock_sql() {
 
   case "$database:$input" in
     platform_bff_db:*"FROM client_operations"*"status = 'PENDING'"*) printf '0\n' ;;
-    wash_execution_db:*"status IN ('PENDING','PROCESSING')"*) printf '0\n0\n' ;;
+    wash_execution_db:*"status <> 'PUBLISHED'"*) printf '0\n0\n' ;;
+    wash_execution_db:*"SELECT count(*) FROM resource_assignments"*) printf '0\n' ;;
+    wash_execution_db:*"SELECT count(*) FROM wash_executions e"*) printf '1\n' ;;
+    appointments_db:*"SELECT count(*) FROM wash_execution_evidence_projection e"*) printf '1\n' ;;
     appointments_db:*"FROM outbox_messages"*"pending_wash_execution_events"*) printf '0\n0\n' ;;
     wash_execution_db:*"DELETE FROM wash_executions"*) : > "$state_dir/owner-cleaned" ;;
     platform_bff_db:*"DELETE FROM wash_execution_read_model"*) : > "$state_dir/bff-cleaned" ;;
@@ -21,10 +24,10 @@ mock_sql() {
     wash_execution_db:*"SELECT wash_execution_id FROM wash_executions"*)
       [ -f "$state_dir/owner-cleaned" ] || printf '00000000-0000-4000-8000-000000000020\n'
       ;;
-    wash_execution_db:*"SELECT status || '|' || version::text FROM wash_executions"*) printf 'ENTRY_REJECTED|2\n' ;;
-    platform_bff_db:*"SELECT status || '|' || execution_version::text"*) printf 'ENTRY_REJECTED|2\n' ;;
-    platform_bff_db:*"SELECT status || '|' || source_version::text"*) printf 'ENTRY_REJECTED|2\n' ;;
-    appointments_db:*"SELECT status || '|' || version::text"*) printf 'ENTRY_REJECTED|2\n' ;;
+    wash_execution_db:*"SELECT status || '|' || version::text FROM wash_executions"*|platform_bff_db:*"SELECT status || '|' || execution_version::text"*)
+      printf '%s\n' "${E2E_MOCK_EXECUTION_STATE:-ENTRY_REJECTED|2}" ;;
+    platform_bff_db:*"SELECT status || '|' || source_version::text"*|appointments_db:*"SELECT status || '|' || version::text"*)
+      if [ "${E2E_MOCK_EXECUTION_STATE:-}" = 'PENDING_ENTRY|1' ]; then printf 'SCHEDULED|1\n'; else printf 'ENTRY_REJECTED|2\n'; fi ;;
     *) printf 'unexpected mock SQL for %s:\n%s\n' "$database" "$input" >&2; exit 1 ;;
   esac
 }
@@ -61,10 +64,12 @@ umask 077
     'DECIDE_KEY=e2e-wash-entry-retry-decide-entry' \
     'ROLE_WAS_ABSENT=1' \
     'ORIGINAL_ROLE_SOURCE_VERSION=0' \
-    'ORIGINAL_ROLE_UPDATED_EPOCH=0'
+    'ORIGINAL_ROLE_UPDATED_EPOCH=0' \
+    'FIXTURE_ROLE_UPDATED_EPOCH=1788600000.123456'
 } > "$manifest"
 : > "$student_manifest"
 : > "$supervisor_manifest"
+cp "$manifest" "$state_dir/original-manifest"
 
 common_env() {
   E2E_REPORT_DIR="$report_dir" \
@@ -87,5 +92,21 @@ fi
 common_env "$fixture" cleanup >/dev/null
 [ -f "$state_dir/bff-cleaned" ] || { printf 'retry did not clean BFF phase\n' >&2; exit 1; }
 [ ! -f "$manifest" ] || { printf 'retry did not remove manifest\n' >&2; exit 1; }
+
+rm -f "$state_dir/owner-cleaned" "$state_dir/bff-cleaned"
+cp "$state_dir/original-manifest" "$manifest"
+E2E_MOCK_EXECUTION_STATE='PENDING_ENTRY|1' common_env "$fixture" cleanup >/dev/null
+[ -f "$state_dir/owner-cleaned" ] && [ -f "$state_dir/bff-cleaned" ] && [ ! -f "$manifest" ] || {
+  printf 'interrupted arrival cleanup failed\n' >&2; exit 1;
+}
+
+rm -f "$state_dir/owner-cleaned" "$state_dir/bff-cleaned"
+cp "$state_dir/original-manifest" "$manifest"
+if E2E_MOCK_EXECUTION_STATE='IN_PROGRESS|2' common_env "$fixture" cleanup >/dev/null 2>&1; then
+  printf 'cleanup accepted execution outside rejected-entry scope\n' >&2; exit 1
+fi
+[ ! -f "$state_dir/owner-cleaned" ] && [ -f "$manifest" ] || {
+  printf 'unsafe execution was changed or lost its recovery manifest\n' >&2; exit 1;
+}
 
 printf 'Wash-supervisor rejected-entry cleanup retry test passed.\n'
