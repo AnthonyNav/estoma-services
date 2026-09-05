@@ -12,7 +12,8 @@ import org.springframework.stereotype.Component;
 @Component
 public final class QueryListener {
   private static final Set<String> QUERIES = Set.of(
-      "GetAppointmentExecutionContext", "ListAppointmentExecutionContextsPage");
+      "GetAppointmentExecutionContext", "ListAppointmentExecutionContextsPage",
+      "GetAppointmentAvailability");
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
   private final AppointmentExecutionQueryService queries;
@@ -44,13 +45,15 @@ public final class QueryListener {
     }
   }
 
-  private static void validateRequester(com.estoma.appointments.contracts.MessageEnvelope query) {
-    if (!"wash-execution".equals(query.producer())) {
+  static void validateRequester(com.estoma.appointments.contracts.MessageEnvelope query) {
+    String requester = "GetAppointmentAvailability".equals(query.messageType())
+        ? "bff" : "wash-execution";
+    if (!requester.equals(query.producer())) {
       throw new InvalidMessageException("query requester is not allowlisted");
     }
     if (query.actor() == null || !"SYSTEM".equals(query.actor().type())
-        || !"wash-execution".equals(query.actor().service()) || query.actor().accountId() != null) {
-      throw new InvalidMessageException("query requires SYSTEM wash-execution actor");
+        || !requester.equals(query.actor().service()) || query.actor().accountId() != null) {
+      throw new InvalidMessageException("query requires SYSTEM " + requester + " actor");
     }
     if (query.idempotencyKey() != null) {
       throw new InvalidMessageException("Query must not carry Command idempotencyKey");

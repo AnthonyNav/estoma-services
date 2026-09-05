@@ -34,6 +34,8 @@ public final class OutboxRelay {
       "CancelExceptionalAppointmentAuthorizationRejected");
   private static final Set<String> EXECUTION_QUERY_RESULTS = Set.of(
       "GetAppointmentExecutionContextResult", "ListAppointmentExecutionContextsPageResult");
+  private static final Set<String> BFF_QUERY_RESULTS = Set.of(
+      "GetAppointmentAvailabilityResult");
 
   private final OutboxRepository outbox;
   private final ConfirmedRabbitPublisher publisher;
@@ -134,6 +136,7 @@ public final class OutboxRelay {
     if (kind == MessageKind.COMMAND) return MessagingNames.LOGICAL_COMPONENT_ID;
     if (kind == MessageKind.RESULT) {
       if (BFF_RESULTS.contains(messageType)) return "bff";
+      if (BFF_QUERY_RESULTS.contains(messageType)) return "bff";
       if (EXECUTION_QUERY_RESULTS.contains(messageType)) return "wash-execution";
       throw new IllegalArgumentException("unknown Result destination for " + messageType);
     }

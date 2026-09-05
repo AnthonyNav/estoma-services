@@ -735,7 +735,7 @@ Recovery/reconciliación no puede tratar RabbitMQ como Event Store. Cuando evide
 
 ---
 
-## 18. Queries autoritativas ofrecidas a Execution
+## 18. Queries autoritativas ofrecidas a consumidores
 
 Appointments expone por RabbitMQ:
 
@@ -751,6 +751,90 @@ wash-execution
 ```
 
 Son side-effect-free, service-to-service y responden por `platform.results` hacia `results.wash-execution`.
+
+### 18.1 Snapshot de disponibilidad para BFF
+
+Appointments también ofrece `GetAppointmentAvailability` V1 exclusivamente al requester técnico
+`bff`. Es una Query durable asíncrona (`platform.queries`, routing key `appointments`), no una
+llamada HTTP/gRPC ni una lectura directa de `appointments-db`. La respuesta
+`GetAppointmentAvailabilityResult` se persiste primero en Transactional Outbox y se publica en
+`platform.results` con routing key `bff`.
+
+El payload de la Query contiene exactamente el contexto estable:
+
+```text
+studentAccountId
+serviceDate
+appointmentType
+instrumentCount
+pieceType
+courseSectionId
+```
+
+El Result exitoso ecoa ese `requestContext` y contiene:
+
+```text
+snapshotId
+snapshotGeneratedAt
+freshUntil
+canSchedule
+blockingReasons[]
+dailyPenaltyPoints
+dailyCompletedAppointments
+exceptionalAuthorizationRequired
+exceptionalAuthorizationAvailable
+exceptionalAuthorizationId
+availableTimeSlots[]
+  appointmentTimeSlotId
+  startsAt
+  endsAt
+  availableCapacity
+  bookingDeadlineAt
+```
+
+`canSchedule` usa la misma `LocalAuthorizationPolicy` del Command para demostrar rol `ALUMNO`,
+acceso `LAVADO_ULTRASONICO = ACTIVE` y proyección local confiable para el `studentAccountId` del
+contexto. El actor técnico `SYSTEM/bff` nunca se trata como el Alumno. Si ese contexto no puede
+demostrarse, `blockingReasons` contiene `STUDENT_ACCESS_DENIED` y `canSchedule = false`, equivalente a la decisión
+de `ScheduleAppointment`.
+
+Los blockers se producen una sola vez y en orden determinista V1:
+
+```text
+ACTIVE_APPOINTMENT_EXISTS
+STUDENT_BLOCKED
+DAILY_COMPLETED_LIMIT
+EXCEPTIONAL_AUTHORIZATION_REQUIRED
+ACADEMIC_ENROLLMENT_INVALID
+STUDENT_ACCESS_DENIED
+```
+
+`snapshotId` es igual a `messageId` del Result. No se inventa una versión agregada global:
+`messageVersion = 1` versiona el wire contract y `snapshotGeneratedAt` expresa cuándo se tomó la
+fotografía. `aggregateId` y `aggregateVersion` quedan ausentes. El BFF aplica un Result sólo si
+`correlationId`, `causationId` y el `requestContext` coinciden con su refresh pendiente más reciente
+para esa llave; un Result viejo no puede sobrescribir uno nuevo.
+
+La vigencia máxima es 30 segundos:
+
+```text
+freshUntil = min(snapshotGeneratedAt + 30s, bookingDeadlineAt más cercano retornado)
+```
+
+El BFF sólo lo considera fresco cuando
+`snapshotGeneratedAt <= now <= freshUntil`; nunca lo sirve después de `freshUntil`. Ausencia o snapshot vencido falla cerrado y
+dispara un refresh durable; no reconstruye matching, puntos ni autorización excepcional. Consultar
+no reserva cupo: `ScheduleAppointment` vuelve a bloquear filas y decide autoritativamente ante
+concurrencia.
+
+`availableTimeSlots` incluye exclusivamente slots activos dentro de booking y con capacidad
+compatible positiva calculada por `AppointmentCapacityMatcher`. NORMAL/JOURNEY comparten capacidad;
+los valores no representan depósitos independientes. Un alumno funcionalmente elegible puede
+recibir `canSchedule = true` con arreglo vacío cuando no existe horario compatible en ese instante.
+
+Un payload malformado, actor/requester incorrecto o campos desconocidos se trata como contrato
+inválido y sigue retry/DLQ. Un contexto bien formado pero semánticamente inválido recibe
+`status = REJECTED`, `error.code = INVALID_AVAILABILITY_CONTEXT`.
 
 ---
 
@@ -1140,6 +1224,7 @@ Appointments V1 no está completo hasta demostrar:
 - out-of-order converge sin saltos;
 - proyecciones reconstruibles sin Event Store;
 - Queries de Execution funcionan;
+- Query/Result de disponibilidad owner-derived conserva fencing, TTL y semántica de matching;
 - RabbitMQ usa `appointments` sin aliases;
 - readiness refleja dependencias/proyecciones;
 - E2E crítico verde;

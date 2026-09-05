@@ -16,6 +16,19 @@ public final class AppointmentCapacityMatcher {
 
   public static boolean canFit(Collection<Appointment> existing, AppointmentType candidate,
       int normalCapacity, int journeyCapacity, int immunocompromisedCapacity) {
+    return availableCapacity(existing, candidate, normalCapacity, journeyCapacity,
+        immunocompromisedCapacity) > 0;
+  }
+
+  /**
+   * Returns how many additional appointments of {@code candidate} fit under the same matching
+   * rules used by the authoritative scheduling command.
+   *
+   * <p>NORMAL and JOURNEY intentionally expose the shared compatible capacity. They are not
+   * independent buckets and their values must never be added by a consumer.
+   */
+  public static int availableCapacity(Collection<Appointment> existing, AppointmentType candidate,
+      int normalCapacity, int journeyCapacity, int immunocompromisedCapacity) {
     if (normalCapacity < 0 || journeyCapacity < 0 || immunocompromisedCapacity < 0) {
       throw new IllegalArgumentException("capacity cannot be negative");
     }
@@ -32,9 +45,9 @@ public final class AppointmentCapacityMatcher {
     }
 
     if (candidate == AppointmentType.IMMUNOCOMPROMISED) {
-      return immunocompromisedDemand + 1 <= immunocompromisedCapacity;
+      return Math.max(0, immunocompromisedCapacity - immunocompromisedDemand);
     }
-    return sharedDemand + 1 <= normalCapacity + journeyCapacity;
+    return Math.max(0, normalCapacity + journeyCapacity - sharedDemand);
   }
 
   public static boolean hasCapacity(Collection<Appointment> existing, Appointment candidate,
