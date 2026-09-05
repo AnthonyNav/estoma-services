@@ -3799,15 +3799,19 @@
                     "type" : [ "string", "null" ]
                   },
                   "loginIdentifier" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "loginType" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "password" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   }
                 },
+                "required" : [ "loginType", "loginIdentifier", "password" ],
                 "type" : "object"
               }
             }
@@ -3913,12 +3917,15 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "loginIdentifier" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "loginType" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   }
                 },
+                "required" : [ "loginType", "loginIdentifier" ],
                 "type" : "object"
               }
             }
@@ -3959,18 +3966,23 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "code" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "loginIdentifier" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "loginType" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "newPassword" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   }
                 },
+                "required" : [ "loginType", "loginIdentifier", "code", "newPassword" ],
                 "type" : "object"
               }
             }
@@ -4018,15 +4030,19 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "code" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "loginIdentifier" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "loginType" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   }
                 },
+                "required" : [ "loginType", "loginIdentifier", "code" ],
                 "type" : "object"
               }
             }
@@ -4073,13 +4089,15 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "refreshToken" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "sessionId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   }
                 },
+                "required" : [ "sessionId", "refreshToken" ],
                 "type" : "object"
               }
             }
@@ -4370,9 +4388,12 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "systemCode" : {
-                    "type" : [ "string", "null" ]
+                    "maxLength" : 160,
+                    "minLength" : 1,
+                    "type" : "string"
                   }
                 },
+                "required" : [ "systemCode" ],
                 "type" : "object"
               }
             }
@@ -4482,9 +4503,11 @@
                     "type" : [ "string", "null" ]
                   },
                   "newPassword" : {
-                    "type" : [ "string", "null" ]
+                    "minLength" : 1,
+                    "type" : "string"
                   }
                 },
+                "required" : [ "newPassword" ],
                 "type" : "object"
               }
             }
@@ -4654,30 +4677,35 @@
                 "properties" : {
                   "appointmentTimeSlotId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   },
                   "appointmentType" : {
-                    "type" : [ "string", "null" ]
+                    "enum" : [ "NORMAL", "JOURNEY", "IMMUNOCOMPROMISED" ],
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "courseSectionId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   },
                   "exceptionalAuthorizationId" : {
                     "format" : "uuid",
                     "type" : [ "string", "null" ]
                   },
                   "instrumentCount" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   },
                   "pieceType" : {
-                    "type" : [ "string", "null" ]
+                    "enum" : [ "HIGH_SPEED", "LOW_SPEED", "CONTRA_ANGLE" ],
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "regulationAccepted" : {
                     "type" : "boolean"
                   }
                 },
-                "required" : [ "instrumentCount", "regulationAccepted" ],
+                "required" : [ "appointmentTimeSlotId", "courseSectionId", "appointmentType", "instrumentCount", "pieceType", "regulationAccepted" ],
                 "type" : "object"
               }
             }
@@ -4765,6 +4793,7 @@
                             "type" : "string"
                           },
                           "availableCapacity" : {
+                            "exclusiveMinimum" : 0,
                             "type" : "integer"
                           },
                           "bookingDeadlineAt" : {
@@ -4887,15 +4916,16 @@
                       "additionalProperties" : false,
                       "properties" : {
                         "currentSemester" : {
-                          "type" : [ "integer", "null" ]
+                          "type" : "integer"
                         },
                         "fullName" : {
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         },
                         "studentEnrollment" : {
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         }
                       },
+                      "required" : [ "fullName", "studentEnrollment", "currentSemester" ],
                       "type" : [ "object", "null" ]
                     }
                   },
@@ -4947,9 +4977,11 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   },
                   "reason" : {
+                    "maxLength" : 500,
                     "type" : [ "string", "null" ]
                   }
                 },
@@ -5009,17 +5041,20 @@
                     "type" : [ "string", "null" ]
                   },
                   "reason" : {
-                    "type" : [ "string", "null" ]
+                    "maxLength" : 500,
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "serviceDate" : {
                     "format" : "date",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   },
                   "studentAccountId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   }
                 },
+                "required" : [ "studentAccountId", "serviceDate", "reason" ],
                 "type" : "object"
               }
             }
@@ -5079,9 +5114,12 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "reason" : {
-                    "type" : [ "string", "null" ]
+                    "maxLength" : 500,
+                    "minLength" : 1,
+                    "type" : "string"
                   }
                 },
+                "required" : [ "reason" ],
                 "type" : "object"
               }
             }
@@ -5134,9 +5172,10 @@
                 "properties" : {
                   "appointmentId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   }
                 },
+                "required" : [ "appointmentId" ],
                 "type" : "object"
               }
             }
@@ -5196,16 +5235,20 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "cancellationReason" : {
+                    "maxLength" : 500,
                     "type" : [ "string", "null" ]
                   },
                   "cancellationSubreason" : {
-                    "type" : [ "string", "null" ]
+                    "maxLength" : 160,
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   }
                 },
-                "required" : [ "expectedVersion" ],
+                "required" : [ "cancellationSubreason", "expectedVersion" ],
                 "type" : "object"
               }
             }
@@ -5265,29 +5308,34 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   },
                   "finalMaterials" : {
                     "additionalProperties" : false,
                     "properties" : {
                       "greenPaperCassette10Count" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       },
                       "greenPaperCassette8Count" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       },
                       "packageCount" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       },
                       "witnessTapePortionCount" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       }
                     },
                     "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
-                    "type" : [ "object", "null" ]
+                    "type" : "object"
                   }
                 },
-                "required" : [ "expectedVersion" ],
+                "required" : [ "finalMaterials", "expectedVersion" ],
                 "type" : "object"
               }
             }
@@ -5347,22 +5395,26 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "decision" : {
-                    "type" : [ "string", "null" ]
+                    "enum" : [ "AUTHORIZED", "REJECTED" ],
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   },
                   "identityConfirmed" : {
                     "type" : "boolean"
                   },
                   "rejectionReason" : {
+                    "maxLength" : 500,
                     "type" : [ "string", "null" ]
                   },
                   "requirementsSatisfied" : {
                     "type" : "boolean"
                   }
                 },
-                "required" : [ "identityConfirmed", "requirementsSatisfied", "expectedVersion" ],
+                "required" : [ "identityConfirmed", "requirementsSatisfied", "decision", "expectedVersion" ],
                 "type" : "object"
               }
             }
@@ -5422,29 +5474,34 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   },
                   "materials" : {
                     "additionalProperties" : false,
                     "properties" : {
                       "greenPaperCassette10Count" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       },
                       "greenPaperCassette8Count" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       },
                       "packageCount" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       },
                       "witnessTapePortionCount" : {
+                        "minimum" : 0,
                         "type" : "integer"
                       }
                     },
                     "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
-                    "type" : [ "object", "null" ]
+                    "type" : "object"
                   }
                 },
-                "required" : [ "expectedVersion" ],
+                "required" : [ "materials", "expectedVersion" ],
                 "type" : "object"
               }
             }
@@ -5505,17 +5562,18 @@
                 "properties" : {
                   "cabinId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   },
                   "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   },
                   "tankId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   }
                 },
-                "required" : [ "expectedVersion" ],
+                "required" : [ "cabinId", "tankId", "expectedVersion" ],
                 "type" : "object"
               }
             }
@@ -5571,20 +5629,25 @@
                     "type" : [ "string", "null" ]
                   },
                   "causeType" : {
-                    "type" : [ "string", "null" ]
+                    "enum" : [ "FAILURE", "MANUAL_DISABLE" ],
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "detectedDuringWashExecutionId" : {
                     "format" : "uuid",
                     "type" : [ "string", "null" ]
                   },
                   "reason" : {
-                    "type" : [ "string", "null" ]
+                    "maxLength" : 500,
+                    "minLength" : 1,
+                    "type" : "string"
                   },
                   "tankId" : {
                     "format" : "uuid",
                     "type" : [ "string", "null" ]
                   }
                 },
+                "required" : [ "causeType", "reason" ],
                 "type" : "object"
               }
             }
@@ -5636,17 +5699,19 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
                     "type" : "integer"
                   },
                   "resolution" : {
+                    "maxLength" : 500,
                     "type" : [ "string", "null" ]
                   },
                   "resourceUnavailabilityId" : {
                     "format" : "uuid",
-                    "type" : [ "string", "null" ]
+                    "type" : "string"
                   }
                 },
-                "required" : [ "expectedVersion" ],
+                "required" : [ "resourceUnavailabilityId", "expectedVersion" ],
                 "type" : "object"
               }
             }
@@ -5695,13 +5760,15 @@
                       "properties" : {
                         "appointmentId" : {
                           "format" : "uuid",
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         },
                         "appointmentStatus" : {
-                          "type" : [ "string", "null" ]
+                          "enum" : [ "SCHEDULED", "CANCELLED", "MISSED", "ENTRY_REJECTED", "IN_PROGRESS", "COMPLETED" ],
+                          "type" : "string"
                         },
                         "appointmentType" : {
-                          "type" : [ "string", "null" ]
+                          "enum" : [ "NORMAL", "JOURNEY", "IMMUNOCOMPROMISED" ],
+                          "type" : "string"
                         },
                         "appointmentVersion" : {
                           "type" : "integer"
@@ -5726,13 +5793,15 @@
                           "type" : [ "integer", "null" ]
                         },
                         "pieceType" : {
+                          "enum" : [ "HIGH_SPEED", "LOW_SPEED", "CONTRA_ANGLE" ],
                           "type" : [ "string", "null" ]
                         },
                         "qrRepresentation" : {
                           "type" : [ "string", "null" ]
                         },
                         "qrUsageContext" : {
-                          "type" : [ "string", "null" ]
+                          "enum" : [ "ENTRY", "STUDENT_EXIT", "SUPERVISOR_EXIT_REVIEW", "NONE" ],
+                          "type" : "string"
                         },
                         "studentCancellationAction" : {
                           "enum" : [ "AVAILABLE", "DEADLINE_PASSED", "NOT_APPLICABLE" ],
@@ -5807,25 +5876,27 @@
                               "type" : [ "string", "null" ]
                             },
                             "status" : {
-                              "type" : [ "string", "null" ]
+                              "enum" : [ "PENDING_ENTRY", "ENTRY_REJECTED", "PENDING_REASSIGNMENT", "IN_PROGRESS", "EXIT_SUBMITTED", "COMPLETED", "CANCELLED" ],
+                              "type" : "string"
                             },
                             "version" : {
                               "type" : [ "integer", "null" ]
                             },
                             "washExecutionId" : {
                               "format" : "uuid",
-                              "type" : [ "string", "null" ]
+                              "type" : "string"
                             }
                           },
+                          "required" : [ "washExecutionId", "status" ],
                           "type" : [ "object", "null" ]
                         }
                       },
-                      "required" : [ "appointmentVersion", "usesExceptionalAuthorization", "studentCancellationAction" ],
+                      "required" : [ "appointmentId", "appointmentStatus", "appointmentVersion", "usesExceptionalAuthorization", "studentCancellationAction", "appointmentType", "qrUsageContext" ],
                       "type" : [ "object", "null" ]
                     },
                     "serviceDate" : {
                       "format" : "date",
-                      "type" : [ "string", "null" ]
+                      "type" : "string"
                     },
                     "student" : {
                       "additionalProperties" : false,
@@ -5834,18 +5905,20 @@
                           "type" : [ "integer", "null" ]
                         },
                         "firstName" : {
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         },
                         "fullName" : {
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         },
                         "studentEnrollment" : {
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         }
                       },
-                      "type" : [ "object", "null" ]
+                      "required" : [ "firstName", "fullName", "studentEnrollment" ],
+                      "type" : "object"
                     }
                   },
+                  "required" : [ "student", "serviceDate" ],
                   "type" : "object"
                 }
               }
@@ -5868,10 +5941,73 @@
         } ]
       }
     },
-    "/api/v1/wash/supervision/entry-lookup" : {
+    "/api/v1/wash/supervision/home" : {
+      "get" : {
+        "operationId" : "WashController_supervisorHome_get__api_v1_wash_supervision_home",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "pendingReassignmentsCount" : {
+                      "type" : "integer"
+                    },
+                    "serviceDate" : {
+                      "format" : "date",
+                      "type" : "string"
+                    },
+                    "summary" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "cancelledAppointments" : {
+                          "type" : "integer"
+                        },
+                        "completedAppointments" : {
+                          "type" : "integer"
+                        },
+                        "deniedAppointments" : {
+                          "type" : "integer"
+                        },
+                        "inProcessAppointments" : {
+                          "type" : "integer"
+                        },
+                        "registeredAppointments" : {
+                          "type" : "integer"
+                        }
+                      },
+                      "required" : [ "registeredAppointments", "inProcessAppointments", "completedAppointments", "deniedAppointments", "cancelledAppointments" ],
+                      "type" : "object"
+                    }
+                  },
+                  "required" : [ "serviceDate", "summary", "pendingReassignmentsCount" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/supervision/lookup" : {
       "post" : {
         "description" : "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is explicitly gated until the owner-backed QR projection is available and returns 503.",
-        "operationId" : "WashController_entryLookup_post__api_v1_wash_supervision_entry_lookup",
+        "operationId" : "WashController_supervisorLookup_post__api_v1_wash_supervision_lookup",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -5879,15 +6015,19 @@
                 "additionalProperties" : false,
                 "properties" : {
                   "lookupType" : {
-                    "type" : [ "string", "null" ]
+                    "enum" : [ "QR", "STUDENT_ENROLLMENT" ],
+                    "type" : "string"
                   },
                   "qrRepresentation" : {
+                    "maxLength" : 2000,
                     "type" : [ "string", "null" ]
                   },
                   "studentEnrollment" : {
+                    "maxLength" : 120,
                     "type" : [ "string", "null" ]
                   }
                 },
+                "required" : [ "lookupType" ],
                 "type" : "object"
               }
             }
@@ -5901,192 +6041,160 @@
                 "schema" : {
                   "additionalProperties" : false,
                   "properties" : {
+                    "activeResourceAssignment" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "assignmentType" : {
+                          "type" : "string"
+                        },
+                        "cabin" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "code" : {
+                              "type" : "string"
+                            },
+                            "name" : {
+                              "type" : "string"
+                            },
+                            "resourceId" : {
+                              "format" : "uuid",
+                              "type" : "string"
+                            }
+                          },
+                          "required" : [ "resourceId", "code", "name" ],
+                          "type" : "object"
+                        },
+                        "resourceAssignmentId" : {
+                          "format" : "uuid",
+                          "type" : "string"
+                        },
+                        "tank" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "code" : {
+                              "type" : "string"
+                            },
+                            "name" : {
+                              "type" : "string"
+                            },
+                            "resourceId" : {
+                              "format" : "uuid",
+                              "type" : "string"
+                            }
+                          },
+                          "required" : [ "resourceId", "code", "name" ],
+                          "type" : "object"
+                        }
+                      },
+                      "required" : [ "resourceAssignmentId", "assignmentType", "cabin", "tank" ],
+                      "type" : [ "object", "null" ]
+                    },
                     "appointment" : {
                       "additionalProperties" : false,
                       "properties" : {
                         "appointmentId" : {
                           "format" : "uuid",
-                          "type" : [ "string", "null" ]
-                        },
-                        "appointmentStatus" : {
-                          "type" : [ "string", "null" ]
-                        },
-                        "appointmentType" : {
-                          "type" : [ "string", "null" ]
-                        },
-                        "appointmentVersion" : {
-                          "type" : "integer"
-                        },
-                        "courseSection" : {
-                          "additionalProperties" : false,
-                          "properties" : {
-                            "courseSectionId" : {
-                              "format" : "uuid",
-                              "type" : [ "string", "null" ]
-                            },
-                            "name" : {
-                              "type" : [ "string", "null" ]
-                            },
-                            "nrc" : {
-                              "type" : [ "string", "null" ]
-                            }
-                          },
-                          "type" : [ "object", "null" ]
-                        },
-                        "instrumentCount" : {
-                          "type" : [ "integer", "null" ]
-                        },
-                        "pieceType" : {
-                          "type" : [ "string", "null" ]
-                        },
-                        "qrRepresentation" : {
-                          "type" : [ "string", "null" ]
-                        },
-                        "qrUsageContext" : {
-                          "type" : [ "string", "null" ]
-                        },
-                        "studentCancellationAction" : {
-                          "enum" : [ "AVAILABLE", "DEADLINE_PASSED", "NOT_APPLICABLE" ],
                           "type" : "string"
                         },
-                        "timeSlot" : {
+                        "appointmentStatus" : {
+                          "enum" : [ "SCHEDULED", "CANCELLED", "MISSED", "ENTRY_REJECTED", "IN_PROGRESS", "COMPLETED" ],
+                          "type" : "string"
+                        },
+                        "appointmentTimeSlot" : {
                           "additionalProperties" : false,
                           "properties" : {
                             "appointmentTimeSlotId" : {
                               "format" : "uuid",
-                              "type" : [ "string", "null" ]
-                            },
-                            "cancellationDeadlineAt" : {
-                              "format" : "date-time",
-                              "type" : [ "string", "null" ]
+                              "type" : "string"
                             },
                             "endsAt" : {
                               "format" : "date-time",
-                              "type" : [ "string", "null" ]
+                              "type" : "string"
                             },
                             "startsAt" : {
                               "format" : "date-time",
-                              "type" : [ "string", "null" ]
+                              "type" : "string"
                             },
                             "timezone" : {
-                              "type" : [ "string", "null" ]
+                              "type" : "string"
                             }
                           },
-                          "type" : [ "object", "null" ]
+                          "required" : [ "appointmentTimeSlotId", "startsAt", "endsAt", "timezone" ],
+                          "type" : "object"
                         },
-                        "usesExceptionalAuthorization" : {
-                          "type" : "boolean"
+                        "appointmentType" : {
+                          "enum" : [ "NORMAL", "JOURNEY", "IMMUNOCOMPROMISED" ],
+                          "type" : "string"
                         },
-                        "washExecution" : {
+                        "courseSectionReference" : {
                           "additionalProperties" : false,
                           "properties" : {
-                            "activeResourceAssignment" : {
-                              "additionalProperties" : false,
-                              "properties" : {
-                                "cabinCode" : {
-                                  "type" : [ "string", "null" ]
-                                },
-                                "cabinId" : {
-                                  "format" : "uuid",
-                                  "type" : [ "string", "null" ]
-                                },
-                                "cabinName" : {
-                                  "type" : [ "string", "null" ]
-                                },
-                                "resourceAssignmentId" : {
-                                  "format" : "uuid",
-                                  "type" : [ "string", "null" ]
-                                },
-                                "tankCode" : {
-                                  "type" : [ "string", "null" ]
-                                },
-                                "tankId" : {
-                                  "format" : "uuid",
-                                  "type" : [ "string", "null" ]
-                                },
-                                "tankName" : {
-                                  "type" : [ "string", "null" ]
-                                }
-                              },
-                              "type" : [ "object", "null" ]
-                            },
-                            "arrivedAt" : {
-                              "format" : "date-time",
-                              "type" : [ "string", "null" ]
-                            },
-                            "rejectionReason" : {
-                              "type" : [ "string", "null" ]
-                            },
-                            "status" : {
-                              "type" : [ "string", "null" ]
-                            },
-                            "version" : {
-                              "type" : [ "integer", "null" ]
-                            },
-                            "washExecutionId" : {
+                            "courseSectionId" : {
                               "format" : "uuid",
-                              "type" : [ "string", "null" ]
+                              "type" : "string"
+                            },
+                            "name" : {
+                              "type" : "string"
+                            },
+                            "nrc" : {
+                              "type" : "string"
                             }
                           },
-                          "type" : [ "object", "null" ]
+                          "required" : [ "courseSectionId", "nrc", "name" ],
+                          "type" : "object"
+                        },
+                        "instrumentCount" : {
+                          "exclusiveMinimum" : 0,
+                          "type" : "integer"
+                        },
+                        "pieceType" : {
+                          "enum" : [ "HIGH_SPEED", "LOW_SPEED", "CONTRA_ANGLE" ],
+                          "type" : "string"
                         }
                       },
-                      "required" : [ "appointmentVersion", "usesExceptionalAuthorization", "studentCancellationAction" ],
-                      "type" : [ "object", "null" ]
+                      "required" : [ "appointmentId", "appointmentStatus", "appointmentType", "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot" ],
+                      "type" : "object"
+                    },
+                    "nextAction" : {
+                      "enum" : [ "ENTRY", "ENTRY_DECISION", "REASSIGNMENT", "EXIT_REVIEW", "NONE" ],
+                      "type" : "string"
                     },
                     "serviceDate" : {
                       "format" : "date",
-                      "type" : [ "string", "null" ]
+                      "type" : "string"
                     },
                     "student" : {
                       "additionalProperties" : false,
                       "properties" : {
                         "currentSemester" : {
-                          "type" : [ "integer", "null" ]
+                          "exclusiveMinimum" : 0,
+                          "type" : "integer"
                         },
-                        "fullName" : {
-                          "type" : [ "string", "null" ]
+                        "displayName" : {
+                          "type" : "string"
+                        },
+                        "studentAccountId" : {
+                          "format" : "uuid",
+                          "type" : "string"
                         },
                         "studentEnrollment" : {
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         }
                       },
-                      "type" : [ "object", "null" ]
+                      "required" : [ "studentAccountId", "displayName", "studentEnrollment", "currentSemester" ],
+                      "type" : "object"
                     },
                     "washExecution" : {
                       "additionalProperties" : false,
                       "properties" : {
-                        "activeResourceAssignment" : {
-                          "additionalProperties" : false,
-                          "properties" : {
-                            "cabinCode" : {
-                              "type" : [ "string", "null" ]
-                            },
-                            "cabinId" : {
-                              "format" : "uuid",
-                              "type" : [ "string", "null" ]
-                            },
-                            "cabinName" : {
-                              "type" : [ "string", "null" ]
-                            },
-                            "resourceAssignmentId" : {
-                              "format" : "uuid",
-                              "type" : [ "string", "null" ]
-                            },
-                            "tankCode" : {
-                              "type" : [ "string", "null" ]
-                            },
-                            "tankId" : {
-                              "format" : "uuid",
-                              "type" : [ "string", "null" ]
-                            },
-                            "tankName" : {
-                              "type" : [ "string", "null" ]
-                            }
-                          },
-                          "type" : [ "object", "null" ]
-                        },
                         "arrivedAt" : {
+                          "format" : "date-time",
+                          "type" : "string"
+                        },
+                        "executionVersion" : {
+                          "type" : "integer"
+                        },
+                        "exitSubmittedAt" : {
                           "format" : "date-time",
                           "type" : [ "string", "null" ]
                         },
@@ -6094,19 +6202,38 @@
                           "type" : [ "string", "null" ]
                         },
                         "status" : {
-                          "type" : [ "string", "null" ]
+                          "enum" : [ "PENDING_ENTRY", "ENTRY_REJECTED", "PENDING_REASSIGNMENT", "IN_PROGRESS", "EXIT_SUBMITTED", "COMPLETED", "CANCELLED" ],
+                          "type" : "string"
                         },
-                        "version" : {
-                          "type" : [ "integer", "null" ]
+                        "submittedExitMaterials" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "greenPaperCassette10Count" : {
+                              "type" : "integer"
+                            },
+                            "greenPaperCassette8Count" : {
+                              "type" : "integer"
+                            },
+                            "packageCount" : {
+                              "type" : "integer"
+                            },
+                            "witnessTapePortionCount" : {
+                              "type" : "integer"
+                            }
+                          },
+                          "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                          "type" : [ "object", "null" ]
                         },
                         "washExecutionId" : {
                           "format" : "uuid",
-                          "type" : [ "string", "null" ]
+                          "type" : "string"
                         }
                       },
+                      "required" : [ "washExecutionId", "status", "executionVersion", "arrivedAt" ],
                       "type" : [ "object", "null" ]
                     }
                   },
+                  "required" : [ "serviceDate", "nextAction", "student", "appointment" ],
                   "type" : "object"
                 }
               }

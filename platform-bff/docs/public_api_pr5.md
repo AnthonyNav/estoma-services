@@ -59,6 +59,8 @@ POST /api/v1/wash/operational-resources/disable
 POST /api/v1/wash/operational-resources/restore
 
 GET  /api/v1/wash/supervision/pending-reassignments
+GET  /api/v1/wash/supervision/home
+POST /api/v1/wash/supervision/lookup
 ```
 
 ### ScheduleAppointment
@@ -103,6 +105,13 @@ qrUsageContext = NONE
 ```
 
 `qrUsageContext` es siempre un dato compuesto; no se persiste ni crea otra entidad/identificador QR.
+
+El Home de Supervisor deriva `serviceDate` en `America/Mexico_City` y compone desde proyecciones
+locales cinco contadores de citas, además de `pendingReassignmentsCount`. El lookup unificado es una
+lectura side-effect-free aunque use `POST`: la búsqueda `STUDENT_ENROLLMENT` resuelve una sola cita
+activa del día o el terminal más reciente y entrega `nextAction`; múltiples activas fallan cerrado.
+La variante `QR` continúa respondiendo `503 BFF.PROJECTION_UNAVAILABLE` hasta disponer de una
+proyección owner-backed. Ninguna de estas lecturas realiza RPC al owner.
 
 ## Availability
 

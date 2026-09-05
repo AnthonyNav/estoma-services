@@ -102,10 +102,4 @@ public final class WashStudentResponses {
       @Required @jakarta.validation.constraints.Positive int availableCapacity,
       @Required Instant bookingDeadlineAt) {}
 
-  /** Side-effect-free WASH-STU-03 manual supervisor lookup response. */
-  public record SupervisorEntryLookupResponse(
-      LocalDate serviceDate,
-      FormStudent student,
-      StudentHomeAppointment appointment,
-      WashExecution washExecution) {}
 }

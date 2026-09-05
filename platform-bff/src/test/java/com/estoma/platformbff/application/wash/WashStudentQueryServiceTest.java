@@ -8,10 +8,8 @@ import com.estoma.platformbff.application.port.WashStudentQueryPort;
 import com.estoma.platformbff.application.projection.ProjectionEvent;
 import com.estoma.platformbff.application.projection.ProjectionReadModel;
 import com.estoma.platformbff.application.projection.ProjectionReadinessService;
-import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.projection.TypedProjectionProjector;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
-import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryLookupRequest;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -168,65 +166,6 @@ class WashStudentQueryServiceTest {
     assertThat(response.availableCourseSections()).extracting(value -> value.courseSectionId())
         .containsExactly(section);
     verify(readiness).requireReady("person", "academic");
-  }
-
-  @Test
-  void supervisorManualLookupComposesTheSameLocalAppointmentReadModel() {
-    service = new WashStudentQueryService(authorization, readiness, projections,
-        Clock.fixed(NOW, ZoneOffset.UTC));
-    UUID executionId = UUID.randomUUID();
-    UUID accountId = UUID.randomUUID();
-    when(authorization.requireWashSupervisor()).thenReturn(UUID.randomUUID());
-    when(projections.findAccountIdByStudentEnrollment("201945678")).thenReturn(Optional.of(accountId));
-    when(projections.findStudent(accountId)).thenReturn(Optional.of(student()));
-    when(projections.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 27)))
-        .thenReturn(Optional.of(appointment(executionId)));
-
-    var response = service.entryLookup(new EntryLookupRequest("STUDENT_ENROLLMENT", null, "201945678"));
-
-    assertThat(response.student().studentEnrollment()).isEqualTo("201945678");
-    assertThat(response.washExecution().washExecutionId()).isEqualTo(executionId);
-    assertThat(response.appointment().washExecution().version()).isEqualTo(3L);
-    verify(readiness).requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
-  }
-
-  @Test
-  void submittedExitKeepsTheInProgressAppointmentAndEnablesSupervisorExitReviewQr() {
-    service = new WashStudentQueryService(authorization, readiness, projections,
-        Clock.fixed(NOW, ZoneOffset.UTC));
-    UUID executionId = UUID.randomUUID();
-    UUID accountId = UUID.randomUUID();
-    when(authorization.requireWashSupervisor()).thenReturn(UUID.randomUUID());
-    when(projections.findAccountIdByStudentEnrollment("201945678")).thenReturn(Optional.of(accountId));
-    when(projections.findStudent(accountId)).thenReturn(Optional.of(student()));
-    when(projections.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 27)))
-        .thenReturn(Optional.of(new WashStudentQueryPort.Appointment(UUID.randomUUID(), "IN_PROGRESS", 3L, "NORMAL",
-            10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
-            NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
-            NOW.plusSeconds(600), null, true, executionId,
-            "EXIT_SUBMITTED", 4L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
-            "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1")));
-
-    var response = service.entryLookup(new EntryLookupRequest("STUDENT_ENROLLMENT", null, "201945678"));
-
-    assertThat(response.appointment().qrUsageContext()).isEqualTo("SUPERVISOR_EXIT_REVIEW");
-    assertThat(response.washExecution().status()).isEqualTo("EXIT_SUBMITTED");
-  }
-
-  @Test
-  void supervisorQrLookupIsExplicitlyGatedUntilItsProjectionExists() {
-    assertThat(org.assertj.core.api.Assertions.catchThrowable(
-        () -> service.entryLookup(new EntryLookupRequest("QR", "opaque", null))))
-        .isInstanceOf(ProjectionUnavailableException.class);
-  }
-
-  private static WashStudentQueryPort.Appointment appointment(UUID executionId) {
-    return new WashStudentQueryPort.Appointment(UUID.randomUUID(), "IN_PROGRESS", 3L, "NORMAL",
-        10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
-        NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
-        NOW.plusSeconds(600), null, true, executionId,
-        "IN_PROGRESS", 3L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
-        "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1");
   }
 
   private static WashStudentQueryPort.Appointment scheduledAppointment(UUID appointmentId, long version,

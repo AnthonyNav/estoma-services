@@ -13,9 +13,7 @@ import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHo
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeStudent;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentCancellationAction;
-import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.SupervisorEntryLookupResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.WashExecution;
-import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryLookupRequest;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -60,28 +58,6 @@ public class WashStudentQueryService {
         .toList();
     return new AppointmentFormContextResponse(new FormStudent(fullName(student), student.studentEnrollment(),
         student.currentSemester()), sections);
-  }
-
-  /**
-   * Composes the manual student-enrollment lookup entirely from local read models. QR remains
-   * intentionally unavailable until its owner-backed lookup projection exists.
-   */
-  public SupervisorEntryLookupResponse entryLookup(EntryLookupRequest request) {
-    authorization.requireWashSupervisor();
-    readiness.requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
-    if ("QR".equals(request.lookupType())) {
-      throw new ProjectionUnavailableException("QR entry lookup is gated pending its local projection");
-    }
-    UUID accountId = projections.findAccountIdByStudentEnrollment(request.studentEnrollment())
-        .orElseThrow(EntryLookupNotFoundException::new);
-    var student = requireStudent(accountId);
-    LocalDate serviceDate = clock.instant().atZone(SERVICE_ZONE).toLocalDate();
-    var appointment = projections.findPrimaryAppointment(accountId, serviceDate)
-        .map(value -> appointment(value, clock))
-        .orElseThrow(EntryLookupNotFoundException::new);
-    return new SupervisorEntryLookupResponse(serviceDate,
-        new FormStudent(fullName(student), student.studentEnrollment(), student.currentSemester()),
-        appointment, appointment.washExecution());
   }
 
   private WashStudentQueryPort.Student requireStudent(UUID accountId) {
@@ -148,7 +124,4 @@ public class WashStudentQueryService {
         .orElse("");
   }
 
-  public static class EntryLookupNotFoundException extends RuntimeException {
-    public EntryLookupNotFoundException() { super("No appointment was found for today."); }
-  }
 }

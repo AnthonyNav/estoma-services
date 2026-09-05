@@ -18,14 +18,15 @@ import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ClinicCancelR
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.CompleteWashExecutionRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.DisableOperationalResourceRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryDecisionRequest;
-import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.EntryLookupRequest;
+import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.SupervisorLookupRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.GrantExceptionalAuthorizationRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ReassignmentRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.RegisterArrivalRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.RestoreOperationalResourceRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ScheduleAppointmentRequest;
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.SubmitExitRequest;
-import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.SupervisorEntryLookupResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorLookupResponse;
 import jakarta.validation.Valid;
 import java.time.Clock;
 import java.time.Instant;
@@ -266,9 +267,14 @@ public class WashController {
     return supervision.pendingReassignments();
   }
 
-  @PostMapping("/supervision/entry-lookup")
-  public SupervisorEntryLookupResponse entryLookup(@Valid @RequestBody EntryLookupRequest request) {
-    return studentQueries.entryLookup(request);
+  @GetMapping("/supervision/home")
+  public SupervisorHomeResponse supervisorHome() {
+    return supervision.home();
+  }
+
+  @PostMapping("/supervision/lookup")
+  public SupervisorLookupResponse supervisorLookup(@Valid @RequestBody SupervisorLookupRequest request) {
+    return supervision.lookup(request);
   }
 
   @GetMapping("/student/home")

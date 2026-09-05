@@ -34,6 +34,14 @@ import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSec
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.FormStudent;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeStudent;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.NextAction;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.AppointmentTimeSlot;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.CourseSectionReference;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorAppointment;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeSummary;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorLookupResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorStudent;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -80,6 +88,20 @@ class PublicApiMvcTest {
     when(mailboxQueries.summary(anyString())).thenReturn(
         new MailboxSystemSummaryResponse("LAVADO_ULTRASONICO", 0, 0, null));
     when(supervision.pendingReassignments()).thenReturn(new PendingReassignmentsResponse(List.of()));
+    when(supervision.home()).thenReturn(new SupervisorHomeResponse(LocalDate.of(2026, 8, 1),
+        new SupervisorHomeSummary(12, 5, 4, 1, 0), 3));
+    when(supervision.lookup(any())).thenReturn(new SupervisorLookupResponse(LocalDate.of(2026, 8, 1),
+        NextAction.ENTRY,
+        new SupervisorStudent(UUID.fromString("00000000-0000-0000-0000-000000000010"),
+            "Ana García Reyes", "201945678", 7),
+        new SupervisorAppointment(UUID.fromString("00000000-0000-0000-0000-000000000011"),
+            "SCHEDULED", "NORMAL", 15, "HIGH_SPEED",
+            new CourseSectionReference(UUID.fromString("00000000-0000-0000-0000-000000000012"),
+                "12345", "Cirugía Bucal"),
+            new AppointmentTimeSlot(UUID.fromString("00000000-0000-0000-0000-000000000013"),
+                Instant.parse("2026-08-01T10:00:00Z"), Instant.parse("2026-08-01T11:00:00Z"),
+                "America/Mexico_City")),
+        null, null));
     Clock clock = Clock.fixed(Instant.parse("2026-08-01T10:00:00Z"), java.time.ZoneOffset.UTC);
     mailboxMvc = MockMvcBuilders.standaloneSetup(
         new MailboxController(mailboxQueries, authorization, effectiveSystems, commands, clock))
@@ -166,6 +188,36 @@ class PublicApiMvcTest {
   void supervisionAndOwnerDerivedAppointmentAvailabilityAreAvailable() throws Exception {
     washMvc.perform(get("/api/v1/wash/supervision/pending-reassignments"))
         .andExpect(status().isOk());
+    washMvc.perform(get("/api/v1/wash/supervision/home"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.serviceDate").value("2026-08-01"))
+        .andExpect(jsonPath("$.summary.registeredAppointments").value(12))
+        .andExpect(jsonPath("$.summary.inProcessAppointments").value(5))
+        .andExpect(jsonPath("$.summary.completedAppointments").value(4))
+        .andExpect(jsonPath("$.summary.deniedAppointments").value(1))
+        .andExpect(jsonPath("$.summary.cancelledAppointments").value(0))
+        .andExpect(jsonPath("$.pendingReassignmentsCount").value(3));
+    washMvc.perform(post("/api/v1/wash/supervision/lookup")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"lookupType\":\"STUDENT_ENROLLMENT\",\"studentEnrollment\":\"201945678\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.nextAction").value("ENTRY"))
+        .andExpect(jsonPath("$.student.studentAccountId")
+            .value("00000000-0000-0000-0000-000000000010"))
+        .andExpect(jsonPath("$.appointment.appointmentStatus").value("SCHEDULED"));
+    washMvc.perform(post("/api/v1/wash/supervision/lookup")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"studentEnrollment\":\"201945678\"}"))
+        .andExpect(status().isBadRequest());
+    washMvc.perform(post("/api/v1/wash/supervision/lookup")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"lookupType\":\"STUDENT_ENROLLMENT\",\"studentEnrollment\":\"201945678\","
+                + "\"qrRepresentation\":\"opaque\"}"))
+        .andExpect(status().isBadRequest());
+    washMvc.perform(post("/api/v1/wash/supervision/entry-lookup")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"lookupType\":\"STUDENT_ENROLLMENT\",\"studentEnrollment\":\"201945678\"}"))
+        .andExpect(status().isNotFound());
     when(appointmentAvailability.availability(any(), eq(15), any(), any()))
         .thenReturn(new AppointmentAvailabilityResponse(true, List.of(), 0, 0,
             false, false, null, List.of()));

@@ -289,6 +289,8 @@ POST /api/v1/wash/executions/{washExecutionId}/clinic-cancel
 POST /api/v1/wash/operational-resources/disable
 POST /api/v1/wash/operational-resources/restore
 GET  /api/v1/wash/supervision/pending-reassignments
+GET  /api/v1/wash/supervision/home
+POST /api/v1/wash/supervision/lookup
 GET  /api/v1/wash/appointments/availability
 ```
 
