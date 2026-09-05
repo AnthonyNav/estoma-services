@@ -8,8 +8,11 @@ This fixture supplies only prerequisites that the current synthetic `e2e-*` acco
 - one same-service-date time slot and its capacity projection.
 
 It does **not** insert, update or cancel an appointment. Schedule and cancellation always travel
-through the public BFF, RabbitMQ and the Appointments owner. It also does not create or modify an
-academic period, system catalogue entry, Authentication account or Users person.
+through the public BFF, RabbitMQ and the Appointments owner. It does not modify an existing
+academic period, system catalogue entry, Authentication account or Users person. When both BFF and
+Appointments lack an active academic period, it creates the same isolated `E2E-*` period in those
+two projections and removes it during cleanup; any partial or conflicting real state still fails
+closed.
 
 ## Database executor boundary
 
@@ -29,12 +32,13 @@ The bootstrap refuses to run unless all of these are true:
 - its current projected role is absent or exactly `E2E_TESTER`;
 - it has no existing Lavado access, academic profile or appointment for the service date;
 - BFF critical projections are `READY`;
-- BFF and Appointments agree on the already-active academic period;
+- BFF and Appointments agree on the active academic period, or both have none so the fixture can
+  create its isolated period;
 - Appointments projections are reliable;
 - the complete synthetic slot, including its end at `now + 70 minutes`, remains within the current
   local service date.
 
-Generated IDs and the original role-presence flags live in
+Generated IDs, the synthetic-period flag and the original role-presence flags live in
 `target/e2e/wash-student/fixture.env` with mode `0600`. The file is ignored by Git and is required
 for exact cleanup. Cleanup targets only the generated identifiers, the two run-scoped idempotency
 keys and appointment(s) created for that account/slot. It restores `E2E_TESTER` or removes the

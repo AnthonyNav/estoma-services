@@ -99,7 +99,6 @@ ORDER BY updated_at DESC, academic_period_id
 LIMIT 1;
 SQL
   )
-  require_uuid "$period_id" 'active BFF academic period'
   owner_period_id=$(sql "$appointments_database" <<SQL
 SELECT academic_period_id FROM academic_period_projection
 WHERE status = 'ACTIVE' AND reliable = TRUE
@@ -107,7 +106,16 @@ ORDER BY updated_at DESC, academic_period_id
 LIMIT 1;
 SQL
   )
-  [ "$owner_period_id" = "$period_id" ] || fail "BFF and Appointments do not agree on the active academic period"
+  period_was_synthetic=0
+  if [ -z "$period_id" ] && [ -z "$owner_period_id" ]; then
+    period_id=$(new_uuid)
+    owner_period_id=$period_id
+    period_was_synthetic=1
+  else
+    require_uuid "$period_id" 'active BFF academic period'
+    require_uuid "$owner_period_id" 'active Appointments academic period'
+    [ "$owner_period_id" = "$period_id" ] || fail "BFF and Appointments do not agree on the active academic period"
+  fi
 
   system_id=$(sql "$bff_database" <<SQL
 SELECT system_id FROM authorization_system_catalog_read_model
@@ -231,6 +239,7 @@ SQL
     printf 'SYSTEM_ACCESS_ID=%s\n' "$system_access_id"
     printf 'SYSTEM_ID=%s\n' "$system_id"
     printf 'PERIOD_ID=%s\n' "$period_id"
+    printf 'PERIOD_WAS_SYNTHETIC=%s\n' "$period_was_synthetic"
     printf 'SLOT_ID=%s\n' "$slot_id"
     printf 'SCHEDULE_ID=%s\n' "$schedule_id"
     printf 'CALENDAR_ID=%s\n' "$calendar_id"
@@ -248,6 +257,9 @@ SQL
 
   sql "$appointments_database" >/dev/null <<SQL
 BEGIN;
+$(if [ "$period_was_synthetic" = 1 ]; then
+    printf "INSERT INTO academic_period_projection (academic_period_id, code, status, source_version, updated_at, reliable) VALUES ('%s'::uuid, 'E2E-%s', 'ACTIVE', 1, CURRENT_TIMESTAMP, TRUE);" "$period_id" "$suffix"
+  fi)
 INSERT INTO account_role_projection
   (account_id, role_id, role_code, source_version, updated_at, reliable)
 VALUES ('$E2E_ACCOUNT_ID'::uuid, '$role_id'::uuid, 'ALUMNO', 1, CURRENT_TIMESTAMP, TRUE)
@@ -291,6 +303,9 @@ SQL
 
   sql "$bff_database" >/dev/null <<SQL
 BEGIN;
+$(if [ "$period_was_synthetic" = 1 ]; then
+    printf "INSERT INTO academic_period_read_model (academic_period_id, code, name, start_date, end_date, status, academic_data_status, source_version, updated_at) VALUES ('%s'::uuid, 'E2E-%s', 'E2E Academic Period', '%s'::date, '%s'::date, 'ACTIVE', 'READY', 1, CURRENT_TIMESTAMP);" "$period_id" "$suffix" "$service_date" "$service_date"
+  fi)
 INSERT INTO authorization_role_projection
   (account_id, role_code, role_source_version, updated_at)
 VALUES ('$E2E_ACCOUNT_ID'::uuid, 'ALUMNO', 1, CURRENT_TIMESTAMP)
@@ -347,6 +362,7 @@ cleanup() {
   SYSTEM_ACCESS_ID=$(manifest_value SYSTEM_ACCESS_ID)
   SYSTEM_ID=$(manifest_value SYSTEM_ID)
   PERIOD_ID=$(manifest_value PERIOD_ID)
+  PERIOD_WAS_SYNTHETIC=$(manifest_value PERIOD_WAS_SYNTHETIC)
   SLOT_ID=$(manifest_value SLOT_ID)
   SCHEDULE_ID=$(manifest_value SCHEDULE_ID)
   CALENDAR_ID=$(manifest_value CALENDAR_ID)
@@ -371,6 +387,7 @@ cleanup() {
   case "$NRC" in E2E-*) ;; *) fail "unsafe manifest NRC" ;; esac
   case "$NRC" in *[!A-Za-z0-9-]*) fail "unsafe manifest NRC" ;; esac
   case "$BFF_ROLE_WAS_ABSENT:$OWNER_ROLE_WAS_ABSENT" in 0:0|0:1|1:0|1:1) ;; *) fail "unsafe manifest role flags" ;; esac
+  case "$PERIOD_WAS_SYNTHETIC" in 0|1) ;; *) fail "unsafe manifest period flag" ;; esac
 
   identity_matches=$(sql "$bff_database" <<SQL
 SELECT CASE WHEN EXISTS (
@@ -466,6 +483,9 @@ DELETE FROM student_enrollment_read_model
   WHERE student_academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
     AND course_section_id = '$COURSE_SECTION_ID'::uuid;
 DELETE FROM course_section_read_model WHERE course_section_id = '$COURSE_SECTION_ID'::uuid;
+$(if [ "$PERIOD_WAS_SYNTHETIC" = 1 ]; then
+    printf "DELETE FROM academic_period_read_model WHERE academic_period_id = '%s'::uuid AND code = 'E2E-%s';" "$PERIOD_ID" "${NRC#E2E-}"
+  fi)
 DELETE FROM student_academic_profile_read_model
   WHERE student_academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
     AND account_id = '$ACCOUNT_ID'::uuid;
@@ -508,6 +528,9 @@ DELETE FROM student_course_section_projection
   WHERE academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
     AND course_section_id = '$COURSE_SECTION_ID'::uuid;
 DELETE FROM course_section_projection WHERE course_section_id = '$COURSE_SECTION_ID'::uuid;
+$(if [ "$PERIOD_WAS_SYNTHETIC" = 1 ]; then
+    printf "DELETE FROM academic_period_projection WHERE academic_period_id = '%s'::uuid AND code = 'E2E-%s';" "$PERIOD_ID" "${NRC#E2E-}"
+  fi)
 DELETE FROM student_academic_profile_projection
   WHERE academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
     AND student_account_id = '$ACCOUNT_ID'::uuid;

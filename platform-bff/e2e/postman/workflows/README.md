@@ -115,7 +115,13 @@ The collection derives account and service date server-side, selects only the ex
 and slot IDs supplied by the runtime fixture, reuses one stable idempotency key per intent, and
 never sends student identity, arbitrary service date, cabin or tank data.
 
-Current certification state: prepared, not yet executed against `develop`. A live run is blocked
-until both the Appointments-owned availability Query/Result contract and the BFF cache-aside
-adapter are merged and deployed. In particular, do not treat the current absence of
-`GET /api/v1/wash/appointments/availability` on `develop` as a failed workflow.
+## Sanitized live evidence
+
+The complete workflow passed against `develop` on 2026-09-04 after the Appointments owner and BFF
+adapter were deployed. The first availability read returned the expected controlled
+`503 + Retry-After`; its bounded retry returned the owner-derived `200` decision and isolated slot.
+Schedule and cancellation were both accepted as `202`, reached terminal `SUCCEEDED` Results and
+converged in student Home before logout. All JUnit assertions passed, and the independent cleanup
+audit found zero synthetic periods, profiles, appointments, availability refreshes or run-scoped
+operations in both BFF and Appointments. No credential, token, fixture UUID or captured payload is
+part of this evidence.
