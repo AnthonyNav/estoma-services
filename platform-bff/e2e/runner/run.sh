@@ -31,6 +31,23 @@ case "${E2E_SUITE:-smoke}" in
       --reporters cli,junit \
       --reporter-junit-export /reports/junit-wash-student.xml
     ;;
+  wash-supervisor)
+    : "${E2E_ALLOW_MUTATIONS:?E2E_ALLOW_MUTATIONS is required for the wash-supervisor suite}"
+    [ "$E2E_ALLOW_MUTATIONS" = "isolated-wash-supervisor-fixture" ] || {
+      echo "E2E_ALLOW_MUTATIONS does not authorize the isolated wash-supervisor workflow" >&2
+      exit 2
+    }
+    : "${E2E_POSTMAN_ENVIRONMENT:?E2E_POSTMAN_ENVIRONMENT must point to the runtime-only environment file}"
+    : "${E2E_POSTMAN_STATE:?E2E_POSTMAN_STATE must point to the ephemeral exported environment}"
+    umask 077
+    exec newman run /opt/e2e/wash-supervisor.json \
+      --environment "$E2E_POSTMAN_ENVIRONMENT" \
+      --export-environment "$E2E_POSTMAN_STATE" \
+      --delay-request "${E2E_DELAY_MILLIS:-1000}" \
+      --bail \
+      --reporters cli,junit \
+      --reporter-junit-export /reports/junit-wash-supervisor.xml
+    ;;
   *)
     echo "unsupported E2E_SUITE: $E2E_SUITE" >&2
     exit 2

@@ -125,3 +125,43 @@ converged in student Home before logout. All JUnit assertions passed, and the in
 audit found zero synthetic periods, profiles, appointments, availability refreshes or run-scoped
 operations in both BFF and Appointments. No credential, token, fixture UUID or captured payload is
 part of this evidence.
+
+## Wash supervisor Home and lookup
+
+`wash-supervisor-front-v1.postman_collection.json` composes the already-certified student
+appointment path with a distinct synthetic Supervisor session:
+
+```text
+supervisor login + Home baseline
+→ student login + availability + schedule + projection convergence
+→ supervisor Home delta
+→ enrollment lookup returns ENTRY
+→ QR lookup returns controlled 503
+→ repeated enrollment lookup remains identical
+→ student cancellation + projection convergence
+→ terminal supervisor lookup returns NONE
+→ Home cancellation delta
+→ both sessions logout
+```
+
+Use only `../../runner/run-wash-supervisor.sh` with the paired fixtures. Home and lookup are reads;
+the wrapper records the supervisor's pre-run client-operation count and verifies after Newman that
+it did not change and that the appointment has no wash execution. This workflow therefore covers
+WASH-SUP-06 and the side-effect-free lookup boundary of WASH-SUP-01; it does not claim that arrival
+or entry-decision commands have been tested.
+
+The collection and environment are generated deterministically from the student workflow plus the
+Supervisor-specific requests. Update them with
+`node ../../scripts/generate-wash-supervisor-workflow.mjs` and enforce a clean generation with
+`--check`. URL, credentials, tokens and fixture identifiers remain blank in the example.
+
+## Sanitized live evidence
+
+The complete workflow passed against the deployed `develop` BFF on 2026-09-05 with two isolated
+synthetic identities. Newman executed 21 requests, including one expected availability retry, and
+all 52 assertions passed. Supervisor Home reflected the scheduled and cancelled appointment
+deltas; enrollment lookup first returned `ENTRY` and, after cancellation, returned `NONE`; QR
+lookup returned the expected controlled `503` while the appointment had no wash execution. The
+side-effect audit found no supervisor client-operation delta and no wash execution, and the
+independent post-run audit found zero transient BFF or Appointments rows. No credentials, tokens,
+fixture UUIDs or captured payloads are part of this evidence.

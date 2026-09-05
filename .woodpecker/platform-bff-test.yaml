@@ -30,11 +30,16 @@ steps:
       - node e2e/scripts/validate-openapi-postman.mjs
       - node e2e/scripts/validate-auth-workflow.mjs
       - node e2e/scripts/validate-wash-student-workflow.mjs
+      - node e2e/scripts/generate-wash-supervisor-workflow.mjs --check
+      - node e2e/scripts/validate-wash-supervisor-workflow.mjs
       - sh -n e2e/fixtures/wash-student/fixture-db.sh
       - sh -n e2e/fixtures/wash-student/psql-exec.example.sh
+      - sh -n e2e/fixtures/wash-supervisor/fixture-db.sh
       - sh -n e2e/runner/run-wash-student.sh
+      - sh -n e2e/runner/run-wash-supervisor.sh
       - sh -n e2e/runner/run.sh
       - sh e2e/scripts/test-wash-student-cleanup-retry.sh
+      - sh e2e/scripts/test-wash-supervisor-cleanup-retry.sh
 
   - name: test
     image: maven:3.9.16-eclipse-temurin-25

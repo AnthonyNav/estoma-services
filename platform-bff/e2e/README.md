@@ -13,6 +13,8 @@ Run without contacting any service:
 ```sh
 node e2e/scripts/validate-openapi-postman.mjs
 node e2e/scripts/validate-auth-workflow.mjs
+node e2e/scripts/generate-wash-supervisor-workflow.mjs --check
+node e2e/scripts/validate-wash-supervisor-workflow.mjs
 ```
 
 The gate requires an exact method/path inventory and checks `Idempotency-Key` and bearer-security requirements for every operation. `docs/openapi.yaml` is JSON-formatted OpenAPI despite its filename.
@@ -52,6 +54,25 @@ directory so the exit trap can revoke an authenticated session even after `--bai
 runs with the invoking user's UID/GID and the file is removed before the wrapper exits. The
 JUnit report contains only test names/results. Fixture details and safety guards are documented in
 `e2e/fixtures/wash-student/README.md`.
+
+After Supervisor Home and unified lookup are deployed, run their two-identity workflow only through
+its guarded wrapper:
+
+```sh
+BFF_BASE_URL="$RUNTIME_BFF_URL" \
+E2E_STUDENT_LOGIN_IDENTIFIER="$RUNTIME_E2E_STUDENT_LOGIN" \
+E2E_STUDENT_PASSWORD="$RUNTIME_E2E_STUDENT_PASSWORD" \
+E2E_SUPERVISOR_LOGIN_IDENTIFIER="$RUNTIME_E2E_SUPERVISOR_LOGIN" \
+E2E_SUPERVISOR_PASSWORD="$RUNTIME_E2E_SUPERVISOR_PASSWORD" \
+E2E_PSQL_EXEC="$PRIVATE_PSQL_EXEC" \
+./e2e/runner/run-wash-supervisor.sh
+```
+
+The student schedules and cancels through the same certified public path. A different synthetic
+account receives only temporary BFF-local Supervisor authorization. The collection takes a Home
+baseline, waits for the appointment delta, exercises enrollment and controlled QR lookup, proves
+the terminal `NONE` mapping after cancellation and logs out both sessions. The exit trap audits
+that reads created no operation or wash execution before cleanup.
 
 ## Real `develop`
 
