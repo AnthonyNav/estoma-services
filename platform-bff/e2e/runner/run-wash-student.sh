@@ -21,19 +21,41 @@ temp_dir=$(mktemp -d)
 login_body="$temp_dir/login.json"
 login_response="$temp_dir/login-response.json"
 runtime_environment="$temp_dir/postman-environment.json"
+runtime_state="$temp_dir/postman-environment-after.json"
 fixture_ready=0
+bootstrap_token=
+
+: > "$runtime_state"
+chmod 600 "$runtime_state"
 
 finish() {
   status=$?
   trap - EXIT INT TERM
   cleanup_status=0
+  if [ -n "$bootstrap_token" ]; then
+    curl -sS --max-time 5 -o /dev/null -X POST \
+      -H "Authorization: Bearer $bootstrap_token" \
+      "$BFF_BASE_URL/api/v1/auth/logout" >/dev/null 2>&1 || true
+    bootstrap_token=
+  fi
+  if [ -f "$runtime_state" ]; then
+    chmod 600 "$runtime_state"
+    runtime_token=$(jq -er '.values[] | select(.key == "runtimeAccessToken") | .value | select(length > 0)' \
+      "$runtime_state" 2>/dev/null || true)
+    if [ -n "$runtime_token" ]; then
+      curl -sS --max-time 5 -o /dev/null -X POST \
+        -H "Authorization: Bearer $runtime_token" \
+        "$BFF_BASE_URL/api/v1/auth/logout" >/dev/null 2>&1 || true
+      unset runtime_token
+    fi
+  fi
   if [ "$fixture_ready" -eq 1 ]; then
     E2E_REPORT_DIR="$report_dir" E2E_PSQL_EXEC="$E2E_PSQL_EXEC" \
       E2E_BFF_DATABASE="${E2E_BFF_DATABASE:-platform_bff_db}" \
       E2E_APPOINTMENTS_DATABASE="${E2E_APPOINTMENTS_DATABASE:-appointments_db}" \
       "$fixture" cleanup || cleanup_status=$?
   fi
-  rm -f -- "$login_body" "$login_response" "$runtime_environment"
+  rm -f -- "$login_body" "$login_response" "$runtime_environment" "$runtime_state"
   rmdir -- "$temp_dir" 2>/dev/null || true
   if [ "$cleanup_status" -ne 0 ]; then
     printf 'Fixture cleanup failed; preserve and inspect %s/fixture.env before another run.\n' "$report_dir" >&2
@@ -62,7 +84,7 @@ bootstrap_token=$(jq -er '.accessToken | select(length > 0)' "$login_response")
 # The discovery session is closed; the Postman workflow proves its own login/session lifecycle.
 curl -sS -o /dev/null -X POST -H "Authorization: Bearer $bootstrap_token" \
   "$BFF_BASE_URL/api/v1/auth/logout"
-unset bootstrap_token
+bootstrap_token=
 
 E2E_ACCOUNT_ID="$account_id" E2E_LOGIN_IDENTIFIER="$E2E_LOGIN_IDENTIFIER" \
   E2E_REPORT_DIR="$report_dir" E2E_PSQL_EXEC="$E2E_PSQL_EXEC" \
@@ -99,10 +121,13 @@ jq \
 
 docker build -q -f "$script_dir/Dockerfile" -t "$image" "$e2e_dir" >/dev/null
 docker run --rm --network host \
+  --user "$(id -u):$(id -g)" \
   -e BFF_BASE_URL="$BFF_BASE_URL" \
   -e E2E_SUITE=wash-student \
   -e E2E_ALLOW_MUTATIONS=isolated-wash-student-fixture \
   -e E2E_POSTMAN_ENVIRONMENT=/run/secrets/postman-environment.json \
+  -e E2E_POSTMAN_STATE=/run/state/postman-environment-after.json \
   -v "$runtime_environment:/run/secrets/postman-environment.json:ro" \
+  -v "$runtime_state:/run/state/postman-environment-after.json" \
   -v "$report_dir:/reports" \
   "$image"

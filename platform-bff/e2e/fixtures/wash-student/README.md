@@ -31,21 +31,28 @@ The bootstrap refuses to run unless all of these are true:
 - BFF critical projections are `READY`;
 - BFF and Appointments agree on the already-active academic period;
 - Appointments projections are reliable;
-- enough time remains before the local service date ends.
+- the complete synthetic slot, including its end at `now + 70 minutes`, remains within the current
+  local service date.
 
 Generated IDs and the original role-presence flags live in
 `target/e2e/wash-student/fixture.env` with mode `0600`. The file is ignored by Git and is required
 for exact cleanup. Cleanup targets only the generated identifiers, the two run-scoped idempotency
 keys and appointment(s) created for that account/slot. It restores `E2E_TESTER` or removes the
-temporary role row according to the manifest.
+temporary role row according to the manifest. Existing `E2E_TESTER` role identifiers and source
+versions are not overwritten; the fixture refuses pre-existing Lavado access, so cleanup removes
+only the access row identified by the generated `system_access_id`.
 
-If cleanup refuses because a command or owner outbox message is still active, do not delete the
-manifest. Investigate the operation and retry cleanup with the same runtime executor.
+Cleanup also waits while an availability refresh is retryable (`FAILED` with a non-null
+`next_attempt_at`) and removes the refresh result's BFF inbox record before deleting the refresh.
+If cleanup refuses because a command, retryable refresh or owner outbox message is still active, do
+not delete the manifest. Investigate the operation and retry cleanup with the same runtime executor.
 
 ## Manual lifecycle
 
 Normally use `../../runner/run-wash-student.sh`, which discovers the account through a real BFF
-login, bootstraps, runs the Postman workflow and executes cleanup in a trap.
+login, bootstraps, runs the Postman workflow and executes cleanup in a trap. If Newman aborts, the
+trap reads the exported environment from its private temporary directory, attempts logout with the
+runtime token and then deletes that state; tokens and passwords are never written to reports.
 
 For investigation, bootstrap and cleanup can be invoked independently. Values below are runtime
 placeholders, never repository defaults:

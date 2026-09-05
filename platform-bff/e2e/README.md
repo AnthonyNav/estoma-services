@@ -46,7 +46,10 @@ E2E_PSQL_EXEC="$PRIVATE_PSQL_EXEC" \
 ```
 
 The wrapper passes credentials through an ephemeral mode-`0600` Postman environment and does not
-retain Newman's JSON reporter because it can capture authenticated request bodies or tokens. The
+retain Newman's JSON reporter because it can capture authenticated request bodies or tokens. Newman
+exports only the runtime environment into a host-owned, mode-`0600` file in a private temporary
+directory so the exit trap can revoke an authenticated session even after `--bail`; the container
+runs with the invoking user's UID/GID and the file is removed before the wrapper exits. The
 JUnit report contains only test names/results. Fixture details and safety guards are documented in
 `e2e/fixtures/wash-student/README.md`.
 

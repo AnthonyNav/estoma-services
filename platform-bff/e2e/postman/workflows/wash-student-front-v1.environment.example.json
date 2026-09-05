@@ -4,6 +4,7 @@
     { "key": "baseUrl", "value": "", "enabled": true },
     { "key": "loginIdentifier", "value": "", "enabled": true },
     { "key": "password", "value": "", "enabled": true },
+    { "key": "runtimeAccessToken", "value": "", "enabled": true },
     { "key": "runKey", "value": "", "enabled": true },
     { "key": "fixtureCourseSectionId", "value": "", "enabled": true },
     { "key": "fixtureAppointmentTimeSlotId", "value": "", "enabled": true },

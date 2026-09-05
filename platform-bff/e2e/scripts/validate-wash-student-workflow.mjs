@@ -64,8 +64,24 @@ const cancelBody = requests.find(({ name }) => name.startsWith('08 '))?.request?
 if (!cancelBody.includes('"expectedVersion"')) errors.push('cancel body misses expectedVersion');
 if (cancelBody.includes('"reason"')) errors.push('WASH-STU-05 must not invent a cancellation reason');
 
+function eventSource(item, listen) {
+  return (item?.event ?? [])
+    .filter((event) => event.listen === listen)
+    .flatMap((event) => event.script?.exec ?? [])
+    .join('\n');
+}
+
+const loginTests = eventSource(collection.item?.[0], 'test');
+const logoutTests = eventSource(collection.item?.[10], 'test');
+if (!loginTests.includes("pm.environment.set('runtimeAccessToken'")) {
+  errors.push('login must persist the runtime token for failure-safe logout');
+}
+if (!logoutTests.includes("pm.environment.unset('runtimeAccessToken'")) {
+  errors.push('successful logout must clear the failure-safe runtime token');
+}
+
 const environmentValues = new Map((environment.values ?? []).map((entry) => [entry.key, entry.value]));
-for (const secret of ['baseUrl', 'loginIdentifier', 'password', 'runKey',
+for (const secret of ['baseUrl', 'loginIdentifier', 'password', 'runtimeAccessToken', 'runKey',
   'fixtureCourseSectionId', 'fixtureAppointmentTimeSlotId']) {
   if (environmentValues.get(secret) !== '') errors.push(`${secret} must be blank in the example environment`);
 }

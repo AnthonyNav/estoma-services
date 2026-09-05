@@ -177,8 +177,9 @@ BEGIN
     ) projection WHERE reliable = FALSE) THEN
     RAISE EXCEPTION 'Appointments has an unreliable academic or authorization projection';
   END IF;
-  IF (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::time >= TIME '23:15:00' THEN
-    RAISE EXCEPTION 'not enough time remains in the service date for a safe E2E slot';
+  IF ((CURRENT_TIMESTAMP + INTERVAL '70 minutes') AT TIME ZONE 'America/Mexico_City')::date
+      <> (CURRENT_TIMESTAMP AT TIME ZONE 'America/Mexico_City')::date THEN
+    RAISE EXCEPTION 'the complete E2E slot would cross the current service date';
   END IF;
 END
 \$guard\$;
@@ -186,6 +187,7 @@ SQL
 
   academic_profile_id=$(new_uuid)
   course_section_id=$(new_uuid)
+  role_id=$(new_uuid)
   system_access_id=$(new_uuid)
   slot_id=$(new_uuid)
   schedule_id=$(new_uuid)
@@ -225,6 +227,7 @@ SQL
     printf 'PERSON_ID=%s\n' "$person_id"
     printf 'ACADEMIC_PROFILE_ID=%s\n' "$academic_profile_id"
     printf 'COURSE_SECTION_ID=%s\n' "$course_section_id"
+    printf 'ROLE_ID=%s\n' "$role_id"
     printf 'SYSTEM_ACCESS_ID=%s\n' "$system_access_id"
     printf 'SYSTEM_ID=%s\n' "$system_id"
     printf 'PERIOD_ID=%s\n' "$period_id"
@@ -247,7 +250,7 @@ SQL
 BEGIN;
 INSERT INTO account_role_projection
   (account_id, role_id, role_code, source_version, updated_at, reliable)
-VALUES ('$E2E_ACCOUNT_ID'::uuid, NULL, 'ALUMNO', 1, CURRENT_TIMESTAMP, TRUE)
+VALUES ('$E2E_ACCOUNT_ID'::uuid, '$role_id'::uuid, 'ALUMNO', 1, CURRENT_TIMESTAMP, TRUE)
 ON CONFLICT (account_id) DO UPDATE
 SET role_code = 'ALUMNO', updated_at = CURRENT_TIMESTAMP, reliable = TRUE;
 
@@ -340,6 +343,7 @@ cleanup() {
   PERSON_ID=$(manifest_value PERSON_ID)
   ACADEMIC_PROFILE_ID=$(manifest_value ACADEMIC_PROFILE_ID)
   COURSE_SECTION_ID=$(manifest_value COURSE_SECTION_ID)
+  ROLE_ID=$(manifest_value ROLE_ID)
   SYSTEM_ACCESS_ID=$(manifest_value SYSTEM_ACCESS_ID)
   SYSTEM_ID=$(manifest_value SYSTEM_ID)
   PERIOD_ID=$(manifest_value PERIOD_ID)
@@ -354,6 +358,7 @@ cleanup() {
   require_uuid "$PERSON_ID" PERSON_ID
   require_uuid "$ACADEMIC_PROFILE_ID" ACADEMIC_PROFILE_ID
   require_uuid "$COURSE_SECTION_ID" COURSE_SECTION_ID
+  require_uuid "$ROLE_ID" ROLE_ID
   require_uuid "$SYSTEM_ACCESS_ID" SYSTEM_ACCESS_ID
   require_uuid "$SYSTEM_ID" SYSTEM_ID
   require_uuid "$PERIOD_ID" PERIOD_ID
@@ -387,7 +392,8 @@ UNION ALL
 SELECT count(*) FROM appointment_availability_refresh
 WHERE student_account_id = '$ACCOUNT_ID'::uuid
   AND course_section_id = '$COURSE_SECTION_ID'::uuid
-  AND status IN ('PENDING', 'PUBLISHED');
+  AND (status IN ('PENDING', 'PUBLISHED')
+    OR (status = 'FAILED' AND next_attempt_at IS NOT NULL));
 SQL
     )
     owner_pending=$(sql "$appointments_database" <<SQL
@@ -438,13 +444,19 @@ CREATE TEMP TABLE e2e_appointment_ids ON COMMIT DROP AS
 SELECT appointment_id FROM appointment_read_model
 WHERE student_account_id = '$ACCOUNT_ID'::uuid
   AND appointment_time_slot_id = '$SLOT_ID'::uuid;
+CREATE TEMP TABLE e2e_availability_result_ids ON COMMIT DROP AS
+SELECT result_message_id AS message_id FROM appointment_availability_refresh
+WHERE student_account_id = '$ACCOUNT_ID'::uuid
+  AND course_section_id = '$COURSE_SECTION_ID'::uuid
+  AND result_message_id IS NOT NULL;
 
+DELETE FROM inbox_messages WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids)
+  OR aggregate_id IN (SELECT appointment_id FROM e2e_appointment_ids)
+  OR message_id IN (SELECT message_id FROM e2e_availability_result_ids);
 DELETE FROM appointment_availability_refresh WHERE student_account_id = '$ACCOUNT_ID'::uuid
   AND course_section_id = '$COURSE_SECTION_ID'::uuid;
 DELETE FROM appointment_availability_read_model WHERE student_account_id = '$ACCOUNT_ID'::uuid
   AND course_section_id = '$COURSE_SECTION_ID'::uuid;
-DELETE FROM inbox_messages WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids)
-  OR aggregate_id IN (SELECT appointment_id FROM e2e_appointment_ids);
 DELETE FROM outbox_messages WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);
 DELETE FROM idempotency_records WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);
 DELETE FROM client_operations WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);

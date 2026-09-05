@@ -47,6 +47,7 @@
               "  pm.expect(body.accountId).to.match(/^[0-9a-f-]{36}$/i);",
               "});",
               "pm.collectionVariables.set('accessToken', body.accessToken);",
+              "pm.environment.set('runtimeAccessToken', body.accessToken);",
               "pm.collectionVariables.set('accountId', body.accountId);"
             ]
           }
@@ -421,7 +422,8 @@
             "exec": [
               "pm.test('logout returns 200', () => pm.response.to.have.status(200));",
               "const body = pm.response.json();",
-              "pm.test('session is revoked', () => pm.expect(body.revoked).to.eql(true));"
+              "pm.test('session is revoked', () => pm.expect(body.revoked).to.eql(true));",
+              "if (body.revoked === true) pm.environment.unset('runtimeAccessToken');"
             ]
           }
         }

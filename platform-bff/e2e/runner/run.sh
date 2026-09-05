@@ -21,8 +21,11 @@ case "${E2E_SUITE:-smoke}" in
       exit 2
     }
     : "${E2E_POSTMAN_ENVIRONMENT:?E2E_POSTMAN_ENVIRONMENT must point to the runtime-only environment file}"
+    : "${E2E_POSTMAN_STATE:?E2E_POSTMAN_STATE must point to the ephemeral exported environment}"
+    umask 077
     exec newman run /opt/e2e/wash-student.json \
       --environment "$E2E_POSTMAN_ENVIRONMENT" \
+      --export-environment "$E2E_POSTMAN_STATE" \
       --delay-request "${E2E_DELAY_MILLIS:-1000}" \
       --bail \
       --reporters cli,junit \
