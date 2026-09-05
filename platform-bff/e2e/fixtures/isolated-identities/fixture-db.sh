@@ -226,10 +226,23 @@ SQL
   case "$session_ids" in *[!0-9a-fA-F,\'-]*) fail "unsafe session identity result" ;; esac
   if [ -n "$session_ids" ]; then session_array="ARRAY[$session_ids]::uuid[]"; else session_array="ARRAY[]::uuid[]"; fi
 
+  authentication_blockers=$(sql "$authentication_database" <<SQL
+SELECT (SELECT count(*) FROM sessions WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid) AND revoked_at IS NULL)+
+       (SELECT count(*) FROM outbox_messages WHERE aggregate_id=ANY($session_array) AND status<>'PUBLISHED')+
+       (SELECT count(*) FROM password_recovery_requests WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid))+
+       (SELECT count(*) FROM security_rpc_idempotency_records WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid))+
+       (SELECT count(*) FROM account_status_history WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid));
+SQL
+  )
+  [ "$authentication_blockers" = 0 ] || fail "dependent Authentication rows remain"
+
   assert_isolated
   sql "$bff_database" >/dev/null <<SQL
 BEGIN;
 DO \$guard\$
+DECLARE
+  account_rows integer;
+  person_rows integer;
 BEGIN
   IF EXISTS (SELECT 1 FROM authorization_role_projection WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid))
      OR EXISTS (SELECT 1 FROM authorization_access_projection WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid))
@@ -241,9 +254,28 @@ BEGIN
      OR EXISTS (SELECT 1 FROM client_operations WHERE actor_account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid)) THEN
     RAISE EXCEPTION 'dependent BFF wash fixture rows remain';
   END IF;
-  IF (SELECT count(*) FROM session_revocations WHERE session_id=ANY($session_array)) <>
-     (SELECT count(*) FROM unnest($session_array)) THEN
-    RAISE EXCEPTION 'not every synthetic session has converged as revoked';
+  SELECT count(*) INTO account_rows FROM account_presentation_read_model
+  WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid);
+  SELECT count(*) INTO person_rows FROM person_presentation_read_model
+  WHERE person_id IN ('$STUDENT_PERSON_ID'::uuid,'$SUPERVISOR_PERSON_ID'::uuid);
+  IF account_rows=0 AND person_rows=0 THEN
+    IF EXISTS (SELECT 1 FROM session_revocations WHERE session_id=ANY($session_array))
+       OR EXISTS (SELECT 1 FROM account_session_revocation_cutoffs WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid))
+       OR EXISTS (SELECT 1 FROM person_session_revocation_cutoffs WHERE person_id IN ('$STUDENT_PERSON_ID'::uuid,'$SUPERVISOR_PERSON_ID'::uuid)) THEN
+      RAISE EXCEPTION 'partially cleaned BFF identity evidence remains';
+    END IF;
+  ELSIF account_rows<>2 OR person_rows<>2 THEN
+    RAISE EXCEPTION 'BFF identity cleanup state is partial';
+  ELSE
+    IF EXISTS (SELECT 1 FROM account_presentation_read_model WHERE
+        (account_id='$STUDENT_ACCOUNT_ID'::uuid AND (person_id<>'$STUDENT_PERSON_ID'::uuid OR login_type<>'USERNAME' OR login_identifier<>'$STUDENT_LOGIN' OR account_status<>'ACTIVE')) OR
+        (account_id='$SUPERVISOR_ACCOUNT_ID'::uuid AND (person_id<>'$SUPERVISOR_PERSON_ID'::uuid OR login_type<>'USERNAME' OR login_identifier<>'$SUPERVISOR_LOGIN' OR account_status<>'ACTIVE'))) THEN
+      RAISE EXCEPTION 'BFF identity differs from cleanup manifest';
+    END IF;
+    IF (SELECT count(*) FROM session_revocations WHERE session_id=ANY($session_array)) <>
+       (SELECT count(*) FROM unnest($session_array)) THEN
+      RAISE EXCEPTION 'not every synthetic session has converged as revoked';
+    END IF;
   END IF;
 END \$guard\$;
 DELETE FROM inbox_messages WHERE message_id IN (SELECT source_message_id FROM session_revocations WHERE session_id=ANY($session_array));
@@ -255,13 +287,17 @@ DELETE FROM person_presentation_read_model WHERE person_id IN ('$STUDENT_PERSON_
 COMMIT;
 SQL
 
+  if [ "${E2E_IDENTITY_INJECT_FAILURE_AFTER_BFF_CLEANUP:-0}" = 1 ]; then
+    fail "injected failure after BFF identity cleanup"
+  fi
+
   assert_isolated
   sql "$authentication_database" >/dev/null <<SQL
 BEGIN;
 DO \$guard\$
 BEGIN
   IF EXISTS (SELECT 1 FROM sessions WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid) AND revoked_at IS NULL)
-     OR EXISTS (SELECT 1 FROM outbox_messages WHERE aggregate_id=ANY($session_array) AND status IN ('PENDING','PROCESSING'))
+     OR EXISTS (SELECT 1 FROM outbox_messages WHERE aggregate_id=ANY($session_array) AND status<>'PUBLISHED')
      OR EXISTS (SELECT 1 FROM password_recovery_requests WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid))
      OR EXISTS (SELECT 1 FROM security_rpc_idempotency_records WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid))
      OR EXISTS (SELECT 1 FROM account_status_history WHERE account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid)) THEN
