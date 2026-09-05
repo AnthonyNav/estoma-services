@@ -220,3 +220,60 @@ Static contract/generation gates, cleanup-retry regressions, interrupted-arrival
 failure/dependency-retention tests also passed. These automated recovery tests use inert mocks;
 the live run certified the successful rejected-entry path, not an injected live failure.
 No credentials, tokens, runtime UUIDs or response captures are included here.
+
+## Wash supervisor authorized entry — isolated environment only
+
+`wash-supervisor-authorized-front-v1.postman_collection.json` covers the positive
+branch of WASH-SUP-01, using the same public scheduling/arrival endpoints followed
+by `POST /api/v1/wash/executions/{washExecutionId}/entry-decision` with
+`identityConfirmed=true`, `requirementsSatisfied=true`, `decision=AUTHORIZED`
+and the current `expectedVersion`. No resource IDs are sent in that decision:
+the owner selects them. The suite verifies the exact synthetic cabin/tank via
+supervisor lookup and expects `nextAction=EXIT_REVIEW`.
+
+This suite MUST NOT run against shared develop. Its fixed executor
+`../../runner/wash-isolated-psql.sh` targets only desktop/wash-e2e/PostgreSQL.
+An independently implemented executor must prove the same isolation through
+`--assert-isolated-wash`. An environment-variable assertion alone is insufficient.
+
+1. Ensure the opt-in `wash-e2e` environment is healthy and exclusively allocated
+   to this run. It supplies empty READY prerequisite snapshots, not live owner recovery.
+2. Bootstrap `../../fixtures/isolated-identities/fixture-db.sh` with the executor,
+   a private `E2E_REPORT_DIR`, and `E2E_PASSWORD_HASH_EXEC` (production Argon2 hash
+   on stdout, password received over stdin). See its README. Never print credentials.
+3. Open a private localhost tunnel to **this namespace's BFF**. Set `BFF_BASE_URL`,
+   `E2E_REPORT_DIR`, `E2E_PSQL_EXEC`; run
+   `node ../../runner/run-wash-supervisor-authorized.mjs`. It reads the protected
+   identity JSON as data and invokes the two-phase wrapper. Do not run folders alone.
+4. The wrapper audits and cleans owner/student/supervisor fixtures. If any cleanup
+   fails, preserve the manifests and repair/retry in that dependency order.
+5. After those fixtures are gone, run identity `cleanup`; then
+   `E2E_PSQL_EXEC=<isolated-executor> node ../../scripts/audit-wash-isolated-cleanup.mjs`.
+   This independent read-only audit expects an exclusively used, empty fixture
+   inventory. It does not erase data or assert that RabbitMQ is empty.
+6. Inspect retry/DLQ counts separately, retain sanitized evidence, close the tunnel.
+
+### Live evidence — 2026-09-05
+
+Pinned isolated runtime: BFF `610488b`, Authentication `bfda392`, Appointments
+`2d7d63c`, Wash Execution `6e5bc68`. Two fresh accounts logged in NORMAL and
+logged out successfully. The full public workflow executed **18 requests / 42
+assertions, zero failures** (17 definitions plus the expected availability retry).
+Arrival and entry returned 202 and reached SUCCEEDED. Lookup converged to
+IN_PROGRESS execution v2, INITIAL automatic assignment to the exact fixture
+resources and EXIT_REVIEW. Appointments/BFF appointment projections reached v3.
+
+The owner audit verified all four published execution Events and the assignment.
+Cleanup checked consumed event evidence and removed its scoped data; identity
+cleanup also passed. An independent audit found **28 fixture tables empty**
+across Authentication, BFF, Appointments and Wash Execution. Sampled logs had no
+ERROR/Exception and both isolated/shared checked Deployments remained available.
+
+**Operational gate remains open:** one `WashResourceAssigned` Event reached
+`events.appointments.dlq`. Appointments currently binds `wash-execution.#` but its
+validator does not accept this event. The message was inspected with requeue and
+retained, not purged. This is a separate Appointments topology defect; the
+functional pass must NOT be described as clean messaging certification. Correct
+the subscription and migrate the persisted wildcard, then rerun and require zero
+new retry/DLQ messages. Reassignment, exit/completion and email flows are not
+certified by this increment.
