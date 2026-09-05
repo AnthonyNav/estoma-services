@@ -34,6 +34,7 @@ steps:
       - sh -n e2e/fixtures/wash-student/psql-exec.example.sh
       - sh -n e2e/runner/run-wash-student.sh
       - sh -n e2e/runner/run.sh
+      - sh e2e/scripts/test-wash-student-cleanup-retry.sh
 
   - name: test
     image: maven:3.9.16-eclipse-temurin-25

@@ -451,6 +451,55 @@ SQL
     done
   fi
 
+  sql "$appointments_database" >/dev/null <<SQL
+BEGIN;
+CREATE TEMP TABLE e2e_appointment_ids ON COMMIT DROP AS
+SELECT appointment_id FROM appointments
+WHERE student_account_id = '$ACCOUNT_ID'::uuid
+  AND appointment_time_slot_id = '$SLOT_ID'::uuid;
+CREATE TEMP TABLE e2e_inbound_message_ids ON COMMIT DROP AS
+SELECT causation_id AS message_id FROM outbox_messages
+WHERE aggregate_id IN (SELECT appointment_id FROM e2e_appointment_ids)
+   OR payload #>> '{data,requestContext,studentAccountId}' = '$ACCOUNT_ID';
+
+DELETE FROM missed_evaluation_confirmations WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
+DELETE FROM pending_capacity_evaluation WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
+DELETE FROM pending_wash_execution_events WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
+DELETE FROM wash_execution_transition_projection WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
+DELETE FROM wash_execution_evidence_projection WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
+DELETE FROM processed_messages WHERE message_id IN (SELECT message_id FROM e2e_inbound_message_ids WHERE message_id IS NOT NULL);
+DELETE FROM outbox_messages
+WHERE aggregate_id IN (SELECT appointment_id FROM e2e_appointment_ids)
+   OR payload #>> '{data,requestContext,studentAccountId}' = '$ACCOUNT_ID';
+DELETE FROM command_idempotency_records
+WHERE idempotency_key IN ('$RUN_KEY-schedule', '$RUN_KEY-cancel');
+DELETE FROM appointments WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
+DELETE FROM appointment_capacity_projections WHERE appointment_time_slot_id = '$SLOT_ID'::uuid;
+DELETE FROM appointment_time_slots WHERE appointment_time_slot_id = '$SLOT_ID'::uuid;
+DELETE FROM student_course_section_projection
+  WHERE academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
+    AND course_section_id = '$COURSE_SECTION_ID'::uuid;
+DELETE FROM course_section_projection WHERE course_section_id = '$COURSE_SECTION_ID'::uuid;
+$(if [ "$PERIOD_WAS_SYNTHETIC" = 1 ]; then
+    printf "DELETE FROM academic_period_projection WHERE academic_period_id = '%s'::uuid AND code = 'E2E-%s';" "$PERIOD_ID" "${NRC#E2E-}"
+  fi)
+DELETE FROM student_academic_profile_projection
+  WHERE academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
+    AND student_account_id = '$ACCOUNT_ID'::uuid;
+DELETE FROM wash_system_access_projection
+  WHERE system_access_id = '$SYSTEM_ACCESS_ID'::uuid AND account_id = '$ACCOUNT_ID'::uuid;
+$(if [ "$OWNER_ROLE_WAS_ABSENT" = 1 ]; then
+    printf "DELETE FROM account_role_projection WHERE account_id = '%s'::uuid AND role_code = 'ALUMNO';" "$ACCOUNT_ID"
+  else
+    printf "UPDATE account_role_projection SET role_code = 'E2E_TESTER', updated_at = CURRENT_TIMESTAMP WHERE account_id = '%s'::uuid;" "$ACCOUNT_ID"
+  fi)
+COMMIT;
+SQL
+
+  if [ "${E2E_TEST_FAIL_AFTER_OWNER_CLEANUP:-0}" = 1 ]; then
+    fail "injected failure after Appointments cleanup"
+  fi
+
   sql "$bff_database" >/dev/null <<SQL
 BEGIN;
 CREATE TEMP TABLE e2e_operation_ids ON COMMIT DROP AS
@@ -495,51 +544,6 @@ $(if [ "$BFF_ROLE_WAS_ABSENT" = 1 ]; then
     printf "DELETE FROM authorization_role_projection WHERE account_id = '%s'::uuid AND role_code = 'ALUMNO';" "$ACCOUNT_ID"
   else
     printf "UPDATE authorization_role_projection SET role_code = 'E2E_TESTER', updated_at = CURRENT_TIMESTAMP WHERE account_id = '%s'::uuid;" "$ACCOUNT_ID"
-  fi)
-COMMIT;
-SQL
-
-  sql "$appointments_database" >/dev/null <<SQL
-BEGIN;
-CREATE TEMP TABLE e2e_appointment_ids ON COMMIT DROP AS
-SELECT appointment_id FROM appointments
-WHERE student_account_id = '$ACCOUNT_ID'::uuid
-  AND appointment_time_slot_id = '$SLOT_ID'::uuid;
-CREATE TEMP TABLE e2e_inbound_message_ids ON COMMIT DROP AS
-SELECT causation_id AS message_id FROM outbox_messages
-WHERE aggregate_id IN (SELECT appointment_id FROM e2e_appointment_ids)
-   OR payload #>> '{data,requestContext,studentAccountId}' = '$ACCOUNT_ID';
-
-DELETE FROM missed_evaluation_confirmations WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
-DELETE FROM pending_capacity_evaluation WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
-DELETE FROM pending_wash_execution_events WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
-DELETE FROM wash_execution_transition_projection WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
-DELETE FROM wash_execution_evidence_projection WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
-DELETE FROM processed_messages WHERE message_id IN (SELECT message_id FROM e2e_inbound_message_ids WHERE message_id IS NOT NULL);
-DELETE FROM outbox_messages
-WHERE aggregate_id IN (SELECT appointment_id FROM e2e_appointment_ids)
-   OR payload #>> '{data,requestContext,studentAccountId}' = '$ACCOUNT_ID';
-DELETE FROM command_idempotency_records
-WHERE idempotency_key IN ('$RUN_KEY-schedule', '$RUN_KEY-cancel');
-DELETE FROM appointments WHERE appointment_id IN (SELECT appointment_id FROM e2e_appointment_ids);
-DELETE FROM appointment_capacity_projections WHERE appointment_time_slot_id = '$SLOT_ID'::uuid;
-DELETE FROM appointment_time_slots WHERE appointment_time_slot_id = '$SLOT_ID'::uuid;
-DELETE FROM student_course_section_projection
-  WHERE academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
-    AND course_section_id = '$COURSE_SECTION_ID'::uuid;
-DELETE FROM course_section_projection WHERE course_section_id = '$COURSE_SECTION_ID'::uuid;
-$(if [ "$PERIOD_WAS_SYNTHETIC" = 1 ]; then
-    printf "DELETE FROM academic_period_projection WHERE academic_period_id = '%s'::uuid AND code = 'E2E-%s';" "$PERIOD_ID" "${NRC#E2E-}"
-  fi)
-DELETE FROM student_academic_profile_projection
-  WHERE academic_profile_id = '$ACADEMIC_PROFILE_ID'::uuid
-    AND student_account_id = '$ACCOUNT_ID'::uuid;
-DELETE FROM wash_system_access_projection
-  WHERE system_access_id = '$SYSTEM_ACCESS_ID'::uuid AND account_id = '$ACCOUNT_ID'::uuid;
-$(if [ "$OWNER_ROLE_WAS_ABSENT" = 1 ]; then
-    printf "DELETE FROM account_role_projection WHERE account_id = '%s'::uuid AND role_code = 'ALUMNO';" "$ACCOUNT_ID"
-  else
-    printf "UPDATE account_role_projection SET role_code = 'E2E_TESTER', updated_at = CURRENT_TIMESTAMP WHERE account_id = '%s'::uuid;" "$ACCOUNT_ID"
   fi)
 COMMIT;
 SQL

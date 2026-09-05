@@ -48,6 +48,10 @@ only the access row identified by the generated `system_access_id`.
 
 Cleanup also waits while an availability refresh is retryable (`FAILED` with a non-null
 `next_attempt_at`) and removes the refresh result's BFF inbox record before deleting the refresh.
+After convergence, cleanup commits Appointments first and BFF second. Both phases are idempotent:
+if the BFF phase fails after Appointments has committed, the manifest remains and a second cleanup
+skips the no-longer-present owner state, repeats the safe owner deletes and completes the BFF phase.
+`e2e/scripts/test-wash-student-cleanup-retry.sh` injects that exact partial failure in CI.
 If cleanup refuses because a command, retryable refresh or owner outbox message is still active, do
 not delete the manifest. Investigate the operation and retry cleanup with the same runtime executor.
 
