@@ -15,6 +15,9 @@ import com.estoma.washexecution.application.port.WashExecutionCommandUseCase;
 import com.estoma.washexecution.application.port.WashExecutionRepository;
 import com.estoma.washexecution.domain.execution.AppointmentType;
 import com.estoma.washexecution.domain.execution.AssignmentType;
+import com.estoma.washexecution.domain.execution.CleaningPeriod;
+import com.estoma.washexecution.domain.execution.CleaningTrigger;
+import com.estoma.washexecution.domain.execution.ReleaseReason;
 import com.estoma.washexecution.domain.execution.EntryDecision;
 import com.estoma.washexecution.domain.execution.ExitMaterials;
 import com.estoma.washexecution.domain.execution.ResourceAssignment;
@@ -25,7 +28,10 @@ import com.estoma.washexecution.infrastructure.persistence.jdbc.JdbcTemporal;
 import com.estoma.washexecution.infrastructure.messaging.inbound.TransientFailureClassifier;
 import com.estoma.washexecution.testsupport.AbstractPostgresIT;
 import java.time.Instant;
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -36,6 +42,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.dao.DataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -50,9 +59,26 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
   @Autowired ResourceUnavailabilityRepository unavailabilities;
   @Autowired CleaningPeriodRepository cleanings;
   @Autowired PlatformTransactionManager transactionManager;
+  @Autowired DecisionClock decisionClock;
+
+  @TestConfiguration
+  static class ClockConfiguration {
+    @Bean
+    @Primary
+    DecisionClock decisionClock() { return new DecisionClock(); }
+  }
+
+  static final class DecisionClock extends Clock {
+    private Instant now = BASE;
+    void advanceTo(Instant value) { now = value; }
+    @Override public Instant instant() { return now; }
+    @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+    @Override public Clock withZone(ZoneId zone) { return Clock.fixed(now, zone); }
+  }
 
   @BeforeEach
   void seedReadiness() {
+    decisionClock.advanceTo(BASE.plusSeconds(1500));
     ready("appointments", "appointments");
     ready("wash-administration", "wash-administration");
     ready("authorization", "authorization");
@@ -341,6 +367,89 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
     assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version);
     assertThat(assignments.findActiveByExecutionId(executionId)).isPresent();
     assertThat(cleanings.findByAssignmentId(assignment.resourceAssignmentId())).isEmpty();
+    assertThat(outboxTypes()).doesNotContain("WashExecutionCancelled", "CleaningPeriodStarted");
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void capacityLossRetryUsesDecisionTimeAfterCleaningExpires(boolean completedHistory) throws Exception {
+    UUID supervisor = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(900));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.IMMUNOCOMPROMISED, "IN_PROGRESS");
+    UUID executionId = createInProgress(appointment, AppointmentType.IMMUNOCOMPROMISED, BASE);
+    WashExecution pending = executions.findById(executionId).orElseThrow();
+    pending.loseResource();
+    executions.save(pending, pending.version() - 1);
+    int version = pending.version();
+
+    // Keep the pending execution's old assignment: a mistaken cancellation would
+    // release it and start a new cleaning because it had physical immuno use.
+    ResourceAssignment original = new ResourceAssignment(UUID.randomUUID(), executionId,
+        slot, UUID.randomUUID(), UUID.randomUUID(), AssignmentType.INITIAL, null, BASE);
+    assignments.save(original);
+    UUID cabin = UUID.randomUUID();
+    seedCabin(cabin, "C-CLEANING", "IMMUNOCOMPROMISED");
+    seedTank(UUID.randomUUID(), cabin, "T-CLEANING", 1);
+    Instant sentAt = BASE.plusSeconds(1500);
+    Instant cleaningEndsAt = sentAt.plusSeconds(3);
+    Instant decisionAt = sentAt.plusSeconds(5);
+    Instant cleaningStartsAt = cleaningEndsAt.minusSeconds(3 * 60 * 60L);
+    UUID previousExecution = createInProgress(UUID.randomUUID(), AppointmentType.IMMUNOCOMPROMISED,
+        cleaningStartsAt.minusSeconds(60));
+    UUID historicalAssignment = UUID.randomUUID();
+    ResourceAssignment previous = new ResourceAssignment(historicalAssignment, previousExecution,
+        slot, cabin, UUID.randomUUID(), AssignmentType.INITIAL, null, cleaningStartsAt.minusSeconds(30));
+    assignments.save(previous);
+    previous.release(supervisor, cleaningStartsAt, ReleaseReason.NORMAL_COMPLETION);
+    assignments.release(previous);
+    CleaningPeriod history = new CleaningPeriod(UUID.randomUUID(), previousExecution,
+        historicalAssignment, cabin, CleaningTrigger.NORMAL_COMPLETION,
+        cleaningStartsAt, 1);
+    cleanings.save(history, 0);
+    CommandRequest request = new CommandRequest(metadata(supervisor, "capacity-cleaning-retry"),
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "CAPACITY_LOSS", null, supervisor, sentAt, version));
+    decisionClock.advanceTo(sentAt);
+
+    // First delivery rolls back technically; the same payload is delivered after
+    // the cleaning deadline, without any eligibility writer needed at that time.
+    try (var blocker = jdbc.getDataSource().getConnection()) {
+      blocker.setAutoCommit(false);
+      try (var statement = blocker.createStatement()) {
+        statement.execute("LOCK TABLE cleaning_periods IN ROW EXCLUSIVE MODE");
+        assertThatThrownBy(() -> commands.dispatch(request))
+            .isInstanceOf(DataAccessException.class)
+            .satisfies(error -> assertThat(new TransientFailureClassifier().isTransient(error)).isTrue());
+      } finally {
+        blocker.rollback();
+      }
+    }
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM command_idempotency_records", Integer.class)).isZero();
+    assertThat(outboxTypes()).isEmpty();
+    decisionClock.advanceTo(decisionAt);
+    if (completedHistory) {
+      history.completeAutomatically(decisionAt);
+      cleanings.save(history, 1);
+    }
+    assertThat(cleanings.findOverlapping(cabin, sentAt, decisionAt.plusSeconds(60))).hasSize(1);
+    assertThat(cleanings.findOverlapping(cabin, decisionAt, decisionAt.plusSeconds(60))).isEmpty();
+
+    CommandOutcome result = commands.dispatch(request);
+    assertThat(result.status()).isEqualTo(CommandOutcome.Status.REJECTED);
+    assertThat(result.errorCode()).isEqualTo("CAPACITY_ALTERNATIVE_AVAILABLE");
+    assertThat(executions.findById(executionId).orElseThrow().status())
+        .isEqualTo(WashExecutionStatus.PENDING_REASSIGNMENT);
+    assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version);
+    assertThat(assignments.findActiveByExecutionId(executionId).orElseThrow().resourceAssignmentId())
+        .isEqualTo(original.resourceAssignmentId());
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM resource_assignments", Integer.class)).isEqualTo(2);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM cleaning_periods", Integer.class)).isEqualTo(1);
+    assertThat(cleanings.findByAssignmentId(original.resourceAssignmentId())).isEmpty();
+    assertThat(cleanings.findByAssignmentId(historicalAssignment).orElseThrow().completed())
+        .isEqualTo(completedHistory);
+    assertThat(outboxTypes()).containsExactly("CancelWashExecutionByClinicRejected");
+    assertThat(commands.dispatch(request).errorCode()).isEqualTo("CAPACITY_ALTERNATIVE_AVAILABLE");
     assertThat(outboxTypes()).doesNotContain("WashExecutionCancelled", "CleaningPeriodStarted");
   }
 

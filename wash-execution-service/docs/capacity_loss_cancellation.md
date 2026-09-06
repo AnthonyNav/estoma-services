@@ -13,6 +13,13 @@ If a candidate exists, the owner publishes the usual rejected command result wit
 remain unchanged; no cancellation event is published. An empty frontend snapshot
 is not authorization to cancel. Other cancellation subreasons are unchanged.
 
+Eligibility uses the owner's current clock sampled after acquiring the transaction
+gate, not the original command's `cancelledAt`. Queue delivery or retry may cross
+a cleaning deadline without any concurrent database write. Historical cleaning rows
+remain present, including rows already completed by the worker. `cancelledAt` keeps
+its existing meaning for a successful cancellation, resource release and event;
+it is not reused as the time of the availability decision.
+
 ## Transaction boundary and contention
 
 Before resource-row/idempotency/aggregate access, this cancellation takes EXCLUSIVE
@@ -47,3 +54,8 @@ insertion/reactivation, operational restoration via `RestoreOperationalResource`
 row-lock acquisition and capacity release.
 The concurrency cases hold a real PostgreSQL writer open, check rollback and transient
 classification, commit the resource, then retry the identical command and require rejection.
+The temporal regression also forces a technical rollback, advances the owner clock
+past a cleaning deadline and retries the unchanged payload. Both completed and
+not-yet-completed historical cleaning rows must yield available-alternative rejection
+without cancellation, assignment changes or new cleaning. The rejected result remains
+idempotent on redelivery.

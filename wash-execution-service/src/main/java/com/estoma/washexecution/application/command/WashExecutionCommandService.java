@@ -461,7 +461,9 @@ public final class WashExecutionCommandService {
       }
       var slot = requireSlot(appointment.appointmentTimeSlotId());
       // The transaction boundary protects these inputs through commit, including new resources.
-      if (!allocator.snapshotCandidates(execution.appointmentType(), slot, c.cancelledAt()).isEmpty()) {
+      // Sample owner time under that gate: delivery/retry may outlive a cleaning deadline.
+      // cancelledAt remains the original cancellation/event timestamp, not an availability clock.
+      if (!allocator.snapshotCandidates(execution.appointmentType(), slot, clock.instant()).isEmpty()) {
         throw new CommandRejectedException("CAPACITY_ALTERNATIVE_AVAILABLE");
       }
     }
