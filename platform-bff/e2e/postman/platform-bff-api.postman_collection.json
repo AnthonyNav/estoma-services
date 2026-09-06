@@ -19095,6 +19095,56 @@
           }
         }
       ]
+    },
+    {
+      "name": "wash.reassignment-candidates",
+      "description": "Side-effect-free owner-derived reassignment candidate snapshot. The rollout gate is disabled by default until the owner Query is deployed.",
+      "request": {
+        "name": "Wash Controller reassignment Candidates get api v1 wash supervision pending reassignments washExecutionId candidates",
+        "url": {
+          "path": [
+            "api",
+            "v1",
+            "wash",
+            "supervision",
+            "pending-reassignments",
+            ":washExecutionId",
+            "candidates"
+          ],
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "query": [],
+          "variable": [
+            {
+              "key": "washExecutionId",
+              "value": "{{washExecutionId}}"
+            }
+          ]
+        },
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "method": "GET",
+        "body": {},
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{bearerToken}}"
+            }
+          ]
+        }
+      },
+      "response": [],
+      "event": [],
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      }
     }
   ],
   "event": [
@@ -19175,7 +19225,7 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "description": {
       "type": "text/plain",
-      "content": "Manual client collection generated from platform-bff/docs/openapi.yaml. It covers every public BFF operation (85). Set baseUrl and the test credentials in the companion environment. Send Login first: it stores bearerToken, refreshToken, sessionId and accountId for subsequent requests. Each state-changing request receives a stable Idempotency-Key that is reused if the same Postman request is retried; clear its generated collection variable only when intentionally starting a new logical operation. Populate the remaining IDs and body placeholders with fixture data from the E2E environment; no development credentials or production values are included. Password-recovery and email-delivery operations are present because they are BFF contracts, but require their external email preconditions."
+      "content": "Manual client collection generated from platform-bff/docs/openapi.yaml. It covers every public BFF operation (88). Set baseUrl and the test credentials in the companion environment. Send Login first: it stores bearerToken, refreshToken, sessionId and accountId for subsequent requests. Each state-changing request receives a stable Idempotency-Key that is reused if the same Postman request is retried; clear its generated collection variable only when intentionally starting a new logical operation. Populate the remaining IDs and body placeholders with fixture data from the E2E environment; no development credentials or production values are included. Password-recovery and email-delivery operations are present because they are BFF contracts, but require their external email preconditions."
     }
   }
 }

@@ -2,6 +2,19 @@
 
 Spring Boot service that provides the client-facing API and composition boundary for Estoma applications.
 
+## Reassignment candidate snapshots
+
+`GET /api/v1/wash/supervision/pending-reassignments/{washExecutionId}/candidates` is a
+strictly side-effect-free local read. Its background owner refresh is rollout-gated by
+`BFF_WASH_REASSIGNMENT_CANDIDATES_ENABLED`, which defaults to `false` and must only be enabled
+after the Wash Execution `GetReassignmentCandidates` v1 Query is deployed.
+
+The default scheduler refreshes at most 25 pending executions per one-second sweep. The confirmed
+publisher relays one Query per 250 ms (roughly four per second per BFF instance), so large backlogs
+are deliberately fair and bounded: with more than about 40 pending executions, some snapshots can
+expire during a rotation and the HTTP endpoint returns controlled `503`, never a fabricated empty
+list. Increase throughput only after measuring RabbitMQ and owner capacity.
+
 ## Owns
 
 - Client-oriented HTTP request/response contracts.

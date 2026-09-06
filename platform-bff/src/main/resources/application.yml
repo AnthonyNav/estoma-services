@@ -89,3 +89,12 @@ platform:
       snapshot-ttl: ${BFF_APPOINTMENT_AVAILABILITY_SNAPSHOT_TTL:30s}
       refresh-retry-after: ${BFF_APPOINTMENT_AVAILABILITY_REFRESH_RETRY_AFTER:30s}
       client-retry-after-seconds: ${BFF_APPOINTMENT_AVAILABILITY_CLIENT_RETRY_AFTER_SECONDS:1}
+  wash:
+    reassignment-candidates:
+      # Rollout gate: enable only after the Wash Execution owner Query is deployed.
+      enabled: ${BFF_WASH_REASSIGNMENT_CANDIDATES_ENABLED:false}
+      snapshot-ttl: 10s
+      refresh-interval: ${BFF_WASH_REASSIGNMENT_CANDIDATES_REFRESH_INTERVAL:5s}
+      sweep-interval: ${BFF_WASH_REASSIGNMENT_CANDIDATES_SWEEP_INTERVAL:1s}
+      refresh-retention: ${BFF_WASH_REASSIGNMENT_CANDIDATES_REFRESH_RETENTION:1h}
+      batch-size: ${BFF_WASH_REASSIGNMENT_CANDIDATES_BATCH_SIZE:25}

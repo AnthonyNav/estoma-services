@@ -5,8 +5,10 @@ import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
 import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService;
+import com.estoma.platformbff.application.wash.ReassignmentCandidatesService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
+import com.estoma.platformbff.contracts.http.wash.ReassignmentCandidatesResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentAvailabilityResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentType;
@@ -52,16 +54,19 @@ public class WashController {
   private final WashSupervisionQueryService supervision;
   private final WashStudentQueryService studentQueries;
   private final AppointmentAvailabilityService appointmentAvailability;
+  private final ReassignmentCandidatesService reassignmentCandidates;
   private final Clock clock;
 
   public WashController(PublicCommandAdapter commands, LocalAuthorizationService authorization,
       WashSupervisionQueryService supervision, WashStudentQueryService studentQueries,
-      AppointmentAvailabilityService appointmentAvailability, Clock clock) {
+      AppointmentAvailabilityService appointmentAvailability,
+      ReassignmentCandidatesService reassignmentCandidates, Clock clock) {
     this.commands = commands;
     this.authorization = authorization;
     this.supervision = supervision;
     this.studentQueries = studentQueries;
     this.appointmentAvailability = appointmentAvailability;
+    this.reassignmentCandidates = reassignmentCandidates;
     this.clock = clock;
   }
 
@@ -265,6 +270,12 @@ public class WashController {
   @GetMapping("/supervision/pending-reassignments")
   public PendingReassignmentsResponse pendingReassignments() {
     return supervision.pendingReassignments();
+  }
+
+  @GetMapping("/supervision/pending-reassignments/{washExecutionId}/candidates")
+  public ReassignmentCandidatesResponse reassignmentCandidates(
+      @PathVariable UUID washExecutionId) {
+    return reassignmentCandidates.candidates(washExecutionId);
   }
 
   @GetMapping("/supervision/home")

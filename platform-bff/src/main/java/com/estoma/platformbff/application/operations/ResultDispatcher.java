@@ -6,6 +6,7 @@ import com.estoma.platformbff.application.projection.AccountPresentationRecovery
 import com.estoma.platformbff.application.projection.PersonPresentationRecoveryService;
 import com.estoma.platformbff.application.projection.SystemCatalogRecoveryService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityResultService;
+import com.estoma.platformbff.application.wash.ReassignmentCandidatesResultService;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import java.util.Set;
 import org.springframework.stereotype.Service;
@@ -37,13 +38,15 @@ public class ResultDispatcher {
   private final PersonPresentationRecoveryService personPresentationRecovery;
   private final SystemCatalogRecoveryService systemCatalogRecovery;
   private final AppointmentAvailabilityResultService appointmentAvailability;
+  private final ReassignmentCandidatesResultService reassignmentCandidates;
 
   public ResultDispatcher(CommandRegistry registry, ResultApplicationService commandResults,
       AuthorizationRecoveryService authorizationRecovery,
       AccountPresentationRecoveryService accountPresentationRecovery,
       PersonPresentationRecoveryService personPresentationRecovery,
       SystemCatalogRecoveryService systemCatalogRecovery,
-      AppointmentAvailabilityResultService appointmentAvailability) {
+      AppointmentAvailabilityResultService appointmentAvailability,
+      ReassignmentCandidatesResultService reassignmentCandidates) {
     this.registry = registry;
     this.commandResults = commandResults;
     this.authorizationRecovery = authorizationRecovery;
@@ -51,6 +54,7 @@ public class ResultDispatcher {
     this.personPresentationRecovery = personPresentationRecovery;
     this.systemCatalogRecovery = systemCatalogRecovery;
     this.appointmentAvailability = appointmentAvailability;
+    this.reassignmentCandidates = reassignmentCandidates;
   }
 
   public DispatchOutcome dispatch(IncomingResult result) {
@@ -60,6 +64,13 @@ public class ResultDispatcher {
     if ("GetAppointmentAvailabilityResult".equals(result.messageType())) {
       try {
         return appointmentAvailability.apply(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
+      } catch (IllegalArgumentException invalid) {
+        return DispatchOutcome.UNTRUSTED;
+      }
+    }
+    if ("GetReassignmentCandidatesResult".equals(result.messageType())) {
+      try {
+        return reassignmentCandidates.apply(result) ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
       } catch (IllegalArgumentException invalid) {
         return DispatchOutcome.UNTRUSTED;
       }

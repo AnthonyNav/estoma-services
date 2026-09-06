@@ -132,6 +132,13 @@ public class OpenApiController {
           + "explicitly gated until the owner-backed QR projection is available and returns 503.");
       operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
     }
+    if (handler.getMethod().getName().equals("reassignmentCandidates")) {
+      operation.put("description", "Side-effect-free local read of an owner-ranked snapshot. "
+          + "Missing, stale, future-dated, version-mismatched, or unready material returns 503; "
+          + "only an owner-proven empty snapshot returns 200 with candidates=[]. The rollout "
+          + "feature is disabled by default until the Wash Execution Query owner is deployed.");
+      operation.put("x-provider-ready-by-default", false);
+    }
     List<Map<String, Object>> parameters = new ArrayList<>();
     requestHeaders(handler, parameters);
     requestParameters(handler, parameters);
@@ -158,6 +165,11 @@ public class OpenApiController {
           "description", "Owner snapshot is being refreshed",
           "headers", Map.of("Retry-After", Map.of("required", true,
               "schema", Map.of("type", "integer", "minimum", 1))),
+          "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
+    }
+    if (handler.getMethod().getName().equals("reassignmentCandidates")) {
+      responses.put("503", Map.of("description", "Required fresh local snapshot is unavailable",
           "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
               Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
     }
