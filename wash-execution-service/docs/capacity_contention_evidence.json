@@ -1,0 +1,443 @@
+{
+  "schemaVersion": 1,
+  "environment": "local disposable Testcontainers; no shared-cluster/BFF certification",
+  "controls": {
+    "maven": "3.9.16",
+    "jdk": "25",
+    "postgres": "16.14",
+    "rabbitmq": "3.13",
+    "applicationCpuQuota": 2,
+    "applicationActiveProcessors": 2,
+    "forkedJvmHeapMiB": 256,
+    "notes": "CPU quota includes Maven; database/broker not constrained to deployed namespace quotas. Observer invokes real relay; observed latency is not BFF SLA."
+  },
+  "before": {
+    "runtimeCommit": "8470357d01b5de5d6ee89afabc7f6182414d48e7",
+    "result": "FAIL: transient writer generated 2 unexpected DLQ commands",
+    "report": {
+      "maxAttempts": 3,
+      "poolSize": 2,
+      "initialConsumersPerQueue": 2,
+      "maxConsumersPerQueue": 4,
+      "retryDelayMs": [
+        5000,
+        30000
+      ],
+      "scenarios": [
+        {
+          "scenario": "mixed-burst",
+          "commands": 40,
+          "events": 40,
+          "commandTerminalCount": 40,
+          "eventAppliedCount": 40,
+          "elapsedMs": 35492,
+          "commandLatencyMs": {
+            "p50": 410,
+            "p95": 5397,
+            "max": 35371
+          },
+          "projectionObservedLatencyMs": {
+            "p50": 386,
+            "p95": 467,
+            "max": 467
+          },
+          "ordinaryReadLatencyMs": {
+            "p50": 0,
+            "p95": 0,
+            "max": 27
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 0,
+            "commands.wash-execution.retry.1": 17,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 2,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 0,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "transient-writer",
+          "commands": 20,
+          "events": 20,
+          "commandTerminalCount": 20,
+          "eventAppliedCount": 20,
+          "elapsedMs": 35076,
+          "commandLatencyMs": {
+            "p50": 35038,
+            "p95": 35069,
+            "max": 35069
+          },
+          "projectionObservedLatencyMs": {
+            "p50": 43,
+            "p95": 43,
+            "max": 43
+          },
+          "ordinaryReadLatencyMs": {
+            "p50": 0,
+            "p95": 0,
+            "max": 1
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 2,
+            "commands.wash-execution.retry.1": 20,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 11,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 2,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "forced-exhaustion",
+          "commands": 1,
+          "events": 5,
+          "commandTerminalCount": 1,
+          "eventAppliedCount": 5,
+          "elapsedMs": 35015,
+          "commandLatencyMs": {
+            "p50": 35015,
+            "p95": 35015,
+            "max": 35015
+          },
+          "projectionObservedLatencyMs": {
+            "p50": 32,
+            "p95": 32,
+            "max": 32
+          },
+          "ordinaryReadLatencyMs": {
+            "p50": 0,
+            "p95": 0,
+            "max": 3
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 1,
+            "commands.wash-execution.retry.1": 1,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 1,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 1,
+          "eventDlq": 0,
+          "controlledRedrive": "REJECTED_WITHOUT_CANCELLATION"
+        }
+      ],
+      "scope": "ephemeral-owner-postgres-rabbitmq; not shared-cluster or BFF E2E",
+      "prefetch": 10
+    }
+  },
+  "after": {
+    "runtimeDelta": "transaction advisory lock before existing EXCLUSIVE NOWAIT gate",
+    "runtimeFileSha256": "575f728f5539c63f2d8383bbdac8cfd607345b2143aceeae92d142a62baef0c9",
+    "result": "PASS: all four scenarios including expected exhaustion and controlled redelivery",
+    "report": {
+      "prefetch": 10,
+      "scope": "ephemeral-owner-postgres-rabbitmq; not shared-cluster or BFF E2E",
+      "scenarios": [
+        {
+          "scenario": "mixed-burst",
+          "expectedDecision": "REJECTED_ALTERNATIVE_AVAILABLE",
+          "commands": 40,
+          "events": 40,
+          "commandTerminalCount": 40,
+          "eventAppliedCount": 40,
+          "elapsedMs": 5418,
+          "commandLatencyMs": {
+            "max": 5353,
+            "p95": 563,
+            "p50": 559
+          },
+          "projectionObservedLatencyMs": {
+            "max": 552,
+            "p95": 552,
+            "p50": 552
+          },
+          "ordinaryReadLatencyMs": {
+            "max": 56,
+            "p95": 0,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 0,
+            "commands.wash-execution.retry.1": 2,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 0,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 0,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "transient-writer",
+          "expectedDecision": "REJECTED_ALTERNATIVE_AVAILABLE",
+          "commands": 20,
+          "events": 20,
+          "commandTerminalCount": 20,
+          "eventAppliedCount": 20,
+          "elapsedMs": 5138,
+          "commandLatencyMs": {
+            "max": 5122,
+            "p95": 5122,
+            "p50": 5116
+          },
+          "projectionObservedLatencyMs": {
+            "max": 90,
+            "p95": 90,
+            "p50": 34
+          },
+          "ordinaryReadLatencyMs": {
+            "max": 4,
+            "p95": 0,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 0,
+            "commands.wash-execution.retry.1": 20,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 0,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 0,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "no-compatible-capacity",
+          "expectedDecision": "CANCELLED",
+          "commands": 40,
+          "events": 40,
+          "commandTerminalCount": 40,
+          "eventAppliedCount": 40,
+          "elapsedMs": 5233,
+          "commandLatencyMs": {
+            "max": 5218,
+            "p95": 5186,
+            "p50": 346
+          },
+          "projectionObservedLatencyMs": {
+            "max": 356,
+            "p95": 356,
+            "p50": 214
+          },
+          "ordinaryReadLatencyMs": {
+            "max": 10,
+            "p95": 0,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 0,
+            "commands.wash-execution.retry.1": 3,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 0,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 0,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "forced-exhaustion",
+          "expectedDecision": "REJECTED_ALTERNATIVE_AVAILABLE",
+          "commands": 1,
+          "events": 5,
+          "commandTerminalCount": 1,
+          "eventAppliedCount": 5,
+          "elapsedMs": 35049,
+          "commandLatencyMs": {
+            "max": 35047,
+            "p95": 35047,
+            "p50": 35047
+          },
+          "projectionObservedLatencyMs": {
+            "max": 35,
+            "p95": 35,
+            "p50": 7
+          },
+          "ordinaryReadLatencyMs": {
+            "max": 3,
+            "p95": 0,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 1,
+            "commands.wash-execution.retry.1": 1,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 1,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 1,
+          "eventDlq": 0,
+          "controlledRedrive": "REJECTED_WITHOUT_CANCELLATION"
+        }
+      ],
+      "retryDelayMs": [
+        5000,
+        30000
+      ],
+      "maxConsumersPerQueue": 4,
+      "initialConsumersPerQueue": 2,
+      "poolSize": 2,
+      "maxAttempts": 3
+    }
+  },
+  "finalRedeliveryAssertionRecheck": {
+    "finishedAt": "2026-09-06T19:08:00Z",
+    "tests": "23 unit + 1 operational IT, zero failures/errors/skips",
+    "report": {
+      "poolSize": 2,
+      "initialConsumersPerQueue": 2,
+      "maxConsumersPerQueue": 4,
+      "retryDelayMs": [
+        5000,
+        30000
+      ],
+      "scenarios": [
+        {
+          "scenario": "mixed-burst",
+          "expectedDecision": "REJECTED_ALTERNATIVE_AVAILABLE",
+          "commands": 40,
+          "events": 40,
+          "commandTerminalCount": 40,
+          "eventAppliedCount": 40,
+          "elapsedMs": 5464,
+          "commandLatencyMs": {
+            "p95": 5328,
+            "max": 5406,
+            "p50": 514
+          },
+          "projectionObservedLatencyMs": {
+            "p95": 575,
+            "max": 575,
+            "p50": 458
+          },
+          "ordinaryReadLatencyMs": {
+            "p95": 0,
+            "max": 16,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 0,
+            "commands.wash-execution.retry.1": 9,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 0,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 0,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "transient-writer",
+          "expectedDecision": "REJECTED_ALTERNATIVE_AVAILABLE",
+          "commands": 20,
+          "events": 20,
+          "commandTerminalCount": 20,
+          "eventAppliedCount": 20,
+          "elapsedMs": 5165,
+          "commandLatencyMs": {
+            "p95": 5152,
+            "max": 5155,
+            "p50": 5149
+          },
+          "projectionObservedLatencyMs": {
+            "p95": 60,
+            "max": 60,
+            "p50": 27
+          },
+          "ordinaryReadLatencyMs": {
+            "p95": 0,
+            "max": 5,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 0,
+            "commands.wash-execution.retry.1": 20,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 0,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 0,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "no-compatible-capacity",
+          "expectedDecision": "CANCELLED",
+          "commands": 40,
+          "events": 40,
+          "commandTerminalCount": 40,
+          "eventAppliedCount": 40,
+          "elapsedMs": 5112,
+          "commandLatencyMs": {
+            "p95": 5104,
+            "max": 5104,
+            "p50": 298
+          },
+          "projectionObservedLatencyMs": {
+            "p95": 314,
+            "max": 314,
+            "p50": 190
+          },
+          "ordinaryReadLatencyMs": {
+            "p95": 0,
+            "max": 11,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 0,
+            "commands.wash-execution.retry.1": 5,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 0,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 0,
+          "eventDlq": 0
+        },
+        {
+          "scenario": "forced-exhaustion",
+          "expectedDecision": "REJECTED_ALTERNATIVE_AVAILABLE",
+          "commands": 1,
+          "events": 5,
+          "commandTerminalCount": 1,
+          "eventAppliedCount": 5,
+          "elapsedMs": 35028,
+          "commandLatencyMs": {
+            "p95": 35027,
+            "max": 35027,
+            "p50": 35027
+          },
+          "projectionObservedLatencyMs": {
+            "p95": 33,
+            "max": 33,
+            "p50": 33
+          },
+          "ordinaryReadLatencyMs": {
+            "p95": 0,
+            "max": 1,
+            "p50": 0
+          },
+          "routes": {
+            "commands.wash-execution.dlq": 1,
+            "commands.wash-execution.retry.1": 1,
+            "events.wash-execution.retry.1": 0,
+            "events.wash-execution.retry.2": 0,
+            "commands.wash-execution.retry.2": 1,
+            "events.wash-execution.dlq": 0
+          },
+          "commandDlq": 1,
+          "eventDlq": 0,
+          "controlledRedrive": "REJECTED_WITHOUT_CANCELLATION"
+        }
+      ],
+      "scope": "ephemeral-owner-postgres-rabbitmq; not shared-cluster or BFF E2E",
+      "prefetch": 10,
+      "maxAttempts": 3
+    }
+  }
+}

@@ -20,6 +20,11 @@ public class JdbcResourceConcurrencyRepository implements ResourceConcurrencyRep
     // NOWAIT avoids queuing behind eligibility writers. Bound later row-lock waits as well.
     // Lock conflicts escape as transient technical failures: rollback, then broker retry.
     jdbc.execute("SET LOCAL lock_timeout = '500ms'");
+    // Serialize capacity cancellations before taking any eligibility locks. Otherwise
+    // competing consumers can repeatedly collide at NOWAIT and exhaust broker retries
+    // even after an external writer has finished. Transaction scope also works across pods;
+    // lock_timeout bounds this wait and rollback releases the advisory lock automatically.
+    jdbc.execute("SELECT pg_advisory_xact_lock(hashtext('wash-execution'), hashtext('capacity-decision'))");
     jdbc.execute("""
         LOCK TABLE appointment_projection, appointment_time_slot_projection,
           cabin_projection, tank_projection, resource_priority_projection,
