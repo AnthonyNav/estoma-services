@@ -1,6 +1,7 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
 import com.estoma.platformbff.application.port.AppointmentQrProjectionPort;
+import com.estoma.platformbff.application.port.AppointmentQrReadPort;
 import com.estoma.platformbff.application.port.AppointmentQrRecoveryProjectionPort;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -17,7 +18,8 @@ import org.springframework.stereotype.Repository;
 /** Technical projection for opaque owner-issued QR references. */
 @Repository
 public class JdbcAppointmentQrProjectionRepository
-    implements AppointmentQrProjectionPort, AppointmentQrRecoveryProjectionPort {
+    implements AppointmentQrProjectionPort, AppointmentQrRecoveryProjectionPort,
+    AppointmentQrReadPort {
   private final JdbcClient jdbc;
 
   public JdbcAppointmentQrProjectionRepository(JdbcClient jdbc) {
@@ -77,6 +79,30 @@ public class JdbcAppointmentQrProjectionRepository
           snapshot.appointmentVersion(), updatedAt);
     }
     return ApplyOutcome.APPLIED;
+  }
+
+  @Override
+  public Optional<Mapping> findByAppointmentId(UUID appointmentId) {
+    return jdbc.sql("""
+        SELECT appointment_id, appointment_version, qr_representation
+        FROM appointment_qr_projection WHERE appointment_id = :appointmentId
+        """).param("appointmentId", appointmentId)
+        .query((rs, row) -> new Mapping(rs.getObject("appointment_id", UUID.class),
+            rs.getLong("appointment_version"), rs.getString("qr_representation")))
+        .optional();
+  }
+
+  @Override
+  public Optional<Mapping> findByExactRepresentation(String qrRepresentation) {
+    return jdbc.sql("""
+        SELECT appointment_id, appointment_version, qr_representation
+        FROM appointment_qr_projection
+        WHERE qr_lookup_hash = :qrLookupHash AND qr_representation = :qrRepresentation
+        """).param("qrLookupHash", sha256(qrRepresentation))
+        .param("qrRepresentation", qrRepresentation)
+        .query((rs, row) -> new Mapping(rs.getObject("appointment_id", UUID.class),
+            rs.getLong("appointment_version"), rs.getString("qr_representation")))
+        .optional();
   }
 
   private Optional<Current> current(UUID appointmentId) {

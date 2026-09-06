@@ -3,6 +3,7 @@ package com.estoma.platformbff.api;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
@@ -20,7 +21,9 @@ import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.mailbox.MailboxQueryService;
 import com.estoma.platformbff.application.security.EffectiveSystemService;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
+import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
+import com.estoma.platformbff.application.wash.WashSupervisionQueryService.LookupNotFoundException;
 import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
@@ -224,6 +227,12 @@ class PublicApiMvcTest {
         .andExpect(jsonPath("$.appointment.appointmentStatus").value("SCHEDULED"));
     washMvc.perform(post("/api/v1/wash/supervision/lookup")
             .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"lookupType\":\"QR\",\"qrRepresentation\":\"opaque-owner-value\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.nextAction").value("ENTRY"))
+        .andExpect(jsonPath("$.appointment.appointmentStatus").value("SCHEDULED"));
+    washMvc.perform(post("/api/v1/wash/supervision/lookup")
+            .contentType(MediaType.APPLICATION_JSON)
             .content("{\"studentEnrollment\":\"201945678\"}"))
         .andExpect(status().isBadRequest());
     washMvc.perform(post("/api/v1/wash/supervision/lookup")
@@ -245,6 +254,32 @@ class PublicApiMvcTest {
             .param("courseSectionId", "00000000-0000-0000-0000-000000000001"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.canSchedule").value(true));
+  }
+
+  @Test
+  void qrLookupExposesUniformNotFoundAndProjectionUnavailableProblemsWithoutEchoingTheValue()
+      throws Exception {
+    when(supervision.lookup(argThat(request -> request != null
+        && "unknown-opaque".equals(request.qrRepresentation()))))
+        .thenThrow(new LookupNotFoundException());
+    when(supervision.lookup(argThat(request -> request != null
+        && "unready-opaque".equals(request.qrRepresentation()))))
+        .thenThrow(new ProjectionUnavailableException("QR projection is not ready"));
+
+    washMvc.perform(post("/api/v1/wash/supervision/lookup")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"lookupType\":\"QR\",\"qrRepresentation\":\"unknown-opaque\"}"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("BFF.WASH_ENTRY_NOT_FOUND"))
+        .andExpect(content().string(org.hamcrest.Matchers.not(
+            org.hamcrest.Matchers.containsString("unknown-opaque"))));
+    washMvc.perform(post("/api/v1/wash/supervision/lookup")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"lookupType\":\"QR\",\"qrRepresentation\":\"unready-opaque\"}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("BFF.PROJECTION_UNAVAILABLE"))
+        .andExpect(content().string(org.hamcrest.Matchers.not(
+            org.hamcrest.Matchers.containsString("unready-opaque"))));
   }
 
   @Test

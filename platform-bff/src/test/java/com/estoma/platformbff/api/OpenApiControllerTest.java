@@ -123,7 +123,10 @@ class OpenApiControllerTest {
         .containsExactly("QR", "STUDENT_ENROLLMENT");
     assertThat(((Map<String, Object>) lookup.get("responses"))).containsKey("200");
     assertThat((Map<String, Boolean>) lookup.get("x-provider-ready"))
+        .containsEntry("STUDENT_ENROLLMENT", true).containsEntry("QR", true);
+    assertThat((Map<String, Boolean>) lookup.get("x-provider-ready-by-default"))
         .containsEntry("STUDENT_ENROLLMENT", true).containsEntry("QR", false);
+    assertThat(lookup).containsEntry("x-qr-feature-flag", "BFF_WASH_QR_ENABLED");
     Map<String, Object> lookupSchema = responseSchema(lookup, "200");
     assertThat((java.util.List<String>) lookupSchema.get("required"))
         .containsExactlyInAnyOrder("serviceDate", "nextAction", "student", "appointment");

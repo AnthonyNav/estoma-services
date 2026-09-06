@@ -51,6 +51,7 @@ class ProjectionQueriesPostgresIT {
   @Autowired JdbcWashCompletionProjectionRepository completions;
   @Autowired JdbcWashSupervisionQueryRepository supervision;
   @Autowired JdbcWashStudentQueryRepository studentQueries;
+  @Autowired JdbcAppointmentQrProjectionRepository appointmentQr;
   @Autowired DataSource dataSource;
   @Autowired PlatformTransactionManager transactionManager;
 
@@ -58,6 +59,7 @@ class ProjectionQueriesPostgresIT {
   void clearReadModels() {
     jdbc.sql("""
         TRUNCATE TABLE mailbox_messages_read_model, mailbox_visits_read_model,
+          appointment_qr_projection,
           wash_resource_assignment_read_model, wash_execution_read_model,
           appointment_read_model, appointment_time_slot_read_model,
           exceptional_appointment_authorization_read_model,
@@ -381,6 +383,33 @@ class ProjectionQueriesPostgresIT {
     assertThat(selected.executionStatus()).isEqualTo("EXIT_SUBMITTED");
     assertThat(selected.exitSubmittedAt()).isEqualTo(latest.plusSeconds(60));
     assertThat(selected.submittedWitnessTapePortionCount()).isEqualTo(4);
+    assertThat(selected.appointmentVersion()).isEqualTo(1L);
+    assertThat(supervision.findAppointment(active, java.time.LocalDate.of(2026, 8, 1)))
+        .map(item -> item.appointmentId()).contains(active);
+    assertThat(supervision.findAppointment(active, java.time.LocalDate.of(2026, 8, 2))).isEmpty();
+  }
+
+  @Test
+  void appointmentQrLookupUsesHashAndExactOpaqueValueAndHidesTombstones() {
+    UUID appointmentId = UUID.randomUUID();
+    Instant projectedAt = Instant.parse("2026-08-01T10:00:00Z");
+    String exact = " owner://opaque/value ";
+
+    appointmentQr.project(appointmentId, exact, 1, projectedAt);
+
+    assertThat(appointmentQr.findByExactRepresentation(exact))
+        .get().extracting(item -> item.appointmentId()).isEqualTo(appointmentId);
+    assertThat(appointmentQr.findByExactRepresentation("owner://opaque/value")).isEmpty();
+    assertThat(appointmentQr.findByAppointmentId(appointmentId))
+        .get().extracting(item -> item.qrRepresentation()).isEqualTo(exact);
+
+    appointmentQr.invalidate(appointmentId, 2, projectedAt.plusSeconds(1));
+
+    assertThat(appointmentQr.findByExactRepresentation(exact)).isEmpty();
+    assertThat(appointmentQr.findByAppointmentId(appointmentId)).get().satisfies(mapping -> {
+      assertThat(mapping.appointmentVersion()).isEqualTo(2L);
+      assertThat(mapping.qrRepresentation()).isNull();
+    });
   }
 
   @Test

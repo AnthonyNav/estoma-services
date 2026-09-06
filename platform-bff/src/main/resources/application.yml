@@ -98,6 +98,9 @@ platform:
       refresh-retry-after: ${BFF_APPOINTMENT_AVAILABILITY_REFRESH_RETRY_AFTER:30s}
       client-retry-after-seconds: ${BFF_APPOINTMENT_AVAILABILITY_CLIENT_RETRY_AFTER_SECONDS:1}
   wash:
+    qr:
+      # Public Home/lookup gate; enable only after the date-scoped recovery and data audit.
+      enabled: ${BFF_WASH_QR_ENABLED:false}
     reassignment-candidates:
       # Rollout gate: enable only after the Wash Execution owner Query is deployed.
       enabled: ${BFF_WASH_REASSIGNMENT_CANDIDATES_ENABLED:false}

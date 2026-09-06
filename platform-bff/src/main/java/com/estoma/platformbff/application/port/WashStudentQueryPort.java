@@ -22,7 +22,7 @@ public interface WashStudentQueryPort {
   record Appointment(
       UUID appointmentId,
       String appointmentStatus,
-      long appointmentVersion,
+      Long appointmentVersion,
       String appointmentType,
       Integer instrumentCount,
       String pieceType,

@@ -3,9 +3,12 @@ package com.estoma.platformbff.application.wash;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.estoma.platformbff.application.port.WashStudentQueryPort;
+import com.estoma.platformbff.application.port.AppointmentQrReadPort;
+import com.estoma.platformbff.application.projection.AppointmentQrRecoveryService;
 import com.estoma.platformbff.application.projection.ProjectionEvent;
 import com.estoma.platformbff.application.projection.ProjectionReadModel;
 import com.estoma.platformbff.application.projection.ProjectionReadinessService;
@@ -21,8 +24,8 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.junit.jupiter.api.BeforeEach;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,7 +36,130 @@ class WashStudentQueryServiceTest {
   @Mock LocalAuthorizationService authorization;
   @Mock ProjectionReadinessService readiness;
   @Mock WashStudentQueryPort projections;
-  @InjectMocks WashStudentQueryService service;
+  @Mock AppointmentQrReadPort appointmentQr;
+  @Mock AppointmentQrRecoveryService qrRecovery;
+  WashStudentQueryService service;
+
+  @BeforeEach
+  void setUp() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+  }
+
+  @Test
+  void enabledQrReturnsExactOwnerRepresentationForPendingReassignment() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    var appointment = executionAppointment("SCHEDULED", "PENDING_REASSIGNMENT", 4L,
+        null, null, false, false);
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(appointment));
+    when(qrRecovery.isReady(java.time.LocalDate.of(2026, 8, 27))).thenReturn(true);
+    when(appointmentQr.findByAppointmentId(appointment.appointmentId())).thenReturn(Optional.of(
+        new AppointmentQrReadPort.Mapping(appointment.appointmentId(), 1, " owner opaque ")));
+
+    var result = service.home().appointment();
+
+    assertThat(result.qrRepresentation()).isEqualTo(" owner opaque ");
+    assertThat(result.qrUsageContext()).isEqualTo("NONE");
+  }
+
+  @Test
+  void enabledQrRequiresReadyCompleteMappingOnlyForActiveAppointment() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    var active = scheduledAppointment(UUID.randomUUID(), 2L, NOW, null);
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(active));
+
+    assertThatThrownBy(service::home).isInstanceOf(ProjectionUnavailableException.class);
+
+    when(qrRecovery.isReady(java.time.LocalDate.of(2026, 8, 27))).thenReturn(true);
+    assertThatThrownBy(service::home).isInstanceOf(ProjectionUnavailableException.class);
+  }
+
+  @Test
+  void enabledQrDoesNotRequireRecoveryForTerminalAppointment() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(executionAppointment("COMPLETED", "COMPLETED", 6L,
+            NOW.minusSeconds(60), NOW.minusSeconds(10), false, true)));
+
+    assertThat(service.home().appointment().qrRepresentation()).isNull();
+    verifyNoInteractions(qrRecovery, appointmentQr);
+  }
+
+  @Test
+  void enabledQrRejectsMappingFromFutureAppointmentVersion() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    var active = scheduledAppointment(UUID.randomUUID(), 2L, NOW, null);
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(active));
+    when(qrRecovery.isReady(java.time.LocalDate.of(2026, 8, 27))).thenReturn(true);
+    when(appointmentQr.findByAppointmentId(active.appointmentId())).thenReturn(Optional.of(
+        new AppointmentQrReadPort.Mapping(active.appointmentId(), 3, "opaque")));
+
+    assertThatThrownBy(service::home).isInstanceOf(ProjectionUnavailableException.class);
+  }
+
+  @Test
+  void enabledQrFailsClosedForIncoherentActiveAppointmentBeforeReturningRepresentation() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(executionAppointment("SCHEDULED", "COMPLETED", 6L,
+            NOW.minusSeconds(60), NOW.minusSeconds(10), false, true)));
+
+    assertThatThrownBy(service::home).isInstanceOf(ProjectionUnavailableException.class);
+    verifyNoInteractions(qrRecovery, appointmentQr);
+  }
+
+  @Test
+  void enabledQrFailsClosedForInProgressAppointmentWithoutExecution() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    var scheduled = scheduledAppointment(UUID.randomUUID(), 2L, NOW, null);
+    var inconsistent = new WashStudentQueryPort.Appointment(
+        scheduled.appointmentId(), "IN_PROGRESS", scheduled.appointmentVersion(), scheduled.appointmentType(),
+        scheduled.instrumentCount(), scheduled.pieceType(), scheduled.courseSectionId(), scheduled.courseNrc(),
+        scheduled.courseName(), scheduled.appointmentTimeSlotId(), scheduled.startsAt(), scheduled.endsAt(),
+        scheduled.timezone(), scheduled.cancellationDeadlineAt(), scheduled.arrivalToleranceUntil(),
+        scheduled.exceptionalAuthorizationId(), scheduled.exceptionalAuthorizationContextKnown(),
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(inconsistent));
+
+    assertThatThrownBy(service::home).isInstanceOf(ProjectionUnavailableException.class);
+    verifyNoInteractions(qrRecovery, appointmentQr);
+  }
+
+  @Test
+  void missingAppointmentVersionFailsAsProjectionUnavailable() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(scheduledAppointment(UUID.randomUUID(), null, NOW, null)));
+
+    assertThatThrownBy(service::home).isInstanceOf(ProjectionUnavailableException.class);
+    verifyNoInteractions(qrRecovery, appointmentQr);
+  }
 
   @Test
   void composesHomeFromLocalReadModelsAndDerivesStudentExitQrContext() {
@@ -228,12 +354,12 @@ class WashStudentQueryServiceTest {
     verify(readiness).requireReady("person", "academic");
   }
 
-  private static WashStudentQueryPort.Appointment scheduledAppointment(UUID appointmentId, long version,
+  private static WashStudentQueryPort.Appointment scheduledAppointment(UUID appointmentId, Long version,
       Instant cancellationDeadlineAt, UUID exceptionalAuthorizationId) {
     return scheduledAppointment(appointmentId, version, cancellationDeadlineAt, exceptionalAuthorizationId, true);
   }
 
-  private static WashStudentQueryPort.Appointment scheduledAppointment(UUID appointmentId, long version,
+  private static WashStudentQueryPort.Appointment scheduledAppointment(UUID appointmentId, Long version,
       Instant cancellationDeadlineAt, UUID exceptionalAuthorizationId, boolean exceptionalContextKnown) {
     return new WashStudentQueryPort.Appointment(appointmentId, "SCHEDULED", version, "NORMAL",
         10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),

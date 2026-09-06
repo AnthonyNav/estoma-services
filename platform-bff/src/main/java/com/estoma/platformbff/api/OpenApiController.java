@@ -128,9 +128,13 @@ public class OpenApiController {
           MediaType.APPLICATION_JSON_VALUE, Map.of("schema", schemaFor(requestType)))));
     }
     if (handler.getMethod().getName().equals("supervisorLookup")) {
-      operation.put("description", "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is "
-          + "explicitly gated until the owner-backed QR projection is available and returns 503.");
-      operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
+      operation.put("description", "STUDENT_ENROLLMENT and QR lookups are implemented as side-effect-free "
+          + "local reads. QR is disabled by default through BFF_WASH_QR_ENABLED and returns 503 until "
+          + "the flag is enabled and recovery is READY for the service date; unknown or revoked QR values "
+          + "return 404.");
+      operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", true));
+      operation.put("x-provider-ready-by-default", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
+      operation.put("x-qr-feature-flag", "BFF_WASH_QR_ENABLED");
     }
     if (handler.getMethod().getName().equals("reassignmentCandidates")) {
       operation.put("description", "Side-effect-free local read of an owner-ranked snapshot. "

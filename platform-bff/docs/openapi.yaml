@@ -6085,7 +6085,7 @@
     },
     "/api/v1/wash/supervision/lookup" : {
       "post" : {
-        "description" : "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is explicitly gated until the owner-backed QR projection is available and returns 503.",
+        "description" : "STUDENT_ENROLLMENT and QR lookups are implemented as side-effect-free local reads. QR is disabled by default through BFF_WASH_QR_ENABLED and returns 503 until the flag is enabled and recovery is READY for the service date; unknown or revoked QR values return 404.",
         "operationId" : "WashController_supervisorLookup_post__api_v1_wash_supervision_lookup",
         "requestBody" : {
           "content" : {
@@ -6334,9 +6334,14 @@
           "bearerAuth" : [ ]
         } ],
         "x-provider-ready" : {
+          "QR" : true,
+          "STUDENT_ENROLLMENT" : true
+        },
+        "x-provider-ready-by-default" : {
           "QR" : false,
           "STUDENT_ENROLLMENT" : true
-        }
+        },
+        "x-qr-feature-flag" : "BFF_WASH_QR_ENABLED"
       }
     },
     "/api/v1/wash/supervision/pending-reassignments" : {
