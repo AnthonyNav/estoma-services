@@ -65,9 +65,34 @@ class CommandWireValidationIT extends AbstractMessagingIT {
     assertThat(jdbc.queryForObject("SELECT count(*) FROM processed_messages", Integer.class)).isZero();
   }
 
+  @Test
+  void mixedCanonicalAndLegacyReassignmentAliasesGoToDlqWithoutInboxOrOutbox() {
+    UUID supervisor = UUID.randomUUID();
+    MessageEnvelope command = envelope(
+        "ResolvePendingReassignment",
+        supervisor,
+        Map.of(
+            "washExecutionId", UUID.randomUUID(),
+            "selectedCabinId", UUID.randomUUID(),
+            "selectedTankId", UUID.randomUUID(),
+            "assignedByAccountId", supervisor,
+            "assignedAt", NOW,
+            "cabinId", UUID.randomUUID(),
+            "tankId", UUID.randomUUID(),
+            "resolvedByAccountId", supervisor,
+            "resolvedAt", NOW,
+            "expectedVersion", 2));
+
+    send(command);
+
+    assertThat(rabbit.receive(MessagingNames.COMMAND_DLQ, 5_000)).isNotNull();
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM processed_messages", Integer.class)).isZero();
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM outbox_messages", Integer.class)).isZero();
+  }
+
   private MessageEnvelope envelope(String type, UUID actorId, Map<String, Object> payload) {
     return new MessageEnvelope(
-        UUID.randomUUID(), type, 1, MessageKind.COMMAND, "platform-bff", NOW,
+        UUID.randomUUID(), type, 1, MessageKind.COMMAND, "bff", NOW,
         UUID.randomUUID(), null, UUID.randomUUID(), UUID.randomUUID().toString(), null, null,
         new Actor("ACCOUNT", actorId, null), codec.toNode(payload));
   }

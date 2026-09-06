@@ -87,6 +87,103 @@ class CommandMessagingIT extends AbstractMessagingIT {
   }
 
   @Test
+  void canonicalReassignmentResolvesAndLegacyReplaySharesIdempotencyWithoutDuplicateEffects()
+      throws Exception {
+    UUID supervisor = UUID.randomUUID();
+    UUID student = UUID.randomUUID();
+    UUID slot = UUID.randomUUID();
+    UUID appointment = UUID.randomUUID();
+    UUID execution = UUID.randomUUID();
+    seedReady("appointments", "appointments");
+    seedReady("authorization", "authorization");
+    seedReady("wash-administration", "wash-administration");
+    seedSupervisor(supervisor);
+    seedSlot(slot);
+    seedAppointment(appointment, student, slot);
+
+    MessageEnvelope arrival = commandEnvelope(
+        "RegisterWashArrival", supervisor,
+        Map.of("washExecutionId", execution, "appointmentId", appointment, "arrivedAt", START));
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, arrival);
+    awaitCount("SELECT count(*) FROM processed_messages WHERE consumer_name='wash-execution.commands' "
+        + "AND message_id=? AND status='APPLIED'", arrival.messageId(), 1);
+
+    MessageEnvelope decision = commandEnvelope(
+        "DecideWashEntry", supervisor,
+        Map.of(
+            "washExecutionId", execution,
+            "identityConfirmed", true,
+            "requirementsSatisfied", true,
+            "decision", "AUTHORIZED",
+            "decidedByAccountId", supervisor,
+            "decidedAt", START.plusSeconds(300),
+            "expectedVersion", 1));
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, decision);
+    awaitCount("SELECT count(*) FROM wash_executions WHERE wash_execution_id=? "
+        + "AND status='PENDING_REASSIGNMENT' AND version=2", execution, 1);
+
+    UUID cabin = UUID.randomUUID();
+    UUID tank = UUID.randomUUID();
+    seedCabin(cabin);
+    seedTank(tank, cabin);
+    Instant assignedAt = START.plusSeconds(360);
+
+    MessageEnvelope spoofed = reassignmentEnvelope(supervisor,
+        canonicalReassignment(execution, cabin, tank, UUID.randomUUID(), assignedAt, 2),
+        "resolve-spoofed", execution, 2);
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, spoofed);
+    awaitCount("SELECT count(*) FROM processed_messages WHERE consumer_name='wash-execution.commands' "
+        + "AND message_id=? AND status='APPLIED'", spoofed.messageId(), 1);
+    assertThat(resultCode(spoofed.messageId())).isEqualTo("ACTOR_NOT_AUTHORIZED");
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM resource_assignments", Integer.class)).isZero();
+
+    String equivalentKey = "resolve-equivalent:" + execution;
+    MessageEnvelope canonical = reassignmentEnvelope(supervisor,
+        canonicalReassignment(execution, cabin, tank, supervisor, assignedAt, 2), equivalentKey);
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, canonical);
+    awaitCount("SELECT count(*) FROM wash_executions WHERE wash_execution_id=? "
+        + "AND status='IN_PROGRESS' AND version=3", execution, 1);
+    assertThat(resultType(canonical.messageId()))
+        .isEqualTo("ResolvePendingReassignmentSucceeded");
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM resource_assignments WHERE wash_execution_id=? "
+            + "AND cabin_id=? AND tank_id=? AND released_at IS NULL",
+        Integer.class, execution, cabin, tank)).isEqualTo(1);
+
+    MessageEnvelope legacyReplay = reassignmentEnvelope(supervisor,
+        legacyReassignment(execution, cabin, tank, supervisor, assignedAt, 2), equivalentKey);
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, legacyReplay);
+    awaitCount("SELECT count(*) FROM processed_messages WHERE consumer_name='wash-execution.commands' "
+        + "AND message_id=? AND status='APPLIED'", legacyReplay.messageId(), 1);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM resource_assignments WHERE wash_execution_id=?",
+        Integer.class, execution)).isEqualTo(1);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='WashResourceAssigned' "
+            + "AND aggregate_id=?",
+        Integer.class, execution)).isEqualTo(1);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM command_idempotency_records WHERE producer='bff' "
+            + "AND operation_type='ResolvePendingReassignment' AND idempotency_key=?",
+        Integer.class, equivalentKey)).isEqualTo(1);
+
+    MessageEnvelope stale = reassignmentEnvelope(supervisor,
+        canonicalReassignment(execution, cabin, tank, supervisor, assignedAt.plusSeconds(1), 2),
+        "resolve-stale:" + execution, execution, 2);
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, stale);
+    awaitCount("SELECT count(*) FROM processed_messages WHERE consumer_name='wash-execution.commands' "
+        + "AND message_id=? AND status='APPLIED'", stale.messageId(), 1);
+    assertThat(resultCode(stale.messageId())).isEqualTo("VERSION_CONFLICT");
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM resource_assignments WHERE wash_execution_id=?",
+        Integer.class, execution)).isEqualTo(1);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='WashResourceAssigned' "
+            + "AND aggregate_id=?",
+        Integer.class, execution)).isEqualTo(1);
+  }
+
+  @Test
   void structurallyInvalidCommandGoesToDlqWithoutDomainMutation() {
     UUID supervisor = UUID.randomUUID();
     MessageEnvelope invalid = new MessageEnvelope(
@@ -107,10 +204,54 @@ class CommandMessagingIT extends AbstractMessagingIT {
   }
 
   private MessageEnvelope commandEnvelope(String type, UUID actorId, Map<String, Object> payload) {
+    return commandEnvelope(type, actorId, payload, UUID.randomUUID().toString());
+  }
+
+  private MessageEnvelope commandEnvelope(
+      String type, UUID actorId, Map<String, Object> payload, String idempotencyKey) {
     return new MessageEnvelope(
         UUID.randomUUID(), type, 1, MessageKind.COMMAND, "platform-bff", START,
-        UUID.randomUUID(), null, UUID.randomUUID(), UUID.randomUUID().toString(), null, null,
+        UUID.randomUUID(), null, UUID.randomUUID(), idempotencyKey, null, null,
         new Actor("ACCOUNT", actorId, null), codec.toNode(payload));
+  }
+
+  private MessageEnvelope reassignmentEnvelope(
+      UUID actorId, Map<String, Object> payload, String idempotencyKey) {
+    return reassignmentEnvelope(actorId, payload, idempotencyKey,
+        (UUID) payload.get("washExecutionId"), (Integer) payload.get("expectedVersion"));
+  }
+
+  private MessageEnvelope reassignmentEnvelope(
+      UUID actorId, Map<String, Object> payload, String idempotencyKey,
+      UUID aggregateId, int aggregateVersion) {
+    return new MessageEnvelope(
+        UUID.randomUUID(), "ResolvePendingReassignment", 1, MessageKind.COMMAND, "bff", START,
+        UUID.randomUUID(), null, UUID.randomUUID(), idempotencyKey, aggregateId, aggregateVersion,
+        new Actor("ACCOUNT", actorId, null), codec.toNode(payload));
+  }
+
+  private Map<String, Object> canonicalReassignment(
+      UUID execution, UUID cabin, UUID tank, UUID supervisor, Instant assignedAt,
+      int expectedVersion) {
+    return Map.of(
+        "washExecutionId", execution,
+        "selectedCabinId", cabin,
+        "selectedTankId", tank,
+        "assignedByAccountId", supervisor,
+        "assignedAt", assignedAt,
+        "expectedVersion", expectedVersion);
+  }
+
+  private Map<String, Object> legacyReassignment(
+      UUID execution, UUID cabin, UUID tank, UUID supervisor, Instant assignedAt,
+      int expectedVersion) {
+    return Map.of(
+        "washExecutionId", execution,
+        "cabinId", cabin,
+        "tankId", tank,
+        "resolvedByAccountId", supervisor,
+        "resolvedAt", assignedAt,
+        "expectedVersion", expectedVersion);
   }
 
   private void send(String exchange, String routingKey, MessageEnvelope envelope) {
@@ -161,6 +302,34 @@ class CommandMessagingIT extends AbstractMessagingIT {
           source_version,updated_at)
         VALUES(?,?,?,?, 'NORMAL',1,'INSTRUMENT','SCHEDULED',NULL,1,now())
         """, appointmentId, student, slotId, UUID.randomUUID());
+  }
+
+  private void seedCabin(UUID cabinId) {
+    jdbc.update("""
+        INSERT INTO cabin_projection(cabin_id,code,name,cabin_type,status,source_version,updated_at)
+        VALUES(?,'C-WIRE','Canonical wire cabin','NORMAL','ACTIVE',1,now())
+        """, cabinId);
+  }
+
+  private void seedTank(UUID tankId, UUID cabinId) {
+    jdbc.update("""
+        INSERT INTO tank_projection(
+          tank_id,cabin_id,code,name,configured_capacity,status,source_version,updated_at)
+        VALUES(?,?,'T-WIRE','Canonical wire tank',2,'ACTIVE',1,now())
+        """, tankId, cabinId);
+  }
+
+  private String resultCode(UUID commandMessageId) {
+    return jdbc.queryForObject(
+        "SELECT payload_json->'error'->>'code' FROM outbox_messages WHERE causation_id=? "
+            + "AND message_kind='RESULT'",
+        String.class, commandMessageId);
+  }
+
+  private String resultType(UUID commandMessageId) {
+    return jdbc.queryForObject(
+        "SELECT message_type FROM outbox_messages WHERE causation_id=? AND message_kind='RESULT'",
+        String.class, commandMessageId);
   }
 
   private void awaitCount(String sql, Object key, int expected) throws InterruptedException {

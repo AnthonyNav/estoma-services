@@ -6,11 +6,18 @@ import com.estoma.washexecution.application.command.CommandRequest;
 import com.estoma.washexecution.application.command.WashExecutionCommand;
 import com.estoma.washexecution.contracts.MessageEnvelope;
 import com.estoma.washexecution.infrastructure.messaging.EnvelopeJsonCodec;
+import java.util.HashSet;
+import java.util.Set;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 @Component
 public final class CommandMessageMapper {
+  private static final Set<String> REASSIGNMENT_CANONICAL_ALIASES = Set.of(
+      "selectedCabinId", "selectedTankId", "assignedByAccountId", "assignedAt");
+  private static final Set<String> REASSIGNMENT_LEGACY_ALIASES = Set.of(
+      "cabinId", "tankId", "resolvedByAccountId", "resolvedAt");
   private final EnvelopeJsonCodec codec;
 
   public CommandMessageMapper(EnvelopeJsonCodec codec) {
@@ -30,7 +37,7 @@ public final class CommandMessageMapper {
     return switch (e.messageType()) {
       case "RegisterWashArrival" -> codec.convertPayload(e, WashExecutionCommand.RegisterWashArrival.class);
       case "DecideWashEntry" -> codec.convertPayload(e, WashExecutionCommand.DecideWashEntry.class);
-      case "ResolvePendingReassignment" -> codec.convertPayload(e, WashExecutionCommand.ResolvePendingReassignment.class);
+      case "ResolvePendingReassignment" -> resolvePendingReassignment(e.payload());
       case "DisableOperationalResource" -> codec.convertPayload(e, WashExecutionCommand.DisableOperationalResource.class);
       case "RestoreOperationalResource" -> codec.convertPayload(e, WashExecutionCommand.RestoreOperationalResource.class);
       case "SubmitWashExit" -> codec.convertPayload(e, WashExecutionCommand.SubmitWashExit.class);
@@ -55,8 +62,7 @@ public final class CommandMessageMapper {
         requireIntegral(payload, "expectedVersion");
       }
       case "ResolvePendingReassignment" -> {
-        require(payload, "washExecutionId", "cabinId", "tankId", "resolvedByAccountId", "resolvedAt",
-            "expectedVersion");
+        requireUnambiguousReassignmentShape(payload);
         requireIntegral(payload, "expectedVersion");
       }
       case "DisableOperationalResource" -> require(payload,
@@ -84,6 +90,42 @@ public final class CommandMessageMapper {
       }
       default -> throw invalid("UNSUPPORTED_COMMAND");
     }
+  }
+
+  private WashExecutionCommand.ResolvePendingReassignment resolvePendingReassignment(JsonNode payload) {
+    if (fields(payload).containsAll(REASSIGNMENT_LEGACY_ALIASES)) {
+      return codec.convertNode(payload, WashExecutionCommand.ResolvePendingReassignment.class);
+    }
+    ObjectNode normalized = (ObjectNode) payload.deepCopy();
+    normalized.set("cabinId", payload.get("selectedCabinId"));
+    normalized.set("tankId", payload.get("selectedTankId"));
+    normalized.set("resolvedByAccountId", payload.get("assignedByAccountId"));
+    normalized.set("resolvedAt", payload.get("assignedAt"));
+    normalized.remove(Set.of(
+        "selectedCabinId", "selectedTankId", "assignedByAccountId", "assignedAt"));
+    return codec.convertNode(normalized, WashExecutionCommand.ResolvePendingReassignment.class);
+  }
+
+  private static void requireUnambiguousReassignmentShape(JsonNode payload) {
+    Set<String> actual = fields(payload);
+    boolean hasCanonical = !java.util.Collections.disjoint(actual, REASSIGNMENT_CANONICAL_ALIASES);
+    boolean hasLegacy = !java.util.Collections.disjoint(actual, REASSIGNMENT_LEGACY_ALIASES);
+    boolean canonicalComplete = actual.containsAll(REASSIGNMENT_CANONICAL_ALIASES);
+    boolean legacyComplete = actual.containsAll(REASSIGNMENT_LEGACY_ALIASES);
+    if (hasCanonical == hasLegacy || (hasCanonical && !canonicalComplete)
+        || (hasLegacy && !legacyComplete)) {
+      throw invalid("AMBIGUOUS_OR_INVALID_REASSIGNMENT_PAYLOAD");
+    }
+    require(payload, "washExecutionId", "expectedVersion");
+    Set<String> selected = hasCanonical
+        ? REASSIGNMENT_CANONICAL_ALIASES : REASSIGNMENT_LEGACY_ALIASES;
+    require(payload, selected.toArray(String[]::new));
+  }
+
+  private static Set<String> fields(JsonNode payload) {
+    Set<String> fields = new HashSet<>();
+    fields.addAll(payload.propertyNames());
+    return fields;
   }
 
   private static void requireMaterials(JsonNode materials) {
