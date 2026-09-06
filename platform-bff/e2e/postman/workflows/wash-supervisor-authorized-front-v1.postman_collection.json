@@ -1,0 +1,857 @@
+{
+  "info": {
+    "name": "platform-bff Front V1 - Wash Supervisor Authorized Entry",
+    "description": "Isolated wash-e2e ONLY. Real BFF arrival and AUTHORIZED entry with exact synthetic cabin/tank assignment. Use the fixture-backed runner; never run against shared develop.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Prepare appointment",
+      "item": [
+        {
+          "name": "01 Login synthetic student",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"USERNAME\",\n  \"loginIdentifier\": \"{{loginIdentifier}}\",\n  \"password\": \"{{password}}\",\n  \"deviceName\": \"platform-bff-wash-student-e2e\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('session is NORMAL and complete', () => {",
+                  "  pm.expect(body.accountId).to.eql(pm.environment.get('fixtureStudentAccountId')); ",
+                  "  pm.expect(body.authState).to.eql('NORMAL');",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.accountId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "});",
+                  "pm.environment.set('accessToken', body.accessToken);",
+                  "pm.environment.set('runtimeAccessToken', body.accessToken);",
+                  "pm.environment.set('accountId', body.accountId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 WASH-STU-01 home without appointment",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/wash/student/home"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('home returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('student presentation is complete', () => {",
+                  "  pm.expect(body.student).to.be.an('object');",
+                  "  pm.expect(body.student.firstName).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.fullName).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.studentEnrollment).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.currentSemester).to.be.a('number');",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "});",
+                  "pm.test('fixture begins with no appointment for today', () => pm.expect(body.appointment).to.eql(null));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 WASH-STU-02 form context",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/wash/appointments/form-context"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('form context returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const sections = Array.isArray(body.availableCourseSections) ? body.availableCourseSections : [];",
+                  "const fixtureSectionId = pm.environment.get('fixtureCourseSectionId');",
+                  "const fixtureSections = sections.filter(section => section.courseSectionId === fixtureSectionId && typeof section.nrc === 'string' && section.nrc.startsWith('E2E-'));",
+                  "pm.test('form context belongs to the authenticated synthetic student', () => {",
+                  "  pm.expect(body.student.fullName).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.studentEnrollment).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.currentSemester).to.be.a('number');",
+                  "});",
+                  "pm.test('one isolated E2E course section is available', () => pm.expect(fixtureSections).to.have.lengthOf(1));",
+                  "if (fixtureSections.length === 1) pm.environment.set('courseSectionId', fixtureSections[0].courseSectionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 WASH-STU-02 availability cache-aside",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/wash/appointments/availability?appointmentType=NORMAL&instrumentCount=5&pieceType=HIGH_SPEED&courseSectionId={{courseSectionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "wash",
+                "appointments",
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "appointmentType",
+                  "value": "NORMAL"
+                },
+                {
+                  "key": "instrumentCount",
+                  "value": "5"
+                },
+                {
+                  "key": "pieceType",
+                  "value": "HIGH_SPEED"
+                },
+                {
+                  "key": "courseSectionId",
+                  "value": "{{courseSectionId}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('availabilityAttempts') || 0);",
+                  "if (pm.response.code === 503) {",
+                  "  const problem = pm.response.json();",
+                  "  pm.test('cache miss is a controlled refresh response', () => {",
+                  "    pm.expect(problem.code).to.eql('BFF.PROJECTION_UNAVAILABLE');",
+                  "    pm.expect(pm.response.headers.get('Retry-After')).to.match(/^\\d+$/);",
+                  "  });",
+                  "  pm.environment.set('availabilityAttempts', String(attempts + 1));",
+                  "  pm.test('availability converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('04 WASH-STU-02 availability cache-aside');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else if (pm.response.code === 200) {",
+                  "  pm.test('availability returns 200', () => pm.response.to.have.status(200));",
+                  "  const body = pm.response.json();",
+                  "  pm.test('owner-derived decision permits scheduling', () => {",
+                  "    pm.expect(body.canSchedule).to.eql(true);",
+                  "    pm.expect(body.blockingReasons).to.deep.eql([]);",
+                  "    pm.expect(body.dailyPenaltyPoints).to.eql(0);",
+                  "    pm.expect(body.dailyCompletedAppointments).to.eql(0);",
+                  "    pm.expect(body.exceptionalAuthorizationRequired).to.eql(false);",
+                  "    pm.expect(body.exceptionalAuthorizationAvailable).to.eql(false);",
+                  "    pm.expect(body.exceptionalAuthorizationId).to.eql(null);",
+                  "  });",
+                  "  pm.test('at least one owner-approved slot is returned', () => pm.expect(body.availableTimeSlots).to.be.an('array').and.not.empty);",
+                  "  const fixtureSlotId = pm.environment.get('fixtureAppointmentTimeSlotId');",
+                  "  const slot = body.availableTimeSlots.find(candidate => candidate.appointmentTimeSlotId === fixtureSlotId);",
+                  "  if (slot) {",
+                  "    pm.test('slot carries booking and capacity data', () => {",
+                  "      pm.expect(slot.appointmentTimeSlotId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "      pm.expect(slot.availableCapacity).to.be.above(0);",
+                  "      pm.expect(Date.parse(slot.endsAt)).to.be.above(Date.parse(slot.startsAt));",
+                  "      pm.expect(Date.parse(slot.bookingDeadlineAt)).to.be.at.most(Date.parse(slot.startsAt));",
+                  "    });",
+                  "    pm.environment.set('appointmentTimeSlotId', slot.appointmentTimeSlotId);",
+                  "  } else {",
+                  "    pm.test('availability contains the isolated fixture slot', () => pm.expect.fail('fixture slot is absent'));",
+                  "    pm.execution.setNextRequest(null);",
+                  "  }",
+                  "} else {",
+                  "  pm.test('availability returns only 200 or controlled 503', () => pm.expect.fail('unexpected HTTP ' + pm.response.code));",
+                  "  pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 WASH-STU-02 schedule appointment",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-schedule"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointmentTimeSlotId\": \"{{appointmentTimeSlotId}}\",\n  \"courseSectionId\": \"{{courseSectionId}}\",\n  \"appointmentType\": \"NORMAL\",\n  \"instrumentCount\": 5,\n  \"pieceType\": \"HIGH_SPEED\",\n  \"exceptionalAuthorizationId\": null,\n  \"regulationAccepted\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/appointments"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('schedule intent is durably accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('schedule begins as a pollable operation', () => {",
+                  "  pm.expect(body.status).to.eql('PENDING');",
+                  "  pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.pollPath).to.eql('/api/v1/operations/' + body.operationId);",
+                  "});",
+                  "pm.environment.set('scheduleOperationId', body.operationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 Poll schedule operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/operations/{{scheduleOperationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('schedule operation is visible', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const maxAttempts = Number(pm.environment.get('maxPollAttempts') || 30);",
+                  "const attempts = Number(pm.environment.get('schedulePollAttempts') || 0);",
+                  "if (body.status === 'PENDING') {",
+                  "  pm.environment.set('schedulePollAttempts', String(attempts + 1));",
+                  "  pm.test('schedule completes within the polling budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('06 Poll schedule operation');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.test('schedule succeeds', () => pm.expect(body.status, body.errorCode || 'no error code').to.eql('SUCCEEDED'));",
+                  "  pm.test('schedule result carries owner aggregate identity', () => {",
+                  "    pm.expect(body.data.aggregateId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "    pm.expect(body.data.aggregateVersion).to.eql(1);",
+                  "  });",
+                  "  if (body.status === 'SUCCEEDED') {",
+                  "    pm.environment.set('appointmentId', body.data.aggregateId);",
+                  "    pm.environment.set('appointmentVersion', String(body.data.aggregateVersion));",
+                  "  } else pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 WASH-STU-01 home converges to scheduled",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/wash/student/home"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('scheduled home read returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const expectedId = pm.environment.get('appointmentId');",
+                  "const converged = body.appointment && body.appointment.appointmentId === expectedId && body.appointment.appointmentStatus === 'SCHEDULED';",
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('scheduledHomeAttempts') || 0);",
+                  "if (!converged) {",
+                  "  pm.environment.set('scheduledHomeAttempts', String(attempts + 1));",
+                  "  pm.test('scheduled projection converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('07 WASH-STU-01 home converges to scheduled');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  const appointment = body.appointment;",
+                  "  pm.test('home exposes the #133 cancellation context', () => {",
+                  "    pm.expect(appointment.appointmentVersion).to.eql(1);",
+                  "    pm.expect(appointment.usesExceptionalAuthorization).to.eql(false);",
+                  "    pm.expect(appointment.studentCancellationAction).to.eql('AVAILABLE');",
+                  "    pm.expect(appointment.timeSlot.cancellationDeadlineAt).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  pm.test('home preserves the submitted appointment context', () => {",
+                  "    pm.expect(appointment.appointmentType).to.eql('NORMAL');",
+                  "    pm.expect(appointment.instrumentCount).to.eql(5);",
+                  "    pm.expect(appointment.pieceType).to.eql('HIGH_SPEED');",
+                  "    pm.expect(appointment.courseSection.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "    pm.expect(appointment.timeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  });",
+                  "  pm.environment.set('appointmentVersion', String(appointment.appointmentVersion));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08 Logout synthetic student",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('logout returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('session is revoked', () => pm.expect(body.revoked).to.eql(true));",
+                  "if (body.revoked === true) pm.environment.unset('runtimeAccessToken');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Arrival and authorized entry",
+      "item": [
+        {
+          "name": "09 Login synthetic supervisor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"USERNAME\",\n  \"loginIdentifier\": \"{{supervisorLoginIdentifier}}\",\n  \"password\": \"{{supervisorPassword}}\",\n  \"deviceName\": \"platform-bff-wash-supervisor-entry-e2e\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('supervisor login returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('supervisor session matches the isolated fixture', () => {",
+                  "  pm.expect(body.authState).to.eql('NORMAL');",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.accountId).to.eql(pm.environment.get('fixtureSupervisorAccountId'));",
+                  "});",
+                  "pm.environment.set('supervisorAccessToken', body.accessToken);",
+                  "pm.environment.set('runtimeSupervisorAccessToken', body.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10 WASH-SUP-01 lookup scheduled appointment",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"studentEnrollment\": \"{{fixtureStudentEnrollment}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/supervision/lookup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('enrollment lookup returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('scheduled lookup preserves the isolated context', () => {",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(body.student.studentAccountId).to.eql(pm.environment.get('fixtureStudentAccountId'));",
+                  "  pm.expect(body.student.studentEnrollment).to.eql(pm.environment.get('fixtureStudentEnrollment'));",
+                  "  pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));",
+                  "  pm.expect(body.appointment.courseSectionReference.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "  pm.expect(body.appointment.appointmentTimeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  pm.expect(body.appointment.appointmentStatus).to.eql('SCHEDULED');",
+                  "  pm.expect(body.nextAction).to.eql('ENTRY');",
+                  "  pm.expect(body.washExecution).to.eql(null);",
+                  "  pm.expect(body.activeResourceAssignment).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11 WASH-SUP-01 register arrival",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-register-arrival"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointmentId\": \"{{appointmentId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/arrivals"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('command is durably accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('command begins as a pollable operation', () => {",
+                  "  pm.expect(body.status).to.eql('PENDING');",
+                  "  pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.pollPath).to.eql('/api/v1/operations/' + body.operationId);",
+                  "});",
+                  "pm.environment.set('arrivalOperationId', body.operationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12 Poll arrival operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/operations/{{arrivalOperationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operation is visible', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const maxAttempts = Number(pm.environment.get('maxPollAttempts') || 30);",
+                  "const attempts = Number(pm.environment.get('arrivalPollAttempts') || 0);",
+                  "if (body.status === 'PENDING') {",
+                  "  pm.environment.set('arrivalPollAttempts', String(attempts + 1));",
+                  "  pm.test('operation completes within the polling budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('12 Poll arrival operation');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.test('owner command succeeds', () => {",
+                  "    pm.expect(body.status, body.errorCode || 'no error code').to.eql('SUCCEEDED');",
+                  "    pm.expect(body.publicOperation).to.eql('wash-register-arrival');",
+                  "    pm.expect(body.errorCode).to.eql(null);",
+                  "    pm.expect(body.data).to.deep.eql({\"status\":\"PENDING_ENTRY\"});",
+                  "    pm.expect(body.completedAt).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  if (body.status !== 'SUCCEEDED') pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13 WASH-SUP-01 lookup converges to pending entry",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"studentEnrollment\": \"{{fixtureStudentEnrollment}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/supervision/lookup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('enrollment lookup returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const execution = body.washExecution;",
+                  "const converged = body.appointment?.appointmentStatus === 'SCHEDULED' && execution?.status === 'PENDING_ENTRY';",
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('pendingEntryLookupAttempts') || 0);",
+                  "if (!converged) {",
+                  "  pm.environment.set('pendingEntryLookupAttempts', String(attempts + 1));",
+                  "  pm.test('pending lookup converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('13 WASH-SUP-01 lookup converges to pending entry');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "pm.test('pending lookup preserves the isolated context', () => {",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(body.student.studentAccountId).to.eql(pm.environment.get('fixtureStudentAccountId'));",
+                  "  pm.expect(body.student.studentEnrollment).to.eql(pm.environment.get('fixtureStudentEnrollment'));",
+                  "  pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));",
+                  "  pm.expect(body.appointment.courseSectionReference.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "  pm.expect(body.appointment.appointmentTimeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  pm.expect(body.appointment.appointmentStatus).to.eql('SCHEDULED');",
+                  "  pm.expect(body.nextAction).to.eql('ENTRY_DECISION');",
+                  "  pm.expect(body.washExecution.washExecutionId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.washExecution.status).to.eql('PENDING_ENTRY');",
+                  "  pm.expect(body.washExecution.executionVersion).to.eql(1);",
+                  "  pm.expect(body.washExecution.arrivedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.washExecution.rejectionReason).to.eql(null);",
+                  "  pm.expect(body.activeResourceAssignment).to.eql(null);",
+                  "});",
+                  "pm.environment.set('washExecutionId', body.washExecution.washExecutionId);",
+                  "pm.environment.set('washExecutionVersion', String(body.washExecution.executionVersion));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14 WASH-SUP-01 authorize entry",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-decide-entry"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identityConfirmed\": true,\n  \"requirementsSatisfied\": true,\n  \"decision\": \"AUTHORIZED\",\n  \"expectedVersion\": {{washExecutionVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/entry-decision"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('command is durably accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('command begins as a pollable operation', () => {",
+                  "  pm.expect(body.status).to.eql('PENDING');",
+                  "  pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.pollPath).to.eql('/api/v1/operations/' + body.operationId);",
+                  "});",
+                  "pm.environment.set('entryDecisionOperationId', body.operationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15 Poll authorized entry operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/operations/{{entryDecisionOperationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operation is visible', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const maxAttempts = Number(pm.environment.get('maxPollAttempts') || 30);",
+                  "const attempts = Number(pm.environment.get('entryDecisionPollAttempts') || 0);",
+                  "if (body.status === 'PENDING') {",
+                  "  pm.environment.set('entryDecisionPollAttempts', String(attempts + 1));",
+                  "  pm.test('operation completes within the polling budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('15 Poll authorized entry operation');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.test('owner command succeeds', () => {",
+                  "    pm.expect(body.status, body.errorCode || 'no error code').to.eql('SUCCEEDED');",
+                  "    pm.expect(body.publicOperation).to.eql('wash-decide-entry');",
+                  "    pm.expect(body.errorCode).to.eql(null);",
+                  "    pm.expect(body.data).to.deep.eql({status:\"IN_PROGRESS\",tankId:pm.environment.get(\"fixtureTankId\")});",
+                  "    pm.expect(body.completedAt).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  if (body.status !== 'SUCCEEDED') pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16 WASH-SUP-01 lookup converges to authorized entry",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"studentEnrollment\": \"{{fixtureStudentEnrollment}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/supervision/lookup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('enrollment lookup returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const execution = body.washExecution;",
+                  "const converged = body.appointment?.appointmentStatus === 'IN_PROGRESS' && execution?.status === 'IN_PROGRESS';",
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('authorizedLookupAttempts') || 0);",
+                  "if (!converged) {",
+                  "  pm.environment.set('authorizedLookupAttempts', String(attempts + 1));",
+                  "  pm.test('authorized lookup converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('16 WASH-SUP-01 lookup converges to authorized entry');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "pm.test('authorized lookup preserves the isolated context', () => {",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(body.student.studentAccountId).to.eql(pm.environment.get('fixtureStudentAccountId'));",
+                  "  pm.expect(body.student.studentEnrollment).to.eql(pm.environment.get('fixtureStudentEnrollment'));",
+                  "  pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));",
+                  "  pm.expect(body.appointment.courseSectionReference.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "  pm.expect(body.appointment.appointmentTimeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  pm.expect(body.appointment.appointmentStatus).to.eql('IN_PROGRESS');",
+                  "  pm.expect(body.nextAction).to.eql('EXIT_REVIEW');",
+                  "  pm.expect(body.washExecution.washExecutionId).to.eql(pm.environment.get('washExecutionId'));",
+                  "  pm.expect(body.washExecution.status).to.eql('IN_PROGRESS');",
+                  "  pm.expect(body.washExecution.executionVersion).to.eql(2);",
+                  "  pm.expect(body.washExecution.rejectionReason).to.eql(null);",
+                  "  pm.expect(body.activeResourceAssignment.resourceAssignmentId).to.match(/^[0-9a-f-]{36}$/i);\npm.expect(body.activeResourceAssignment.assignmentType).to.eql('INITIAL');\npm.expect(body.activeResourceAssignment.cabin.resourceId).to.eql(pm.environment.get('fixtureCabinId'));\npm.expect(body.activeResourceAssignment.tank.resourceId).to.eql(pm.environment.get('fixtureTankId'));\npm.expect(body.washExecution.exitSubmittedAt).to.eql(null);",
+                  "});",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17 Logout synthetic supervisor",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('supervisor logout returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('supervisor session is revoked', () => pm.expect(body.revoked).to.eql(true));",
+                  "if (body.revoked === true) pm.environment.unset('runtimeSupervisorAccessToken');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
