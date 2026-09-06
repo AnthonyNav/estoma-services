@@ -6,6 +6,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -49,10 +50,21 @@ public class JdbcWashSupervisionQueryRepository implements WashSupervisionQueryP
 
   @Override
   public List<LookupCandidate> findAppointments(UUID studentAccountId, LocalDate serviceDate) {
+    return findAppointments(studentAccountId, null, serviceDate);
+  }
+
+  @Override
+  public Optional<LookupCandidate> findAppointment(UUID appointmentId, LocalDate serviceDate) {
+    return findAppointments(null, appointmentId, serviceDate).stream().findFirst();
+  }
+
+  private List<LookupCandidate> findAppointments(UUID studentAccountId, UUID appointmentId,
+      LocalDate serviceDate) {
     return jdbc.sql("""
         SELECT a.student_account_id, sp.person_id, p.first_name, p.paternal_surname,
                p.maternal_surname, sp.student_number, sp.current_semester, sp.academic_status,
-               a.appointment_id, a.status AS appointment_status, a.appointment_type,
+               a.appointment_id, a.source_version AS appointment_version,
+               a.status AS appointment_status, a.appointment_type,
                a.instrument_count, a.piece_type, a.course_section_id,
                c.nrc AS course_nrc, c.name AS course_name, a.appointment_time_slot_id,
                ats.starts_at AS slot_starts_at, ats.ends_at AS slot_ends_at,
@@ -98,10 +110,15 @@ public class JdbcWashSupervisionQueryRepository implements WashSupervisionQueryP
         ) ra ON TRUE
         LEFT JOIN wash_cabin_read_model cabin ON cabin.cabin_id = ra.cabin_id
         LEFT JOIN wash_tank_read_model tank ON tank.tank_id = ra.tank_id
-        WHERE a.student_account_id = :studentAccountId AND ats.service_date = :serviceDate
+        WHERE ats.service_date = :serviceDate
+          AND (:byStudent = FALSE OR a.student_account_id = :studentAccountId)
+          AND (:byAppointment = FALSE OR a.appointment_id = :appointmentId)
         ORDER BY a.updated_at DESC, a.appointment_id ASC
         """)
-        .param("studentAccountId", studentAccountId)
+        .param("byStudent", studentAccountId != null)
+        .param("studentAccountId", studentAccountId == null ? new UUID(0, 0) : studentAccountId)
+        .param("byAppointment", appointmentId != null)
+        .param("appointmentId", appointmentId == null ? new UUID(0, 0) : appointmentId)
         .param("serviceDate", serviceDate)
         .query((rs, rowNum) -> lookupRow(rs))
         .list();
@@ -176,7 +193,8 @@ public class JdbcWashSupervisionQueryRepository implements WashSupervisionQueryP
         uuid(rs, "student_account_id"), uuid(rs, "person_id"), rs.getString("first_name"),
         rs.getString("paternal_surname"), rs.getString("maternal_surname"),
         rs.getString("student_number"), integer(rs, "current_semester"), rs.getString("academic_status"),
-        uuid(rs, "appointment_id"), rs.getString("appointment_status"), rs.getString("appointment_type"),
+        uuid(rs, "appointment_id"), rs.getObject("appointment_version", Long.class),
+        rs.getString("appointment_status"), rs.getString("appointment_type"),
         integer(rs, "instrument_count"), rs.getString("piece_type"), uuid(rs, "course_section_id"),
         rs.getString("course_nrc"), rs.getString("course_name"), uuid(rs, "appointment_time_slot_id"),
         instant(rs, "slot_starts_at"), instant(rs, "slot_ends_at"), rs.getString("slot_timezone"),

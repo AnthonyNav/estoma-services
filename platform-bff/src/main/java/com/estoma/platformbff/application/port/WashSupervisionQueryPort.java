@@ -3,6 +3,7 @@ package com.estoma.platformbff.application.port;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Read-only composition input dedicated to the supervisor wash view. */
@@ -10,6 +11,8 @@ public interface WashSupervisionQueryPort {
   HomeSnapshot summarizeHome(LocalDate serviceDate);
 
   List<LookupCandidate> findAppointments(UUID studentAccountId, LocalDate serviceDate);
+
+  Optional<LookupCandidate> findAppointment(UUID appointmentId, LocalDate serviceDate);
 
   List<PendingReassignment> findPendingReassignments();
 
@@ -31,6 +34,7 @@ public interface WashSupervisionQueryPort {
       Integer currentSemester,
       String academicStatus,
       UUID appointmentId,
+      Long appointmentVersion,
       String appointmentStatus,
       String appointmentType,
       Integer instrumentCount,

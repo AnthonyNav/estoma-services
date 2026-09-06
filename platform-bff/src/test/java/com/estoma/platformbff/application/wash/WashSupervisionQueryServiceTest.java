@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import com.estoma.platformbff.application.port.WashStudentQueryPort;
 import com.estoma.platformbff.application.port.WashSupervisionQueryPort;
+import com.estoma.platformbff.application.port.AppointmentQrReadPort;
+import com.estoma.platformbff.application.projection.AppointmentQrRecoveryService;
 import com.estoma.platformbff.application.projection.ProjectionReadinessService;
 import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
@@ -38,6 +40,8 @@ class WashSupervisionQueryServiceTest {
   @Mock ProjectionReadinessService readiness;
   @Mock WashSupervisionQueryPort projections;
   @Mock WashStudentQueryPort studentProjections;
+  @Mock AppointmentQrReadPort appointmentQr;
+  @Mock AppointmentQrRecoveryService qrRecovery;
   private WashSupervisionQueryService service;
 
   @BeforeEach
@@ -180,6 +184,68 @@ class WashSupervisionQueryServiceTest {
   }
 
   @Test
+  void enabledQrLookupResolvesExactActiveAppointmentLocally() {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    var candidate = candidate("IN_PROGRESS", UUID.randomUUID(), "PENDING_REASSIGNMENT", false, false);
+    when(qrRecovery.isReady(SERVICE_DATE)).thenReturn(true);
+    when(appointmentQr.findByExactRepresentation("opaque")).thenReturn(Optional.of(
+        new AppointmentQrReadPort.Mapping(candidate.appointmentId(), 1, "opaque")));
+    when(projections.findAppointment(candidate.appointmentId(), SERVICE_DATE))
+        .thenReturn(Optional.of(candidate));
+
+    var response = service.lookup(new SupervisorLookupRequest(LookupType.QR, "opaque", null));
+
+    assertThat(response.appointment().appointmentId()).isEqualTo(candidate.appointmentId());
+    assertThat(response.nextAction()).isEqualTo(NextAction.REASSIGNMENT);
+    verify(authorization).requireWashSupervisor();
+    verify(readiness).requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
+  }
+
+  @Test
+  void enabledQrLookupUsesUniformNotFoundForUnknownRepresentation() {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    when(qrRecovery.isReady(SERVICE_DATE)).thenReturn(true);
+    when(appointmentQr.findByExactRepresentation("unknown")).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.lookup(
+        new SupervisorLookupRequest(LookupType.QR, "unknown", null)))
+        .isInstanceOf(WashSupervisionQueryService.LookupNotFoundException.class);
+  }
+
+  @Test
+  void enabledQrLookupFailsClosedForTerminalAppointmentView() {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    var terminal = candidate("COMPLETED", null, null, false, false);
+    when(qrRecovery.isReady(SERVICE_DATE)).thenReturn(true);
+    when(appointmentQr.findByExactRepresentation("opaque")).thenReturn(Optional.of(
+        new AppointmentQrReadPort.Mapping(terminal.appointmentId(), 1, "opaque")));
+    when(projections.findAppointment(terminal.appointmentId(), SERVICE_DATE))
+        .thenReturn(Optional.of(terminal));
+
+    assertThatThrownBy(() -> service.lookup(
+        new SupervisorLookupRequest(LookupType.QR, "opaque", null)))
+        .isInstanceOf(ProjectionUnavailableException.class);
+  }
+
+  @Test
+  void enabledQrLookupFailsClosedForFutureOrMissingAppointmentVersion() {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    var active = candidate("SCHEDULED", null, null, false, false, null);
+    when(qrRecovery.isReady(SERVICE_DATE)).thenReturn(true);
+    when(appointmentQr.findByExactRepresentation("opaque")).thenReturn(Optional.of(
+        new AppointmentQrReadPort.Mapping(active.appointmentId(), 2, "opaque")));
+    when(projections.findAppointment(active.appointmentId(), SERVICE_DATE)).thenReturn(Optional.of(active));
+
+    assertThatThrownBy(() -> service.lookup(
+        new SupervisorLookupRequest(LookupType.QR, "opaque", null)))
+        .isInstanceOf(ProjectionUnavailableException.class);
+  }
+
+  @Test
   void composesTheCanonicalPendingReassignmentView() {
     UUID executionId = UUID.randomUUID();
     when(projections.findPendingReassignments()).thenReturn(List.of(new WashSupervisionQueryPort.PendingReassignment(
@@ -215,9 +281,15 @@ class WashSupervisionQueryServiceTest {
 
   private static WashSupervisionQueryPort.LookupCandidate candidate(String appointmentStatus,
       UUID executionId, String executionStatus, boolean assignment, boolean materials) {
+    return candidate(appointmentStatus, executionId, executionStatus, assignment, materials, 1L);
+  }
+
+  private static WashSupervisionQueryPort.LookupCandidate candidate(String appointmentStatus,
+      UUID executionId, String executionStatus, boolean assignment, boolean materials,
+      Long appointmentVersion) {
     return new WashSupervisionQueryPort.LookupCandidate(
         ACCOUNT_ID, UUID.randomUUID(), "Ana", "García", "Reyes", "201945678", 7, "ACTIVE",
-        UUID.randomUUID(), appointmentStatus, "NORMAL", 15, "HIGH_SPEED", UUID.randomUUID(),
+        UUID.randomUUID(), appointmentVersion, appointmentStatus, "NORMAL", 15, "HIGH_SPEED", UUID.randomUUID(),
         "12345", "Cirugía Bucal", UUID.randomUUID(), NOW, NOW.plusSeconds(3600),
         "America/Mexico_City", executionId, executionStatus, executionId == null ? null : 4L,
         executionId == null ? null : NOW.minusSeconds(60), null,

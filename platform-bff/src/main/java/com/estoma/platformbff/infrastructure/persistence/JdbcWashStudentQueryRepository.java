@@ -115,7 +115,7 @@ public class JdbcWashStudentQueryRepository implements WashStudentQueryPort {
         .param("accountId", accountId)
         .param("serviceDate", serviceDate)
         .query((rs, rowNum) -> new Appointment(uuid(rs, "appointment_id"),
-            rs.getString("appointment_status"), rs.getLong("appointment_version"),
+            rs.getString("appointment_status"), rs.getObject("appointment_version", Long.class),
             rs.getString("appointment_type"),
             integer(rs, "instrument_count"), rs.getString("piece_type"),
             uuid(rs, "course_section_id"), rs.getString("course_nrc"), rs.getString("course_name"),

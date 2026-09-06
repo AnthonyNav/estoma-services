@@ -41,5 +41,22 @@ not quarantined halfway through recovery.
 
 Two successful passes alone do not prove completeness. Appointment event consumption must stay
 continuous throughout bootstrap, then operations must verify the date has no missing active QR
-projection before any future Home or lookup reader is enabled. A new service date has its own
-recovery state and cannot inherit another date's `READY` status.
+projection before enabling the public read flag. A new service date has its own recovery state
+and cannot inherit another date's `READY` status.
+
+## Public read activation
+
+Student Home and supervisor QR lookup are implemented behind
+`BFF_WASH_QR_ENABLED=false`. Enabling the flag does not bypass recovery: an active appointment
+requires the current `America/Mexico_City` service date to be `READY`. Student Home returns the
+exact opaque owner representation for `SCHEDULED` and `IN_PROGRESS` appointments, including
+`PENDING_REASSIGNMENT`; terminal appointments return `null` without depending on QR readiness.
+An active appointment with a missing, future-version or contradictory QR mapping returns 503.
+
+Supervisor QR lookup hashes the supplied representation for indexed local lookup and then
+compares the exact value. Unknown and tombstoned representations return the same 404 response.
+A mapping whose appointment is absent for the current service date, terminal, incoherent or
+behind an impossible future mapping returns 503. Lookup performs no owner RPC and publishes no
+command. Keep the public flag off until the owner query and recovery scheduler are enabled, all
+BFF replicas run the recovery implementation, the date is `READY`, event consumption stayed
+continuous, and the active-appointment audit reports no missing mappings.

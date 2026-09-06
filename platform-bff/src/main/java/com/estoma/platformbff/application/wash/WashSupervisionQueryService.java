@@ -2,6 +2,8 @@ package com.estoma.platformbff.application.wash;
 
 import com.estoma.platformbff.application.port.WashSupervisionQueryPort;
 import com.estoma.platformbff.application.port.WashStudentQueryPort;
+import com.estoma.platformbff.application.port.AppointmentQrReadPort;
+import com.estoma.platformbff.application.projection.AppointmentQrRecoveryService;
 import com.estoma.platformbff.application.projection.ProjectionReadinessService;
 import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
@@ -35,6 +37,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 @Service
 public class WashSupervisionQueryService {
@@ -51,15 +55,30 @@ public class WashSupervisionQueryService {
   private final WashSupervisionQueryPort projections;
   private final WashStudentQueryPort studentProjections;
   private final Clock clock;
+  private final AppointmentQrReadPort appointmentQr;
+  private final AppointmentQrRecoveryService qrRecovery;
+  private final boolean qrEnabled;
 
+  @Autowired
   public WashSupervisionQueryService(LocalAuthorizationService authorization,
       ProjectionReadinessService readiness, WashSupervisionQueryPort projections,
-      WashStudentQueryPort studentProjections, Clock clock) {
+      WashStudentQueryPort studentProjections, Clock clock, AppointmentQrReadPort appointmentQr,
+      AppointmentQrRecoveryService qrRecovery,
+      @Value("${platform.wash.qr.enabled:false}") boolean qrEnabled) {
     this.authorization = authorization;
     this.readiness = readiness;
     this.projections = projections;
     this.studentProjections = studentProjections;
     this.clock = clock;
+    this.appointmentQr = appointmentQr;
+    this.qrRecovery = qrRecovery;
+    this.qrEnabled = qrEnabled;
+  }
+
+  public WashSupervisionQueryService(LocalAuthorizationService authorization,
+      ProjectionReadinessService readiness, WashSupervisionQueryPort projections,
+      WashStudentQueryPort studentProjections, Clock clock) {
+    this(authorization, readiness, projections, studentProjections, clock, null, null, false);
   }
 
   public SupervisorHomeResponse home() {
@@ -76,10 +95,8 @@ public class WashSupervisionQueryService {
   public SupervisorLookupResponse lookup(SupervisorLookupRequest request) {
     authorization.requireWashSupervisor();
     readiness.requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
-    if (request.lookupType() == LookupType.QR) {
-      throw new ProjectionUnavailableException("QR supervisor lookup is gated pending its local projection");
-    }
     LocalDate serviceDate = serviceDate();
+    if (request.lookupType() == LookupType.QR) return lookupQr(request.qrRepresentation(), serviceDate);
     UUID accountId = studentProjections.findAccountIdByStudentEnrollment(request.studentEnrollment())
         .orElseThrow(LookupNotFoundException::new);
     List<WashSupervisionQueryPort.LookupCandidate> candidates =
@@ -98,6 +115,24 @@ public class WashSupervisionQueryService {
                 "the projected appointment state cannot be mapped safely"))
         : active.getFirst();
     return composeLookup(serviceDate, selected);
+  }
+
+  private SupervisorLookupResponse lookupQr(String representation, LocalDate serviceDate) {
+    if (!qrEnabled || !qrRecovery.isReady(serviceDate)) {
+      throw new ProjectionUnavailableException("appointment QR lookup is not ready for the service date");
+    }
+    AppointmentQrReadPort.Mapping mapping = appointmentQr.findByExactRepresentation(representation)
+        .orElseThrow(LookupNotFoundException::new);
+    WashSupervisionQueryPort.LookupCandidate candidate =
+        projections.findAppointment(mapping.appointmentId(), serviceDate)
+            .orElseThrow(() -> new ProjectionUnavailableException(
+                "appointment QR projection has no matching Appointment view"));
+    if (candidate.appointmentVersion() == null
+        || mapping.appointmentVersion() > candidate.appointmentVersion()
+        || !isActive(candidate)) {
+      throw new ProjectionUnavailableException("appointment QR projection contradicts Appointment state");
+    }
+    return composeLookup(serviceDate, candidate);
   }
 
   public PendingReassignmentsResponse pendingReassignments() {

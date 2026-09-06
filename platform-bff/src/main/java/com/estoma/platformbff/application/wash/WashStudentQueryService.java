@@ -1,6 +1,8 @@
 package com.estoma.platformbff.application.wash;
 
 import com.estoma.platformbff.application.port.WashStudentQueryPort;
+import com.estoma.platformbff.application.port.AppointmentQrReadPort;
+import com.estoma.platformbff.application.projection.AppointmentQrRecoveryService;
 import com.estoma.platformbff.application.projection.ProjectionReadinessService;
 import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
@@ -21,22 +23,39 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 
 @Service
 public class WashStudentQueryService {
   private static final ZoneId SERVICE_ZONE = ZoneId.of("America/Mexico_City");
+  private static final java.util.Set<String> QR_ACTIVE_STATUSES = java.util.Set.of("SCHEDULED", "IN_PROGRESS");
 
   private final LocalAuthorizationService authorization;
   private final ProjectionReadinessService readiness;
   private final WashStudentQueryPort projections;
   private final Clock clock;
+  private final AppointmentQrReadPort appointmentQr;
+  private final AppointmentQrRecoveryService qrRecovery;
+  private final boolean qrEnabled;
 
+  @Autowired
   public WashStudentQueryService(LocalAuthorizationService authorization,
-      ProjectionReadinessService readiness, WashStudentQueryPort projections, Clock clock) {
+      ProjectionReadinessService readiness, WashStudentQueryPort projections, Clock clock,
+      AppointmentQrReadPort appointmentQr, AppointmentQrRecoveryService qrRecovery,
+      @Value("${platform.wash.qr.enabled:false}") boolean qrEnabled) {
     this.authorization = authorization;
     this.readiness = readiness;
     this.projections = projections;
     this.clock = clock;
+    this.appointmentQr = appointmentQr;
+    this.qrRecovery = qrRecovery;
+    this.qrEnabled = qrEnabled;
+  }
+
+  public WashStudentQueryService(LocalAuthorizationService authorization,
+      ProjectionReadinessService readiness, WashStudentQueryPort projections, Clock clock) {
+    this(authorization, readiness, projections, clock, null, null, false);
   }
 
   public StudentHomeResponse home() {
@@ -45,7 +64,7 @@ public class WashStudentQueryService {
     var student = requireStudent(accountId);
     LocalDate serviceDate = clock.instant().atZone(SERVICE_ZONE).toLocalDate();
     StudentHomeAppointment appointment = projections.findPrimaryAppointment(accountId, serviceDate)
-        .map(value -> appointment(value, clock))
+        .map(value -> appointment(value, clock, serviceDate))
         .orElse(null);
     return new StudentHomeResponse(homeStudent(student), serviceDate, appointment);
   }
@@ -71,7 +90,11 @@ public class WashStudentQueryService {
         student.currentSemester());
   }
 
-  private static StudentHomeAppointment appointment(WashStudentQueryPort.Appointment value, Clock clock) {
+  private StudentHomeAppointment appointment(WashStudentQueryPort.Appointment value, Clock clock,
+      LocalDate serviceDate) {
+    if (value.appointmentVersion() == null) {
+      throw new ProjectionUnavailableException("appointment version is incomplete");
+    }
     CourseSection course = value.courseSectionId() == null ? null
         : new CourseSection(value.courseSectionId(), value.courseNrc(), value.courseName());
     AppointmentTimeSlot slot = value.appointmentTimeSlotId() == null ? null
@@ -96,7 +119,38 @@ public class WashStudentQueryService {
     return new StudentHomeAppointment(value.appointmentId(), value.appointmentStatus(), value.appointmentVersion(),
         value.exceptionalAuthorizationId() != null, studentCancellationAction(value, clock),
         value.appointmentType(), value.instrumentCount(), value.pieceType(), course, slot, execution,
-        qrUsageContext(value, clock), null);
+        qrUsageContext(value, clock), qrRepresentation(value, serviceDate));
+  }
+
+  private String qrRepresentation(WashStudentQueryPort.Appointment appointment, LocalDate serviceDate) {
+    if (!qrEnabled) return null;
+    if (!isQrActive(appointment)) return null;
+    if (!qrRecovery.isReady(serviceDate)) {
+      throw new ProjectionUnavailableException("appointment QR recovery is not ready for the service date");
+    }
+    AppointmentQrReadPort.Mapping mapping = appointmentQr.findByAppointmentId(appointment.appointmentId())
+        .orElseThrow(() -> new ProjectionUnavailableException("appointment QR projection is incomplete"));
+    if (!mapping.appointmentId().equals(appointment.appointmentId())
+        || mapping.qrRepresentation() == null
+        || mapping.appointmentVersion() > appointment.appointmentVersion()) {
+      throw new ProjectionUnavailableException("appointment QR projection contradicts Appointment state");
+    }
+    return mapping.qrRepresentation();
+  }
+
+  private static boolean isQrActive(WashStudentQueryPort.Appointment appointment) {
+    if (!QR_ACTIVE_STATUSES.contains(appointment.appointmentStatus())) return false;
+    if ("SCHEDULED".equals(appointment.appointmentStatus())) {
+      if (appointment.washExecutionId() == null) return true;
+      if ("PENDING_ENTRY".equals(appointment.washExecutionStatus())
+          || "PENDING_REASSIGNMENT".equals(appointment.washExecutionStatus())) return true;
+    } else if (appointment.washExecutionId() != null
+        && ("PENDING_REASSIGNMENT".equals(appointment.washExecutionStatus())
+            || "IN_PROGRESS".equals(appointment.washExecutionStatus())
+            || "EXIT_SUBMITTED".equals(appointment.washExecutionStatus()))) {
+      return true;
+    }
+    throw new ProjectionUnavailableException("appointment and wash execution states contradict each other");
   }
 
   private static void requireExecutionContext(WashStudentQueryPort.Appointment value,
