@@ -42,30 +42,13 @@ public interface WashStudentQueryPort {
       Long washExecutionVersion,
       Instant washExecutionArrivedAt,
       String washExecutionRejectionReason,
-      Instant exitSubmittedAt,
-      Integer submittedPackageCount,
-      Integer submittedGreenPaperCassette8Count,
-      Integer submittedGreenPaperCassette10Count,
-      Integer submittedWitnessTapePortionCount,
-      Instant completedAt,
-      Integer finalPackageCount,
-      Integer finalGreenPaperCassette8Count,
-      Integer finalGreenPaperCassette10Count,
-      Integer finalWitnessTapePortionCount,
       UUID resourceAssignmentId,
       UUID cabinId,
       String cabinCode,
       String cabinName,
       UUID tankId,
       String tankCode,
-      String tankName,
-      UUID lastResourceAssignmentId,
-      UUID lastCabinId,
-      String lastCabinCode,
-      String lastCabinName,
-      UUID lastTankId,
-      String lastTankCode,
-      String lastTankName) {}
+      String tankName) {}
 
   record CourseSection(UUID courseSectionId, String nrc, String name) {}
 }

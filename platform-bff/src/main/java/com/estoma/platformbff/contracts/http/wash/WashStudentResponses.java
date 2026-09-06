@@ -49,22 +49,10 @@ public final class WashStudentResponses {
   public record WashExecution(
       @NotNull UUID washExecutionId,
       @NotNull @Pattern(regexp = "PENDING_ENTRY|ENTRY_REJECTED|PENDING_REASSIGNMENT|IN_PROGRESS|EXIT_SUBMITTED|COMPLETED|CANCELLED") String status,
-      @Required Long version,
-      @Required Long executionVersion,
+      Long version,
       Instant arrivedAt,
       String rejectionReason,
-      Instant exitSubmittedAt,
-      ExitMaterials submittedExitMaterials,
-      Instant completedAt,
-      ExitMaterials finalExitMaterials,
-      ActiveResourceAssignment activeResourceAssignment,
-      ActiveResourceAssignment lastResourceAssignment) {}
-
-  public record ExitMaterials(
-      int packageCount,
-      int greenPaperCassette8Count,
-      int greenPaperCassette10Count,
-      int witnessTapePortionCount) {}
+      ActiveResourceAssignment activeResourceAssignment) {}
 
   public record ActiveResourceAssignment(
       UUID resourceAssignmentId,

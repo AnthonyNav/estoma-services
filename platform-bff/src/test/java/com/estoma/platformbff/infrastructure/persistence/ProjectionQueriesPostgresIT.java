@@ -229,11 +229,6 @@ class ProjectionQueriesPostgresIT {
         """).param("executionId", executionId).query().singleRow();
     assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(completedAt);
     assertThat(assignment.get("source_version")).isEqualTo(4L);
-    var home = studentQueries.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 1)).orElseThrow();
-    assertThat(home.resourceAssignmentId()).isNull();
-    assertThat(home.lastResourceAssignmentId()).isNotNull();
-    assertThat(home.lastCabinCode()).isEqualTo("C-01");
-    assertThat(home.finalPackageCount()).isEqualTo(5);
   }
 
   @Test
