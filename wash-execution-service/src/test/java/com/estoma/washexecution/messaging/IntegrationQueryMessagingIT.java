@@ -195,6 +195,121 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
     assertThat(result.payload().path("error").path("code").asText()).isEqualTo("INVALID_PAGE_TOKEN");
   }
 
+  @Test
+  void reassignmentCandidatesPublishesOwnerOrderedSnapshotThroughOutbox() throws Exception {
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    seedSlot(slotId);
+    seedAppointment(appointmentId, slotId);
+    seedExecution(executionId, appointmentId, "PENDING_REASSIGNMENT", 4);
+    seedReady("appointments");
+    seedReady("wash-administration");
+    seedResource(cabinId, tankId, "107", "Cabina 107", "B", "Tina B");
+
+    MessageEnvelope query = candidateQuery("bff", executionId);
+    MessageEnvelope result = executeCandidateQuery(query, CANDIDATE_BFF_RESULT_QUEUE);
+
+    assertThat(result.messageType()).isEqualTo("GetReassignmentCandidatesResult");
+    assertThat(result.messageKind()).isEqualTo(MessageKind.RESULT);
+    assertThat(result.producer()).isEqualTo("wash-execution");
+    assertThat(result.actor().type()).isEqualTo("SYSTEM");
+    assertThat(result.actor().accountId()).isNull();
+    assertThat(result.actor().service()).isEqualTo("wash-execution");
+    assertThat(result.causationId()).isEqualTo(query.messageId());
+    assertThat(result.correlationId()).isEqualTo(query.correlationId());
+    JsonNode data = result.payload().path("data");
+    assertThat(data.path("washExecutionId").asText()).isEqualTo(executionId.toString());
+    assertThat(data.path("executionVersion").asInt()).isEqualTo(4);
+    assertThat(Instant.parse(data.path("freshUntil").asText()))
+        .isEqualTo(Instant.parse(data.path("snapshotGeneratedAt").asText()).plusSeconds(10));
+    assertThat(data.path("candidates").size()).isEqualTo(1);
+    JsonNode candidate = data.path("candidates").get(0);
+    assertThat(candidate.path("cabinCode").asText()).isEqualTo("107");
+    assertThat(candidate.path("cabinName").asText()).isEqualTo("Cabina 107");
+    assertThat(candidate.path("tankCode").asText()).isEqualTo("B");
+    assertThat(candidate.path("tankName").asText()).isEqualTo("Tina B");
+    assertThat(candidate.path("availableCapacity").asInt()).isEqualTo(2);
+    assertThat(data.path("recommendedCandidate")).isEqualTo(candidate);
+  }
+
+  @Test
+  void trustworthyNoCandidateSnapshotIsSucceededEmptyRatherThanRejected() throws Exception {
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    seedSlot(slotId);
+    seedAppointment(appointmentId, slotId);
+    seedExecution(executionId, appointmentId, "PENDING_REASSIGNMENT", 2);
+    seedReady("appointments");
+    seedReady("wash-administration");
+    seedResource(cabinId, tankId, "108", "Cabina 108", "C", "Tina C");
+    jdbc.update("""
+        INSERT INTO resource_unavailabilities(
+          resource_unavailability_id,detected_during_wash_execution_id,cabin_id,tank_id,cause_type,
+          reason,disabled_by_account_id,disabled_at,version,created_at,updated_at)
+        VALUES(?,NULL,NULL,?,'MANUAL_DISABLE','maintenance',?,?,1,now(),now())
+        """, UUID.randomUUID(), tankId, UUID.randomUUID(), Timestamp.from(NOW));
+
+    MessageEnvelope result = executeCandidateQuery(candidateQuery("bff", executionId),
+        CANDIDATE_BFF_RESULT_QUEUE);
+
+    assertThat(result.payload().path("status").asText()).isEqualTo("SUCCEEDED");
+    assertThat(result.payload().path("data").path("candidates")).isEmpty();
+    assertThat(result.payload().path("data").has("recommendedCandidate")).isFalse();
+  }
+
+  @Test
+  void candidateQueryRejectsMissingUnreadyAndNonPendingExecution() throws Exception {
+    MessageEnvelope missing = executeCandidateQuery(candidateQuery("bff", UUID.randomUUID()),
+        CANDIDATE_BFF_RESULT_QUEUE);
+    assertThat(missing.payload().path("error").path("code").asText())
+        .isEqualTo("WASH_EXECUTION_NOT_FOUND");
+
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    seedExecution(executionId, appointmentId, "PENDING_REASSIGNMENT", 2);
+
+    MessageEnvelope unready = executeCandidateQuery(candidateQuery("bff", executionId),
+        CANDIDATE_BFF_RESULT_QUEUE);
+    assertThat(unready.payload().path("error").path("code").asText())
+        .isEqualTo("APPOINTMENT_CONTEXT_UNAVAILABLE");
+
+    seedSlot(slotId);
+    seedAppointment(appointmentId, slotId);
+    seedReady("appointments");
+    MessageEnvelope resourcesUnready = executeCandidateQuery(candidateQuery("bff", executionId),
+        CANDIDATE_BFF_RESULT_QUEUE);
+    assertThat(resourcesUnready.payload().path("error").path("code").asText())
+        .isEqualTo("RESOURCE_CONFIGURATION_UNAVAILABLE");
+
+    jdbc.update("UPDATE wash_executions SET status='IN_PROGRESS' WHERE wash_execution_id=?", executionId);
+    MessageEnvelope notPending = executeCandidateQuery(candidateQuery("bff", executionId),
+        CANDIDATE_BFF_RESULT_QUEUE);
+    assertThat(notPending.payload().path("error").path("code").asText())
+        .isEqualTo("REASSIGNMENT_NOT_PENDING");
+  }
+
+  @Test
+  void candidateQueryIsAllowedOnlyForBffAndBffCannotUseRecoveryQueries() throws Exception {
+    MessageEnvelope appointmentsCandidate = candidateQuery("appointments", UUID.randomUUID());
+    MessageEnvelope deniedCandidate = executeCandidateQuery(
+        appointmentsCandidate, APPOINTMENTS_RESULT_QUEUE);
+    assertThat(deniedCandidate.payload().path("error").path("code").asText())
+        .isEqualTo("QUERY_PRODUCER_NOT_ALLOWED");
+
+    MessageEnvelope bffRecovery = query(
+        "GetWashExecutionIntegrationContext", "bff", Map.of("appointmentId", UUID.randomUUID()));
+    MessageEnvelope deniedRecovery = executeCandidateQuery(bffRecovery, CANDIDATE_BFF_RESULT_QUEUE);
+    assertThat(deniedRecovery.payload().path("error").path("code").asText())
+        .isEqualTo("QUERY_PRODUCER_NOT_ALLOWED");
+  }
+
   private JsonNode queryExecution(UUID appointmentId) throws Exception {
     MessageEnvelope query = query(
         "GetWashExecutionIntegrationContext", "appointments", Map.of("appointmentId", appointmentId));
@@ -215,12 +330,33 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
     return result.payload().path("data").path("washExecution");
   }
 
+  private MessageEnvelope executeCandidateQuery(MessageEnvelope query, String resultQueue)
+      throws Exception {
+    send(query);
+    awaitOutbox(query.messageId());
+    relay.relay();
+    Message raw = rabbit.receive(resultQueue, 5_000);
+    assertThat(raw).isNotNull();
+    MessageEnvelope result = codec.decode(raw.getBody());
+    assertThat(result.payload().path("status").asText())
+        .isIn("SUCCEEDED", "REJECTED");
+    return result;
+  }
+
   private MessageEnvelope query(String type, String producer, Map<String, Object> payload) {
     UUID correlation = UUID.randomUUID();
     return new MessageEnvelope(
         UUID.randomUUID(), type, 1, MessageKind.QUERY, producer, NOW,
         correlation, null, UUID.randomUUID(), null, null, null,
         new Actor("SYSTEM", null, producer), codec.toNode(payload));
+  }
+
+  private MessageEnvelope candidateQuery(String producer, UUID washExecutionId) {
+    UUID correlation = UUID.randomUUID();
+    return new MessageEnvelope(
+        UUID.randomUUID(), "GetReassignmentCandidates", 1, MessageKind.QUERY, producer, NOW,
+        correlation, null, null, null, null, null,
+        new Actor("SYSTEM", null, producer), codec.toNode(Map.of("washExecutionId", washExecutionId)));
   }
 
   private void send(MessageEnvelope query) {
@@ -272,5 +408,28 @@ class IntegrationQueryMessagingIT extends AbstractMessagingIT {
           source_version,updated_at)
         VALUES(?,?,?,?, 'NORMAL',1,'INSTRUMENT','SCHEDULED',NULL,1,now())
         """, appointmentId, UUID.randomUUID(), slotId, UUID.randomUUID());
+  }
+
+  private void seedReady(String projection) {
+    jdbc.update("""
+        INSERT INTO projection_recovery_state(
+          projection_name,source_logical_component_id,readiness_status,last_successful_rebuild_at,
+          last_error,updated_at)
+        VALUES(?,?,'READY',now(),NULL,now())
+        """, projection, projection);
+  }
+
+  private void seedResource(
+      UUID cabinId, UUID tankId, String cabinCode, String cabinName,
+      String tankCode, String tankName) {
+    jdbc.update("""
+        INSERT INTO cabin_projection(cabin_id,code,name,cabin_type,status,source_version,updated_at)
+        VALUES(?,?,?,'NORMAL','ACTIVE',1,now())
+        """, cabinId, cabinCode, cabinName);
+    jdbc.update("""
+        INSERT INTO tank_projection(
+          tank_id,cabin_id,code,name,configured_capacity,status,source_version,updated_at)
+        VALUES(?,?,?,?,2,'ACTIVE',1,now())
+        """, tankId, cabinId, tankCode, tankName);
   }
 }

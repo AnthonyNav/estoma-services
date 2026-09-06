@@ -21,7 +21,8 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
   @Override
   public List<ProjectionRepositories.ResourceCandidate> findCandidates(AppointmentType type, UUID slotId) {
     return jdbc.query("""
-        SELECT c.cabin_id,t.tank_id,c.code AS cabin_code,t.code AS tank_code,c.cabin_type,
+        SELECT c.cabin_id,t.tank_id,c.code AS cabin_code,c.name AS cabin_name,
+          t.code AS tank_code,t.name AS tank_name,c.cabin_type,
           c.status AS cabin_status,t.status AS tank_status,t.configured_capacity,
           (SELECT count(*) FROM resource_assignments a
             WHERE a.tank_id=t.tank_id AND a.appointment_time_slot_id=? AND a.released_at IS NULL) AS active_count,
@@ -49,7 +50,8 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
   public Optional<ProjectionRepositories.ResourceCandidate> findCandidate(
       UUID cabinId, UUID tankId, UUID slotId) {
     return jdbc.query("""
-        SELECT c.cabin_id,t.tank_id,c.code AS cabin_code,t.code AS tank_code,c.cabin_type,
+        SELECT c.cabin_id,t.tank_id,c.code AS cabin_code,c.name AS cabin_name,
+          t.code AS tank_code,t.name AS tank_name,c.cabin_type,
           c.status AS cabin_status,t.status AS tank_status,t.configured_capacity,
           (SELECT count(*) FROM resource_assignments a
             WHERE a.tank_id=t.tank_id AND a.appointment_time_slot_id=? AND a.released_at IS NULL) AS active_count,
@@ -118,7 +120,8 @@ public class JdbcResourceProjectionRepository implements ProjectionRepositories.
   private ProjectionRepositories.ResourceCandidate mapCandidate(ResultSet rs, int row) throws SQLException {
     return new ProjectionRepositories.ResourceCandidate(
         rs.getObject("cabin_id", UUID.class), rs.getObject("tank_id", UUID.class),
-        rs.getString("cabin_code"), rs.getString("tank_code"), CabinType.valueOf(rs.getString("cabin_type")),
+        rs.getString("cabin_code"), rs.getString("cabin_name"),
+        rs.getString("tank_code"), rs.getString("tank_name"), CabinType.valueOf(rs.getString("cabin_type")),
         rs.getString("cabin_status"), rs.getString("tank_status"), rs.getInt("configured_capacity"),
         rs.getInt("active_count"), rs.getInt("priority_order"));
   }

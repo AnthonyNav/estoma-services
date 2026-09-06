@@ -50,7 +50,8 @@ class WashExecutionIntegrationQueryServiceTest {
       }
     };
     WashExecutionIntegrationQueryService service = new WashExecutionIntegrationQueryService(
-        repository, published::set, json, Clock.fixed(snapshotAt, ZoneOffset.UTC));
+        repository, null, null, null, null, null,
+        published::set, json, Clock.fixed(snapshotAt, ZoneOffset.UTC));
     IntegrationQueryMetadata metadata = new IntegrationQueryMetadata(
         UUID.randomUUID(), "GetWashExecutionIntegrationContext", "appointments",
         UUID.randomUUID(), null, ActorContext.system("appointments"));

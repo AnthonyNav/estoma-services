@@ -14,7 +14,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 public final class ResourceAllocator {
   private final ProjectionRepositories.ResourceProjectionRepository resources;
@@ -51,16 +53,29 @@ public final class ResourceAllocator {
     List<ProjectionRepositories.ResourceCandidate> snapshot = resources.findCandidates(
         appointmentType, slot.appointmentTimeSlotId());
     lockCandidateSet(snapshot);
+    Set<CandidateKey> locked = snapshot.stream()
+        .map(candidate -> new CandidateKey(candidate.cabinId(), candidate.tankId()))
+        .collect(Collectors.toUnmodifiableSet());
 
-    List<ProjectionRepositories.ResourceCandidate> current = snapshot.stream()
-        .map(candidate -> resources.findCandidate(
-            candidate.cabinId(), candidate.tankId(), slot.appointmentTimeSlotId()).orElse(null))
-        .filter(Objects::nonNull)
-        .sorted(businessOrder())
+    List<ProjectionRepositories.ResourceCandidate> current = resources.findCandidates(
+        appointmentType, slot.appointmentTimeSlotId()).stream()
+        .filter(candidate -> locked.contains(new CandidateKey(candidate.cabinId(), candidate.tankId())))
         .toList();
-    return current.stream()
-        .filter(candidate -> available(candidate, appointmentType, slot, assignmentAt))
-        .findFirst();
+    return eligibleCandidates(current, appointmentType, slot, assignmentAt).stream().findFirst();
+  }
+
+  /** Returns the current owner-ordered candidates without reserving or locking resources. */
+  public List<ProjectionRepositories.ResourceCandidate> snapshotCandidates(
+      AppointmentType appointmentType,
+      ProjectionRepositories.TimeSlotContext slot,
+      Instant snapshotAt) {
+    requireAdministrationReady();
+    requireActiveSlot(slot);
+    return eligibleCandidates(
+        resources.findCandidates(appointmentType, slot.appointmentTimeSlotId()),
+        appointmentType,
+        slot,
+        snapshotAt);
   }
 
   public ProjectionRepositories.ResourceCandidate requireSelected(
@@ -136,6 +151,17 @@ public final class ResourceAllocator {
     return availableRestrictions(candidate, slot, assignmentAt);
   }
 
+  private List<ProjectionRepositories.ResourceCandidate> eligibleCandidates(
+      List<ProjectionRepositories.ResourceCandidate> candidates,
+      AppointmentType appointmentType,
+      ProjectionRepositories.TimeSlotContext slot,
+      Instant at) {
+    return candidates.stream()
+        .filter(candidate -> available(candidate, appointmentType, slot, at))
+        .sorted(businessOrder())
+        .toList();
+  }
+
   private boolean availableRestrictions(
       ProjectionRepositories.ResourceCandidate candidate,
       ProjectionRepositories.TimeSlotContext slot,
@@ -194,4 +220,6 @@ public final class ResourceAllocator {
         .thenComparing(ProjectionRepositories.ResourceCandidate::cabinId)
         .thenComparing(ProjectionRepositories.ResourceCandidate::tankId);
   }
+
+  private record CandidateKey(UUID cabinId, UUID tankId) {}
 }

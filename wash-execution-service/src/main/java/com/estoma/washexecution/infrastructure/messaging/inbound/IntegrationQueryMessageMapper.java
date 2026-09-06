@@ -33,8 +33,19 @@ public final class IntegrationQueryMessageMapper {
               serviceDate(payload),
               optionalInt(payload, "pageSize"),
               optionalPageToken(payload));
+      case "GetReassignmentCandidates" ->
+          new WashExecutionIntegrationQuery.GetReassignmentCandidates(
+              reassignmentExecutionId(payload));
       default -> throw rejected("UNSUPPORTED_QUERY");
     };
+  }
+
+  private static UUID reassignmentExecutionId(JsonNode payload) {
+    if (payload == null || !payload.isObject()
+        || payload.size() != 1 || !payload.has("washExecutionId")) {
+      throw rejected("INVALID_QUERY_PAYLOAD");
+    }
+    return uuid(payload, "washExecutionId", "INVALID_WASH_EXECUTION_ID");
   }
 
   private static LocalDate serviceDate(JsonNode payload) {

@@ -25,6 +25,7 @@ import org.testcontainers.rabbitmq.RabbitMQContainer;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 public abstract class AbstractMessagingIT {
   protected static final String BFF_RESULT_QUEUE = "test.wash-execution.results.platform-bff";
+  protected static final String CANDIDATE_BFF_RESULT_QUEUE = "test.wash-execution.results.bff";
   protected static final String APPOINTMENTS_RESULT_QUEUE = "test.wash-execution.results.appointments";
   protected static final String UNAUTHORIZED_RESULT_QUEUE = "test.wash-execution.results.unauthorized";
   protected static final String EVENT_TAP_QUEUE = "test.wash-execution.events.tap";
@@ -98,6 +99,7 @@ public abstract class AbstractMessagingIT {
         """);
 
     declareTap(BFF_RESULT_QUEUE, MessagingNames.RESULTS_EXCHANGE, "platform-bff");
+    declareTap(CANDIDATE_BFF_RESULT_QUEUE, MessagingNames.RESULTS_EXCHANGE, "bff");
     declareTap(APPOINTMENTS_RESULT_QUEUE, MessagingNames.RESULTS_EXCHANGE, "appointments");
     declareTap(UNAUTHORIZED_RESULT_QUEUE, MessagingNames.RESULTS_EXCHANGE, "unknown-requester");
     declareTap(EVENT_TAP_QUEUE, MessagingNames.EVENTS_EXCHANGE, "wash-execution.#");
@@ -106,6 +108,7 @@ public abstract class AbstractMessagingIT {
     declareTap(AUTH_QUERY_QUEUE, MessagingNames.QUERIES_EXCHANGE, "authorization");
 
     purge(BFF_RESULT_QUEUE);
+    purge(CANDIDATE_BFF_RESULT_QUEUE);
     purge(APPOINTMENTS_RESULT_QUEUE);
     purge(UNAUTHORIZED_RESULT_QUEUE);
     purge(EVENT_TAP_QUEUE);
