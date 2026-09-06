@@ -40,6 +40,7 @@ steps:
       - node --check e2e/scripts/audit-wash-isolated-cleanup.mjs
       - node --check e2e/runner/run-reassignment-candidates.mjs
       - node e2e/scripts/test-reassignment-candidates-assertions.mjs
+      - node e2e/scripts/test-reassignment-identity-bootstrap.mjs
       - sh -n e2e/fixtures/reassignment-candidates/fixture-db.sh
       - sh -n e2e/scripts/test-reassignment-candidates-postgres.sh
       - sh e2e/scripts/test-reassignment-candidates-fixture.sh

@@ -86,10 +86,10 @@ async function request(path,options={}) {
   return {response,body};
 }
 
-let token=''; let identityReady=false; let cleanupError=null;
+let token=''; let cleanupError=null;
 try {
   execFileSync(executor,['--assert-isolated-wash'],{stdio:'inherit',timeout:30000});
-  fixture(identityFixture,'bootstrap'); identityReady=true;
+  fixture(identityFixture,'bootstrap');
   fixture(candidateFixture,'bootstrap');
   const ids=manifest();
   const credentials=JSON.parse(readFileSync(credentialsPath,'utf8'));
@@ -132,8 +132,10 @@ try {
   if(existsSync(candidateManifest)) {
     try { fixture(candidateFixture,'cleanup'); } catch(error) { cleanupError=error; }
   }
-  if(identityReady && !existsSync(candidateManifest)) {
-    try { fixture(identityFixture,'cleanup'); identityReady=false; } catch(error) { cleanupError??=error; }
+  // Bootstrap can commit Authentication before BFF fails. Recover from its persisted
+  // manifest, not a success flag; the identity helper retains all ownership guards.
+  if(existsSync(identityManifest) && !existsSync(candidateManifest)) {
+    try { fixture(identityFixture,'cleanup'); } catch(error) { cleanupError??=error; }
   }
   if(cleanupError) throw cleanupError;
 }
