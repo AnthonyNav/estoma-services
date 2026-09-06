@@ -1,6 +1,7 @@
 package com.estoma.washexecution.integration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.washexecution.application.command.ActorContext;
 import com.estoma.washexecution.application.command.CommandMetadata;
@@ -21,14 +22,23 @@ import com.estoma.washexecution.domain.execution.UnavailabilityCauseType;
 import com.estoma.washexecution.domain.execution.WashExecution;
 import com.estoma.washexecution.domain.execution.WashExecutionStatus;
 import com.estoma.washexecution.infrastructure.persistence.jdbc.JdbcTemporal;
+import com.estoma.washexecution.infrastructure.messaging.inbound.TransientFailureClassifier;
 import com.estoma.washexecution.testsupport.AbstractPostgresIT;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class WashExecutionCommandIT extends AbstractPostgresIT {
   private static final Instant BASE = Instant.parse("2026-08-23T10:00:00Z");
@@ -39,6 +49,7 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
   @Autowired ResourceAssignmentRepository assignments;
   @Autowired ResourceUnavailabilityRepository unavailabilities;
   @Autowired CleaningPeriodRepository cleanings;
+  @Autowired PlatformTransactionManager transactionManager;
 
   @BeforeEach
   void seedReadiness() {
@@ -275,7 +286,9 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
   void cancelAfterPhysicalImmunoUseCreatesCleaningButNeverCancelsDirectlyFromInProgress() {
     UUID supervisor = UUID.randomUUID();
     authorize(supervisor, "SUPERVISOR_LAVADO");
-    UUID executionId = createInProgress(UUID.randomUUID(), AppointmentType.IMMUNOCOMPROMISED, BASE);
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(15 * 60L));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.IMMUNOCOMPROMISED, "IN_PROGRESS");
+    UUID executionId = createInProgress(appointment, AppointmentType.IMMUNOCOMPROMISED, BASE);
     WashExecution pending = executions.findById(executionId).orElseThrow();
     pending.loseResource();
     executions.save(pending, pending.version() - 1);
@@ -299,6 +312,172 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
     assertThat(assignments.findActiveByExecutionId(executionId)).isEmpty();
     assertThat(cleanings.findByAssignmentId(assignment.resourceAssignmentId())).isPresent();
     assertThat(outboxTypes()).contains("WashExecutionCancelled", "CleaningPeriodStarted");
+  }
+
+  @Test
+  void capacityLossRejectsAvailableAlternativeWithoutMutatingExecutionOrAssignment() {
+    UUID supervisor = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(15 * 60L));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.NORMAL, "IN_PROGRESS");
+    UUID executionId = createPending(appointment);
+    UUID cabin = UUID.randomUUID();
+    UUID tank = UUID.randomUUID();
+    seedCabin(cabin, "C-ALTERNATIVE", "NORMAL");
+    seedTank(tank, cabin, "T-ALTERNATIVE", 2);
+    ResourceAssignment assignment = new ResourceAssignment(
+        UUID.randomUUID(), executionId, slot, cabin, tank, AssignmentType.INITIAL, null, BASE);
+    assignments.save(assignment);
+    int version = executions.findById(executionId).orElseThrow().version();
+
+    CommandOutcome result = dispatch(supervisor, "capacity-available",
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "CAPACITY_LOSS", null, supervisor, BASE.plusSeconds(1500), version));
+
+    assertThat(result.errorCode()).isEqualTo("CAPACITY_ALTERNATIVE_AVAILABLE");
+    assertThat(result.status()).isEqualTo(CommandOutcome.Status.REJECTED);
+    assertThat(executions.findById(executionId).orElseThrow().status())
+        .isEqualTo(WashExecutionStatus.PENDING_REASSIGNMENT);
+    assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version);
+    assertThat(assignments.findActiveByExecutionId(executionId)).isPresent();
+    assertThat(cleanings.findByAssignmentId(assignment.resourceAssignmentId())).isEmpty();
+    assertThat(outboxTypes()).doesNotContain("WashExecutionCancelled", "CleaningPeriodStarted");
+  }
+
+  @Test
+  void capacityLossFailsClosedWithoutAppointmentContextButOtherSubreasonsRemainSupported() {
+    UUID supervisor = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID executionId = createPending(UUID.randomUUID());
+    int version = executions.findById(executionId).orElseThrow().version();
+    CommandOutcome rejected = dispatch(supervisor, "capacity-no-context",
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "CAPACITY_LOSS", null, supervisor, BASE.plusSeconds(1500), version));
+    assertThat(rejected.errorCode()).isEqualTo("APPOINTMENT_CONTEXT_UNAVAILABLE");
+    assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version);
+    CommandOutcome cancelled = dispatch(supervisor, "other-cancellation",
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "OPERATIONAL_REASON", null, supervisor, BASE.plusSeconds(1500), version));
+    assertThat(cancelled.status()).isEqualTo(CommandOutcome.Status.SUCCEEDED);
+  }
+
+  @Test
+  void capacityLossFailsClosedWhenAdministrationIsNotReady() {
+    UUID supervisor = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(15 * 60L));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.NORMAL, "IN_PROGRESS");
+    UUID executionId = createPending(appointment);
+    jdbc.update("DELETE FROM projection_recovery_state WHERE projection_name='wash-administration'");
+    int version = executions.findById(executionId).orElseThrow().version();
+    CommandOutcome rejected = dispatch(supervisor, "capacity-unready",
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "CAPACITY_LOSS", null, supervisor, BASE.plusSeconds(1500), version));
+    assertThat(rejected.errorCode()).isEqualTo("RESOURCE_CONFIGURATION_UNAVAILABLE");
+    assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version);
+    assertThat(outboxTypes()).doesNotContain("WashExecutionCancelled");
+  }
+
+  private UUID createPending(UUID appointment) {
+    UUID executionId = createInProgress(appointment, AppointmentType.NORMAL, BASE);
+    WashExecution execution = executions.findById(executionId).orElseThrow();
+    execution.loseResource();
+    executions.save(execution, execution.version() - 1);
+    return executionId;
+  }
+
+  @Test
+  void capacityLossPreservesVersionCheckAndReplaysSuccessfulCancellation() {
+    UUID supervisor = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(900));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.NORMAL, "IN_PROGRESS");
+    UUID executionId = createPending(appointment);
+    int version = executions.findById(executionId).orElseThrow().version();
+    assertThat(dispatch(supervisor, "stale-capacity",
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "CAPACITY_LOSS", null, supervisor, BASE.plusSeconds(1500), version - 1))
+        .errorCode()).isEqualTo("VERSION_CONFLICT");
+    CommandRequest request = new CommandRequest(metadata(supervisor, "empty-capacity"),
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "CAPACITY_LOSS", null, supervisor, BASE.plusSeconds(1500), version));
+    assertThat(commands.dispatch(request).status()).isEqualTo(CommandOutcome.Status.SUCCEEDED);
+    commands.dispatch(request);
+    assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version + 1);
+    assertThat(outboxTypes().stream().filter("WashExecutionCancelled"::equals).count()).isEqualTo(1);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {0, 1, 2, 3, 4})
+  void capacityLossRollsBackDuringEligibilityChangesAndRechecksOnRetry(int scenario)
+      throws Exception {
+    UUID supervisor = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(900));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.NORMAL, "IN_PROGRESS");
+    UUID executionId = createPending(appointment);
+    UUID cabin = UUID.randomUUID();
+    UUID tank = UUID.randomUUID();
+    UUID unavailable = UUID.randomUUID();
+    seedCabin(cabin, "C-RACE", "NORMAL");
+    if (scenario != 0) {
+      seedTank(tank, cabin, "T-RACE", 1);
+      if (scenario == 3) {
+        UUID other = createInProgress(UUID.randomUUID(), AppointmentType.NORMAL, BASE);
+        assignments.save(new ResourceAssignment(
+            UUID.randomUUID(), other, slot, cabin, tank, AssignmentType.INITIAL, null, BASE));
+      } else if (scenario == 4) {
+        assertThat(dispatch(supervisor, "disable-race",
+            new WashExecutionCommand.DisableOperationalResource(
+                unavailable, null, tank, UnavailabilityCauseType.FAILURE, "Synthetic failure",
+                supervisor, null, BASE.plusSeconds(300))).status()).isEqualTo(CommandOutcome.Status.SUCCEEDED);
+      } else {
+        jdbc.update("UPDATE tank_projection SET status='INACTIVE' WHERE tank_id=?", tank);
+      }
+    }
+    int version = executions.findById(executionId).orElseThrow().version();
+    CommandRequest request = new CommandRequest(metadata(supervisor, "capacity-race"),
+        new WashExecutionCommand.CancelWashExecutionByClinic(
+            executionId, "CAPACITY_LOSS", null, supervisor, BASE.plusSeconds(1500), version));
+    CountDownLatch written = new CountDownLatch(1);
+    CountDownLatch commit = new CountDownLatch(1);
+    try (var executor = Executors.newSingleThreadExecutor()) {
+      var writer = executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(tx -> {
+        switch (scenario) {
+          case 0 -> seedTank(tank, cabin, "T-RACE", 1);
+          case 1 -> jdbc.update("UPDATE tank_projection SET status='ACTIVE' WHERE tank_id=?", tank);
+          case 2 -> jdbc.queryForObject("SELECT cabin_id FROM cabin_projection WHERE cabin_id=? FOR UPDATE", UUID.class, cabin);
+          case 3 -> jdbc.update("UPDATE resource_assignments SET released_at=now(), release_reason='NORMAL_COMPLETION' WHERE tank_id=?", tank);
+          case 4 -> assertThat(dispatch(supervisor, "restore-race",
+              new WashExecutionCommand.RestoreOperationalResource(
+                  unavailable, null, supervisor, BASE.plusSeconds(600), 1)).status())
+              .isEqualTo(CommandOutcome.Status.SUCCEEDED);
+          default -> throw new IllegalArgumentException("unknown scenario");
+        }
+        written.countDown();
+        try {
+          if (!commit.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("writer timed out");
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException(interrupted);
+        }
+        if (scenario == 2) jdbc.update("UPDATE tank_projection SET status='ACTIVE' WHERE tank_id=?", tank);
+      }));
+      try {
+        assertThat(written.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThatThrownBy(() -> commands.dispatch(request))
+            .isInstanceOf(DataAccessException.class)
+            .satisfies(error -> assertThat(new TransientFailureClassifier().isTransient(error)).isTrue());
+        assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version);
+        assertThat(outboxTypes()).doesNotContain("WashExecutionCancelled", "CancelWashExecutionByClinicRejected");
+      } finally {
+        commit.countDown();
+      }
+      writer.get(5, TimeUnit.SECONDS);
+    }
+    assertThat(commands.dispatch(request).errorCode()).isEqualTo("CAPACITY_ALTERNATIVE_AVAILABLE");
+    assertThat(executions.findById(executionId).orElseThrow().status())
+        .isEqualTo(WashExecutionStatus.PENDING_REASSIGNMENT);
   }
 
   @Test

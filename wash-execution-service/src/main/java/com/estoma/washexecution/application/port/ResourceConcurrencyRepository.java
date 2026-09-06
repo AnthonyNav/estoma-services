@@ -6,6 +6,9 @@ import java.util.Objects;
 import java.util.UUID;
 
 public interface ResourceConcurrencyRepository {
+  /** Protect the complete local eligibility input set until the surrounding transaction ends. */
+  void lockCapacityDecision();
+
   void lockCabin(UUID cabinId);
 
   void lockTank(UUID cabinId, UUID tankId);
