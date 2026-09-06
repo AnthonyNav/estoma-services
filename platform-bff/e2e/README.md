@@ -103,3 +103,18 @@ assignment is created or modified.
 The smoke collection may be run against `develop` only from an approved network location and after its deployment is `Synced/Healthy`. Do not run the catalogue against `develop`: it includes mutating operations. Mutating workflows require authorized synthetic fixtures, unique runtime values and explicit cleanup. A workflow README is the source of truth for whether that workflow has actually passed live; prepared coverage is not a certification claim.
 
 No tokens, passwords, personal data, fixture UUIDs or response captures belong in Git. Keep generated reports under `target/e2e/`, which is ignored by Maven conventions.
+
+The reassignment-candidates compatibility runner is a standalone isolated workflow. It creates its
+own two synthetic identities, drives the scheduler's real Query/Result path, proves both a positive
+candidate and a newly refreshed empty result after its tank becomes inactive, then performs fenced
+manifest-only cleanup:
+
+```sh
+BFF_BASE_URL=http://127.0.0.1:18080 \
+E2E_PSQL_EXEC="$PWD/e2e/runner/wash-isolated-psql.sh" \
+E2E_PASSWORD_HASH_EXEC=/path/to/stdin-argon2-helper \
+node e2e/runner/run-reassignment-candidates.mjs
+```
+
+The BFF reassignment-candidates rollout gate must already be enabled for this explicitly requested
+test run. A prepared harness is not evidence of a live pass.
