@@ -6476,6 +6476,137 @@
         } ]
       }
     },
+    "/api/v1/wash/supervision/pending-reassignments/{washExecutionId}/candidates" : {
+      "get" : {
+        "description" : "Side-effect-free local read of an owner-ranked snapshot. Missing, stale, future-dated, version-mismatched, or unready material returns 503; only an owner-proven empty snapshot returns 200 with candidates=[]. The rollout feature is disabled by default until the Wash Execution Query owner is deployed.",
+        "operationId" : "WashController_reassignmentCandidates_get__api_v1_wash_supervision_pending_reassignments_washExecutionId_candidates",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "washExecutionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "candidates" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "availableCapacity" : {
+                            "exclusiveMinimum" : 0,
+                            "type" : "integer"
+                          },
+                          "cabinCode" : {
+                            "type" : "string"
+                          },
+                          "cabinId" : {
+                            "format" : "uuid",
+                            "type" : "string"
+                          },
+                          "cabinName" : {
+                            "type" : "string"
+                          },
+                          "tankCode" : {
+                            "type" : "string"
+                          },
+                          "tankId" : {
+                            "format" : "uuid",
+                            "type" : "string"
+                          },
+                          "tankName" : {
+                            "type" : "string"
+                          }
+                        },
+                        "required" : [ "cabinId", "cabinCode", "cabinName", "tankId", "tankCode", "tankName", "availableCapacity" ],
+                        "type" : "object"
+                      },
+                      "type" : "array"
+                    },
+                    "executionVersion" : {
+                      "type" : "integer"
+                    },
+                    "recommendedCandidate" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "availableCapacity" : {
+                          "exclusiveMinimum" : 0,
+                          "type" : "integer"
+                        },
+                        "cabinCode" : {
+                          "type" : "string"
+                        },
+                        "cabinId" : {
+                          "format" : "uuid",
+                          "type" : "string"
+                        },
+                        "cabinName" : {
+                          "type" : "string"
+                        },
+                        "tankCode" : {
+                          "type" : "string"
+                        },
+                        "tankId" : {
+                          "format" : "uuid",
+                          "type" : "string"
+                        },
+                        "tankName" : {
+                          "type" : "string"
+                        }
+                      },
+                      "required" : [ "cabinId", "cabinCode", "cabinName", "tankId", "tankCode", "tankName", "availableCapacity" ],
+                      "type" : [ "object", "null" ]
+                    },
+                    "snapshotGeneratedAt" : {
+                      "format" : "date-time",
+                      "type" : "string"
+                    },
+                    "washExecutionId" : {
+                      "format" : "uuid",
+                      "type" : "string"
+                    }
+                  },
+                  "required" : [ "washExecutionId", "executionVersion", "snapshotGeneratedAt", "recommendedCandidate", "candidates" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Required fresh local snapshot is unavailable"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "x-provider-ready-by-default" : false
+      }
+    },
     "/health" : {
       "get" : {
         "operationId" : "SystemController_health_get__health",

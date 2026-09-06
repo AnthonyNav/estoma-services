@@ -131,6 +131,20 @@ class OpenApiControllerTest {
         .containsExactlyInAnyOrder("appointmentId", "appointmentStatus", "appointmentType",
             "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot");
 
+    Map<String, Object> reassignmentCandidates = operation(paths,
+        "/api/v1/wash/supervision/pending-reassignments/{washExecutionId}/candidates", "get");
+    assertThat(reassignmentCandidates).containsEntry("x-provider-ready-by-default", false);
+    assertThat((Map<String, Object>) reassignmentCandidates.get("responses")).containsKey("503");
+    Map<String, Object> candidatesSchema = responseSchema(reassignmentCandidates, "200");
+    assertThat((java.util.List<String>) candidatesSchema.get("required"))
+        .containsExactlyInAnyOrder("washExecutionId", "executionVersion", "snapshotGeneratedAt",
+            "recommendedCandidate", "candidates");
+    Map<String, Object> candidateProperties = (Map<String, Object>) ((Map<String, Object>)
+        ((Map<String, Object>) candidatesSchema.get("properties")).get("candidates")).get("items");
+    assertThat((java.util.List<String>) candidateProperties.get("required"))
+        .containsExactlyInAnyOrder("cabinId", "cabinCode", "cabinName", "tankId", "tankCode",
+            "tankName", "availableCapacity");
+
     Map<String, Object> temporaryPassword = operation(paths,
         "/api/v1/admin/accounts/{accountId}/temporary-password", "post");
     assertThat((java.util.List<Map<String, Object>>) temporaryPassword.get("parameters"))

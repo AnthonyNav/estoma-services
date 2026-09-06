@@ -24,10 +24,13 @@ import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
 import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
+import com.estoma.platformbff.application.wash.ReassignmentCandidatesService;
 import com.estoma.platformbff.contracts.http.AcceptedOperationResponse;
 import com.estoma.platformbff.contracts.http.mailbox.MailboxMessagesResponse;
 import com.estoma.platformbff.contracts.http.mailbox.MailboxSystemSummaryResponse;
 import com.estoma.platformbff.contracts.http.wash.PendingReassignmentsResponse;
+import com.estoma.platformbff.contracts.http.wash.ReassignmentCandidatesResponse;
+import com.estoma.platformbff.contracts.http.wash.ReassignmentCandidatesResponse.CandidateResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentFormContextResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.AppointmentAvailabilityResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSection;
@@ -70,6 +73,7 @@ class PublicApiMvcTest {
   @Mock WashSupervisionQueryService supervision;
   @Mock WashStudentQueryService studentQueries;
   @Mock AppointmentAvailabilityService appointmentAvailability;
+  @Mock ReassignmentCandidatesService reassignmentCandidates;
 
   private MockMvc mailboxMvc;
   private MockMvc washMvc;
@@ -109,7 +113,7 @@ class PublicApiMvcTest {
         .build();
     washMvc = MockMvcBuilders.standaloneSetup(
         new WashController(commands, authorization, supervision, studentQueries,
-            appointmentAvailability, clock))
+            appointmentAvailability, reassignmentCandidates, clock))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
@@ -188,6 +192,19 @@ class PublicApiMvcTest {
   void supervisionAndOwnerDerivedAppointmentAvailabilityAreAvailable() throws Exception {
     washMvc.perform(get("/api/v1/wash/supervision/pending-reassignments"))
         .andExpect(status().isOk());
+    UUID executionId = UUID.fromString("00000000-0000-0000-0000-000000000020");
+    var candidate = new CandidateResponse(
+        UUID.fromString("00000000-0000-0000-0000-000000000021"), "107", "Cabina 107",
+        UUID.fromString("00000000-0000-0000-0000-000000000022"), "B", "Tina B", 2);
+    when(reassignmentCandidates.candidates(executionId)).thenReturn(
+        new ReassignmentCandidatesResponse(executionId, 2,
+            Instant.parse("2026-08-01T10:00:00Z"), candidate, List.of(candidate)));
+    washMvc.perform(get("/api/v1/wash/supervision/pending-reassignments/{id}/candidates",
+            executionId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.executionVersion").value(2))
+        .andExpect(jsonPath("$.recommendedCandidate.cabinCode").value("107"))
+        .andExpect(jsonPath("$.candidates[0].availableCapacity").value(2));
     washMvc.perform(get("/api/v1/wash/supervision/home"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.serviceDate").value("2026-08-01"))
