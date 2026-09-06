@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 public final class QueryListener {
   private static final Set<String> QUERIES = Set.of(
       "GetAppointmentExecutionContext", "ListAppointmentExecutionContextsPage",
-      "GetAppointmentAvailability");
+      "GetAppointmentAvailability", "ListAppointmentQrProjectionSnapshotsPage");
   private final EnvelopeJsonCodec codec;
   private final EnvelopeValidator validator;
   private final AppointmentExecutionQueryService queries;
@@ -46,8 +46,10 @@ public final class QueryListener {
   }
 
   static void validateRequester(com.estoma.appointments.contracts.MessageEnvelope query) {
-    String requester = "GetAppointmentAvailability".equals(query.messageType())
-        ? "bff" : "wash-execution";
+    String requester = switch (query.messageType()) {
+      case "GetAppointmentAvailability", "ListAppointmentQrProjectionSnapshotsPage" -> "bff";
+      default -> "wash-execution";
+    };
     if (!requester.equals(query.producer())) {
       throw new InvalidMessageException("query requester is not allowlisted");
     }
@@ -57,6 +59,10 @@ public final class QueryListener {
     }
     if (query.idempotencyKey() != null) {
       throw new InvalidMessageException("Query must not carry Command idempotencyKey");
+    }
+    if ("ListAppointmentQrProjectionSnapshotsPage".equals(query.messageType())
+        && (query.aggregateId() != null || query.aggregateVersion() != null)) {
+      throw new InvalidMessageException("QR recovery Query must not carry aggregate identity");
     }
   }
 }

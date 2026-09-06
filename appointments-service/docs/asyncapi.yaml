@@ -1,13 +1,12 @@
 asyncapi: 3.0.0
 
 info:
-  title: appointments-service availability V1 messaging contract
+  title: appointments-service BFF Query V1 messaging contract
   version: 1.0.0
   description: >
-    Executable wire contract for the durable, owner-derived availability snapshot consumed by
-    platform-bff. Normative business rules remain in estomatologia-platform-docs/main. This
-    document intentionally describes the availability Query/Result introduced to resolve the
-    Front V1 WASH-STU-02 provider gate.
+    Executable wire contract for the durable, owner-derived availability and QR recovery
+    snapshots consumed by platform-bff. Normative business rules remain in
+    estomatologia-platform-docs/main.
 
 defaultContentType: application/json
 
@@ -18,6 +17,8 @@ channels:
     messages:
       getAppointmentAvailability:
         $ref: '#/components/messages/GetAppointmentAvailability'
+      listAppointmentQrProjectionSnapshotsPage:
+        $ref: '#/components/messages/ListAppointmentQrProjectionSnapshotsPage'
     bindings:
       amqp:
         is: queue
@@ -36,6 +37,8 @@ channels:
     messages:
       getAppointmentAvailabilityResult:
         $ref: '#/components/messages/GetAppointmentAvailabilityResult'
+      listAppointmentQrProjectionSnapshotsPageResult:
+        $ref: '#/components/messages/ListAppointmentQrProjectionSnapshotsPageResult'
 
 operations:
   receiveAppointmentAvailabilityQuery:
@@ -43,6 +46,14 @@ operations:
     channel:
       $ref: '#/channels/queries.appointments'
   sendAppointmentAvailabilityResult:
+    action: send
+    channel:
+      $ref: '#/channels/platform.results.bff'
+  receiveAppointmentQrProjectionSnapshotsPageQuery:
+    action: receive
+    channel:
+      $ref: '#/channels/queries.appointments'
+  sendAppointmentQrProjectionSnapshotsPageResult:
     action: send
     channel:
       $ref: '#/channels/platform.results.bff'
@@ -57,6 +68,14 @@ components:
       name: GetAppointmentAvailabilityResult
       payload:
         $ref: '#/components/schemas/GetAppointmentAvailabilityResultEnvelope'
+    ListAppointmentQrProjectionSnapshotsPage:
+      name: ListAppointmentQrProjectionSnapshotsPage
+      payload:
+        $ref: '#/components/schemas/ListAppointmentQrProjectionSnapshotsPageEnvelope'
+    ListAppointmentQrProjectionSnapshotsPageResult:
+      name: ListAppointmentQrProjectionSnapshotsPageResult
+      payload:
+        $ref: '#/components/schemas/ListAppointmentQrProjectionSnapshotsPageResultEnvelope'
 
   schemas:
     Uuid:
@@ -310,3 +329,115 @@ components:
           minimum: 1
         bookingDeadlineAt:
           $ref: '#/components/schemas/Instant'
+
+    ListAppointmentQrProjectionSnapshotsPageEnvelope:
+      type: object
+      additionalProperties: false
+      required: [messageId, messageType, messageVersion, messageKind, producer, occurredAt, correlationId, actor, payload]
+      properties:
+        messageId: {$ref: '#/components/schemas/Uuid'}
+        messageType: {const: ListAppointmentQrProjectionSnapshotsPage}
+        messageVersion: {const: 1}
+        messageKind: {const: QUERY}
+        producer: {const: bff}
+        occurredAt: {$ref: '#/components/schemas/Instant'}
+        correlationId: {$ref: '#/components/schemas/Uuid'}
+        causationId:
+          oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]
+        operationId:
+          oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]
+        idempotencyKey: {type: 'null'}
+        aggregateId: {type: 'null'}
+        aggregateVersion: {type: 'null'}
+        actor:
+          allOf:
+            - $ref: '#/components/schemas/SystemActor'
+            - type: object
+              properties:
+                service: {const: bff}
+        payload: {$ref: '#/components/schemas/AppointmentQrProjectionPageRequest'}
+
+    AppointmentQrProjectionPageRequest:
+      type: object
+      additionalProperties: false
+      required: [serviceDate, pageSize]
+      properties:
+        serviceDate: {type: string, format: date}
+        pageSize: {type: integer, minimum: 1, maximum: 100}
+        pageToken: {type: string, minLength: 1, maxLength: 160}
+
+    ListAppointmentQrProjectionSnapshotsPageResultEnvelope:
+      type: object
+      additionalProperties: false
+      required: [messageId, messageType, messageVersion, messageKind, producer, occurredAt, correlationId, causationId, actor, payload]
+      properties:
+        messageId: {$ref: '#/components/schemas/Uuid'}
+        messageType: {const: ListAppointmentQrProjectionSnapshotsPageResult}
+        messageVersion: {const: 1}
+        messageKind: {const: RESULT}
+        producer: {const: appointments}
+        occurredAt: {$ref: '#/components/schemas/Instant'}
+        correlationId: {$ref: '#/components/schemas/Uuid'}
+        causationId: {$ref: '#/components/schemas/Uuid'}
+        operationId:
+          oneOf: [{$ref: '#/components/schemas/Uuid'}, {type: 'null'}]
+        idempotencyKey: {type: 'null'}
+        aggregateId: {type: 'null'}
+        aggregateVersion: {type: 'null'}
+        actor:
+          allOf:
+            - $ref: '#/components/schemas/SystemActor'
+            - type: object
+              properties:
+                service: {const: appointments}
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/AppointmentQrProjectionPageSucceededPayload'
+            - $ref: '#/components/schemas/AppointmentQrProjectionPageRejectedPayload'
+
+    AppointmentQrProjectionPageSucceededPayload:
+      type: object
+      additionalProperties: false
+      required: [status, data]
+      properties:
+        status: {const: SUCCEEDED}
+        data:
+          type: object
+          additionalProperties: false
+          required: [snapshotGeneratedAt, serviceDate, items]
+          properties:
+            snapshotGeneratedAt: {$ref: '#/components/schemas/Instant'}
+            serviceDate: {type: string, format: date}
+            items:
+              type: array
+              items: {$ref: '#/components/schemas/AppointmentQrProjectionSnapshot'}
+            nextPageToken: {type: string, minLength: 1, maxLength: 160}
+
+    AppointmentQrProjectionSnapshot:
+      type: object
+      additionalProperties: false
+      required: [appointmentId, appointmentVersion, appointmentStatus, entryAuthorizedAt, qrRepresentation]
+      properties:
+        appointmentId: {$ref: '#/components/schemas/Uuid'}
+        appointmentVersion: {type: integer, minimum: 1}
+        appointmentStatus:
+          enum: [SCHEDULED, IN_PROGRESS, CANCELLED, MISSED, ENTRY_REJECTED, COMPLETED]
+        entryAuthorizedAt:
+          oneOf: [{$ref: '#/components/schemas/Instant'}, {type: 'null'}]
+        qrRepresentation:
+          description: Present for active rows; null is an explicit terminal tombstone.
+          oneOf: [{type: string, minLength: 1, maxLength: 2000}, {type: 'null'}]
+
+    AppointmentQrProjectionPageRejectedPayload:
+      type: object
+      additionalProperties: false
+      required: [status, error]
+      properties:
+        status: {const: REJECTED}
+        error:
+          type: object
+          additionalProperties: false
+          required: [code]
+          properties:
+            code:
+              enum: [QR_PROJECTION_DISABLED, INVALID_SERVICE_DATE, INVALID_PAGE_SIZE, INVALID_PAGE_TOKEN]

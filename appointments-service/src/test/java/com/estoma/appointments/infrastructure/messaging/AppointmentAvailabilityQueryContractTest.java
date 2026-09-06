@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.estoma.appointments.application.port.in.AppointmentExecutionQueryUseCase;
 import com.estoma.appointments.application.port.in.GetAppointmentAvailabilityUseCase;
 import com.estoma.appointments.application.port.out.OutboxRepository;
+import com.estoma.appointments.application.port.out.AppointmentQrRepresentationIssuer;
 import com.estoma.appointments.contracts.MessageEnvelope;
 import com.estoma.appointments.contracts.MessageKind;
 import com.estoma.appointments.contracts.WireActor;
@@ -35,7 +36,7 @@ class AppointmentAvailabilityQueryContractTest {
     var outbox = mock(OutboxRepository.class);
     var mapper = new ObjectMapper();
     var service = new AppointmentExecutionQueryService(execution, availability, outbox, mapper,
-        Clock.fixed(NOW, ZoneOffset.UTC));
+        Clock.fixed(NOW, ZoneOffset.UTC), mock(AppointmentQrRepresentationIssuer.class));
     UUID studentId = UUID.randomUUID();
     UUID courseSectionId = UUID.randomUUID();
     UUID slotId = UUID.randomUUID();
@@ -110,7 +111,7 @@ class AppointmentAvailabilityQueryContractTest {
     payload.put("unexpected", true);
     var service = new AppointmentExecutionQueryService(mock(AppointmentExecutionQueryUseCase.class),
         mock(GetAppointmentAvailabilityUseCase.class), mock(OutboxRepository.class), mapper,
-        Clock.fixed(NOW, ZoneOffset.UTC));
+        Clock.fixed(NOW, ZoneOffset.UTC), mock(AppointmentQrRepresentationIssuer.class));
     assertThatThrownBy(() -> service.answer(new MessageEnvelope(valid.messageId(), valid.messageType(),
         valid.messageVersion(), valid.messageKind(), valid.producer(), valid.occurredAt(),
         valid.correlationId(), valid.causationId(), valid.operationId(), valid.idempotencyKey(),

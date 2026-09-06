@@ -41,6 +41,10 @@ final class AppointmentEventPayloads {
   }
 
   static String scheduled(Appointment appointment) {
+    return scheduled(appointment, null);
+  }
+
+  static String scheduled(Appointment appointment, String qrRepresentation) {
     Map<String, Object> fields = baseAppointment(appointment);
     fields.put("courseSectionId", appointment.courseSectionId());
     fields.put("instrumentCount", appointment.instrumentCount());
@@ -50,6 +54,9 @@ final class AppointmentEventPayloads {
     }
     fields.put("createdAt", appointment.createdAt());
     fields.put("version", appointment.version());
+    if (qrRepresentation != null) {
+      fields.put("qrRepresentation", qrRepresentation);
+    }
     return object(fields);
   }
 

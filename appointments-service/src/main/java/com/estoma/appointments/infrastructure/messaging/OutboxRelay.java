@@ -35,7 +35,7 @@ public final class OutboxRelay {
   private static final Set<String> EXECUTION_QUERY_RESULTS = Set.of(
       "GetAppointmentExecutionContextResult", "ListAppointmentExecutionContextsPageResult");
   private static final Set<String> BFF_QUERY_RESULTS = Set.of(
-      "GetAppointmentAvailabilityResult");
+      "GetAppointmentAvailabilityResult", "ListAppointmentQrProjectionSnapshotsPageResult");
 
   private final OutboxRepository outbox;
   private final ConfirmedRabbitPublisher publisher;

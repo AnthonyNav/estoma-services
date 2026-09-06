@@ -10,6 +10,7 @@ import com.estoma.appointments.application.port.out.AuthorizationProjectionRepos
 import com.estoma.appointments.application.port.out.CommandIdempotencyRepository;
 import com.estoma.appointments.application.port.out.ExceptionalAppointmentAuthorizationRepository;
 import com.estoma.appointments.application.port.out.OutboxRepository;
+import com.estoma.appointments.application.port.out.AppointmentQrRepresentationIssuer;
 import com.estoma.appointments.domain.error.DomainViolationException;
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
@@ -34,13 +35,15 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
   private final AcademicProjectionRepository academic;
   private final CommandIdempotencyRepository idempotency;
   private final OutboxRepository outbox;
+  private final AppointmentQrRepresentationIssuer qrIssuer;
   private final LocalAuthorizationPolicy policy;
 
   public ScheduleAppointmentHandler(AppointmentRepository appointments,
       AppointmentTimeSlotRepository slots, AppointmentCapacityProjectionRepository capacity,
       ExceptionalAppointmentAuthorizationRepository authorizations,
       AcademicProjectionRepository academic, AuthorizationProjectionRepository authorization,
-      CommandIdempotencyRepository idempotency, OutboxRepository outbox) {
+      CommandIdempotencyRepository idempotency, OutboxRepository outbox,
+      AppointmentQrRepresentationIssuer qrIssuer) {
     this.appointments = appointments;
     this.slots = slots;
     this.capacity = capacity;
@@ -48,6 +51,7 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
     this.academic = academic;
     this.idempotency = idempotency;
     this.outbox = outbox;
+    this.qrIssuer = qrIssuer;
     this.policy = new LocalAuthorizationPolicy(authorization);
   }
 
@@ -159,8 +163,10 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
         command.studentAccountId(), command.courseSectionId(), command.appointmentType(),
         command.instrumentCount(), command.pieceType(), authorizationId, command.now());
     appointments.save(appointment);
+    String qrRepresentation = qrIssuer.enabled() ? qrIssuer.issue(appointment.appointmentId()) : null;
     ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentScheduled",
-        appointment.appointmentId(), appointment.version(), AppointmentEventPayloads.scheduled(appointment), command.now());
+        appointment.appointmentId(), appointment.version(),
+        AppointmentEventPayloads.scheduled(appointment, qrRepresentation), command.now());
     return ApplicationResult.applied(appointment.appointmentId(), appointment.version(), "appointment scheduled");
   }
 

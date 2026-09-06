@@ -24,9 +24,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+@TestPropertySource(properties = {
+    "estoma.qr.enabled=true",
+    "estoma.qr.secret=0123456789abcdef0123456789abcdef"
+})
 class AppointmentExecutionProducerContractIT extends AbstractPostgresIT {
   private static final Instant NOW = Instant.parse("2026-08-24T13:00:00Z");
   private static final Instant START = Instant.parse("2026-08-24T14:00:00Z");
@@ -111,6 +116,8 @@ class AppointmentExecutionProducerContractIT extends AbstractPostgresIT {
     assertThat(payload.path("appointmentType").asString()).isEqualTo("NORMAL");
     assertThat(payload.path("instrumentCount").asInt()).isEqualTo(2);
     assertThat(payload.path("pieceType").asString()).isEqualTo("HIGH_SPEED");
+    assertThat(payload.path("qrRepresentation").asString())
+        .startsWith("v1." + payload.path("appointmentId").asString() + ".");
     assertThat(payload.has("status")).isFalse();
     assertThat(payload.path("version").asLong()).isEqualTo(1L);
     assertThat(OutboxRelay.eventRoutingKey("AppointmentScheduled"))

@@ -92,7 +92,8 @@ class MessagingContractTest {
   @Test
   void qrTamperingIsRejectedAndSignatureDoesNotDecideEntry() {
     UUID appointmentId = UUID.randomUUID();
-    AppointmentQrTokenService qr = new AppointmentQrTokenService("test-secret");
+    AppointmentQrTokenService qr = new AppointmentQrTokenService(
+        "0123456789abcdef0123456789abcdef");
     String token = qr.issue(appointmentId);
     assertThat(qr.verify(token)).isEqualTo(appointmentId);
     assertThatThrownBy(() -> qr.verify(token.replace(appointmentId.toString(), UUID.randomUUID().toString())))

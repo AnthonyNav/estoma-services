@@ -37,6 +37,7 @@ estoma:
     retry1-ttl: ${ESTOMA_MESSAGING_RETRY1_TTL:5s}
     retry2-ttl: ${ESTOMA_MESSAGING_RETRY2_TTL:30s}
   qr:
+    enabled: ${ESTOMA_QR_ENABLED:false}
     secret: ${ESTOMA_QR_SECRET:}
 management:
   tracing:

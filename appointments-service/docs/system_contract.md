@@ -844,13 +844,54 @@ QR = representación protegida de `appointmentId`.
 
 No es entidad, autoridad de entrada ni validación de identidad.
 
-Requisitos:
+El formato owner V1 es `v1.<appointmentId>.<HMAC-SHA256 base64url>`. Aporta integridad y
+detección de alteraciones. El UUID permanece visible: este formato no aporta confidencialidad y no
+debe describirse como cifrado. El cliente y el BFF tratan la cadena completa como opaca. La firma
+válida identifica una cita; no autoriza entrada ni sustituye la validación funcional del estado.
 
-- integridad criptográfica/tamper detection;
-- secreto/clave fuera del repo;
-- mínimo de datos;
-- validación funcional siempre contra estado actual;
-- firma válida no autoriza entrada.
+La emisión se activa sólo con `ESTOMA_QR_ENABLED=true`; el valor por defecto es `false`. Con el
+flag apagado, `AppointmentScheduled` conserva exactamente su shape anterior. Con el flag activo,
+todo `AppointmentScheduled` nuevo incluye `qrRepresentation`, calculado dentro de la misma
+transacción que persiste Appointment y su Event en Outbox. El proceso no arranca si
+`ESTOMA_QR_SECRET` está vacío, es blanco o mide menos de 32 bytes UTF-8. Esa longitud es un mínimo,
+no una medición de entropía: operación debe generar material aleatorio de al menos 32 bytes y
+provisionar el mismo valor en todas las réplicas sin imprimirlo ni copiarlo al BFF.
+
+No hay rotación automática ni `kid`. El secreto permanece estable mientras existan citas activas.
+Antes de rotarlo se cierra el gate QR, se detienen emisiones mixtas, se limpia/reinicializa la
+proyección QR del BFF y se ejecuta recovery completa con todas las réplicas de Appointments sobre
+el nuevo valor. Rotar una réplica o regenerar tokens sin esa secuencia rompe representaciones ya
+entregadas.
+
+### 19.1 Recovery owner para la proyección BFF
+
+`ListAppointmentQrProjectionSnapshotsPage` V1 es una Query exclusiva de recuperación. Exige
+`producer=bff`, actor `SYSTEM/service=bff` sin `accountId`, payload exacto con `serviceDate`,
+`pageSize` entero de 1 a 100 y `pageToken` opaco opcional. No se invoca por cada escaneo ni habilita
+un endpoint HTTP/RPC owner.
+
+El Result se guarda en Outbox antes de publicarse a routing key `bff`. Un replay con el mismo
+`messageId` de Query converge sobre un único Result durable. Cada item contiene
+`appointmentId`, `appointmentVersion`, `appointmentStatus`, `entryAuthorizedAt` y
+`qrRepresentation`. `SCHEDULED` e `IN_PROGRESS` llevan la representación; `CANCELLED`, `MISSED`,
+`ENTRY_REJECTED` y `COMPLETED` llevan `qrRepresentation=null` como tombstone explícito. El BFF
+aplica cada fila con fence de `appointmentVersion`: un snapshot viejo no restaura un mapping que
+un evento owner posterior ya retiró.
+
+El cursor está versionado y ligado a `serviceDate`; usarlo con otra fecha se rechaza. Cada página
+usa una transacción `REPEATABLE_READ`, pero la serie completa de páginas no es un snapshot global.
+La convergencia requiere consumir Events concurrentes y completar después una pasada de
+reconciliación desde la primera página. Una fila insertada concurrentemente antes del cursor puede
+llegar por su Event y queda incluida en la siguiente pasada completa.
+
+La Query responde `QR_PROJECTION_DISABLED` mientras el producer está apagado. El rollout despliega
+primero un BFF que acepte `AppointmentScheduled` V1 con el campo opcional y procese recovery;
+después provisiona el secreto y activa Appointments. El gate público QR permanece cerrado hasta
+que la pasada owner termine y BFF demuestre todos los mappings activos.
+
+El consumidor actual de Wash Execution lee de forma selectiva los campos de `AppointmentScheduled`
+y tolera este campo aditivo. La dependencia de orden aplica al BFF porque su allowlist de payload es
+cerrada: su cambio compatible debe estar desplegado antes de activar el producer QR.
 
 ---
 

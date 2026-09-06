@@ -51,7 +51,8 @@ class RabbitMessagingIT extends AbstractPostgresIT {
     registry.add("estoma.messaging.recovery-worker-enabled", () -> "false");
     registry.add("estoma.messaging.retry1-ttl", () -> "100ms");
     registry.add("estoma.messaging.retry2-ttl", () -> "100ms");
-    registry.add("estoma.qr.secret", () -> "integration-test-secret");
+    registry.add("estoma.qr.enabled", () -> "true");
+    registry.add("estoma.qr.secret", () -> "0123456789abcdef0123456789abcdef");
   }
 
   @Autowired AmqpAdmin admin;
@@ -175,6 +176,46 @@ class RabbitMessagingIT extends AbstractPostgresIT {
         .isEqualTo(slotId.toString());
     assertThat(result.payload().path("data").path("timeSlot").path("calendarId").asString())
         .isEqualTo(calendarId.toString());
+  }
+
+  @Test
+  void qrRecoveryResultUsesDurableBffRouteAndCanonicalEnvelope() {
+    String resultQueue = "test.results.bff.qr." + UUID.randomUUID();
+    admin.declareQueue(new Queue(resultQueue, false, true, true));
+    admin.declareBinding(new Binding(resultQueue, Binding.DestinationType.QUEUE,
+        MessagingNames.RESULTS_EXCHANGE, "bff", null));
+
+    Instant start = Instant.parse("2026-09-06T15:00:00Z");
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    slots.save(AppointmentTimeSlot.create(slotId, UUID.randomUUID(), UUID.randomUUID(),
+        LocalDate.of(2026, 9, 6), start, start.plusSeconds(3600), ZoneOffset.UTC,
+        start.minusSeconds(600), start.minusSeconds(1200), start.plusSeconds(600)));
+    appointments.save(Appointment.scheduled(appointmentId, slotId, UUID.randomUUID(), UUID.randomUUID(),
+        AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, null, start.minusSeconds(1800)));
+
+    UUID queryId = UUID.randomUUID();
+    UUID correlationId = UUID.randomUUID();
+    queryAdapter.answer(new MessageEnvelope(queryId, "ListAppointmentQrProjectionSnapshotsPage", 1,
+        MessageKind.QUERY, "bff", start, correlationId, null, null, null, null, null,
+        new WireActor("SYSTEM", null, "bff"), mapper.createObjectNode()
+            .put("serviceDate", "2026-09-06").put("pageSize", 100)));
+
+    relay.relay();
+
+    Message published = rabbit.receive(resultQueue, 2_000);
+    assertThat(published).isNotNull();
+    var result = codec.decode(codec.readTree(published.getBody()));
+    assertThat(result.messageType()).isEqualTo("ListAppointmentQrProjectionSnapshotsPageResult");
+    assertThat(result.messageKind()).isEqualTo(MessageKind.RESULT);
+    assertThat(result.producer()).isEqualTo("appointments");
+    assertThat(result.correlationId()).isEqualTo(correlationId);
+    assertThat(result.causationId()).isEqualTo(queryId);
+    assertThat(result.actor()).isEqualTo(new WireActor("SYSTEM", null, "appointments"));
+    assertThat(result.payload().path("data").path("items")).singleElement().satisfies(item -> {
+      assertThat(item.path("appointmentId").asString()).isEqualTo(appointmentId.toString());
+      assertThat(item.path("qrRepresentation").asString()).startsWith("v1." + appointmentId + ".");
+    });
   }
 
   @Test
