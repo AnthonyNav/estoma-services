@@ -65,6 +65,7 @@ class ProjectionEventRuntimePostgresIT {
           account_presentation_read_model,
           authorization_role_projection, authorization_access_projection,
           mailbox_messages_read_model, mailbox_visits_read_model,
+          appointment_qr_projection,
           wash_execution_read_model, wash_resource_assignment_read_model CASCADE
         """).update();
   }
@@ -79,6 +80,128 @@ class ProjectionEventRuntimePostgresIT {
     assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE consumer_name = 'bff-projection-runtime'")
         .query(Long.class).single()).isEqualTo(1L);
     assertThat(jdbc.sql("SELECT count(*) FROM person_presentation_read_model")
+        .query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
+  void appointmentScheduledV1AcceptsOldPayloadAndProjectsOpaqueQrWhenPresent() throws Exception {
+    UUID oldAppointmentId = UUID.randomUUID();
+    UUID newAppointmentId = UUID.randomUUID();
+    String representation = "owner.opaque.reference";
+
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), oldAppointmentId, 1, null)))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), newAppointmentId, 1, representation)))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+
+    assertThat(jdbc.sql("SELECT count(*) FROM appointment_qr_projection WHERE appointment_id = :id")
+        .param("id", oldAppointmentId).query(Long.class).single()).isZero();
+    var projected = jdbc.sql("""
+        SELECT qr_representation, qr_lookup_hash, appointment_version
+        FROM appointment_qr_projection WHERE appointment_id = :id
+        """).param("id", newAppointmentId).query().singleRow();
+    assertThat(projected.get("qr_representation")).isEqualTo(representation);
+    assertThat((byte[]) projected.get("qr_lookup_hash")).isEqualTo(
+        MessageDigest.getInstance("SHA-256").digest(representation.getBytes(StandardCharsets.UTF_8)));
+    assertThat(projected.get("appointment_version")).isEqualTo(1L);
+  }
+
+  @Test
+  void invalidQrRepresentationIsRejectedBeforeInbox() {
+    UUID appointmentId = UUID.randomUUID();
+    UUID blankMessageId = UUID.randomUUID();
+    UUID oversizedMessageId = UUID.randomUUID();
+
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", blankMessageId, appointmentId, 1, "")))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.UNTRUSTED);
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", oversizedMessageId, appointmentId, 1, "x".repeat(2001))))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.UNTRUSTED);
+
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id IN (:first, :second)")
+        .param("first", blankMessageId).param("second", oversizedMessageId)
+        .query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM appointment_qr_projection")
+        .query(Long.class).single()).isZero();
+  }
+
+  @Test
+  void duplicateAndStaleAppointmentEventsCannotRewriteOrRestoreQr() {
+    UUID appointmentId = UUID.randomUUID();
+    UUID scheduledMessageId = UUID.randomUUID();
+    ProjectionEvent scheduled = appointmentEvent(
+        "AppointmentScheduled", scheduledMessageId, appointmentId, 1, "owner.original");
+
+    assertThat(runtime.dispatch(scheduled)).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", scheduledMessageId, appointmentId, 1, "owner.mutated")))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), appointmentId, 1, "owner.same-version")))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(jdbc.sql("SELECT qr_representation FROM appointment_qr_projection WHERE appointment_id = :id")
+        .param("id", appointmentId).query(String.class).single()).isEqualTo("owner.original");
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentCompleted", UUID.randomUUID(), appointmentId, 3, null)))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), appointmentId, 3, "owner.same-terminal-version")))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), appointmentId, 2, "owner.stale")))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+
+    var projected = jdbc.sql("""
+        SELECT qr_representation, qr_lookup_hash, appointment_version
+        FROM appointment_qr_projection WHERE appointment_id = :id
+        """).param("id", appointmentId).query().singleRow();
+    assertThat(projected.get("qr_representation")).isNull();
+    assertThat(projected.get("qr_lookup_hash")).isNull();
+    assertThat(projected.get("appointment_version")).isEqualTo(3L);
+  }
+
+  @Test
+  void terminalBeforeScheduleCreatesFenceAndStartedDoesNotInvalidate() {
+    UUID cancelledId = UUID.randomUUID();
+    UUID startedId = UUID.randomUUID();
+
+    runtime.dispatch(appointmentEvent(
+        "AppointmentCancelled", UUID.randomUUID(), cancelledId, 4, null));
+    runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), cancelledId, 1, "owner.late"));
+    runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), startedId, 1, "owner.active"));
+    runtime.dispatch(appointmentEvent(
+        "AppointmentStarted", UUID.randomUUID(), startedId, 2, null));
+
+    assertThat(jdbc.sql("SELECT qr_representation FROM appointment_qr_projection WHERE appointment_id = :id")
+        .param("id", cancelledId).query(String.class).optional()).isEmpty();
+    assertThat(jdbc.sql("SELECT appointment_version FROM appointment_qr_projection WHERE appointment_id = :id")
+        .param("id", cancelledId).query(Long.class).single()).isEqualTo(4L);
+    assertThat(jdbc.sql("SELECT qr_representation FROM appointment_qr_projection WHERE appointment_id = :id")
+        .param("id", startedId).query(String.class).single()).isEqualTo("owner.active");
+  }
+
+  @Test
+  void duplicateQrHashRollsBackInboxAndAppointmentProjection() {
+    UUID firstId = UUID.randomUUID();
+    UUID secondId = UUID.randomUUID();
+    UUID secondMessageId = UUID.randomUUID();
+    runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", UUID.randomUUID(), firstId, 1, "owner.unique"));
+
+    assertThatThrownBy(() -> runtime.dispatch(appointmentEvent(
+        "AppointmentScheduled", secondMessageId, secondId, 1, "owner.unique")))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :id")
+        .param("id", secondMessageId).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM appointment_read_model WHERE appointment_id = :id")
+        .param("id", secondId).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM appointment_qr_projection")
         .query(Long.class).single()).isEqualTo(1L);
   }
 
@@ -420,6 +543,24 @@ class ProjectionEventRuntimePostgresIT {
     return event("PersonCreated", "users", messageId, personId, version,
         Map.of("personId", personId.toString(), "firstName", "Ada", "paternalSurname", "Nav",
             "institutionalEmail", "ada@example.invalid", "status", status, "createdAt", now()));
+  }
+
+  private static ProjectionEvent appointmentEvent(String type, UUID messageId, UUID appointmentId,
+      int version, String qrRepresentation) {
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("appointmentId", appointmentId.toString());
+    payload.put("appointmentTimeSlotId", UUID.randomUUID().toString());
+    payload.put("studentAccountId", UUID.randomUUID().toString());
+    payload.put("status", switch (type) {
+      case "AppointmentCancelled" -> "CANCELLED";
+      case "AppointmentMissed" -> "MISSED";
+      case "AppointmentEntryRejected" -> "ENTRY_REJECTED";
+      case "AppointmentStarted" -> "IN_PROGRESS";
+      case "AppointmentCompleted" -> "COMPLETED";
+      default -> "SCHEDULED";
+    });
+    if (qrRepresentation != null) payload.put("qrRepresentation", qrRepresentation);
+    return event(type, "appointments", messageId, appointmentId, version, payload);
   }
 
   private static ProjectionEvent personUpdated(UUID messageId, UUID personId, int version, String status) {

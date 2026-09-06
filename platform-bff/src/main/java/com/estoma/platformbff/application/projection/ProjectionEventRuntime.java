@@ -74,6 +74,15 @@ public class ProjectionEventRuntime {
         || !contract.allowedFields().containsAll(event.payload().keySet())) {
       throw new IllegalArgumentException("projection payload shape is not registered");
     }
+    if ("appointments".equals(event.producer())
+        && "AppointmentScheduled".equals(event.messageType())
+        && event.payload().containsKey("qrRepresentation")) {
+      Object value = event.payload().get("qrRepresentation");
+      if (!(value instanceof String representation)
+          || representation.isEmpty() || representation.codePointCount(0, representation.length()) > 2000) {
+        throw new IllegalArgumentException("qrRepresentation must contain 1..2000 characters");
+      }
+    }
   }
 
   private static Map<EventKey, Contract> buildRegistry() {
@@ -218,9 +227,19 @@ public class ProjectionEventRuntime {
       register(entries, "appointments", type, Set.of("appointmentTimeSlotId", "projectionVersion"),
           Set.of("appointmentTimeSlotId", "capacityNormal", "capacityJourney", "capacityImmunocompromised", "previousCapacityNormal", "previousCapacityJourney", "previousCapacityImmunocompromised", "affectedAppointmentCount", "projectionVersion"), true);
     }
-    for (String type : Set.of("AppointmentScheduled", "AppointmentCancelled", "AppointmentMissed", "AppointmentEntryRejected", "AppointmentStarted", "AppointmentCompleted")) {
+    Set<String> appointmentFields = Set.of("appointmentId", "appointmentTimeSlotId", "studentAccountId",
+        "appointmentType", "courseSectionId", "instrumentCount", "pieceType",
+        "exceptionalAuthorizationId", "createdAt", "cancellationType", "cancellationSubreason",
+        "cancellationReason", "reason", "cancelledByAccountId", "cancelledAt", "washExecutionId",
+        "sourceEventId", "missedAt", "rejectionReason", "rejectedByAccountId", "rejectedAt",
+        "startedAt", "completedAt", "completedByAccountId", "status", "version");
+    register(entries, "appointments", "AppointmentScheduled",
+        Set.of("appointmentId", "appointmentTimeSlotId", "studentAccountId"),
+        with(appointmentFields, "qrRepresentation"), true);
+    for (String type : Set.of("AppointmentCancelled", "AppointmentMissed", "AppointmentEntryRejected",
+        "AppointmentStarted", "AppointmentCompleted")) {
       register(entries, "appointments", type, Set.of("appointmentId", "appointmentTimeSlotId", "studentAccountId"),
-          Set.of("appointmentId", "appointmentTimeSlotId", "studentAccountId", "appointmentType", "courseSectionId", "instrumentCount", "pieceType", "exceptionalAuthorizationId", "createdAt", "cancellationType", "cancellationSubreason", "cancellationReason", "reason", "cancelledByAccountId", "cancelledAt", "washExecutionId", "sourceEventId", "missedAt", "rejectionReason", "rejectedByAccountId", "rejectedAt", "startedAt", "completedAt", "completedByAccountId", "status", "version"), true);
+          appointmentFields, true);
     }
     register(entries, "appointments", "ExceptionalAppointmentAuthorizationGranted", Set.of("authorizationId", "studentAccountId", "authorizationDate", "grantedAt"),
         Set.of("authorizationId", "studentAccountId", "authorizationDate", "authorizedByAccountId", "reason", "grantedAt"), true);
@@ -260,6 +279,12 @@ public class ProjectionEventRuntime {
       Set<String> required, Set<String> allowed, boolean aggregateRequired) {
     entries.put(new EventKey(producer, type, 1),
         new Contract(Set.copyOf(required), Set.copyOf(allowed), aggregateRequired, aggregateRequired));
+  }
+
+  private static Set<String> with(Set<String> fields, String additionalField) {
+    Set<String> result = new HashSet<>(fields);
+    result.add(additionalField);
+    return Set.copyOf(result);
   }
 
   public record EventKey(String producer, String messageType, int messageVersion) {}

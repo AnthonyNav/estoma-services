@@ -9,6 +9,7 @@ import com.estoma.platformbff.contracts.messaging.EventEnvelope;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import com.estoma.platformbff.infrastructure.config.MessagingTopology;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.AmqpAdmin;
@@ -83,6 +84,36 @@ class BffRabbitMessagingIT {
     Message received = rabbit.receive(MessagingTopology.PROJECTION_EVENTS_QUEUE, 5_000);
     assertThat(received).isNotNull();
     assertThat(codec.readEvent(received.getBody()).messageType()).isEqualTo("WashExecutionStarted");
+  }
+
+  @Test
+  void appointmentScheduledV1WireAcceptsPayloadWithAndWithoutQrRepresentation() {
+    UUID slotId = UUID.randomUUID();
+    UUID studentId = UUID.randomUUID();
+    List<String> payloads = List.of(
+        "{\"appointmentId\":\"%s\",\"appointmentTimeSlotId\":\"%s\",\"studentAccountId\":\"%s\"}",
+        "{\"appointmentId\":\"%s\",\"appointmentTimeSlotId\":\"%s\",\"studentAccountId\":\"%s\",\"qrRepresentation\":\"owner.opaque\"}");
+
+    for (String payloadTemplate : payloads) {
+      UUID appointmentId = UUID.randomUUID();
+      var event = new EventEnvelope(
+          UUID.randomUUID(), "AppointmentScheduled", 1, MessageKind.EVENT, "appointments",
+          Instant.now(), UUID.randomUUID(), UUID.randomUUID(), null, null, appointmentId, 1,
+          com.estoma.platformbff.contracts.messaging.ActorContext.anonymous(),
+          codec.readTree(payloadTemplate.formatted(appointmentId, slotId, studentId)));
+      var properties = new org.springframework.amqp.core.MessageProperties();
+      properties.setContentType(org.springframework.amqp.core.MessageProperties.CONTENT_TYPE_JSON);
+      properties.setMessageId(event.messageId().toString());
+      rabbit.send(MessagingTopology.EVENTS_EXCHANGE, "appointments.appointment.scheduled",
+          new Message(codec.write(event).getBytes(java.nio.charset.StandardCharsets.UTF_8), properties));
+    }
+
+    EventEnvelope oldEvent = codec.readEvent(
+        rabbit.receive(MessagingTopology.PROJECTION_EVENTS_QUEUE, 5_000).getBody());
+    EventEnvelope newEvent = codec.readEvent(
+        rabbit.receive(MessagingTopology.PROJECTION_EVENTS_QUEUE, 5_000).getBody());
+    assertThat(oldEvent.payload().has("qrRepresentation")).isFalse();
+    assertThat(newEvent.payload().path("qrRepresentation").asText()).isEqualTo("owner.opaque");
   }
 
   @Test

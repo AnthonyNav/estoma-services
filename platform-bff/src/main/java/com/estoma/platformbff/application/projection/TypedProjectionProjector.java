@@ -2,6 +2,7 @@ package com.estoma.platformbff.application.projection;
 
 import static com.estoma.platformbff.application.projection.ProjectionPayloads.*;
 
+import com.estoma.platformbff.application.port.AppointmentQrProjectionPort;
 import com.estoma.platformbff.application.port.ProjectionReadModelPort;
 import com.estoma.platformbff.application.security.RevocationProjectionEvent;
 import com.estoma.platformbff.application.security.RevocationProjectionEvent.AccountSessionsRevoked;
@@ -12,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** Maps owner Events to typed records; this class deliberately has no transport dependencies. */
@@ -19,11 +21,24 @@ import org.springframework.stereotype.Component;
 public class TypedProjectionProjector implements ProjectionEventProjector {
   private final ProjectionReadModelPort readModels;
   private final RevocationProjectionService revocations;
+  private final AppointmentQrProjectionPort appointmentQr;
 
+  @Autowired
   public TypedProjectionProjector(
-      ProjectionReadModelPort readModels, RevocationProjectionService revocations) {
+      ProjectionReadModelPort readModels, RevocationProjectionService revocations,
+      AppointmentQrProjectionPort appointmentQr) {
     this.readModels = readModels;
     this.revocations = revocations;
+    this.appointmentQr = appointmentQr;
+  }
+
+  /** Compatibility constructor for focused tests unrelated to appointment QR projection. */
+  public TypedProjectionProjector(
+      ProjectionReadModelPort readModels, RevocationProjectionService revocations) {
+    this(readModels, revocations, new AppointmentQrProjectionPort() {
+      @Override public void project(UUID id, String value, long version, Instant at) {}
+      @Override public void invalidate(UUID id, long version, Instant at) {}
+    });
   }
 
   @Override
@@ -293,6 +308,11 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
             appointmentStatus(event.messageType(), p),
             optionalText(p, "cancellationType"), version,
             event.occurredAt()));
+        if (event.messageType().equals("AppointmentScheduled") && p.containsKey("qrRepresentation")) {
+          appointmentQr.project(id, text(p, "qrRepresentation"), version, event.occurredAt());
+        } else if (isTerminalAppointmentEvent(event.messageType())) {
+          appointmentQr.invalidate(id, version, event.occurredAt());
+        }
       }
       case "ExceptionalAppointmentAuthorizationGranted", "ExceptionalAppointmentAuthorizationCancelled" -> {
         UUID id = uuid(p, "authorizationId");
@@ -495,6 +515,14 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
       case "AppointmentStarted" -> "IN_PROGRESS";
       case "AppointmentCompleted" -> "COMPLETED";
       default -> "SCHEDULED";
+    };
+  }
+
+  private static boolean isTerminalAppointmentEvent(String type) {
+    return switch (type) {
+      case "AppointmentCancelled", "AppointmentMissed", "AppointmentEntryRejected",
+          "AppointmentCompleted" -> true;
+      default -> false;
     };
   }
 
