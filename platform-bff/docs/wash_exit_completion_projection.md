@@ -9,6 +9,12 @@ This first rollout stage only writes the final-material projection and converges
 release. Student Home keeps its existing response contract, query and consistency checks.
 The stored final materials and released assignment history are not exposed by this stage.
 
+The second stage exposes canonical `executionVersion`, submitted/final materials, completion
+time and active/last assignment in Student Home. It keeps `version` as a compatibility alias
+with the same value and fails closed when a terminal execution lacks its required owner
+context. This read stage must not be published or deployed until the activation gate below is
+closed with current rollout evidence.
+
 ## Historical recovery behavior
 
 The incremental Wash Execution feed has no owner-supported historical snapshot. Existing
