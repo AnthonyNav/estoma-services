@@ -2,8 +2,14 @@ package com.estoma.appointments.infrastructure.messaging;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.estoma.appointments.application.port.in.HandleWashEntryAuthorizedUseCase;
+import com.estoma.appointments.application.port.in.HandleWashEntryRejectedUseCase;
+import com.estoma.appointments.application.port.in.HandleWashExecutionCancelledUseCase;
+import com.estoma.appointments.application.port.in.HandleWashExecutionCompletedUseCase;
+import com.estoma.appointments.application.port.in.HandleWashExecutionStartedUseCase;
 import com.estoma.appointments.application.port.out.AppointmentRepository;
 import com.estoma.appointments.application.port.out.AppointmentTimeSlotRepository;
+import com.estoma.appointments.application.port.out.PendingWashExecutionEventRepository;
 import com.estoma.appointments.application.port.out.WashExecutionEvidenceRepository;
 import com.estoma.appointments.application.port.out.WashExecutionTransitionRepository;
 import com.estoma.appointments.contracts.MessageEnvelope;
@@ -15,6 +21,7 @@ import com.estoma.appointments.domain.model.AppointmentTimeSlot;
 import com.estoma.appointments.domain.model.AppointmentType;
 import com.estoma.appointments.domain.model.PieceType;
 import com.estoma.appointments.testsupport.AbstractPostgresIT;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -25,6 +32,8 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
+import org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -56,13 +65,27 @@ class ExecutionMessagingE2EIT extends AbstractPostgresIT {
   @Autowired AppointmentTimeSlotRepository slots;
   @Autowired WashExecutionEvidenceRepository evidence;
   @Autowired WashExecutionTransitionRepository transitions;
+  @Autowired PendingWashExecutionEventRepository pending;
+  @Autowired HandleWashEntryRejectedUseCase rejected;
+  @Autowired HandleWashExecutionStartedUseCase started;
+  @Autowired HandleWashExecutionCompletedUseCase completed;
+  @Autowired HandleWashExecutionCancelledUseCase cancelled;
+  @Autowired HandleWashEntryAuthorizedUseCase authorized;
   @Autowired EnvelopeJsonCodec codec;
   @Autowired ObjectMapper mapper;
+  @Autowired Clock clock;
   @Autowired JdbcClient jdbc;
   @Autowired @Qualifier("requiredRouteRabbitTemplate") RabbitTemplate rabbit;
+  @Autowired RabbitListenerEndpointRegistry listenerRegistry;
 
   @BeforeEach
   void clean() {
+    SimpleMessageListenerContainer eventListener = (SimpleMessageListenerContainer)
+        listenerRegistry.getListenerContainer("appointmentsEventConsumer");
+    eventListener.stop();
+    eventListener.setConcurrentConsumers(1);
+    eventListener.setMaxConcurrentConsumers(1);
+    eventListener.start();
     jdbc.sql("""
         TRUNCATE TABLE
           wash_execution_evidence_projection, wash_execution_transition_projection,
@@ -113,11 +136,61 @@ class ExecutionMessagingE2EIT extends AbstractPostgresIT {
 
     // Exact redelivery is absorbed by Inbox/evidence/transition fencing.
     long outboxBefore = jdbc.sql("SELECT count(*) FROM outbox_messages").query(Long.class).single();
+    MessageEnvelope staleStartBarrier = executionEvent(UUID.randomUUID(), "WashExecutionStarted",
+        executionId, appointmentId, 6, correlationId,
+        "startedAt", NOW.plusSeconds(40), null, null);
     sendEvent(authorized);
     sendEvent(started);
-    Thread.sleep(300);
+    sendEvent(staleStartBarrier);
+    awaitProcessed(staleStartBarrier.messageId(), "APPLIED");
     assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages").query(Long.class).single())
         .isEqualTo(outboxBefore);
+  }
+
+  @Test
+  void completionDeliveredBeforeStartConvergesOnceThroughPendingRecovery() throws Exception {
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID supervisorId = UUID.randomUUID();
+    UUID correlationId = UUID.randomUUID();
+    slots.save(slot(slotId));
+    appointments.save(Appointment.scheduled(appointmentId, slotId, UUID.randomUUID(), UUID.randomUUID(),
+        AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, null, NOW.minusSeconds(300)));
+
+    UUID completionMessageId = UUID.randomUUID();
+    MessageEnvelope completion = executionEvent(completionMessageId, "WashExecutionCompleted",
+        executionId, appointmentId, 6, correlationId,
+        "completedAt", NOW.plusSeconds(90), "completedByAccountId", supervisorId);
+    MessageEnvelope start = executionEvent(UUID.randomUUID(), "WashExecutionStarted",
+        executionId, appointmentId, 5, correlationId,
+        "startedAt", NOW.plusSeconds(40), null, null);
+
+    sendEvent(completion);
+    awaitProcessed(completionMessageId, "DEFERRED");
+    assertThat(appointments.findById(appointmentId).orElseThrow().status().name())
+        .isEqualTo("SCHEDULED");
+
+    sendEvent(start);
+    awaitStatus(appointmentId, "IN_PROGRESS");
+    pendingRecovery().replay(NOW.plusSeconds(120));
+    awaitStatus(appointmentId, "COMPLETED");
+
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type='AppointmentCompleted' AND aggregate_id=:id")
+        .param("id", appointmentId).query(Long.class).single()).isEqualTo(1);
+    assertThat(jdbc.sql("SELECT count(*) FROM wash_execution_transition_projection WHERE wash_execution_id=:id AND event_type='WashExecutionCompleted'")
+        .param("id", executionId).query(Long.class).single()).isEqualTo(1);
+
+    MessageEnvelope staleStartBarrier = executionEvent(UUID.randomUUID(), "WashExecutionStarted",
+        executionId, appointmentId, 5, correlationId,
+        "startedAt", NOW.plusSeconds(40), null, null);
+    sendEvent(completion);
+    sendEvent(staleStartBarrier);
+    awaitProcessed(staleStartBarrier.messageId(), "APPLIED");
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type='AppointmentCompleted' AND aggregate_id=:id")
+        .param("id", appointmentId).query(Long.class).single()).isEqualTo(1);
+    assertThat(appointments.findById(appointmentId).orElseThrow().status().name())
+        .isEqualTo("COMPLETED");
   }
 
   private MessageEnvelope executionEvent(UUID messageId, String type, UUID executionId,
@@ -144,6 +217,11 @@ class ExecutionMessagingE2EIT extends AbstractPostgresIT {
         new Message(codec.encode(envelope), properties));
   }
 
+  private PendingExecutionRecoveryWorker pendingRecovery() {
+    return new PendingExecutionRecoveryWorker(pending, rejected, started, completed, cancelled,
+        authorized, codec, clock);
+  }
+
   private void awaitApplied(UUID appointmentId) throws InterruptedException {
     long deadline = System.nanoTime() + 5_000_000_000L;
     while (System.nanoTime() < deadline) {
@@ -153,6 +231,27 @@ class ExecutionMessagingE2EIT extends AbstractPostgresIT {
       Thread.sleep(25);
     }
     throw new AssertionError("timed out waiting for same-version execution events");
+  }
+
+  private void awaitStatus(UUID appointmentId, String expected) throws InterruptedException {
+    long deadline = System.nanoTime() + 5_000_000_000L;
+    while (System.nanoTime() < deadline) {
+      var value = appointments.findById(appointmentId).orElse(null);
+      if (value != null && expected.equals(value.status().name())) return;
+      Thread.sleep(25);
+    }
+    throw new AssertionError("timed out waiting for Appointment status " + expected);
+  }
+
+  private void awaitProcessed(UUID messageId, String expected) throws InterruptedException {
+    long deadline = System.nanoTime() + 5_000_000_000L;
+    while (System.nanoTime() < deadline) {
+      var value = jdbc.sql("SELECT status FROM processed_messages WHERE message_id=:id")
+          .param("id", messageId).query(String.class).optional();
+      if (value.filter(expected::equals).isPresent()) return;
+      Thread.sleep(25);
+    }
+    throw new AssertionError("timed out waiting for processed message status " + expected);
   }
 
   private static AppointmentTimeSlot slot(UUID id) {
