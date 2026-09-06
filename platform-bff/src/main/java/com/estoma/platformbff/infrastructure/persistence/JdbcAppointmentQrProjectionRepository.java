@@ -1,17 +1,23 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
 import com.estoma.platformbff.application.port.AppointmentQrProjectionPort;
+import com.estoma.platformbff.application.port.AppointmentQrRecoveryProjectionPort;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 /** Technical projection for opaque owner-issued QR references. */
 @Repository
-public class JdbcAppointmentQrProjectionRepository implements AppointmentQrProjectionPort {
+public class JdbcAppointmentQrProjectionRepository
+    implements AppointmentQrProjectionPort, AppointmentQrRecoveryProjectionPort {
   private final JdbcClient jdbc;
 
   public JdbcAppointmentQrProjectionRepository(JdbcClient jdbc) {
@@ -31,6 +37,7 @@ public class JdbcAppointmentQrProjectionRepository implements AppointmentQrProje
 
   private void upsert(UUID appointmentId, String qrRepresentation, byte[] qrLookupHash,
       long appointmentVersion, Instant updatedAt) {
+    lockAppointment(appointmentId);
     jdbc.sql("""
         INSERT INTO appointment_qr_projection (
           appointment_id, qr_representation, qr_lookup_hash, appointment_version, updated_at)
@@ -50,6 +57,42 @@ public class JdbcAppointmentQrProjectionRepository implements AppointmentQrProje
         .update();
   }
 
+  @Override
+  public ApplyOutcome applyPage(List<Snapshot> snapshots, Instant updatedAt) {
+    List<Snapshot> ordered = snapshots.stream()
+        .sorted(Comparator.comparing(snapshot -> snapshot.appointmentId().toString()))
+        .toList();
+    ordered.forEach(snapshot -> lockAppointment(snapshot.appointmentId()));
+
+    for (Snapshot snapshot : ordered) {
+      Current current = current(snapshot.appointmentId()).orElse(null);
+      if (current != null && current.appointmentVersion() == snapshot.appointmentVersion()
+          && !Objects.equals(current.qrRepresentation(), snapshot.qrRepresentation())) {
+        return ApplyOutcome.CONFLICT;
+      }
+    }
+    for (Snapshot snapshot : ordered) {
+      upsert(snapshot.appointmentId(), snapshot.qrRepresentation(),
+          snapshot.qrRepresentation() == null ? null : sha256(snapshot.qrRepresentation()),
+          snapshot.appointmentVersion(), updatedAt);
+    }
+    return ApplyOutcome.APPLIED;
+  }
+
+  private Optional<Current> current(UUID appointmentId) {
+    return jdbc.sql("""
+        SELECT qr_representation, appointment_version
+        FROM appointment_qr_projection WHERE appointment_id = :appointmentId
+        """).param("appointmentId", appointmentId)
+        .query((rs, row) -> new Current(rs.getString("qr_representation"),
+            rs.getLong("appointment_version"))).optional();
+  }
+
+  private void lockAppointment(UUID appointmentId) {
+    jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended('appointment-qr:' || CAST(:id AS TEXT), 0))")
+        .param("id", appointmentId).query().singleRow();
+  }
+
   private static byte[] sha256(String value) {
     try {
       return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
@@ -57,4 +100,6 @@ public class JdbcAppointmentQrProjectionRepository implements AppointmentQrProje
       throw new IllegalStateException("SHA-256 is unavailable", impossible);
     }
   }
+
+  private record Current(String qrRepresentation, long appointmentVersion) {}
 }

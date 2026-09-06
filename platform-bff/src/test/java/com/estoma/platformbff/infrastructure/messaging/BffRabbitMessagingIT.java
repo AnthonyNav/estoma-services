@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.platformbff.domain.messaging.OutboxMessage;
 import com.estoma.platformbff.domain.messaging.OutboxStatus;
+import com.estoma.platformbff.domain.projection.RecoveryQuery;
+import com.estoma.platformbff.contracts.messaging.ActorContext;
 import com.estoma.platformbff.contracts.messaging.EventEnvelope;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import com.estoma.platformbff.infrastructure.config.MessagingTopology;
@@ -58,6 +60,7 @@ class BffRabbitMessagingIT {
   @Autowired RabbitTemplate rabbit;
   @Autowired MessageEnvelopeCodec codec;
   @Autowired DefaultConfirmedCommandPublisher publisher;
+  @Autowired DefaultRecoveryQueryPublisher recoveryPublisher;
 
   @Test
   void declaresOnlyBffOwnedResultsQueue() {
@@ -145,6 +148,36 @@ class BffRabbitMessagingIT {
     assertThat(envelope.aggregateId()).isEqualTo(aggregateId);
     assertThat(envelope.aggregateVersion()).isEqualTo(4);
     assertThat(envelope.actor().accountId()).isEqualTo(accountId);
+  }
+
+  @Test
+  void appointmentQrRecoveryQueryUsesOwnerRouteAndExactTechnicalWireShape() {
+    String queueName = "test.queries.appointments." + UUID.randomUUID();
+    admin.declareQueue(new Queue(queueName, false, true, true));
+    admin.declareBinding(new Binding(queueName, Binding.DestinationType.QUEUE,
+        "platform.queries", "appointments", null));
+    UUID jobId = UUID.randomUUID();
+    UUID queryId = UUID.randomUUID();
+    Instant now = Instant.now();
+    var query = new RecoveryQuery(queryId, jobId, 9,
+        "ListAppointmentQrProjectionSnapshotsPage", 1, "platform.queries", "appointments",
+        jobId, null, queryId.toString(), null,
+        java.util.Map.of("serviceDate", "2026-09-06", "pageSize", 100, "pageToken", "opaque"),
+        "PENDING", null, null, 0, null, null, null, now, now);
+
+    recoveryPublisher.publish(query);
+
+    Message published = rabbit.receive(queueName, 5_000);
+    assertThat(published).isNotNull();
+    var envelope = codec.readQuery(published.getBody());
+    assertThat(envelope.messageType()).isEqualTo("ListAppointmentQrProjectionSnapshotsPage");
+    assertThat(envelope.producer()).isEqualTo("bff");
+    assertThat(envelope.actor()).isEqualTo(ActorContext.system("bff"));
+    assertThat(envelope.correlationId()).isEqualTo(jobId);
+    assertThat(envelope.operationId()).isEqualTo(jobId);
+    assertThat(envelope.payload().path("serviceDate").asText()).isEqualTo("2026-09-06");
+    assertThat(envelope.payload().path("pageSize").asInt()).isEqualTo(100);
+    assertThat(envelope.payload().path("pageToken").asText()).isEqualTo("opaque");
   }
 
   @Test
