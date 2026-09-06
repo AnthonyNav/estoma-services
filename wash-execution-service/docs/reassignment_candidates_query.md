@@ -58,8 +58,9 @@ candidate. Missing or unready owner context must never be disguised as an empty 
 ## Rollout
 
 Deploy this owner Result producer before enabling the BFF refresher. Keep the BFF background
-scheduler disabled by default until the owner deployment is confirmed. This slice deliberately does
-not change `ResolvePendingReassignment` field names or clinic-cancellation policy. Automatic
+scheduler disabled by default until the owner deployment is confirmed. The compatibility bridge in
+the owner system contract governs `ResolvePendingReassignment`; clinic-cancellation policy remains
+unchanged. Automatic
 allocation now retains the authoritative configured priority on its post-lock reread; the previous
 single-candidate reread hardcoded priority `1`. The reread is intersected with the initially locked
 candidate set, so a concurrently appearing resource can never be selected without its lock.

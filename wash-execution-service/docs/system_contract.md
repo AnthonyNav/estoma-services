@@ -775,6 +775,25 @@ CompleteWashExecution
 CancelWashExecutionByClinic
 ```
 
+El wire owner canónico de `ResolvePendingReassignment` es:
+
+```text
+washExecutionId
+selectedCabinId
+selectedTankId
+assignedByAccountId
+assignedAt
+expectedVersion
+```
+
+Durante la transición, el consumer conserva compatibilidad con la forma legacy ya publicada por
+el BFF (`cabinId`, `tankId`, `resolvedByAccountId`, `resolvedAt`). Debe llegar una familia completa
+y exclusiva; mezclar o enviar parcialmente aliases canónicos y legacy es wire inválido. Ambas
+formas se normalizan al mismo Command interno antes de calcular el fingerprint, de modo que un
+retry con igual `producer`, operación, `idempotencyKey` e intención conserva la misma respuesta y
+no repite efectos. El BFF cambia a los nombres canónicos únicamente después de desplegar este
+consumer compatible; la rama legacy no se retira mientras puedan quedar Commands antiguos en cola.
+
 Operaciones internas:
 
 ```text
