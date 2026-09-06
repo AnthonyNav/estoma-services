@@ -4,6 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.platformbff.application.security.ProjectionEventQuarantineService;
+import com.estoma.platformbff.contracts.messaging.ActorContext;
+import com.estoma.platformbff.contracts.messaging.EventEnvelope;
+import com.estoma.platformbff.contracts.messaging.MessageKind;
+import com.estoma.platformbff.infrastructure.messaging.ProjectionEventDispatcher;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -24,6 +28,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 @Testcontainers(disabledWithoutDocker = true)
@@ -49,6 +54,7 @@ class ProjectionEventRuntimePostgresIT {
   }
 
   @Autowired ProjectionEventRuntime runtime;
+  @Autowired ProjectionEventDispatcher dispatcher;
   @Autowired ProjectionEventQuarantineService quarantine;
   @Autowired JdbcClient jdbc;
 
@@ -137,6 +143,80 @@ class ProjectionEventRuntimePostgresIT {
   }
 
   @Test
+  void completedEventProjectsFinalMaterialsAndDuplicateMessageCannotRewriteThem() {
+    UUID executionId = UUID.randomUUID();
+    UUID messageId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-23T20:00:00Z");
+    Map<String, Object> original = completionPayload(executionId, completedAt, 5);
+
+    assertThat(dispatcher.dispatch(envelope(messageId, executionId, 6, original)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    Map<String, Object> mutatedDuplicate = completionPayload(executionId, completedAt, 99);
+    assertThat(dispatcher.dispatch(envelope(messageId, executionId, 6, mutatedDuplicate)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    var projected = jdbc.sql("""
+        SELECT final_package_count, final_exit_version FROM wash_execution_read_model
+        WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(projected.get("final_package_count")).isEqualTo(5);
+    assertThat(projected.get("final_exit_version")).isEqualTo(6L);
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :messageId")
+        .param("messageId", messageId).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
+  void originalRedeliveryBackfillsACompletedRowWhoseInboxEntryPredatesFinalProjection() {
+    UUID executionId = UUID.randomUUID();
+    UUID messageId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-23T20:00:00Z");
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model (
+          wash_execution_id, status, completed_at, execution_version, updated_at)
+        VALUES (:executionId, 'COMPLETED', :completedAt, 6, :completedAt)
+        """).param("executionId", executionId)
+        .param("completedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO inbox_messages (
+          consumer_name, message_id, message_kind, message_type, message_version, producer,
+          aggregate_id, aggregate_version, received_at, applied_at)
+        VALUES ('bff-projection-runtime', :messageId, 'EVENT', 'WashExecutionCompleted', 1,
+          'wash-execution', :executionId, 6, :completedAt, :completedAt)
+        """).param("messageId", messageId).param("executionId", executionId)
+        .param("completedAt", java.sql.Timestamp.from(completedAt)).update();
+
+    assertThat(dispatcher.dispatch(envelope(
+        messageId, executionId, 6, completionPayload(executionId, completedAt, 5))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    var projected = jdbc.sql("""
+        SELECT final_package_count, final_exit_version FROM wash_execution_read_model
+        WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(projected.get("final_package_count")).isEqualTo(5);
+    assertThat(projected.get("final_exit_version")).isEqualTo(6L);
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :messageId")
+        .param("messageId", messageId).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
+  void nonIntegralOrNegativeFinalMaterialsAreRejectedBeforeInbox() {
+    UUID executionId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-23T20:00:00Z");
+    Map<String, Object> decimal = completionPayload(executionId, completedAt, 5);
+    decimal.put("finalPackageCount", 1.5d);
+    Map<String, Object> negative = completionPayload(executionId, completedAt, 5);
+    negative.put("finalPackageCount", -1);
+
+    assertThat(dispatcher.dispatch(envelope(UUID.randomUUID(), executionId, 6, decimal)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    assertThat(dispatcher.dispatch(envelope(UUID.randomUUID(), executionId, 6, negative)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages").query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM wash_execution_read_model").query(Long.class).single()).isZero();
+  }
+
+  @Test
   void communicationsVisitUsesVisitedAtAsMonotonicFenceWithoutAggregateMetadata() {
     UUID accountId = UUID.randomUUID();
     Instant newer = Instant.parse("2026-08-23T21:00:00Z");
@@ -195,6 +275,27 @@ class ProjectionEventRuntimePostgresIT {
         .param("id", messageId).query(Long.class).single()).isZero();
     assertThat(jdbc.sql("SELECT count(*) FROM session_revocations WHERE session_id = :id")
         .param("id", sessionId).query(Long.class).single()).isZero();
+  }
+
+  private static Map<String, Object> completionPayload(UUID executionId, Instant completedAt, int packages) {
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("washExecutionId", executionId.toString());
+    payload.put("executionStatus", "COMPLETED");
+    payload.put("executionVersion", 6);
+    payload.put("completedAt", completedAt.toString());
+    payload.put("finalPackageCount", packages);
+    payload.put("finalGreenPaperCassette8Count", 1);
+    payload.put("finalGreenPaperCassette10Count", 2);
+    payload.put("finalWitnessTapePortionCount", 3);
+    return payload;
+  }
+
+  private static EventEnvelope envelope(UUID messageId, UUID executionId, int version,
+      Map<String, Object> payload) {
+    return new EventEnvelope(messageId, "WashExecutionCompleted", 1, MessageKind.EVENT,
+        "wash-execution", Instant.parse("2026-08-23T20:00:00Z"), UUID.randomUUID(), UUID.randomUUID(),
+        null, null, executionId, version, ActorContext.anonymous(),
+        JsonMapper.builder().findAndAddModules().build().valueToTree(payload));
   }
 
   @Test

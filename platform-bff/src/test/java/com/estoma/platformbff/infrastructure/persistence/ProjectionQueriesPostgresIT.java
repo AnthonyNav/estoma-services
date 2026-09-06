@@ -5,12 +5,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.estoma.platformbff.application.projection.ProjectionReadModel;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -42,8 +48,11 @@ class ProjectionQueriesPostgresIT {
   @Autowired JdbcClient jdbc;
   @Autowired JdbcProjectionReadModelRepository projections;
   @Autowired JdbcWashExitMaterialsProjectionRepository exitMaterials;
+  @Autowired JdbcWashCompletionProjectionRepository completions;
   @Autowired JdbcWashSupervisionQueryRepository supervision;
   @Autowired JdbcWashStudentQueryRepository studentQueries;
+  @Autowired DataSource dataSource;
+  @Autowired PlatformTransactionManager transactionManager;
 
   @BeforeEach
   void clearReadModels() {
@@ -144,6 +153,172 @@ class ProjectionQueriesPostgresIT {
         SELECT submitted_exit_version FROM wash_execution_read_model
         WHERE wash_execution_id = :executionId
         """).param("executionId", executionId).query(Long.class).single()).isEqualTo(7L);
+  }
+
+  @Test
+  void completionProjectsOfficialMaterialsAndReleasesTheAssignmentWithAReplaySafeFence() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-01T11:00:00Z");
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model (
+          wash_execution_id, status, completed_at, execution_version, updated_at)
+        VALUES (:executionId, 'COMPLETED', :completedAt, 6, :completedAt)
+        """).param("executionId", executionId)
+        .param("completedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_resource_assignment_read_model (
+          resource_assignment_id, wash_execution_id, assignment_type, assigned_at,
+          source_message_id, source_version, updated_at)
+        VALUES (:assignmentId, :executionId, 'INITIAL', :assignedAt, :messageId, 4, :assignedAt)
+        """).param("assignmentId", assignmentId).param("executionId", executionId)
+        .param("assignedAt", java.sql.Timestamp.from(completedAt.minusSeconds(600)))
+        .param("messageId", UUID.randomUUID()).update();
+
+    completions.projectCompletion(executionId, 5, 6, 7, 8, 6, completedAt);
+    completions.projectCompletion(executionId, 9, 9, 9, 9, 5, completedAt.minusSeconds(30));
+    completions.projectCompletion(executionId, 5, 6, 7, 8, 6, completedAt);
+
+    var row = jdbc.sql("""
+        SELECT final_package_count, final_green_paper_cassette_8_count,
+               final_green_paper_cassette_10_count, final_witness_tape_portion_count,
+               final_exit_version
+        FROM wash_execution_read_model WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(row.get("final_package_count")).isEqualTo(5);
+    assertThat(row.get("final_green_paper_cassette_8_count")).isEqualTo(6);
+    assertThat(row.get("final_green_paper_cassette_10_count")).isEqualTo(7);
+    assertThat(row.get("final_witness_tape_portion_count")).isEqualTo(8);
+    assertThat(row.get("final_exit_version")).isEqualTo(6L);
+    assertThat(jdbc.sql("""
+        SELECT released_at FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query(Instant.class).single()).isEqualTo(completedAt);
+  }
+
+  @Test
+  void delayedAssignmentBecomesTheReleasedHistoryOfACompletedExecution() {
+    UUID accountId = UUID.randomUUID();
+    UUID appointmentId = appointment(accountId, "IN_PROGRESS", Instant.parse("2026-08-01T10:00:00Z"));
+    UUID executionId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-01T11:00:00Z");
+    jdbc.sql("""
+        INSERT INTO wash_cabin_read_model(cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, 'C-01', 'Cabina 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", cabinId).param("updatedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_tank_read_model(tank_id, cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, :cabinId, 'T-01', 'Tanque 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", tankId).param("cabinId", cabinId)
+        .param("updatedAt", java.sql.Timestamp.from(completedAt)).update();
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, appointmentId, "NORMAL", "COMPLETED", null, null, null, null, completedAt, null,
+        null, null, null, null, null, null, 6, completedAt));
+    completions.projectCompletion(executionId, 5, 6, 7, 8, 6, completedAt);
+
+    projections.upsert(new ProjectionReadModel.ResourceAssignment(
+        UUID.randomUUID(), executionId, appointmentId, null, cabinId, tankId,
+        "INITIAL", completedAt.minusSeconds(600), null, UUID.randomUUID(), 4,
+        completedAt.minusSeconds(600)));
+
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(completedAt);
+    assertThat(assignment.get("source_version")).isEqualTo(4L);
+    var home = studentQueries.findPrimaryAppointment(accountId, java.time.LocalDate.of(2026, 8, 1)).orElseThrow();
+    assertThat(home.resourceAssignmentId()).isNull();
+    assertThat(home.lastResourceAssignmentId()).isNotNull();
+    assertThat(home.lastCabinCode()).isEqualTo("C-01");
+    assertThat(home.finalPackageCount()).isEqualTo(5);
+  }
+
+  @Test
+  void concurrentAssignmentCannotReactivateACompletedExecution() throws Exception {
+    UUID accountId = UUID.randomUUID();
+    UUID appointmentId = appointment(accountId, "IN_PROGRESS", Instant.parse("2026-08-01T10:00:00Z"));
+    UUID executionId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-01T11:00:00Z");
+    jdbc.sql("""
+        INSERT INTO wash_cabin_read_model(cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, 'C-01', 'Cabina 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", cabinId).param("updatedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_tank_read_model(tank_id, cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, :cabinId, 'T-01', 'Tanque 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", tankId).param("cabinId", cabinId)
+        .param("updatedAt", java.sql.Timestamp.from(completedAt)).update();
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, appointmentId, "NORMAL", "IN_PROGRESS", null, null, completedAt.minusSeconds(900), null,
+        null, null, null, null, null, null, null, null, 5, completedAt.minusSeconds(900)));
+
+    jdbc.sql("""
+        CREATE FUNCTION block_test_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.wash_execution_id = '%s'::uuid THEN
+            PERFORM pg_advisory_xact_lock(918273645);
+          END IF;
+          RETURN NEW;
+        END
+        $$
+        """.formatted(executionId)).update();
+    jdbc.sql("""
+        CREATE TRIGGER block_test_assignment_before_insert
+        BEFORE INSERT ON wash_resource_assignment_read_model
+        FOR EACH ROW EXECUTE FUNCTION block_test_assignment()
+        """).update();
+
+    var executor = Executors.newFixedThreadPool(2);
+    try (var blocker = dataSource.getConnection()) {
+      blocker.setAutoCommit(false);
+      blocker.createStatement().execute("SELECT pg_advisory_xact_lock(918273645)");
+      CompletableFuture<Void> assignment = CompletableFuture.runAsync(() -> projections.upsert(
+          new ProjectionReadModel.ResourceAssignment(
+              UUID.randomUUID(), executionId, appointmentId, null, cabinId, tankId,
+              "INITIAL", completedAt.minusSeconds(600), null, UUID.randomUUID(), 4,
+              completedAt.minusSeconds(600))), executor);
+      awaitAdvisoryWaiters(1);
+
+      CompletableFuture<Void> completion = CompletableFuture.runAsync(() ->
+          new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            projections.upsert(new ProjectionReadModel.WashExecution(
+                executionId, appointmentId, "NORMAL", "COMPLETED", null, null, null, null, completedAt,
+                null, null, null, null, null, null, null, 6, completedAt));
+            completions.projectCompletion(executionId, 5, 6, 7, 8, 6, completedAt);
+          }), executor);
+      awaitAdvisoryWaiters(2);
+
+      blocker.commit();
+      CompletableFuture.allOf(assignment, completion).get(10, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+      jdbc.sql("DROP TRIGGER IF EXISTS block_test_assignment_before_insert ON wash_resource_assignment_read_model")
+          .update();
+      jdbc.sql("DROP FUNCTION IF EXISTS block_test_assignment()")
+          .update();
+    }
+
+    var assignment = jdbc.sql("""
+        SELECT released_at FROM wash_resource_assignment_read_model
+        WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(completedAt);
+  }
+
+  private void awaitAdvisoryWaiters(long expected) throws InterruptedException {
+    for (int attempt = 0; attempt < 250; attempt++) {
+      long waiters = jdbc.sql("""
+          SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+          """).query(Long.class).single();
+      if (waiters >= expected) return;
+      Thread.sleep(20);
+    }
+    throw new AssertionError("Expected at least " + expected + " advisory-lock waiters");
   }
 
   @Test

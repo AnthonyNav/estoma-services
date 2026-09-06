@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 /** JDBC adapter for the typed PR4 read models. Fencing is local to each row/stream. */
 @Repository
@@ -27,6 +28,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   }
 
   @Override
+  @Transactional
   public void upsert(ProjectionReadModel model) {
     switch (model) {
       case ProjectionReadModel.Person value -> person(value);
@@ -738,6 +740,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   }
 
   private void execution(ProjectionReadModel.WashExecution v) {
+    if ("COMPLETED".equals(v.status())) lockWashExecution(v.washExecutionId());
     jdbc.sql("""
         INSERT INTO wash_execution_read_model(wash_execution_id, appointment_id, appointment_type, status, arrived_at, authorized_at, started_at, exit_submitted_at, completed_at, cancelled_at, cancellation_type, rejection_reason, execution_version, updated_at)
         VALUES (:id, :appointmentId, :appointmentType, :status, :arrivedAt, :authorizedAt, :startedAt, :exitSubmittedAt, :completedAt, :cancelledAt, :cancellationType, :rejectionReason, :version, :updatedAt)
@@ -748,12 +751,27 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   }
 
   private void assignment(ProjectionReadModel.ResourceAssignment v) {
+    lockWashExecution(v.washExecutionId());
     jdbc.sql("""
         INSERT INTO wash_resource_assignment_read_model(resource_assignment_id, wash_execution_id, appointment_id, appointment_time_slot_id, cabin_id, tank_id, assignment_type, assigned_at, released_at, source_message_id, source_version, updated_at)
-        VALUES (:id, :executionId, :appointmentId, :slotId, :cabinId, :tankId, :type, :assignedAt, :releasedAt, :messageId, :version, :updatedAt)
+        SELECT :id, :executionId, :appointmentId, :slotId, :cabinId, :tankId, :type, :assignedAt,
+          COALESCE(:releasedAt, CASE
+            WHEN e.status = 'COMPLETED' AND e.execution_version >= :version THEN e.completed_at
+            ELSE NULL
+          END),
+          :messageId, :version, :updatedAt
+        FROM (SELECT 1) seed
+        LEFT JOIN wash_execution_read_model e ON e.wash_execution_id = :executionId
         ON CONFLICT (resource_assignment_id) DO UPDATE SET wash_execution_id = EXCLUDED.wash_execution_id, appointment_id = COALESCE(EXCLUDED.appointment_id, wash_resource_assignment_read_model.appointment_id), appointment_time_slot_id = COALESCE(EXCLUDED.appointment_time_slot_id, wash_resource_assignment_read_model.appointment_time_slot_id), cabin_id = COALESCE(EXCLUDED.cabin_id, wash_resource_assignment_read_model.cabin_id), tank_id = COALESCE(EXCLUDED.tank_id, wash_resource_assignment_read_model.tank_id), assignment_type = COALESCE(EXCLUDED.assignment_type, wash_resource_assignment_read_model.assignment_type), assigned_at = COALESCE(EXCLUDED.assigned_at, wash_resource_assignment_read_model.assigned_at), released_at = COALESCE(EXCLUDED.released_at, wash_resource_assignment_read_model.released_at), source_message_id = EXCLUDED.source_message_id, source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
         WHERE wash_resource_assignment_read_model.source_version <= EXCLUDED.source_version
         """).param("id", v.resourceAssignmentId()).param("executionId", v.washExecutionId()).param("appointmentId", v.appointmentId()).param("slotId", v.appointmentTimeSlotId()).param("cabinId", v.cabinId()).param("tankId", v.tankId()).param("type", v.assignmentType()).param("assignedAt", JdbcTimes.timestamp(v.assignedAt())).param("releasedAt", JdbcTimes.timestamp(v.releasedAt())).param("messageId", v.sourceMessageId()).param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  private void lockWashExecution(UUID washExecutionId) {
+    jdbc.sql("SELECT pg_advisory_xact_lock(hashtextextended(CAST(:executionId AS TEXT), 0))")
+        .param("executionId", washExecutionId)
+        .query()
+        .singleRow();
   }
 
   private void unavailability(ProjectionReadModel.ResourceUnavailability v) {

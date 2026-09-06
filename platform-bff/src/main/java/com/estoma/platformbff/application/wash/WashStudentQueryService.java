@@ -9,6 +9,7 @@ import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.Appointme
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.ActiveResourceAssignment;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.CourseSection;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.FormStudent;
+import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.ExitMaterials;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeAppointment;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashStudentResponses.StudentHomeStudent;
@@ -79,14 +80,60 @@ public class WashStudentQueryService {
     ActiveResourceAssignment assignment = value.resourceAssignmentId() == null ? null
         : new ActiveResourceAssignment(value.resourceAssignmentId(), value.cabinId(), value.cabinCode(),
             value.cabinName(), value.tankId(), value.tankCode(), value.tankName());
+    ActiveResourceAssignment lastAssignment = value.lastResourceAssignmentId() == null ? null
+        : new ActiveResourceAssignment(value.lastResourceAssignmentId(), value.lastCabinId(), value.lastCabinCode(),
+            value.lastCabinName(), value.lastTankId(), value.lastTankCode(), value.lastTankName());
+    ExitMaterials submitted = materials(value.submittedPackageCount(), value.submittedGreenPaperCassette8Count(),
+        value.submittedGreenPaperCassette10Count(), value.submittedWitnessTapePortionCount());
+    ExitMaterials completed = materials(value.finalPackageCount(), value.finalGreenPaperCassette8Count(),
+        value.finalGreenPaperCassette10Count(), value.finalWitnessTapePortionCount());
+    requireExecutionContext(value, assignment, lastAssignment, submitted, completed);
     WashExecution execution = value.washExecutionId() == null ? null
         : new WashExecution(value.washExecutionId(), value.washExecutionStatus(),
-            value.washExecutionVersion(), value.washExecutionArrivedAt(),
-            value.washExecutionRejectionReason(), assignment);
+            value.washExecutionVersion(), value.washExecutionVersion(), value.washExecutionArrivedAt(),
+            value.washExecutionRejectionReason(), value.exitSubmittedAt(), submitted,
+            value.completedAt(), completed, assignment, lastAssignment);
     return new StudentHomeAppointment(value.appointmentId(), value.appointmentStatus(), value.appointmentVersion(),
         value.exceptionalAuthorizationId() != null, studentCancellationAction(value, clock),
         value.appointmentType(), value.instrumentCount(), value.pieceType(), course, slot, execution,
         qrUsageContext(value, clock), null);
+  }
+
+  private static void requireExecutionContext(WashStudentQueryPort.Appointment value,
+      ActiveResourceAssignment active, ActiveResourceAssignment last,
+      ExitMaterials submitted, ExitMaterials completed) {
+    if (value.washExecutionId() == null) return;
+    if (value.washExecutionVersion() == null) {
+      throw new ProjectionUnavailableException("wash execution version is incomplete");
+    }
+    if (value.washExecutionStatus() == null) {
+      throw new ProjectionUnavailableException("wash execution status is incomplete");
+    }
+    switch (value.washExecutionStatus()) {
+      case "IN_PROGRESS" -> {
+        if (active == null) throw new ProjectionUnavailableException("active resource assignment is incomplete");
+      }
+      case "EXIT_SUBMITTED" -> {
+        if (active == null || submitted == null || value.exitSubmittedAt() == null) {
+          throw new ProjectionUnavailableException("submitted exit context is incomplete");
+        }
+      }
+      case "COMPLETED" -> {
+        if (active != null || last == null || completed == null || value.completedAt() == null) {
+          throw new ProjectionUnavailableException("completed wash execution context is incomplete");
+        }
+      }
+      default -> { }
+    }
+  }
+
+  private static ExitMaterials materials(Integer packages, Integer cassette8, Integer cassette10,
+      Integer witnessTape) {
+    if (packages == null && cassette8 == null && cassette10 == null && witnessTape == null) return null;
+    if (packages == null || cassette8 == null || cassette10 == null || witnessTape == null) {
+      throw new ProjectionUnavailableException("exit materials projection is incomplete");
+    }
+    return new ExitMaterials(packages, cassette8, cassette10, witnessTape);
   }
 
   private static StudentCancellationAction studentCancellationAction(WashStudentQueryPort.Appointment value,
