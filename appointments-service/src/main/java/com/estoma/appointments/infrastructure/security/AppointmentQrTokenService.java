@@ -1,5 +1,6 @@
 package com.estoma.appointments.infrastructure.security;
 
+import com.estoma.appointments.application.port.out.AppointmentQrRepresentationIssuer;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -7,18 +8,41 @@ import java.util.Base64;
 import java.util.UUID;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /** QR is an integrity-protected appointment reference, never an entry credential. */
 @Component
-public final class AppointmentQrTokenService {
+public final class AppointmentQrTokenService implements AppointmentQrRepresentationIssuer {
+  static final int MINIMUM_SECRET_BYTES = 32;
+  private final boolean enabled;
   private final byte[] secret;
-  public AppointmentQrTokenService(@Value("${estoma.qr.secret:}") String secret) {
+
+  @Autowired
+  public AppointmentQrTokenService(@Value("${estoma.qr.enabled:false}") boolean enabled,
+      @Value("${estoma.qr.secret:}") String secret) {
+    this.enabled = enabled;
     this.secret = secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8);
+    if (enabled && (secret == null || secret.isBlank() || this.secret.length < MINIMUM_SECRET_BYTES)) {
+      throw new IllegalStateException(
+          "QR emission requires a non-blank secret of at least " + MINIMUM_SECRET_BYTES + " bytes");
+    }
   }
+
+  /** Test/standalone constructor; production activation is controlled by estoma.qr.enabled. */
+  public AppointmentQrTokenService(String secret) {
+    this(true, secret);
+  }
+
+  @Override
+  public boolean enabled() {
+    return enabled;
+  }
+
+  @Override
   public String issue(UUID appointmentId) {
-    if (secret.length == 0) throw new IllegalStateException("QR secret is not configured");
+    if (!enabled) throw new IllegalStateException("QR emission is disabled");
     String value = appointmentId.toString();
     return "v1." + value + "." + sign(value);
   }

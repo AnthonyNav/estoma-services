@@ -3,6 +3,7 @@ package com.estoma.appointments.infrastructure.messaging;
 import com.estoma.appointments.application.port.in.AppointmentExecutionQueryUseCase;
 import com.estoma.appointments.application.port.in.GetAppointmentAvailabilityUseCase;
 import com.estoma.appointments.application.port.out.OutboxRepository;
+import com.estoma.appointments.application.port.out.AppointmentQrRepresentationIssuer;
 import com.estoma.appointments.contracts.MessageEnvelope;
 import com.estoma.appointments.domain.model.Appointment;
 import com.estoma.appointments.domain.model.AppointmentTimeSlot;
@@ -26,21 +27,27 @@ import tools.jackson.databind.node.ObjectNode;
 public class AppointmentExecutionQueryService {
   private static final int DEFAULT_PAGE_SIZE = 100;
   private static final int MAX_PAGE_SIZE = 500;
+  private static final int MAX_QR_PAGE_SIZE = 100;
+  private static final String QR_PAGE_QUERY = "ListAppointmentQrProjectionSnapshotsPage";
+  private static final String QR_PAGE_RESULT = QR_PAGE_QUERY + "Result";
 
   private final AppointmentExecutionQueryUseCase queries;
   private final GetAppointmentAvailabilityUseCase availability;
   private final OutboxRepository outbox;
   private final ObjectMapper mapper;
   private final Clock clock;
+  private final AppointmentQrRepresentationIssuer qrIssuer;
 
   public AppointmentExecutionQueryService(AppointmentExecutionQueryUseCase queries,
       GetAppointmentAvailabilityUseCase availability,
-      OutboxRepository outbox, ObjectMapper mapper, Clock clock) {
+      OutboxRepository outbox, ObjectMapper mapper, Clock clock,
+      AppointmentQrRepresentationIssuer qrIssuer) {
     this.queries = queries;
     this.availability = availability;
     this.outbox = outbox;
     this.mapper = mapper;
     this.clock = clock;
+    this.qrIssuer = qrIssuer;
   }
 
   @Transactional(isolation = Isolation.REPEATABLE_READ)
@@ -49,7 +56,133 @@ public class AppointmentExecutionQueryService {
       case "GetAppointmentExecutionContext" -> answerOne(query);
       case "ListAppointmentExecutionContextsPage" -> answerPage(query);
       case "GetAppointmentAvailability" -> answerAvailability(query);
+      case QR_PAGE_QUERY -> answerQrPage(query);
       default -> throw new InvalidMessageException("unsupported Appointment Query");
+    }
+  }
+
+  private void answerQrPage(MessageEnvelope query) {
+    requireQrPageFields(query.payload());
+    LocalDate serviceDate;
+    try {
+      serviceDate = LocalDate.parse(requiredText(query.payload(), "serviceDate"));
+    } catch (RuntimeException invalid) {
+      appendQrRejected(query, "INVALID_SERVICE_DATE");
+      return;
+    }
+
+    int pageSize;
+    try {
+      pageSize = requiredInt(query.payload(), "pageSize");
+    } catch (InvalidMessageException invalid) {
+      appendQrRejected(query, "INVALID_PAGE_SIZE");
+      return;
+    }
+    if (pageSize < 1 || pageSize > MAX_QR_PAGE_SIZE) {
+      appendQrRejected(query, "INVALID_PAGE_SIZE");
+      return;
+    }
+
+    UUID after;
+    try {
+      after = decodeQrToken(optionalPageToken(query.payload()), serviceDate);
+    } catch (IllegalArgumentException invalid) {
+      appendQrRejected(query, "INVALID_PAGE_TOKEN");
+      return;
+    }
+
+    if (!qrIssuer.enabled()) {
+      appendQrRejected(query, "QR_PROJECTION_DISABLED");
+      return;
+    }
+
+    var result = queries.list(serviceDate, after, pageSize, clock.instant());
+    ArrayNode items = mapper.createArrayNode();
+    for (var context : result.contexts()) {
+      Appointment appointment = context.appointment();
+      ObjectNode item = mapper.createObjectNode();
+      item.put("appointmentId", appointment.appointmentId().toString());
+      item.put("appointmentVersion", appointment.version());
+      item.put("appointmentStatus", appointment.status().name());
+      if (appointment.entryAuthorizedAt() == null) item.putNull("entryAuthorizedAt");
+      else item.put("entryAuthorizedAt", appointment.entryAuthorizedAt().toString());
+      if (appointment.status() == com.estoma.appointments.domain.model.AppointmentStatus.SCHEDULED
+          || appointment.status() == com.estoma.appointments.domain.model.AppointmentStatus.IN_PROGRESS) {
+        item.put("qrRepresentation", qrIssuer.issue(appointment.appointmentId()));
+      } else {
+        // Explicit tombstone: lets a recovering consumer clear a stale active mapping by version.
+        item.putNull("qrRepresentation");
+      }
+      items.add(item);
+    }
+
+    ObjectNode payload = mapper.createObjectNode();
+    payload.put("status", "SUCCEEDED");
+    ObjectNode data = mapper.createObjectNode();
+    data.put("snapshotGeneratedAt", result.snapshotGeneratedAt().toString());
+    data.put("serviceDate", result.serviceDate().toString());
+    data.set("items", items);
+    if (result.nextAfterAppointmentId() != null) {
+      data.put("nextPageToken", encodeQrToken(serviceDate, result.nextAfterAppointmentId()));
+    }
+    payload.set("data", data);
+    append(query, qrResultMessageId(query.messageId()), QR_PAGE_RESULT, null, null, payload);
+  }
+
+  private void appendQrRejected(MessageEnvelope query, String code) {
+    ObjectNode payload = mapper.createObjectNode();
+    payload.put("status", "REJECTED");
+    ObjectNode error = mapper.createObjectNode();
+    error.put("code", code);
+    payload.set("error", error);
+    append(query, qrResultMessageId(query.messageId()), QR_PAGE_RESULT, null, null, payload);
+  }
+
+  private static UUID qrResultMessageId(UUID queryMessageId) {
+    return UUID.nameUUIDFromBytes((QR_PAGE_RESULT + ":" + queryMessageId)
+        .getBytes(StandardCharsets.UTF_8));
+  }
+
+  static String encodeQrToken(LocalDate serviceDate, UUID appointmentId) {
+    String value = "v1:" + serviceDate + ":" + appointmentId;
+    return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+  }
+
+  static UUID decodeQrToken(String token, LocalDate serviceDate) {
+    if (token == null) return null;
+    if (token.length() > 160) throw new IllegalArgumentException("pageToken is too long");
+    try {
+      String decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+      String[] parts = decoded.split(":", -1);
+      if (parts.length != 3 || !"v1".equals(parts[0])
+          || !serviceDate.equals(LocalDate.parse(parts[1]))) {
+        throw new IllegalArgumentException("pageToken does not match serviceDate");
+      }
+      UUID appointmentId = UUID.fromString(parts[2]);
+      if (!token.equals(encodeQrToken(serviceDate, appointmentId))) {
+        throw new IllegalArgumentException("pageToken is not canonical");
+      }
+      return appointmentId;
+    } catch (RuntimeException invalid) {
+      throw new IllegalArgumentException("invalid pageToken", invalid);
+    }
+  }
+
+  private static String optionalPageToken(tools.jackson.databind.JsonNode payload) {
+    if (!payload.has("pageToken")) return null;
+    if (!payload.path("pageToken").isTextual() || payload.path("pageToken").asString().isBlank()) {
+      throw new InvalidMessageException("pageToken must be a non-blank string when present");
+    }
+    return payload.path("pageToken").asString();
+  }
+
+  private static void requireQrPageFields(tools.jackson.databind.JsonNode payload) {
+    java.util.Set<String> actual = new java.util.HashSet<>();
+    actual.addAll(payload.propertyNames());
+    java.util.Set<String> required = Set.of("serviceDate", "pageSize");
+    java.util.Set<String> withToken = Set.of("serviceDate", "pageSize", "pageToken");
+    if (!actual.equals(required) && !actual.equals(withToken)) {
+      throw new InvalidMessageException("QR projection page payload fields do not match V1 contract");
     }
   }
 

@@ -132,6 +132,7 @@ class BoundedContextE2EIT extends AbstractPostgresIT {
     assertThat(event.payload().path("appointmentId").asString()).isEqualTo(appointmentId.toString());
     assertThat(event.payload().path("studentAccountId").asString()).isEqualTo(studentId.toString());
     assertThat(event.payload().path("courseSectionId").asString()).isEqualTo(courseId.toString());
+    assertThat(event.payload().has("qrRepresentation")).isFalse();
 
     long initialOutbox = outboxCount(appointmentId);
 
