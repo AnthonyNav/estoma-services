@@ -138,7 +138,9 @@ class ExecutionMessagingE2EIT extends AbstractPostgresIT {
     properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
     properties.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
     properties.setMessageId(envelope.messageId().toString());
-    rabbit.send(MessagingNames.EVENTS_EXCHANGE, "wash-execution.execution.lifecycle",
+    String routingKey = MessagingNames.WASH_EXECUTION_EVENT_ROUTES.get(envelope.messageType());
+    if (routingKey == null) throw new IllegalArgumentException("unsupported execution test Event");
+    rabbit.send(MessagingNames.EVENTS_EXCHANGE, routingKey,
         new Message(codec.encode(envelope), properties));
   }
 
