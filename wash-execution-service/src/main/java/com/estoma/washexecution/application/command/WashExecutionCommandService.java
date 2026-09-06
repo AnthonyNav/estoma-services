@@ -452,6 +452,21 @@ public final class WashExecutionCommandService {
 
     execution.cancelByClinic(
         supervisorId, c.cancellationSubreason(), c.cancellationReason(), c.cancelledAt());
+    if ("CAPACITY_LOSS".equals(c.cancellationSubreason())) {
+      requireAppointmentsReady();
+      var appointment = appointments.findById(execution.appointmentId())
+          .orElseThrow(() -> new CommandRejectedException("APPOINTMENT_CONTEXT_UNAVAILABLE"));
+      if (!"SCHEDULED".equals(appointment.status()) && !"IN_PROGRESS".equals(appointment.status())) {
+        throw new CommandRejectedException("APPOINTMENT_CONTEXT_UNAVAILABLE");
+      }
+      var slot = requireSlot(appointment.appointmentTimeSlotId());
+      // The transaction boundary protects these inputs through commit, including new resources.
+      // Sample owner time under that gate: delivery/retry may outlive a cleaning deadline.
+      // cancelledAt remains the original cancellation/event timestamp, not an availability clock.
+      if (!allocator.snapshotCandidates(execution.appointmentType(), slot, clock.instant()).isEmpty()) {
+        throw new CommandRejectedException("CAPACITY_ALTERNATIVE_AVAILABLE");
+      }
+    }
     CleaningPeriod cleaning = null;
     if (assignment != null) {
       assignment.release(supervisorId, c.cancelledAt(), ReleaseReason.CLINIC_CANCELLATION);

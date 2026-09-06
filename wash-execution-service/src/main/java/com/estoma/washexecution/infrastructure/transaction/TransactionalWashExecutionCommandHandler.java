@@ -42,6 +42,11 @@ public final class TransactionalWashExecutionCommandHandler implements WashExecu
   public CommandOutcome dispatch(CommandRequest request) {
     return Objects.requireNonNull(
         transactions.execute(status -> {
+          if (request != null
+              && request.command() instanceof WashExecutionCommand.CancelWashExecutionByClinic cancel
+              && "CAPACITY_LOSS".equals(cancel.cancellationSubreason())) {
+            resourceLocks.lockCapacityDecision();
+          }
           preLockReleaseResources(request);
           return service.dispatch(request);
         }),
