@@ -97,6 +97,39 @@ class ResourceAllocatorIT extends AbstractPostgresIT {
         .isPresent();
   }
 
+  @Test
+  void sideEffectFreeSnapshotUsesTheSameFirstCandidateAsAutomaticAllocation() {
+    UUID calendar = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    UUID normalCabin = UUID.randomUUID();
+    UUID normalTank = UUID.randomUUID();
+    UUID journeyCabin = UUID.randomUUID();
+    UUID journeyTank = UUID.randomUUID();
+    seedResource(normalCabin, normalTank, "NORMAL");
+    seedResource(journeyCabin, journeyTank, "JOURNEY");
+    jdbc.update("""
+        INSERT INTO resource_priority_projection(
+          resource_priority_id,appointment_type,cabin_type,usage_mode,priority_order,status,
+          source_version,updated_at)
+        VALUES
+          (?,'NORMAL','NORMAL','AUTOMATIC',9,'ACTIVE',1,now()),
+          (?,'NORMAL','JOURNEY','AUTOMATIC',1,'ACTIVE',1,now())
+        """, UUID.randomUUID(), UUID.randomUUID());
+    var slot = slot(slotId, calendar);
+
+    var snapshot = inTransaction(() -> allocator.snapshotCandidates(
+        AppointmentType.NORMAL, slot, START.plusSeconds(60)));
+    var automatic = inTransaction(() -> allocator.allocateAutomatic(
+        AppointmentType.NORMAL, slot, START.plusSeconds(60)));
+
+    assertThat(snapshot).isNotEmpty();
+    assertThat(automatic).isPresent();
+    assertThat(snapshot.getFirst().tankId()).isEqualTo(journeyTank);
+    assertThat(automatic.get().tankId()).isEqualTo(snapshot.getFirst().tankId());
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM resource_assignments", Integer.class)).isZero();
+  }
+
   private ProjectionRepositories.TimeSlotContext slot(UUID slotId, UUID calendarId) {
     return new ProjectionRepositories.TimeSlotContext(
         slotId,
@@ -111,10 +144,14 @@ class ResourceAllocatorIT extends AbstractPostgresIT {
   }
 
   private void seedResource(UUID cabin, UUID tank) {
+    seedResource(cabin, tank, "NORMAL");
+  }
+
+  private void seedResource(UUID cabin, UUID tank, String cabinType) {
     jdbc.update("""
         INSERT INTO cabin_projection(cabin_id,code,name,cabin_type,status,source_version,updated_at)
-        VALUES(?,?,'Cabin','NORMAL','ACTIVE',1,now())
-        """, cabin, "C-" + cabin.toString().substring(0, 8));
+        VALUES(?,?,'Cabin',?,'ACTIVE',1,now())
+        """, cabin, "C-" + cabin.toString().substring(0, 8), cabinType);
     jdbc.update("""
         INSERT INTO tank_projection(tank_id,cabin_id,code,name,configured_capacity,status,source_version,updated_at)
         VALUES(?,?,?,'Tank',2,'ACTIVE',1,now())

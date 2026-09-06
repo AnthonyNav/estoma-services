@@ -54,7 +54,7 @@ public final class IntegrationQueryListener {
     }
 
     try {
-      if (!"appointments".equals(envelope.producer())) {
+      if (!requesterAllowed(envelope)) {
         processor.reject(metadata, "QUERY_PRODUCER_NOT_ALLOWED");
       } else {
         try {
@@ -67,6 +67,12 @@ public final class IntegrationQueryListener {
     } catch (Exception technical) {
       routeTechnical(message, channel, tag, technical);
     }
+  }
+
+  private static boolean requesterAllowed(MessageEnvelope envelope) {
+    return "GetReassignmentCandidates".equals(envelope.messageType())
+        ? "bff".equals(envelope.producer())
+        : "appointments".equals(envelope.producer());
   }
 
   private static String stableCode(IllegalArgumentException exception) {

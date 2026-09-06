@@ -94,9 +94,15 @@ public class WashExecutionApplicationConfig {
   @Bean
   WashExecutionIntegrationQueryService washExecutionIntegrationQueryService(
       WashExecutionIntegrationQueryRepository repository,
+      WashExecutionRepository executions,
+      ProjectionRepositories.AppointmentRepository appointments,
+      ProjectionRepositories.TimeSlotRepository slots,
+      ProjectionReadinessGuard readiness,
+      ResourceAllocator allocator,
       OutboxRepository outbox,
       JsonCodec json,
       Clock clock) {
-    return new WashExecutionIntegrationQueryService(repository, outbox, json, clock);
+    return new WashExecutionIntegrationQueryService(
+        repository, executions, appointments, slots, readiness, allocator, outbox, json, clock);
   }
 }

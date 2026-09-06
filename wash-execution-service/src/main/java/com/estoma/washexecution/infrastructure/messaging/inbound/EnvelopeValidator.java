@@ -12,7 +12,8 @@ public final class EnvelopeValidator {
       "DisableOperationalResource", "RestoreOperationalResource", "SubmitWashExit",
       "CompleteWashExecution", "CancelWashExecutionByClinic");
   private static final Set<String> QUERY_TYPES = Set.of(
-      "GetWashExecutionIntegrationContext", "ListWashExecutionIntegrationContextsPage");
+      "GetWashExecutionIntegrationContext", "ListWashExecutionIntegrationContextsPage",
+      "GetReassignmentCandidates");
 
   public void validateCommand(MessageEnvelope envelope) {
     common(envelope, MessageKind.COMMAND);
@@ -36,7 +37,18 @@ public final class EnvelopeValidator {
   public void validateQuery(MessageEnvelope envelope) {
     common(envelope, MessageKind.QUERY);
     if (!QUERY_TYPES.contains(envelope.messageType())) invalid("UNSUPPORTED_QUERY");
-    if (envelope.operationId() == null) invalid("INVALID_QUERY_ENVELOPE");
+    if ("GetReassignmentCandidates".equals(envelope.messageType())) {
+      boolean invalidActor = envelope.actor() == null
+          || !"SYSTEM".equals(envelope.actor().type())
+          || envelope.actor().accountId() != null
+          || !envelope.producer().equals(envelope.actor().service());
+      if (invalidActor || envelope.operationId() != null || envelope.idempotencyKey() != null
+          || envelope.aggregateId() != null || envelope.aggregateVersion() != null) {
+        invalid("INVALID_QUERY_ENVELOPE");
+      }
+    } else if (envelope.operationId() == null) {
+      invalid("INVALID_QUERY_ENVELOPE");
+    }
   }
 
   private static void common(MessageEnvelope envelope, MessageKind kind) {
