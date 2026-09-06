@@ -88,6 +88,12 @@ class OpenApiControllerTest {
         .containsExactly("AVAILABLE", "DEADLINE_PASSED", "NOT_APPLICABLE");
     Map<String, Object> timeSlot = (Map<String, Object>) appointmentProperties.get("timeSlot");
     assertThat((Map<String, Object>) timeSlot.get("properties")).containsKey("cancellationDeadlineAt");
+    Map<String, Object> washExecution = (Map<String, Object>) appointmentProperties.get("washExecution");
+    assertThat((Map<String, Object>) washExecution.get("properties")).containsKeys(
+        "version", "executionVersion", "exitSubmittedAt", "submittedExitMaterials", "completedAt",
+        "finalExitMaterials", "activeResourceAssignment", "lastResourceAssignment");
+    assertThat((java.util.List<String>) washExecution.get("required"))
+        .contains("version", "executionVersion");
 
     Map<String, Object> admin = operation(paths, "/api/v1/admin/wash/calendars", "post");
     assertThat((java.util.List<Map<String, Object>>) admin.get("parameters"))

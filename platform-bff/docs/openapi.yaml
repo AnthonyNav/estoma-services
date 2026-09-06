@@ -5872,6 +5872,66 @@
                               "format" : "date-time",
                               "type" : [ "string", "null" ]
                             },
+                            "completedAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "executionVersion" : {
+                              "type" : "integer"
+                            },
+                            "exitSubmittedAt" : {
+                              "format" : "date-time",
+                              "type" : [ "string", "null" ]
+                            },
+                            "finalExitMaterials" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "greenPaperCassette10Count" : {
+                                  "type" : "integer"
+                                },
+                                "greenPaperCassette8Count" : {
+                                  "type" : "integer"
+                                },
+                                "packageCount" : {
+                                  "type" : "integer"
+                                },
+                                "witnessTapePortionCount" : {
+                                  "type" : "integer"
+                                }
+                              },
+                              "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                              "type" : [ "object", "null" ]
+                            },
+                            "lastResourceAssignment" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "cabinCode" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "cabinId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "cabinName" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "resourceAssignmentId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankCode" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                },
+                                "tankName" : {
+                                  "type" : [ "string", "null" ]
+                                }
+                              },
+                              "type" : [ "object", "null" ]
+                            },
                             "rejectionReason" : {
                               "type" : [ "string", "null" ]
                             },
@@ -5879,15 +5939,34 @@
                               "enum" : [ "PENDING_ENTRY", "ENTRY_REJECTED", "PENDING_REASSIGNMENT", "IN_PROGRESS", "EXIT_SUBMITTED", "COMPLETED", "CANCELLED" ],
                               "type" : "string"
                             },
+                            "submittedExitMaterials" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "greenPaperCassette10Count" : {
+                                  "type" : "integer"
+                                },
+                                "greenPaperCassette8Count" : {
+                                  "type" : "integer"
+                                },
+                                "packageCount" : {
+                                  "type" : "integer"
+                                },
+                                "witnessTapePortionCount" : {
+                                  "type" : "integer"
+                                }
+                              },
+                              "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                              "type" : [ "object", "null" ]
+                            },
                             "version" : {
-                              "type" : [ "integer", "null" ]
+                              "type" : "integer"
                             },
                             "washExecutionId" : {
                               "format" : "uuid",
                               "type" : "string"
                             }
                           },
-                          "required" : [ "washExecutionId", "status" ],
+                          "required" : [ "washExecutionId", "status", "version", "executionVersion" ],
                           "type" : [ "object", "null" ]
                         }
                       },

@@ -1,6 +1,7 @@
 package com.estoma.platformbff.application.wash;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -8,6 +9,7 @@ import com.estoma.platformbff.application.port.WashStudentQueryPort;
 import com.estoma.platformbff.application.projection.ProjectionEvent;
 import com.estoma.platformbff.application.projection.ProjectionReadModel;
 import com.estoma.platformbff.application.projection.ProjectionReadinessService;
+import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.projection.TypedProjectionProjector;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import java.time.Clock;
@@ -46,15 +48,17 @@ class WashStudentQueryServiceTest {
             10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
             NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
             NOW.plusSeconds(600), null, true, executionId,
-            "IN_PROGRESS", 3L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
-            "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1")));
+            "IN_PROGRESS", 3L, NOW.minusSeconds(60), null,
+            null, null, null, null, null, null, null, null, null, null,
+            UUID.randomUUID(), UUID.randomUUID(), "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1",
+            null, null, null, null, null, null, null)));
 
     var response = service.home();
 
     assertThat(response.student().fullName()).isEqualTo("Ana García Reyes");
     assertThat(response.appointment().appointmentId()).isEqualTo(appointmentId);
     assertThat(response.appointment().washExecution().washExecutionId()).isEqualTo(executionId);
-    assertThat(response.appointment().washExecution().version()).isEqualTo(3L);
+    assertThat(response.appointment().washExecution().executionVersion()).isEqualTo(3L);
     assertThat(response.appointment().washExecution().activeResourceAssignment().cabinCode()).isEqualTo("C-01");
     assertThat(response.appointment().qrUsageContext()).isEqualTo("STUDENT_EXIT");
     assertThat(response.appointment().studentCancellationAction().name()).isEqualTo("NOT_APPLICABLE");
@@ -140,13 +144,69 @@ class WashStudentQueryServiceTest {
             10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", slotId,
             NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
             NOW.plusSeconds(600), null, true, UUID.randomUUID(),
-            "IN_PROGRESS", 3L, NOW.minusSeconds(60), null, UUID.randomUUID(), UUID.randomUUID(),
-            "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1")));
+            "IN_PROGRESS", 3L, NOW.minusSeconds(60), null,
+            null, null, null, null, null, null, null, null, null, null,
+            UUID.randomUUID(), UUID.randomUUID(), "C-01", "Cabina 1", UUID.randomUUID(), "T-01", "Tanque 1",
+            null, null, null, null, null, null, null)));
 
     var response = service.home();
 
     assertThat(response.appointment().appointmentStatus()).isEqualTo("IN_PROGRESS");
     assertThat(response.appointment().qrUsageContext()).isEqualTo("STUDENT_EXIT");
+  }
+
+  @Test
+  void exitSubmittedExposesSubmittedMaterialsAndServerVersion() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(executionAppointment("IN_PROGRESS", "EXIT_SUBMITTED", 5L,
+            NOW.minusSeconds(30), null, true, false)));
+
+    var execution = service.home().appointment().washExecution();
+
+    assertThat(execution.executionVersion()).isEqualTo(5L);
+    assertThat(execution.exitSubmittedAt()).isEqualTo(NOW.minusSeconds(30));
+    assertThat(execution.submittedExitMaterials().packageCount()).isEqualTo(1);
+    assertThat(execution.finalExitMaterials()).isNull();
+    assertThat(execution.activeResourceAssignment()).isNotNull();
+    assertThat(service.home().appointment().qrUsageContext()).isEqualTo("SUPERVISOR_EXIT_REVIEW");
+  }
+
+  @Test
+  void completedExposesOfficialMaterialsAndOnlyHistoricalAssignmentDuringAppointmentConvergence() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(executionAppointment("IN_PROGRESS", "COMPLETED", 6L,
+            NOW.minusSeconds(60), NOW.minusSeconds(10), false, true)));
+
+    var response = service.home();
+    var execution = response.appointment().washExecution();
+
+    assertThat(response.appointment().appointmentStatus()).isEqualTo("IN_PROGRESS");
+    assertThat(execution.completedAt()).isEqualTo(NOW.minusSeconds(10));
+    assertThat(execution.finalExitMaterials().packageCount()).isEqualTo(5);
+    assertThat(execution.activeResourceAssignment()).isNull();
+    assertThat(execution.lastResourceAssignment().cabinCode()).isEqualTo("C-01");
+    assertThat(response.appointment().qrUsageContext()).isEqualTo("NONE");
+  }
+
+  @Test
+  void completedWithActiveAssignmentFailsClosed() {
+    service = new WashStudentQueryService(authorization, readiness, projections,
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    when(authorization.requireStudent()).thenReturn(ACCOUNT_ID);
+    when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
+    when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
+        .thenReturn(Optional.of(executionAppointment("COMPLETED", "COMPLETED", 6L,
+            NOW.minusSeconds(60), NOW.minusSeconds(10), true, true)));
+
+    assertThatThrownBy(service::home).isInstanceOf(ProjectionUnavailableException.class);
   }
 
   @Test
@@ -178,8 +238,29 @@ class WashStudentQueryServiceTest {
     return new WashStudentQueryPort.Appointment(appointmentId, "SCHEDULED", version, "NORMAL",
         10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
         NOW, NOW.plusSeconds(3600), "America/Mexico_City", cancellationDeadlineAt,
-        NOW.plusSeconds(600), exceptionalAuthorizationId, exceptionalContextKnown, null, null, null, null, null,
-        null, null, null, null, null, null, null);
+        NOW.plusSeconds(600), exceptionalAuthorizationId, exceptionalContextKnown,
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+  }
+
+  private static WashStudentQueryPort.Appointment executionAppointment(String appointmentStatus,
+      String executionStatus, long version, Instant exitSubmittedAt, Instant completedAt,
+      boolean active, boolean last) {
+    UUID executionId = UUID.randomUUID();
+    return new WashStudentQueryPort.Appointment(UUID.randomUUID(), appointmentStatus, 7L, "NORMAL",
+        10, "HIGH_SPEED", UUID.randomUUID(), "12345", "Cirugía", UUID.randomUUID(),
+        NOW, NOW.plusSeconds(3600), "America/Mexico_City", NOW.plusSeconds(300),
+        NOW.plusSeconds(600), null, true, executionId, executionStatus, version, NOW.minusSeconds(120), null,
+        exitSubmittedAt, exitSubmittedAt == null ? null : 1, exitSubmittedAt == null ? null : 2,
+        exitSubmittedAt == null ? null : 3, exitSubmittedAt == null ? null : 4,
+        completedAt, completedAt == null ? null : 5, completedAt == null ? null : 6,
+        completedAt == null ? null : 7, completedAt == null ? null : 8,
+        active ? UUID.randomUUID() : null, active ? UUID.randomUUID() : null,
+        active ? "C-01" : null, active ? "Cabina 1" : null, active ? UUID.randomUUID() : null,
+        active ? "T-01" : null, active ? "Tanque 1" : null,
+        last ? UUID.randomUUID() : null, last ? UUID.randomUUID() : null,
+        last ? "C-01" : null, last ? "Cabina 1" : null, last ? UUID.randomUUID() : null,
+        last ? "T-01" : null, last ? "Tanque 1" : null);
   }
 
   private static WashStudentQueryPort.Student student() {
