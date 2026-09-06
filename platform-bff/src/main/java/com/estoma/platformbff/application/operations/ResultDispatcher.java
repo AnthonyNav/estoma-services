@@ -3,12 +3,14 @@ package com.estoma.platformbff.application.operations;
 import com.estoma.platformbff.application.commands.CommandRegistry;
 import com.estoma.platformbff.application.projection.AuthorizationRecoveryService;
 import com.estoma.platformbff.application.projection.AccountPresentationRecoveryService;
+import com.estoma.platformbff.application.projection.AppointmentQrRecoveryService;
 import com.estoma.platformbff.application.projection.PersonPresentationRecoveryService;
 import com.estoma.platformbff.application.projection.SystemCatalogRecoveryService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityResultService;
 import com.estoma.platformbff.application.wash.ReassignmentCandidatesResultService;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -39,14 +41,17 @@ public class ResultDispatcher {
   private final SystemCatalogRecoveryService systemCatalogRecovery;
   private final AppointmentAvailabilityResultService appointmentAvailability;
   private final ReassignmentCandidatesResultService reassignmentCandidates;
+  private final AppointmentQrRecoveryService appointmentQrRecovery;
 
+  @Autowired
   public ResultDispatcher(CommandRegistry registry, ResultApplicationService commandResults,
       AuthorizationRecoveryService authorizationRecovery,
       AccountPresentationRecoveryService accountPresentationRecovery,
       PersonPresentationRecoveryService personPresentationRecovery,
       SystemCatalogRecoveryService systemCatalogRecovery,
       AppointmentAvailabilityResultService appointmentAvailability,
-      ReassignmentCandidatesResultService reassignmentCandidates) {
+      ReassignmentCandidatesResultService reassignmentCandidates,
+      AppointmentQrRecoveryService appointmentQrRecovery) {
     this.registry = registry;
     this.commandResults = commandResults;
     this.authorizationRecovery = authorizationRecovery;
@@ -55,11 +60,34 @@ public class ResultDispatcher {
     this.systemCatalogRecovery = systemCatalogRecovery;
     this.appointmentAvailability = appointmentAvailability;
     this.reassignmentCandidates = reassignmentCandidates;
+    this.appointmentQrRecovery = appointmentQrRecovery;
+  }
+
+  /** Compatibility constructor for focused tests unrelated to Appointment QR recovery. */
+  public ResultDispatcher(CommandRegistry registry, ResultApplicationService commandResults,
+      AuthorizationRecoveryService authorizationRecovery,
+      AccountPresentationRecoveryService accountPresentationRecovery,
+      PersonPresentationRecoveryService personPresentationRecovery,
+      SystemCatalogRecoveryService systemCatalogRecovery,
+      AppointmentAvailabilityResultService appointmentAvailability,
+      ReassignmentCandidatesResultService reassignmentCandidates) {
+    this(registry, commandResults, authorizationRecovery, accountPresentationRecovery,
+        personPresentationRecovery, systemCatalogRecovery, appointmentAvailability,
+        reassignmentCandidates, null);
   }
 
   public DispatchOutcome dispatch(IncomingResult result) {
     if (result == null || result.messageKind() != MessageKind.RESULT) {
       return DispatchOutcome.UNTRUSTED;
+    }
+    if (AppointmentQrRecoveryService.RESULT_TYPE.equals(result.messageType())) {
+      if (appointmentQrRecovery == null) return DispatchOutcome.RECOVERY_NOT_ENABLED;
+      try {
+        return appointmentQrRecovery.applyResult(result)
+            ? DispatchOutcome.APPLIED : DispatchOutcome.UNTRUSTED;
+      } catch (IllegalArgumentException invalid) {
+        return DispatchOutcome.UNTRUSTED;
+      }
     }
     if ("GetAppointmentAvailabilityResult".equals(result.messageType())) {
       try {

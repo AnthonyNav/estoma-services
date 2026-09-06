@@ -47,6 +47,12 @@ public class JdbcProjectionRecoveryQueryRepository implements ProjectionRecovery
   }
 
   @Override
+  public Optional<RecoveryQuery> findById(UUID messageId) {
+    return jdbc.sql("SELECT * FROM projection_recovery_messages WHERE message_id = :messageId")
+        .param("messageId", messageId).query((rs, row) -> map(rs)).optional();
+  }
+
+  @Override
   public Optional<RecoveryQuery> claimNext(String workerId, Instant now) {
     UUID token = UUID.randomUUID();
     return jdbc.sql("""

@@ -84,6 +84,14 @@ platform:
   recovery:
     enabled: ${BFF_RECOVERY_ENABLED:true}
     system-catalog-refresh-codes: ${BFF_SYSTEM_CATALOG_REFRESH_CODES:}
+    appointment-qr:
+      # Enable only after every BFF replica runs the QR recovery writer and Appointments QR is enabled.
+      enabled: ${BFF_APPOINTMENT_QR_RECOVERY_ENABLED:false}
+      restart-revision: ${BFF_APPOINTMENT_QR_RECOVERY_RESTART_REVISION:0}
+      page-size: ${BFF_APPOINTMENT_QR_RECOVERY_PAGE_SIZE:100}
+      max-pages-per-pass: ${BFF_APPOINTMENT_QR_RECOVERY_MAX_PAGES_PER_PASS:10000}
+      result-timeout: ${BFF_APPOINTMENT_QR_RECOVERY_RESULT_TIMEOUT:2m}
+      sweep-interval: ${BFF_APPOINTMENT_QR_RECOVERY_SWEEP_INTERVAL:30s}
   appointments:
     availability:
       snapshot-ttl: ${BFF_APPOINTMENT_AVAILABILITY_SNAPSHOT_TTL:30s}
