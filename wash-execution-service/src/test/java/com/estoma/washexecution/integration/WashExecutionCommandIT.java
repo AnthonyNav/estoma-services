@@ -341,13 +341,41 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
             executionId, supervisor, new ExitMaterials(0, 1, 1, 0), completedAt, expectedVersion));
 
     assertThat(completed.status()).isEqualTo(CommandOutcome.Status.SUCCEEDED);
-    assertThat(executions.findById(executionId).orElseThrow().status())
-        .isEqualTo(WashExecutionStatus.COMPLETED);
+    WashExecution persisted = executions.findById(executionId).orElseThrow();
+    assertThat(persisted.status()).isEqualTo(WashExecutionStatus.COMPLETED);
+    assertThat(persisted.exitSubmittedByAccountId()).isNotNull();
+    assertThat(persisted.exitSubmittedAt()).isEqualTo(BASE.plusSeconds(20 * 60L));
+    assertThat(persisted.exitMaterials()).isEqualTo(new ExitMaterials(0, 1, 1, 0));
     assertThat(assignments.findActiveByExecutionId(executionId)).isEmpty();
     var cleaning = cleanings.findByAssignmentId(assignment.resourceAssignmentId()).orElseThrow();
     assertThat(cleaning.startsAt()).isEqualTo(completedAt);
     assertThat(cleaning.expectedEndsAt()).isEqualTo(completedAt.plusSeconds(3 * 60 * 60L));
     assertThat(outboxTypes()).contains("WashExecutionCompleted", "CleaningPeriodStarted");
+  }
+
+  @Test
+  void directSupervisorCompletionIsSideEffectFreeWhileFlagIsOff() {
+    UUID supervisor = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID executionId = createInProgress(UUID.randomUUID(), AppointmentType.NORMAL, BASE);
+    ResourceAssignment assignment = new ResourceAssignment(
+        UUID.randomUUID(), executionId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+        AssignmentType.INITIAL, null, BASE.plusSeconds(60));
+    assignments.save(assignment);
+    int version = executions.findById(executionId).orElseThrow().version();
+
+    CommandOutcome outcome = dispatch(supervisor, "direct-completion-off",
+        new WashExecutionCommand.CompleteWashExecution(
+            executionId, supervisor, new ExitMaterials(1, 0, 0, 0),
+            BASE.plusSeconds(20 * 60L), version));
+
+    assertThat(outcome.status()).isEqualTo(CommandOutcome.Status.REJECTED);
+    assertThat(outcome.errorCode()).isEqualTo("DIRECT_SUPERVISOR_COMPLETION_DISABLED");
+    assertThat(executions.findById(executionId).orElseThrow().status())
+        .isEqualTo(WashExecutionStatus.IN_PROGRESS);
+    assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(version);
+    assertThat(assignments.findActiveByExecutionId(executionId)).isPresent();
+    assertThat(outboxTypes()).doesNotContain("WashExecutionCompleted", "CleaningPeriodStarted");
   }
 
   @Test

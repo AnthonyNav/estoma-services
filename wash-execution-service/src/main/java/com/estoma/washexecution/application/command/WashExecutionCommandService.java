@@ -58,6 +58,7 @@ public final class WashExecutionCommandService {
   private final JsonCodec json;
   private final Clock clock;
   private final boolean unclassifiedEntryRejectionEnabled;
+  private final boolean directSupervisorCompletionEnabled;
 
   public WashExecutionCommandService(
       WashExecutionRepository executions,
@@ -77,7 +78,8 @@ public final class WashExecutionCommandService {
       CommandIdempotencyRepository idempotency,
       JsonCodec json,
       Clock clock,
-      boolean unclassifiedEntryRejectionEnabled) {
+      boolean unclassifiedEntryRejectionEnabled,
+      boolean directSupervisorCompletionEnabled) {
     this.executions = executions;
     this.validations = validations;
     this.assignments = assignments;
@@ -96,6 +98,7 @@ public final class WashExecutionCommandService {
     this.json = json;
     this.clock = clock;
     this.unclassifiedEntryRejectionEnabled = unclassifiedEntryRejectionEnabled;
+    this.directSupervisorCompletionEnabled = directSupervisorCompletionEnabled;
   }
 
   public CommandOutcome dispatch(CommandRequest request) {
@@ -430,7 +433,14 @@ public final class WashExecutionCommandService {
     ResourceAssignment assignment = assignments.findActiveByExecutionId(execution.washExecutionId())
         .orElseThrow(() -> new CommandRejectedException("ACTIVE_RESOURCE_ASSIGNMENT_NOT_FOUND"));
 
-    execution.complete(supervisorId, c.finalMaterials(), c.completedAt());
+    if (execution.status() == WashExecutionStatus.IN_PROGRESS) {
+      if (!directSupervisorCompletionEnabled) {
+        throw new CommandRejectedException("DIRECT_SUPERVISOR_COMPLETION_DISABLED");
+      }
+      execution.completeDirectly(supervisorId, c.finalMaterials(), c.completedAt());
+    } else {
+      execution.complete(supervisorId, c.finalMaterials(), c.completedAt());
+    }
     assignment.release(supervisorId, c.completedAt(), ReleaseReason.NORMAL_COMPLETION);
     CleaningPeriod cleaning = prepareCleaningIfNeeded(
         execution, assignment, execution.startedAt() != null,

@@ -1,5 +1,6 @@
 package com.estoma.washexecution.infrastructure.messaging.inbound;
 
+import com.estoma.washexecution.application.port.OptimisticConcurrencyException;
 import com.estoma.washexecution.infrastructure.messaging.outbound.RabbitPublishException;
 import java.sql.SQLException;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -14,7 +15,8 @@ public final class TransientFailureClassifier {
     for (Throwable cause = error; cause != null; cause = cause.getCause()) {
       // Spring's SQL-state fallback leaves PostgreSQL lock_not_available uncategorized.
       if (cause instanceof SQLException sql && "55P03".equals(sql.getSQLState())) return true;
-      if (cause instanceof CannotGetJdbcConnectionException
+      if (cause instanceof OptimisticConcurrencyException
+          || cause instanceof CannotGetJdbcConnectionException
           || cause instanceof DataAccessResourceFailureException
           || cause instanceof TransientDataAccessException
           || cause instanceof RecoverableDataAccessException

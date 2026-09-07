@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.estoma.washexecution.application.port.AffectedExecutionRepository;
 import com.estoma.washexecution.application.port.CleaningPeriodRepository;
 import com.estoma.washexecution.application.port.OutboxRepository;
+import com.estoma.washexecution.application.port.OptimisticConcurrencyException;
 import com.estoma.washexecution.application.port.ProcessedMessageRepository;
 import com.estoma.washexecution.application.port.ResourceAssignmentRepository;
 import com.estoma.washexecution.application.port.ResourceConcurrencyRepository;
@@ -20,6 +21,7 @@ import com.estoma.washexecution.domain.execution.ResourceAssignment;
 import com.estoma.washexecution.domain.execution.ResourceUnavailability;
 import com.estoma.washexecution.domain.execution.UnavailabilityCauseType;
 import com.estoma.washexecution.domain.execution.WashExecution;
+import com.estoma.washexecution.infrastructure.persistence.jdbc.JdbcTemporal;
 import com.estoma.washexecution.testsupport.AbstractPostgresIT;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -104,6 +106,48 @@ class PostgresFoundationIT extends AbstractPostgresIT {
   }
 
   @Test
+  void completionShapeDistinguishesDirectAndReviewedCompletionWithoutNullLoopholes() {
+    String insert = """
+        INSERT INTO wash_executions(
+          wash_execution_id,appointment_id,appointment_type,status,arrived_at,started_at,
+          exit_submitted_by_account_id,exit_submitted_at,package_count,
+          green_paper_cassette_8_count,green_paper_cassette_10_count,witness_tape_portion_count,
+          completed_by_account_id,completed_at,version,created_at,updated_at)
+        VALUES(?,?, 'NORMAL','COMPLETED',?,?,?,?,?,?,?,?,?,?,3,now(),now())
+        """;
+    Instant arrived = Instant.parse("2026-08-23T10:00:00Z");
+    Instant started = arrived.plusSeconds(60);
+    Instant completed = started.plusSeconds(60);
+
+    jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(),
+        JdbcTemporal.timestamp(arrived), JdbcTemporal.timestamp(started), null, null,
+        1, 0, 0, 0, UUID.randomUUID(), JdbcTemporal.timestamp(completed));
+    UUID student = UUID.randomUUID();
+    Instant submitted = started.plusSeconds(30);
+    jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(),
+        JdbcTemporal.timestamp(arrived), JdbcTemporal.timestamp(started), student,
+        JdbcTemporal.timestamp(submitted), 0, 1, 0, 0, UUID.randomUUID(),
+        JdbcTemporal.timestamp(completed));
+
+    assertThatThrownBy(() -> jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(),
+        JdbcTemporal.timestamp(arrived), JdbcTemporal.timestamp(started), student, null,
+        1, 0, 0, 0, UUID.randomUUID(), JdbcTemporal.timestamp(completed)))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(() -> jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(),
+        JdbcTemporal.timestamp(arrived), JdbcTemporal.timestamp(started), null, null,
+        1, null, 0, 0, UUID.randomUUID(), JdbcTemporal.timestamp(completed)))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    assertThatThrownBy(() -> jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(),
+        JdbcTemporal.timestamp(arrived), JdbcTemporal.timestamp(started), null, null,
+        1, 0, 0, 0, UUID.randomUUID(), JdbcTemporal.timestamp(started.minusSeconds(1))))
+        .isInstanceOf(DataIntegrityViolationException.class);
+    jdbc.update(insert, UUID.randomUUID(), UUID.randomUUID(),
+        JdbcTemporal.timestamp(arrived), JdbcTemporal.timestamp(started), student,
+        JdbcTemporal.timestamp(submitted), 1, 0, 0, 0, UUID.randomUUID(),
+        JdbcTemporal.timestamp(submitted.minusSeconds(1)));
+  }
+
+  @Test
   void optimisticVersionPreventsTwoTerminalMutationsFromSameSnapshot() {
     UUID id = seedExecution();
     WashExecution first = executions.findById(id).orElseThrow();
@@ -114,7 +158,7 @@ class PostgresFoundationIT extends AbstractPostgresIT {
 
     stale.authorizeWithoutResource();
     assertThatThrownBy(() -> executions.save(stale, 1))
-        .isInstanceOf(IllegalStateException.class)
+        .isInstanceOf(OptimisticConcurrencyException.class)
         .hasMessage("VERSION_CONFLICT");
   }
 

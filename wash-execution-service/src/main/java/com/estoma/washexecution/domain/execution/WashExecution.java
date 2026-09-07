@@ -115,6 +115,19 @@ public final class WashExecution {
         || at.isBefore(exitSubmittedAt)) {
       throw new DomainRuleViolationException("INVALID_COMPLETION");
     }
+    finish(accountId, finalMaterials, at);
+  }
+
+  public void completeDirectly(UUID accountId, ExitMaterials finalMaterials, Instant at) {
+    require(WashExecutionStatus.IN_PROGRESS);
+    if (accountId == null || at == null || finalMaterials == null || startedAt == null
+        || at.isBefore(startedAt)) {
+      throw new DomainRuleViolationException("INVALID_COMPLETION");
+    }
+    finish(accountId, finalMaterials, at);
+  }
+
+  private void finish(UUID accountId, ExitMaterials finalMaterials, Instant at) {
     completedByAccountId = accountId;
     completedAt = at;
     exitMaterials = finalMaterials;

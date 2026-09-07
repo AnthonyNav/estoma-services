@@ -77,11 +77,14 @@ public class WashExecutionApplicationConfig {
       JsonCodec json,
       Clock clock,
       @Value("${estoma.entry.unclassified-rejection-enabled:false}")
-          boolean unclassifiedEntryRejectionEnabled) {
+          boolean unclassifiedEntryRejectionEnabled,
+      @Value("${estoma.completion.direct-supervisor-enabled:false}")
+          boolean directSupervisorCompletionEnabled) {
     return new WashExecutionCommandService(
         executions, validations, assignments, unavailabilities, affectedExecutions, cleanings,
         appointments, slots, resources, locks, allocator, authorization, readiness, outbox,
-        idempotency, json, clock, unclassifiedEntryRejectionEnabled);
+        idempotency, json, clock, unclassifiedEntryRejectionEnabled,
+        directSupervisorCompletionEnabled);
   }
 
   @Bean
