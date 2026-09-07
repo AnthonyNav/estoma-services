@@ -1,6 +1,7 @@
 package com.estoma.washexecution.infrastructure.persistence.jdbc;
 
 import com.estoma.washexecution.application.port.WashExecutionRepository;
+import com.estoma.washexecution.application.port.OptimisticConcurrencyException;
 import com.estoma.washexecution.domain.execution.AppointmentType;
 import com.estoma.washexecution.domain.execution.CancellationType;
 import com.estoma.washexecution.domain.execution.ExitMaterials;
@@ -71,7 +72,7 @@ public class JdbcWashExecutionRepository implements WashExecutionRepository {
         e.cancellationSubreason(), e.cancellationReason(), e.cancelledByAccountId(),
         JdbcTemporal.timestamp(e.cancelledAt()), e.version(), JdbcTemporal.timestamp(now),
         e.washExecutionId(), expectedVersion);
-    if (updated != 1) throw new IllegalStateException("VERSION_CONFLICT");
+    if (updated != 1) throw new OptimisticConcurrencyException();
   }
 
   private WashExecution map(ResultSet rs, int row) throws SQLException {

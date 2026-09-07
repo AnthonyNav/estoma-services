@@ -478,12 +478,29 @@ IN_PROGRESS → EXIT_SUBMITTED
 
 `CompleteWashExecution`:
 
-- solo desde `EXIT_SUBMITTED`;
+- desde `EXIT_SUBMITTED`, conserva el flujo V1 de revisión del envío del Alumno;
+- desde `IN_PROGRESS`, permite el cierre directo del Supervisor únicamente cuando
+  `ESTOMA_DIRECT_SUPERVISOR_COMPLETION_ENABLED=true` (propiedad
+  `estoma.completion.direct-supervisor-enabled`, apagada por defecto);
 - permite al Supervisor confirmar o corregir los cuatro valores finales;
+- exige los cuatro valores finales enteros, no negativos y con al menos uno positivo;
+- exige actor Supervisor, coincidencia con `completedByAccountId`, `expectedVersion` vigente y
+  una asignación activa antes de mutar;
 - libera la asignación vigente;
 - cambia `WashExecution → COMPLETED`;
 - registra `WashExecutionCompleted` en Outbox;
 - crea `CleaningPeriod` cuando corresponde.
+
+El cierre directo no fabrica una entrega del Alumno: `exitSubmittedByAccountId` y
+`exitSubmittedAt` permanecen nulos. El cierre revisado conserva esa tupla y sólo sustituye los
+materiales por los valores finales del Supervisor. En ambos casos `completedByAccountId` y
+`completedAt` forman la auditoría del cierre; la presencia o ausencia de la tupla de envío permite
+distinguir internamente su origen.
+
+`WashExecutionCompleted` permanece en V1 y no añade indicadores de origen ni campos de envío. Un
+cierre directo tampoco publica `WashExitSubmitted`. Debe desplegarse la migración V5 y el owner con
+el flag apagado antes de habilitar callers; desactivar el flag impide nuevos cierres directos sin
+afectar el flujo `EXIT_SUBMITTED → COMPLETED`.
 
 ---
 
@@ -764,6 +781,7 @@ dos ejecuciones por último cupo del mismo Tank/slot
 assign vs DisableOperationalResource
 doble ResolvePendingReassignment
 doble CompleteWashExecution
+SubmitWashExit vs CompleteWashExecution directo con el mismo expectedVersion
 doble CancelWashExecutionByClinic
 una inhabilitación que afecta varias ejecuciones
 dos workers completando el mismo CleaningPeriod
