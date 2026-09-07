@@ -193,6 +193,45 @@ class ExecutionMessagingE2EIT extends AbstractPostgresIT {
         .isEqualTo("COMPLETED");
   }
 
+  @Test
+  void washEntryRejectedV2WithoutCheckFieldsAndV1BothConverge() throws Exception {
+    UUID slotV2 = UUID.randomUUID();
+    UUID appointmentV2 = UUID.randomUUID();
+    UUID executionV2 = UUID.randomUUID();
+    UUID slotV1 = UUID.randomUUID();
+    UUID appointmentV1 = UUID.randomUUID();
+    UUID executionV1 = UUID.randomUUID();
+    UUID supervisorId = UUID.randomUUID();
+    UUID correlationId = UUID.randomUUID();
+    slots.save(slot(slotV2));
+    slots.save(slot(slotV1));
+    appointments.save(Appointment.scheduled(appointmentV2, slotV2, UUID.randomUUID(), UUID.randomUUID(),
+        AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, null, NOW.minusSeconds(300)));
+    appointments.save(Appointment.scheduled(appointmentV1, slotV1, UUID.randomUUID(), UUID.randomUUID(),
+        AppointmentType.NORMAL, 1, PieceType.HIGH_SPEED, null, NOW.minusSeconds(300)));
+
+    MessageEnvelope rejectedV2 = rejectionEvent(UUID.randomUUID(), 2, executionV2, appointmentV2,
+        2, correlationId, supervisorId, "Unclassified operational reason", false);
+    MessageEnvelope rejectedV1 = rejectionEvent(UUID.randomUUID(), 1, executionV1, appointmentV1,
+        2, correlationId, supervisorId, "Legacy requirement failed", true);
+
+    sendEvent(rejectedV2);
+    sendEvent(rejectedV1);
+    awaitStatus(appointmentV2, "ENTRY_REJECTED");
+    awaitStatus(appointmentV1, "ENTRY_REJECTED");
+
+    assertThat(appointments.findById(appointmentV2).orElseThrow().rejectionReason())
+        .isEqualTo("Unclassified operational reason");
+    assertThat(appointments.findById(appointmentV1).orElseThrow().rejectionReason())
+        .isEqualTo("Legacy requirement failed");
+    assertThat(jdbc.sql("SELECT count(*) FROM processed_messages WHERE message_id IN (:v2,:v1) AND status='APPLIED'")
+        .param("v2", rejectedV2.messageId()).param("v1", rejectedV1.messageId())
+        .query(Long.class).single()).isEqualTo(2);
+    assertThat(jdbc.sql("SELECT count(*) FROM outbox_messages WHERE message_type='AppointmentEntryRejected' AND aggregate_id IN (:v2,:v1)")
+        .param("v2", appointmentV2).param("v1", appointmentV1)
+        .query(Long.class).single()).isEqualTo(2);
+  }
+
   private MessageEnvelope executionEvent(UUID messageId, String type, UUID executionId,
       UUID appointmentId, int version, UUID correlationId,
       String timeField, Instant time, String actorField, UUID actorId) {
@@ -203,6 +242,24 @@ class ExecutionMessagingE2EIT extends AbstractPostgresIT {
     if (actorField != null) payload.put(actorField, actorId.toString());
     return new MessageEnvelope(messageId, type, 1, MessageKind.EVENT, "wash-execution", NOW,
         correlationId, null, null, null, executionId, version,
+        new WireActor("SYSTEM", null, "wash-execution"), payload);
+  }
+
+  private MessageEnvelope rejectionEvent(UUID messageId, int messageVersion, UUID executionId,
+      UUID appointmentId, int aggregateVersion, UUID correlationId, UUID supervisorId,
+      String reason, boolean includeLegacyChecks) {
+    var payload = mapper.createObjectNode();
+    payload.put("washExecutionId", executionId.toString());
+    payload.put("appointmentId", appointmentId.toString());
+    payload.put("decidedAt", NOW.plusSeconds(30).toString());
+    payload.put("decidedByAccountId", supervisorId.toString());
+    payload.put("rejectionReason", reason);
+    if (includeLegacyChecks) {
+      payload.put("identityConfirmed", true);
+      payload.put("requirementsSatisfied", false);
+    }
+    return new MessageEnvelope(messageId, "WashEntryRejected", messageVersion, MessageKind.EVENT,
+        "wash-execution", NOW, correlationId, null, null, null, executionId, aggregateVersion,
         new WireActor("SYSTEM", null, "wash-execution"), payload);
   }
 
