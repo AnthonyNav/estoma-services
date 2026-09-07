@@ -294,6 +294,12 @@ POST /api/v1/wash/supervision/lookup
 GET  /api/v1/wash/appointments/availability
 ```
 
+`entry-decision` accepts the existing classified decisions. It also supports `REJECTED` with a
+nonblank reason and both check fields omitted or null. That unclassified form is disabled by
+default through `BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED`; while disabled it returns `503`
+after supervisor authorization and before creating a durable operation. Omission and explicit
+null normalize to the same idempotent intent and neither check is sent to the owner.
+
 Availability se rige por la resolución owner-derived de la sección 16. No realiza RPC síncrono ni
 calcula reglas de Appointments en el BFF.
 

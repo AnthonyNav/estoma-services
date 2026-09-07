@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -58,6 +59,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,6 +88,7 @@ class PublicApiMvcTest {
 
   private MockMvc mailboxMvc;
   private MockMvc washMvc;
+  private MockMvc washUnclassifiedEnabledMvc;
 
   @BeforeEach
   void setUp() {
@@ -96,6 +99,8 @@ class PublicApiMvcTest {
     when(commands.submitEnriched(any(), anyString(), anyString(), anyMap(), anyMap(), anyString(),
         any(), any(), any(), any())).thenReturn(accepted);
     when(authorization.requireAuthenticatedAccount()).thenReturn(UUID.randomUUID());
+    when(authorization.requireWashSupervisor())
+        .thenReturn(UUID.fromString("00000000-0000-0000-0000-000000000099"));
     when(mailboxQueries.messages(anyString(), org.mockito.ArgumentMatchers.anyInt(), nullable(String.class)))
         .thenReturn(new MailboxMessagesResponse(List.of(), null));
     when(mailboxQueries.summary(anyString())).thenReturn(
@@ -137,7 +142,12 @@ class PublicApiMvcTest {
         .build();
     washMvc = MockMvcBuilders.standaloneSetup(
         new WashController(commands, authorization, supervision, studentQueries,
-            appointmentAvailability, reassignmentCandidates, clock))
+            appointmentAvailability, reassignmentCandidates, clock, false))
+        .setControllerAdvice(new ApiExceptionHandler())
+        .build();
+    washUnclassifiedEnabledMvc = MockMvcBuilders.standaloneSetup(
+        new WashController(commands, authorization, supervision, studentQueries,
+            appointmentAvailability, reassignmentCandidates, clock, true))
         .setControllerAdvice(new ApiExceptionHandler())
         .build();
   }
@@ -210,6 +220,133 @@ class PublicApiMvcTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"appointmentTimeSlotId\":\"00000000-0000-0000-0000-000000000001\",\"courseSectionId\":\"00000000-0000-0000-0000-000000000002\",\"appointmentType\":\"NORMAL\",\"instrumentCount\":1,\"pieceType\":\"HIGH_SPEED\",\"regulationAccepted\":false}"))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void unclassifiedEntryRejectionIsUnavailableBeforeCreatingAnOperationWhenGateIsOff()
+      throws Exception {
+    washMvc.perform(post("/api/v1/wash/executions/{id}/entry-decision",
+            "00000000-0000-0000-0000-000000000001")
+            .header("Idempotency-Key", "unclassified-off")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"decision\":\"REJECTED\",\"rejectionReason\":\"Motivo operativo\","
+                + "\"expectedVersion\":1}"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code")
+            .value("BFF.WASH_UNCLASSIFIED_ENTRY_REJECTION_UNAVAILABLE"));
+
+    verify(authorization).requireWashSupervisor();
+    verifyNoInteractions(commands);
+  }
+
+  @Test
+  void authorizationPrecedesTheUnclassifiedEntryFeatureGate() throws Exception {
+    when(authorization.requireWashSupervisor()).thenThrow(new AuthorizationDeniedException());
+
+    washMvc.perform(post("/api/v1/wash/executions/{id}/entry-decision",
+            "00000000-0000-0000-0000-000000000001")
+            .header("Idempotency-Key", "unclassified-forbidden")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"decision\":\"REJECTED\",\"rejectionReason\":\"Motivo operativo\","
+                + "\"expectedVersion\":1}"))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("BFF.ACCESS_DENIED"));
+
+    verifyNoInteractions(commands);
+  }
+
+  @Test
+  void authenticationPrecedesTheUnclassifiedEntryFeatureGate() throws Exception {
+    when(authorization.requireWashSupervisor()).thenThrow(new AuthenticationRequiredException());
+
+    washMvc.perform(post("/api/v1/wash/executions/{id}/entry-decision",
+            "00000000-0000-0000-0000-000000000001")
+            .header("Idempotency-Key", "unclassified-unauthenticated")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"decision\":\"REJECTED\",\"rejectionReason\":\"Motivo operativo\","
+                + "\"expectedVersion\":1}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("BFF.AUTHENTICATION_REQUIRED"));
+
+    verifyNoInteractions(commands);
+  }
+
+  @Test
+  void omissionAndExplicitNullChecksProduceTheSameOwnerAndIdempotencyPayloadShape()
+      throws Exception {
+    String path = "/api/v1/wash/executions/00000000-0000-0000-0000-000000000001/entry-decision";
+    String omission = "{\"decision\":\"REJECTED\",\"rejectionReason\":\"Motivo operativo\","
+        + "\"expectedVersion\":1}";
+    String explicitNull = "{\"identityConfirmed\":null,\"requirementsSatisfied\":null,"
+        + "\"decision\":\"REJECTED\",\"rejectionReason\":\"Motivo operativo\","
+        + "\"expectedVersion\":1}";
+
+    washUnclassifiedEnabledMvc.perform(post(path).header("Idempotency-Key", "omitted")
+            .contentType(MediaType.APPLICATION_JSON).content(omission))
+        .andExpect(status().isAccepted());
+    washUnclassifiedEnabledMvc.perform(post(path).header("Idempotency-Key", "explicit-null")
+            .contentType(MediaType.APPLICATION_JSON).content(explicitNull))
+        .andExpect(status().isAccepted());
+
+    for (String key : List.of("omitted", "explicit-null")) {
+      verify(commands).submitEnriched(any(), eq("wash-decide-entry"), eq("DecideWashEntry"),
+          argThat(PublicApiMvcTest::isCanonicalUnclassifiedEntryPayload),
+          argThat(PublicApiMvcTest::isCanonicalUnclassifiedEntryIntent), eq(key), any(), eq(1),
+          any(), eq(1));
+    }
+  }
+
+  @Test
+  void legacyRejectedChecksRemainPresentAndInvalidDecisionShapesNeverReachTheAdapter()
+      throws Exception {
+    String path = "/api/v1/wash/executions/00000000-0000-0000-0000-000000000001/entry-decision";
+    washMvc.perform(post(path).header("Idempotency-Key", "legacy-false")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"identityConfirmed\":false,\"requirementsSatisfied\":false,"
+                + "\"decision\":\"REJECTED\",\"rejectionReason\":\"Motivo clasificado\","
+                + "\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+    verify(commands).submitEnriched(any(), eq("wash-decide-entry"), eq("DecideWashEntry"),
+        argThat(payload -> Boolean.FALSE.equals(payload.get("identityConfirmed"))
+            && Boolean.FALSE.equals(payload.get("requirementsSatisfied"))),
+        argThat(payload -> Boolean.FALSE.equals(payload.get("identityConfirmed"))
+            && Boolean.FALSE.equals(payload.get("requirementsSatisfied"))),
+        eq("legacy-false"), any(), eq(1), any(), eq(1));
+  }
+
+  @Test
+  void invalidEntryDecisionCombinationsAndNonBooleanChecksReturn400WithoutAnOperation()
+      throws Exception {
+    String path = "/api/v1/wash/executions/00000000-0000-0000-0000-000000000001/entry-decision";
+    for (String body : List.of(
+        "{\"identityConfirmed\":false,\"decision\":\"REJECTED\","
+            + "\"rejectionReason\":\"Parcial\",\"expectedVersion\":1}",
+        "{\"identityConfirmed\":null,\"requirementsSatisfied\":true,"
+            + "\"decision\":\"REJECTED\",\"rejectionReason\":\"Parcial\","
+            + "\"expectedVersion\":1}",
+        "{\"decision\":\"AUTHORIZED\",\"expectedVersion\":1}",
+        "{\"identityConfirmed\":false,\"requirementsSatisfied\":true,"
+            + "\"decision\":\"AUTHORIZED\",\"expectedVersion\":1}",
+        "{\"identityConfirmed\":true,\"requirementsSatisfied\":true,"
+            + "\"decision\":\"AUTHORIZED\",\"rejectionReason\":\"No aplica\","
+            + "\"expectedVersion\":1}",
+        "{\"identityConfirmed\":false,\"requirementsSatisfied\":false,"
+            + "\"decision\":\"REJECTED\",\"expectedVersion\":1}",
+        "{\"identityConfirmed\":\"false\",\"requirementsSatisfied\":false,"
+            + "\"decision\":\"REJECTED\",\"rejectionReason\":\"Tipo inválido\","
+            + "\"expectedVersion\":1}",
+        "{\"identityConfirmed\":0,\"requirementsSatisfied\":false,"
+            + "\"decision\":\"REJECTED\",\"rejectionReason\":\"Tipo inválido\","
+            + "\"expectedVersion\":1}",
+        "{\"identityConfirmed\":false,\"requirementsSatisfied\":false,"
+            + "\"decision\":\"REJECTED\",\"rejectionReason\":\"" + "x".repeat(501)
+            + "\",\"expectedVersion\":1}")) {
+      washUnclassifiedEnabledMvc.perform(post(path).header("Idempotency-Key", "invalid")
+              .contentType(MediaType.APPLICATION_JSON).content(body))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("BFF.INVALID_REQUEST"));
+    }
+    verifyNoInteractions(commands);
   }
 
   @Test
@@ -386,6 +523,25 @@ class PublicApiMvcTest {
   private static String materials(String property) {
     return "{\"" + property + "\":{\"packageCount\":1,\"greenPaperCassette8Count\":0,"
         + "\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0},\"expectedVersion\":1}";
+  }
+
+  private static boolean isCanonicalUnclassifiedEntryIntent(Map<String, ?> payload) {
+    return payload.size() == 4 && hasCanonicalUnclassifiedEntryFields(payload);
+  }
+
+  private static boolean hasCanonicalUnclassifiedEntryFields(Map<String, ?> payload) {
+    return payload.containsKey("washExecutionId")
+        && "REJECTED".equals(payload.get("decision"))
+        && "Motivo operativo".equals(payload.get("rejectionReason"))
+        && Integer.valueOf(1).equals(payload.get("expectedVersion"))
+        && !payload.containsKey("identityConfirmed")
+        && !payload.containsKey("requirementsSatisfied");
+  }
+
+  private static boolean isCanonicalUnclassifiedEntryPayload(Map<String, ?> payload) {
+    return payload.size() == 6 && hasCanonicalUnclassifiedEntryFields(payload)
+        && payload.containsKey("decidedByAccountId")
+        && payload.containsKey("decidedAt");
   }
 
   private void verifyOwnerCommand(String publicOperation, String commandType) {

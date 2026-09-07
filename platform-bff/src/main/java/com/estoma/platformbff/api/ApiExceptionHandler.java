@@ -9,6 +9,7 @@ import com.estoma.platformbff.application.security.SecurityRpcUnavailableExcepti
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService.LookupNotFoundException;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService.ExecutionNotFoundException;
+import com.estoma.platformbff.api.wash.WashController.UnclassifiedEntryRejectionUnavailableException;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
@@ -46,6 +47,13 @@ public class ApiExceptionHandler {
   ResponseEntity<ProblemResponse> projectionUnavailable() {
     return problem(HttpStatus.SERVICE_UNAVAILABLE, "BFF.PROJECTION_UNAVAILABLE",
         "Service Unavailable", "The required local projection is temporarily unavailable.");
+  }
+
+  @ExceptionHandler(UnclassifiedEntryRejectionUnavailableException.class)
+  ResponseEntity<ProblemResponse> unclassifiedEntryRejectionUnavailable() {
+    return problem(HttpStatus.SERVICE_UNAVAILABLE,
+        "BFF.WASH_UNCLASSIFIED_ENTRY_REJECTION_UNAVAILABLE", "Service Unavailable",
+        "Unclassified Wash entry rejection is temporarily unavailable.");
   }
 
   @ExceptionHandler(AppointmentAvailabilityRefreshingException.class)

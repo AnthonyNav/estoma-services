@@ -137,6 +137,30 @@ class OpenApiControllerTest {
             "completedAt", "finalExitMaterials", "activeResourceAssignment",
             "lastResourceAssignment");
 
+    Map<String, Object> entryDecision = operation(paths,
+        "/api/v1/wash/executions/{washExecutionId}/entry-decision", "post");
+    assertThat(entryDecision).containsEntry("x-unclassified-rejection-provider-ready", true)
+        .containsEntry("x-unclassified-rejection-enabled-by-default", false)
+        .containsEntry("x-unclassified-rejection-feature-flag",
+            "BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED");
+    assertThat(entryDecision.get("description").toString())
+        .contains("Classified entry decisions remain available")
+        .contains("503 before creating an operation");
+    assertThat((Map<String, Object>) entryDecision.get("responses")).containsKey("503");
+    Map<String, Object> entryRequest = (Map<String, Object>) ((Map<String, Object>)
+        ((Map<String, Object>) ((Map<String, Object>) entryDecision.get("requestBody"))
+            .get("content")).get("application/json")).get("schema");
+    assertThat(entryRequest.get("description").toString())
+        .contains("AUTHORIZED requires true/true")
+        .contains("both checks omitted/null");
+    assertThat((java.util.List<String>) entryRequest.get("required"))
+        .containsExactlyInAnyOrder("decision", "expectedVersion");
+    Map<String, Object> entryProperties = (Map<String, Object>) entryRequest.get("properties");
+    assertThat((java.util.List<String>) ((Map<String, Object>) entryProperties
+        .get("identityConfirmed")).get("type")).containsExactly("boolean", "null");
+    assertThat((java.util.List<String>) ((Map<String, Object>) entryProperties
+        .get("requirementsSatisfied")).get("type")).containsExactly("boolean", "null");
+
     Map<String, Object> lookup = operation(paths, "/api/v1/wash/supervision/lookup", "post");
     assertThat(lookup).doesNotContainKey("parameters");
     Map<String, Object> lookupRequest = (Map<String, Object>) ((Map<String, Object>)

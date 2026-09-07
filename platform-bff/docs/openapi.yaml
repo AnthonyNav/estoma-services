@@ -5371,6 +5371,7 @@
     },
     "/api/v1/wash/executions/{washExecutionId}/entry-decision" : {
       "post" : {
+        "description" : "Classified entry decisions remain available. Unclassified REJECTED decisions are implemented but disabled by default; while disabled they return 503 before creating an operation.",
         "operationId" : "WashController_decideEntry_post__api_v1_wash_executions_washExecutionId_entry_decision",
         "parameters" : [ {
           "in" : "header",
@@ -5393,6 +5394,7 @@
             "application/json" : {
               "schema" : {
                 "additionalProperties" : false,
+                "description" : "AUTHORIZED requires true/true and no rejectionReason. REJECTED requires a nonblank rejectionReason and either two boolean checks or both checks omitted/null. Omitted/null checks are the gated unclassified-rejection capability.",
                 "properties" : {
                   "decision" : {
                     "enum" : [ "AUTHORIZED", "REJECTED" ],
@@ -5404,17 +5406,17 @@
                     "type" : "integer"
                   },
                   "identityConfirmed" : {
-                    "type" : "boolean"
+                    "type" : [ "boolean", "null" ]
                   },
                   "rejectionReason" : {
                     "maxLength" : 500,
                     "type" : [ "string", "null" ]
                   },
                   "requirementsSatisfied" : {
-                    "type" : "boolean"
+                    "type" : [ "boolean", "null" ]
                   }
                 },
-                "required" : [ "identityConfirmed", "requirementsSatisfied", "decision", "expectedVersion" ],
+                "required" : [ "decision", "expectedVersion" ],
                 "type" : "object"
               }
             }
@@ -5432,6 +5434,16 @@
             },
             "description" : "Accepted"
           },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Unclassified entry rejection is disabled; no operation was created"
+          },
           "default" : {
             "content" : {
               "application/problem+json" : {
@@ -5445,7 +5457,10 @@
         },
         "security" : [ {
           "bearerAuth" : [ ]
-        } ]
+        } ],
+        "x-unclassified-rejection-enabled-by-default" : false,
+        "x-unclassified-rejection-feature-flag" : "BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED",
+        "x-unclassified-rejection-provider-ready" : true
       }
     },
     "/api/v1/wash/executions/{washExecutionId}/exit" : {

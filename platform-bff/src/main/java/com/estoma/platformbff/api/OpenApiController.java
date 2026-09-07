@@ -124,8 +124,14 @@ public class OpenApiController {
         operation.put("x-server-derived-actor-fields", admin.serverDerivedActorFields().stream().sorted().toList());
       }
     } else if (requestType != null) {
+      Map<String, Object> requestSchema = new LinkedHashMap<>(schemaFor(requestType));
+      if (handler.getMethod().getName().equals("decideEntry")) {
+        requestSchema.put("description", "AUTHORIZED requires true/true and no rejectionReason. "
+            + "REJECTED requires a nonblank rejectionReason and either two boolean checks or both "
+            + "checks omitted/null. Omitted/null checks are the gated unclassified-rejection capability.");
+      }
       operation.put("requestBody", Map.of("required", true, "content", Map.of(
-          MediaType.APPLICATION_JSON_VALUE, Map.of("schema", schemaFor(requestType)))));
+          MediaType.APPLICATION_JSON_VALUE, Map.of("schema", requestSchema))));
     }
     if (handler.getMethod().getName().equals("supervisorLookup")) {
       operation.put("description", "STUDENT_ENROLLMENT and QR lookups are implemented as side-effect-free "
@@ -147,6 +153,15 @@ public class OpenApiController {
       operation.put("description", "Side-effect-free exact local read of one current or historical "
           + "Wash execution. The path identifier is the only selector; no current-service-date "
           + "filter or fallback appointment is applied. The response does not grant command permissions.");
+    }
+    if (handler.getMethod().getName().equals("decideEntry")) {
+      operation.put("description", "Classified entry decisions remain available. Unclassified "
+          + "REJECTED decisions are implemented but disabled by default; while disabled they return "
+          + "503 before creating an operation.");
+      operation.put("x-unclassified-rejection-provider-ready", true);
+      operation.put("x-unclassified-rejection-enabled-by-default", false);
+      operation.put("x-unclassified-rejection-feature-flag",
+          "BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED");
     }
     List<Map<String, Object>> parameters = new ArrayList<>();
     requestHeaders(handler, parameters);
@@ -188,6 +203,10 @@ public class OpenApiController {
       responses.put("403", problemResponse("Wash supervisor permission is required"));
       responses.put("404", problemResponse("Wash execution was not found"));
       responses.put("503", problemResponse("Required local projection is unavailable or incomplete"));
+    }
+    if (handler.getMethod().getName().equals("decideEntry")) {
+      responses.put("503", problemResponse(
+          "Unclassified entry rejection is disabled; no operation was created"));
     }
     responses.put("default", Map.of("description", "Problem response", "content", Map.of(
         MediaType.APPLICATION_PROBLEM_JSON_VALUE,
