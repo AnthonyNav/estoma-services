@@ -31,6 +31,8 @@ class OpenApiControllerTest {
   void operationNotFoundExplicitlyDocumentsAnEmptyResponse() {
     Map<String, Object> paths = (Map<String, Object>) openApi.document().get("paths");
     Map<String, Object> operation = operation(paths, "/api/v1/operations/{operationId}", "get");
+    assertThat(operation.get("security"))
+        .isEqualTo(java.util.List.of(Map.of("bearerAuth", java.util.List.of()), Map.of()));
     Map<String, Object> responses = (Map<String, Object>) operation.get("responses");
     assertThat(responses).containsKeys("200", "400", "401", "404", "default");
     assertThat((Map<String, Object>) responses.get("404"))

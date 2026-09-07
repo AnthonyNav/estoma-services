@@ -4679,7 +4679,10 @@
             },
             "description" : "Problem response"
           }
-        }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        }, { } ]
       }
     },
     "/api/v1/wash/appointments" : {

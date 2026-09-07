@@ -21,6 +21,30 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class OperationsControllerTest {
   @Test
+  void accountReceiptIsVisibleToOwnerButHiddenWithoutActor() throws Exception {
+    UUID id = UUID.randomUUID();
+    UUID owner = UUID.randomUUID();
+    Instant now = Instant.parse("2026-09-07T12:00:00Z");
+    var repository = mock(ClientOperationRepository.class);
+    when(repository.findById(id)).thenReturn(Optional.of(new ClientOperation(
+        id, owner, "wash-complete", "CompleteWashExecution", "wash-execution",
+        "commands.wash-execution", UUID.randomUUID(), "synthetic-intent", OperationStatus.SUCCEEDED,
+        null, null, null, now, now, now, now.plusSeconds(3600))));
+    var query = new OperationQueryService(repository);
+    var mapper = mock(OperationDataMapper.class);
+    var ownerMvc = MockMvcBuilders.standaloneSetup(new OperationsController(
+        query, () -> Optional.of(owner), mapper)).build();
+    ownerMvc.perform(get("/api/v1/operations/{operationId}", id))
+        .andExpect(status().isOk())
+        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+            .jsonPath("$.operationId").value(id.toString()));
+    var anonymousMvc = MockMvcBuilders.standaloneSetup(new OperationsController(
+        query, Optional::empty, mapper)).build();
+    anonymousMvc.perform(get("/api/v1/operations/{operationId}", id))
+        .andExpect(status().isNotFound()).andExpect(content().string(""));
+  }
+
+  @Test
   void unknownAndOtherActorsOperationsReturnTheSameEmpty404() throws Exception {
     UUID id = UUID.randomUUID();
     UUID owner = UUID.randomUUID();

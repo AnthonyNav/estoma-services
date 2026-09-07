@@ -110,7 +110,9 @@ public class OpenApiController {
     operation.put("operationId", handler.getBeanType().getSimpleName() + "_"
         + handler.getMethod().getName() + "_" + method.name().toLowerCase() + "_"
         + path.replaceAll("[^A-Za-z0-9]+", "_"));
-    if (!ANONYMOUS.contains(path)) {
+    if (path.equals("/api/v1/operations/{operationId}")) {
+      operation.put("security", List.of(Map.of("bearerAuth", List.of()), Map.of()));
+    } else if (!ANONYMOUS.contains(path)) {
       operation.put("security", List.of(Map.of("bearerAuth", List.of())));
     }
     Type requestType = requestType(handler);

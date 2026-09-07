@@ -11,6 +11,11 @@ Problem. An invalid UUID produces 400 Problem. Restore the original actor/sessio
 context before retrying the same saved pollPath. A 404 is not FAILED or EXPIRED,
 and does not prove that the command was never accepted or had no effects.
 
+OpenAPI declares optional authentication as `security: [{bearerAuth: []}, {}]`.
+The Postman catalogue defaults to `{{bearerToken}}` for account-owned receipts.
+For an anonymous receipt, explicitly select No Auth; do not send a stale or
+empty token as if it were a valid account credential.
+
 Preserve the operation ID, idempotency key and original request. Do not generate
 a new key or resubmit a command automatically after 404. For Lavado, reconcile
 the exact appointment/execution rather than selecting whichever appointment is
