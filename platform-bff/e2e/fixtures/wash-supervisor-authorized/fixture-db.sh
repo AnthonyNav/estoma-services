@@ -12,6 +12,7 @@ base_fixture="$script_dir/../wash-supervisor-entry/fixture-db.sh"
 bff_database=${E2E_BFF_DATABASE:-platform_bff_db}
 appointments_database=${E2E_APPOINTMENTS_DATABASE:-appointments_db}
 execution_database=${E2E_WASH_EXECUTION_DATABASE:-wash_execution_db}
+terminal_manifest=${E2E_AUTHORIZED_TERMINAL_MANIFEST:-}
 
 fail() { printf 'wash-supervisor-authorized fixture: %s\n' "$*" >&2; exit 1; }
 
@@ -39,6 +40,14 @@ manifest_value() {
   value=$(sed -n "s/^${key}=//p" "$manifest")
   [ -n "$value" ] || fail "$manifest is missing $key"
   [ "$(printf '%s\n' "$value" | wc -l)" -eq 1 ] || fail "$manifest repeats $key"
+  printf '%s\n' "$value"
+}
+
+manifest_value_from() {
+  source_manifest=$1 key=$2
+  value=$(sed -n "s/^${key}=//p" "$source_manifest")
+  [ -n "$value" ] || fail "$source_manifest is missing $key"
+  [ "$(printf '%s\n' "$value" | wc -l)" -eq 1 ] || fail "$source_manifest repeats $key"
   printf '%s\n' "$value"
 }
 
@@ -81,6 +90,78 @@ load_manifest() {
   case "$ORIGINAL_ROLE_SOURCE_VERSION:$ORIGINAL_ROLE_UPDATED_EPOCH:$FIXTURE_ROLE_UPDATED_EPOCH" in
     *[!0-9.:]*) fail "unsafe role snapshot" ;;
   esac
+}
+
+load_terminal_manifest() {
+  TERMINAL_MODE=0
+  OPERATION_KEYS="'$REGISTER_KEY','$DECIDE_KEY'"
+  WASH_EXECUTION_ID=00000000-0000-0000-0000-000000000000
+  RESOURCE_ASSIGNMENT_ID=00000000-0000-0000-0000-000000000000
+  INVALID_EXIT_KEY=unused-invalid-exit
+  FOREIGN_EXIT_KEY=unused-foreign-exit
+  EXIT_KEY=unused-exit
+  COMPLETE_STALE_KEY=unused-complete-stale
+  COMPLETE_KEY=unused-complete
+  ORIGINAL_PACKAGE_COUNT=0
+  ORIGINAL_CASSETTE8_COUNT=0
+  ORIGINAL_CASSETTE10_COUNT=0
+  ORIGINAL_WITNESS_COUNT=0
+  FINAL_PACKAGE_COUNT=0
+  FINAL_CASSETTE8_COUNT=0
+  FINAL_CASSETTE10_COUNT=0
+  FINAL_WITNESS_COUNT=0
+  [ -n "$terminal_manifest" ] || return 0
+  [ -f "$terminal_manifest" ] || fail "terminal fixture manifest does not exist"
+  [ "$(stat -c %a "$terminal_manifest")" = 600 ] || fail "terminal fixture manifest must be mode 0600"
+  TERMINAL_MODE=1
+  WASH_EXECUTION_ID=$(manifest_value_from "$terminal_manifest" WASH_EXECUTION_ID)
+  RESOURCE_ASSIGNMENT_ID=$(manifest_value_from "$terminal_manifest" RESOURCE_ASSIGNMENT_ID)
+  terminal_appointment_id=$(manifest_value_from "$terminal_manifest" APPOINTMENT_ID)
+  terminal_slot_id=$(manifest_value_from "$terminal_manifest" SLOT_ID)
+  terminal_cabin_id=$(manifest_value_from "$terminal_manifest" CABIN_ID)
+  terminal_tank_id=$(manifest_value_from "$terminal_manifest" TANK_ID)
+  terminal_student_id=$(manifest_value_from "$terminal_manifest" STUDENT_ACCOUNT_ID)
+  terminal_supervisor_id=$(manifest_value_from "$terminal_manifest" SUPERVISOR_ACCOUNT_ID)
+  INVALID_EXIT_KEY=$(manifest_value_from "$terminal_manifest" INVALID_EXIT_KEY)
+  FOREIGN_EXIT_KEY=$(manifest_value_from "$terminal_manifest" FOREIGN_EXIT_KEY)
+  EXIT_KEY=$(manifest_value_from "$terminal_manifest" EXIT_KEY)
+  COMPLETE_STALE_KEY=$(manifest_value_from "$terminal_manifest" COMPLETE_STALE_KEY)
+  COMPLETE_KEY=$(manifest_value_from "$terminal_manifest" COMPLETE_KEY)
+  ORIGINAL_PACKAGE_COUNT=$(manifest_value_from "$terminal_manifest" ORIGINAL_PACKAGE_COUNT)
+  ORIGINAL_CASSETTE8_COUNT=$(manifest_value_from "$terminal_manifest" ORIGINAL_CASSETTE8_COUNT)
+  ORIGINAL_CASSETTE10_COUNT=$(manifest_value_from "$terminal_manifest" ORIGINAL_CASSETTE10_COUNT)
+  ORIGINAL_WITNESS_COUNT=$(manifest_value_from "$terminal_manifest" ORIGINAL_WITNESS_COUNT)
+  FINAL_PACKAGE_COUNT=$(manifest_value_from "$terminal_manifest" FINAL_PACKAGE_COUNT)
+  FINAL_CASSETTE8_COUNT=$(manifest_value_from "$terminal_manifest" FINAL_CASSETTE8_COUNT)
+  FINAL_CASSETTE10_COUNT=$(manifest_value_from "$terminal_manifest" FINAL_CASSETTE10_COUNT)
+  FINAL_WITNESS_COUNT=$(manifest_value_from "$terminal_manifest" FINAL_WITNESS_COUNT)
+  for pair in "$WASH_EXECUTION_ID:WASH_EXECUTION_ID" "$RESOURCE_ASSIGNMENT_ID:RESOURCE_ASSIGNMENT_ID" \
+      "$terminal_appointment_id:APPOINTMENT_ID" "$terminal_slot_id:SLOT_ID" \
+      "$terminal_cabin_id:CABIN_ID" "$terminal_tank_id:TANK_ID" \
+      "$terminal_student_id:STUDENT_ACCOUNT_ID" "$terminal_supervisor_id:SUPERVISOR_ACCOUNT_ID"; do
+    require_uuid "${pair%%:*}" "${pair#*:}"
+  done
+  [ "$APPOINTMENT_ID" = "$terminal_appointment_id" ] || fail "terminal appointment does not match entry fixture"
+  [ "$SLOT_ID" = "$terminal_slot_id" ] || fail "terminal slot does not match entry fixture"
+  [ "$CABIN_ID" = "$terminal_cabin_id" ] || fail "terminal cabin does not match entry fixture"
+  [ "$TANK_ID" = "$terminal_tank_id" ] || fail "terminal tank does not match entry fixture"
+  [ "$STUDENT_ACCOUNT_ID" = "$terminal_student_id" ] || fail "terminal student does not match entry fixture"
+  [ "$SUPERVISOR_ACCOUNT_ID" = "$terminal_supervisor_id" ] || fail "terminal supervisor does not match entry fixture"
+  [ "$INVALID_EXIT_KEY" = "$RUN_KEY-invalid-exit" ] || fail "unexpected invalid-exit key"
+  [ "$FOREIGN_EXIT_KEY" = "$RUN_KEY-foreign-exit" ] || fail "unexpected foreign-exit key"
+  [ "$EXIT_KEY" = "$RUN_KEY-exit" ] || fail "unexpected exit key"
+  [ "$COMPLETE_STALE_KEY" = "$RUN_KEY-complete-stale" ] || fail "unexpected stale-complete key"
+  [ "$COMPLETE_KEY" = "$RUN_KEY-complete" ] || fail "unexpected complete key"
+  for value in "$ORIGINAL_PACKAGE_COUNT" "$ORIGINAL_CASSETTE8_COUNT" "$ORIGINAL_CASSETTE10_COUNT" \
+      "$ORIGINAL_WITNESS_COUNT" "$FINAL_PACKAGE_COUNT" "$FINAL_CASSETTE8_COUNT" \
+      "$FINAL_CASSETTE10_COUNT" "$FINAL_WITNESS_COUNT"; do
+    case "$value" in ''|*[!0-9]*) fail "terminal materials must be nonnegative integers" ;; esac
+  done
+  [ "$ORIGINAL_PACKAGE_COUNT|$ORIGINAL_CASSETTE8_COUNT|$ORIGINAL_CASSETTE10_COUNT|$ORIGINAL_WITNESS_COUNT" = '2|1|0|2' ] \
+    || fail "unexpected original materials"
+  [ "$FINAL_PACKAGE_COUNT|$FINAL_CASSETTE8_COUNT|$FINAL_CASSETTE10_COUNT|$FINAL_WITNESS_COUNT" = '2|1|1|2' ] \
+    || fail "unexpected final materials"
+  OPERATION_KEYS="'$REGISTER_KEY','$DECIDE_KEY','$INVALID_EXIT_KEY','$FOREIGN_EXIT_KEY','$EXIT_KEY','$COMPLETE_STALE_KEY','$COMPLETE_KEY'"
 }
 
 bootstrap() {
@@ -258,20 +339,20 @@ cleanup() {
   [ -f "$student_manifest" ] || fail "entry cleanup must run before student cleanup"
   [ -f "$supervisor_manifest" ] || fail "entry cleanup must run before supervisor cleanup"
   load_manifest
+  load_terminal_manifest
 
   attempts=0
   while :; do
     pending_bff=$(sql "$bff_database" <<SQL
-SELECT count(*) FROM client_operations WHERE actor_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
- AND idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY') AND status='PENDING';
+SELECT count(*) FROM client_operations WHERE idempotency_key IN ($OPERATION_KEYS) AND status='PENDING';
 SQL
     )
     pending_execution=$(sql "$execution_database" <<SQL
-SELECT count(*) FROM outbox_messages WHERE (idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY')
+SELECT count(*) FROM outbox_messages WHERE (idempotency_key IN ($OPERATION_KEYS)
  OR aggregate_id IN (SELECT wash_execution_id FROM wash_executions WHERE appointment_id='$APPOINTMENT_ID'::uuid))
  AND status <> 'PUBLISHED'
 UNION ALL SELECT count(*) FROM processed_messages
- WHERE idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY') AND status='DEFERRED';
+ WHERE idempotency_key IN ($OPERATION_KEYS) AND status='DEFERRED';
 SQL
     ); pending_execution=$(printf '%s\n' "$pending_execution" | awk '{n+=$1} END {print n+0}')
     pending_appointments=$(sql "$appointments_database" <<SQL
@@ -331,8 +412,105 @@ SQL
         expected_execution='PENDING_ENTRY|1'; expected_appointment='SCHEDULED|1'
         expected_bff_consumed='1|0|0|0'
         ;;
+      'EXIT_SUBMITTED|3')
+        [ "$TERMINAL_MODE" = 1 ] || fail "terminal cleanup manifest is required for EXIT_SUBMITTED"
+        [ "$execution_id" = "$WASH_EXECUTION_ID" ] || fail "terminal execution does not match manifest"
+        proof=$(sql "$execution_database" <<SQL
+SELECT count(*) FROM wash_executions e
+JOIN entry_validations v ON v.wash_execution_id=e.wash_execution_id
+JOIN resource_assignments a ON a.resource_assignment_id='$RESOURCE_ASSIGNMENT_ID'::uuid
+WHERE e.wash_execution_id='$WASH_EXECUTION_ID'::uuid AND e.appointment_id='$APPOINTMENT_ID'::uuid
+ AND e.exit_submitted_by_account_id='$STUDENT_ACCOUNT_ID'::uuid AND e.exit_submitted_at IS NOT NULL
+ AND e.package_count=$ORIGINAL_PACKAGE_COUNT AND e.green_paper_cassette_8_count=$ORIGINAL_CASSETTE8_COUNT
+ AND e.green_paper_cassette_10_count=$ORIGINAL_CASSETTE10_COUNT AND e.witness_tape_portion_count=$ORIGINAL_WITNESS_COUNT
+ AND e.completed_by_account_id IS NULL AND e.completed_at IS NULL
+ AND v.decision='AUTHORIZED' AND v.decided_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
+ AND a.wash_execution_id=e.wash_execution_id AND a.appointment_time_slot_id='$SLOT_ID'::uuid
+ AND a.cabin_id='$CABIN_ID'::uuid AND a.tank_id='$TANK_ID'::uuid AND a.assignment_type='INITIAL'
+ AND a.released_at IS NULL AND a.released_by_account_id IS NULL AND a.release_reason IS NULL
+ AND (SELECT count(*) FROM resource_assignments x WHERE x.wash_execution_id=e.wash_execution_id)=1
+ AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id AND m.message_kind='EVENT')=5
+ AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+   AND m.message_type='WashExitSubmitted' AND m.aggregate_version=3 AND m.idempotency_key='$EXIT_KEY'
+   AND m.status='PUBLISHED' AND (m.payload_json->>'packageCount')::int=$ORIGINAL_PACKAGE_COUNT
+   AND (m.payload_json->>'greenPaperCassette8Count')::int=$ORIGINAL_CASSETTE8_COUNT
+   AND (m.payload_json->>'greenPaperCassette10Count')::int=$ORIGINAL_CASSETTE10_COUNT
+   AND (m.payload_json->>'witnessTapePortionCount')::int=$ORIGINAL_WITNESS_COUNT)=1
+ AND (SELECT count(*) FROM command_idempotency_records WHERE producer='bff'
+   AND idempotency_key='$EXIT_KEY' AND status='SUCCEEDED' AND aggregate_id=e.wash_execution_id)=1
+ AND NOT EXISTS (SELECT 1 FROM command_idempotency_records WHERE producer='bff'
+   AND idempotency_key IN ('$COMPLETE_STALE_KEY','$COMPLETE_KEY') AND status='IN_PROGRESS');
+SQL
+        )
+        [ "$proof" = 1 ] || fail "cleanup refused: EXIT_SUBMITTED history is not the exact terminal fixture"
+        expected_execution='EXIT_SUBMITTED|3'; expected_appointment='IN_PROGRESS|3'
+        expected_bff_consumed='1|1|1|1|1|0'
+        ;;
+      'COMPLETED|4')
+        [ "$TERMINAL_MODE" = 1 ] || fail "terminal cleanup manifest is required for COMPLETED"
+        [ "$execution_id" = "$WASH_EXECUTION_ID" ] || fail "terminal execution does not match manifest"
+        proof=$(sql "$execution_database" <<SQL
+SELECT count(*) FROM wash_executions e
+JOIN entry_validations v ON v.wash_execution_id=e.wash_execution_id
+JOIN resource_assignments a ON a.resource_assignment_id='$RESOURCE_ASSIGNMENT_ID'::uuid
+WHERE e.wash_execution_id='$WASH_EXECUTION_ID'::uuid AND e.appointment_id='$APPOINTMENT_ID'::uuid
+ AND e.exit_submitted_by_account_id='$STUDENT_ACCOUNT_ID'::uuid AND e.exit_submitted_at IS NOT NULL
+ AND e.completed_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid AND e.completed_at IS NOT NULL
+ AND e.package_count=$FINAL_PACKAGE_COUNT AND e.green_paper_cassette_8_count=$FINAL_CASSETTE8_COUNT
+ AND e.green_paper_cassette_10_count=$FINAL_CASSETTE10_COUNT AND e.witness_tape_portion_count=$FINAL_WITNESS_COUNT
+ AND v.decision='AUTHORIZED' AND v.decided_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
+ AND a.wash_execution_id=e.wash_execution_id AND a.appointment_time_slot_id='$SLOT_ID'::uuid
+ AND a.cabin_id='$CABIN_ID'::uuid AND a.tank_id='$TANK_ID'::uuid AND a.assignment_type='INITIAL'
+ AND a.released_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid AND a.released_at=e.completed_at
+ AND a.release_reason='NORMAL_COMPLETION'
+ AND (SELECT count(*) FROM resource_assignments x WHERE x.wash_execution_id=e.wash_execution_id)=1
+ AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id AND m.message_kind='EVENT')=6
+ AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+   AND m.message_type='WashExitSubmitted' AND m.aggregate_version=3 AND m.idempotency_key='$EXIT_KEY'
+   AND m.status='PUBLISHED' AND (m.payload_json->>'packageCount')::int=$ORIGINAL_PACKAGE_COUNT
+   AND (m.payload_json->>'greenPaperCassette8Count')::int=$ORIGINAL_CASSETTE8_COUNT
+   AND (m.payload_json->>'greenPaperCassette10Count')::int=$ORIGINAL_CASSETTE10_COUNT
+   AND (m.payload_json->>'witnessTapePortionCount')::int=$ORIGINAL_WITNESS_COUNT)=1
+ AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+   AND m.message_type='WashExecutionCompleted' AND m.aggregate_version=4 AND m.idempotency_key='$COMPLETE_KEY'
+   AND m.status='PUBLISHED' AND (m.payload_json->>'finalPackageCount')::int=$FINAL_PACKAGE_COUNT
+   AND (m.payload_json->>'finalGreenPaperCassette8Count')::int=$FINAL_CASSETTE8_COUNT
+   AND (m.payload_json->>'finalGreenPaperCassette10Count')::int=$FINAL_CASSETTE10_COUNT
+   AND (m.payload_json->>'finalWitnessTapePortionCount')::int=$FINAL_WITNESS_COUNT)=1
+ AND (SELECT count(*) FROM command_idempotency_records WHERE producer='bff'
+   AND idempotency_key='$EXIT_KEY' AND status='SUCCEEDED' AND aggregate_id=e.wash_execution_id)=1
+ AND (SELECT count(*) FROM command_idempotency_records WHERE producer='bff'
+   AND idempotency_key='$COMPLETE_STALE_KEY' AND status='REJECTED' AND error_code='VERSION_CONFLICT')=1
+ AND (SELECT count(*) FROM command_idempotency_records WHERE producer='bff'
+   AND idempotency_key='$COMPLETE_KEY' AND status='SUCCEEDED' AND aggregate_id=e.wash_execution_id)=1;
+SQL
+        )
+        [ "$proof" = 1 ] || fail "cleanup refused: COMPLETED history is not the exact terminal fixture"
+        expected_execution='COMPLETED|4'; expected_appointment='COMPLETED|4'
+        expected_bff_consumed='1|1|1|1|1|1'
+        ;;
       *) fail "cleanup refused for execution outside the isolated authorized path" ;;
     esac
+    if [ "$TERMINAL_MODE" = 1 ]; then
+      operation_proof=$(sql "$bff_database" <<SQL
+SELECT
+ (SELECT count(*) FROM client_operations WHERE idempotency_key IN ('$INVALID_EXIT_KEY','$FOREIGN_EXIT_KEY')) || '|' ||
+ (SELECT count(*) FROM client_operations WHERE actor_account_id='$STUDENT_ACCOUNT_ID'::uuid
+   AND idempotency_key='$EXIT_KEY' AND public_operation='wash-submit-exit' AND status='SUCCEEDED') || '|' ||
+ (SELECT count(*) FROM client_operations WHERE actor_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
+   AND idempotency_key='$COMPLETE_STALE_KEY' AND public_operation='wash-complete-execution'
+   AND status='REJECTED' AND error_code='VERSION_CONFLICT') || '|' ||
+ (SELECT count(*) FROM client_operations WHERE actor_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
+   AND idempotency_key='$COMPLETE_KEY' AND public_operation='wash-complete-execution' AND status='SUCCEEDED') || '|' ||
+ (SELECT count(*) FROM client_operations WHERE idempotency_key IN ('$EXIT_KEY','$COMPLETE_STALE_KEY','$COMPLETE_KEY'));
+SQL
+      )
+      case "$expected_execution:$operation_proof" in
+        'EXIT_SUBMITTED|3:0|1|0|0|1'|'EXIT_SUBMITTED|3:0|1|1|0|2') ;;
+        'COMPLETED|4:0|1|1|1|3') ;;
+        *) fail "cleanup refused: terminal BFF operations are missing or ambiguous" ;;
+      esac
+    fi
     attempts=0
     while :; do
       bff_state=$(sql "$bff_database" <<SQL
@@ -347,7 +525,19 @@ SQL
 SELECT status || '|' || source_version FROM appointment_read_model WHERE appointment_id='$APPOINTMENT_ID'::uuid;
 SQL
       )
-      if [ "$expected_execution" = 'IN_PROGRESS|2' ]; then
+      if [ "$TERMINAL_MODE" = 1 ]; then
+        appointments_consumed=$(sql "$appointments_database" <<SQL
+SELECT count(*) FROM wash_execution_evidence_projection e
+JOIN wash_execution_transition_projection started ON started.wash_execution_id=e.wash_execution_id
+JOIN processed_messages started_message ON started_message.message_id=started.source_event_id
+WHERE e.appointment_id='$APPOINTMENT_ID'::uuid AND e.wash_execution_id='$execution_id'::uuid
+ AND e.arrival_execution_version=1 AND e.entry_authorized_execution_version=2
+ AND started.event_type='WashExecutionStarted' AND started.execution_version=2
+ AND started_message.status='APPLIED'
+ AND ($([ "$expected_execution" = 'COMPLETED|4' ] && printf "EXISTS (SELECT 1 FROM wash_execution_transition_projection completed JOIN processed_messages pm ON pm.message_id=completed.source_event_id WHERE completed.wash_execution_id=e.wash_execution_id AND completed.event_type='WashExecutionCompleted' AND completed.execution_version=4 AND completed.state='COMPLETED' AND pm.status='APPLIED')" || printf 'TRUE'));
+SQL
+        )
+      elif [ "$expected_execution" = 'IN_PROGRESS|2' ]; then
         appointments_consumed=$(sql "$appointments_database" <<SQL
 SELECT count(*) FROM wash_execution_evidence_projection e
 JOIN processed_messages arrival ON arrival.message_id=e.arrival_source_event_id
@@ -386,9 +576,19 @@ SELECT
    AND message_type='WashResourceAssigned' AND aggregate_version=2) || '|' ||
  (SELECT count(*) FROM inbox_messages WHERE consumer_name='bff-projection-runtime'
    AND aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
-   AND message_type='WashExecutionStarted' AND aggregate_version=2);
+   AND message_type='WashExecutionStarted' AND aggregate_version=2) || '|' ||
+ (SELECT count(*) FROM inbox_messages WHERE consumer_name='bff-projection-runtime'
+   AND aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
+   AND message_type='WashExitSubmitted' AND aggregate_version=3) || '|' ||
+ (SELECT count(*) FROM inbox_messages WHERE consumer_name='bff-projection-runtime'
+   AND aggregate_id='$execution_id'::uuid AND message_kind='EVENT'
+   AND message_type='WashExecutionCompleted' AND aggregate_version=4);
 SQL
       )
+      if [ "$TERMINAL_MODE" = 0 ]; then
+        [ "$(printf '%s\n' "$bff_consumed" | awk -F'|' '{print NF}')" -ne 6 ] \
+          || bff_consumed=${bff_consumed%|0|0}
+      fi
       [ "$bff_state" = "$expected_execution" ] && [ "$owner_state" = "$expected_appointment" ] \
         && [ "$bff_appointment" = "$expected_appointment" ] && [ "$appointments_consumed" = 1 ] \
         && [ "$bff_consumed" = "$expected_bff_consumed" ] && break
@@ -460,6 +660,39 @@ DO \$guard\$ BEGIN
         AND m.message_type='WashArrivalRegistered' AND m.message_kind='EVENT' AND m.aggregate_version=1
         AND m.idempotency_key='$REGISTER_KEY' AND m.status='PUBLISHED')
    )
+   OR ($TERMINAL_MODE=1 AND EXISTS (
+    SELECT 1 FROM wash_executions e
+    JOIN entry_validations v ON v.wash_execution_id=e.wash_execution_id
+    JOIN resource_assignments a ON a.resource_assignment_id='$RESOURCE_ASSIGNMENT_ID'::uuid
+    WHERE e.wash_execution_id='$WASH_EXECUTION_ID'::uuid AND e.appointment_id='$APPOINTMENT_ID'::uuid
+      AND v.decision='AUTHORIZED' AND v.decided_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid
+      AND a.wash_execution_id=e.wash_execution_id AND a.appointment_time_slot_id='$SLOT_ID'::uuid
+      AND a.cabin_id='$CABIN_ID'::uuid AND a.tank_id='$TANK_ID'::uuid AND a.assignment_type='INITIAL'
+      AND (SELECT count(*) FROM resource_assignments x WHERE x.wash_execution_id=e.wash_execution_id)=1
+      AND (
+       (e.status='EXIT_SUBMITTED' AND e.version=3
+        AND e.exit_submitted_by_account_id='$STUDENT_ACCOUNT_ID'::uuid AND e.exit_submitted_at IS NOT NULL
+        AND e.package_count=$ORIGINAL_PACKAGE_COUNT AND e.green_paper_cassette_8_count=$ORIGINAL_CASSETTE8_COUNT
+        AND e.green_paper_cassette_10_count=$ORIGINAL_CASSETTE10_COUNT AND e.witness_tape_portion_count=$ORIGINAL_WITNESS_COUNT
+        AND e.completed_at IS NULL AND a.released_at IS NULL
+        AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id AND m.message_kind='EVENT')=5)
+       OR
+       (e.status='COMPLETED' AND e.version=4
+        AND e.exit_submitted_by_account_id='$STUDENT_ACCOUNT_ID'::uuid AND e.exit_submitted_at IS NOT NULL
+        AND e.completed_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid AND e.completed_at IS NOT NULL
+        AND e.package_count=$FINAL_PACKAGE_COUNT AND e.green_paper_cassette_8_count=$FINAL_CASSETTE8_COUNT
+        AND e.green_paper_cassette_10_count=$FINAL_CASSETTE10_COUNT AND e.witness_tape_portion_count=$FINAL_WITNESS_COUNT
+        AND a.released_by_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid AND a.released_at=e.completed_at
+        AND a.release_reason='NORMAL_COMPLETION'
+        AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id AND m.message_kind='EVENT')=6)
+      )
+      AND (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+        AND m.message_type='WashExitSubmitted' AND m.aggregate_version=3
+        AND m.idempotency_key='$EXIT_KEY' AND m.status='PUBLISHED')=1
+      AND (e.status<>'COMPLETED' OR (SELECT count(*) FROM outbox_messages m WHERE m.aggregate_id=e.wash_execution_id
+        AND m.message_type='WashExecutionCompleted' AND m.aggregate_version=4
+        AND m.idempotency_key='$COMPLETE_KEY' AND m.status='PUBLISHED')=1)
+   ))
  ) THEN RAISE EXCEPTION 'execution changed after cleanup proof'; END IF;
 END \$guard\$;
 LOCK TABLE authorization_role_projection IN SHARE ROW EXCLUSIVE MODE;
@@ -477,11 +710,11 @@ DELETE FROM cleaning_periods WHERE wash_execution_id IN (SELECT wash_execution_i
 DELETE FROM resource_assignments WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids)
  AND cabin_id='$CABIN_ID'::uuid AND tank_id='$TANK_ID'::uuid;
 DELETE FROM entry_validations WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
-DELETE FROM outbox_messages WHERE idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY')
+DELETE FROM outbox_messages WHERE idempotency_key IN ($OPERATION_KEYS)
  OR aggregate_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
-DELETE FROM processed_messages WHERE idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY');
+DELETE FROM processed_messages WHERE idempotency_key IN ($OPERATION_KEYS);
 DELETE FROM processed_messages WHERE aggregate_id='$APPOINTMENT_ID'::uuid AND message_type='AppointmentScheduled';
-DELETE FROM command_idempotency_records WHERE producer='bff' AND idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY');
+DELETE FROM command_idempotency_records WHERE producer='bff' AND idempotency_key IN ($OPERATION_KEYS);
 DELETE FROM wash_executions WHERE wash_execution_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
 DELETE FROM appointment_projection WHERE appointment_id='$APPOINTMENT_ID'::uuid
  AND student_account_id='$STUDENT_ACCOUNT_ID'::uuid AND appointment_time_slot_id='$SLOT_ID'::uuid;
@@ -508,7 +741,8 @@ LOCK TABLE client_operations, inbox_messages, quarantined_messages, outbox_messa
   idempotency_records, wash_execution_read_model, wash_resource_assignment_read_model,
   wash_cabin_read_model, wash_tank_read_model IN SHARE ROW EXCLUSIVE MODE;
 CREATE TEMP TABLE e2e_operation_ids ON COMMIT DROP AS SELECT operation_id FROM client_operations
- WHERE actor_account_id='$SUPERVISOR_ACCOUNT_ID'::uuid AND idempotency_key IN ('$REGISTER_KEY','$DECIDE_KEY');
+ WHERE idempotency_key IN ($OPERATION_KEYS)
+   AND actor_account_id IN ('$STUDENT_ACCOUNT_ID'::uuid,'$SUPERVISOR_ACCOUNT_ID'::uuid);
 CREATE TEMP TABLE e2e_execution_ids ON COMMIT DROP AS SELECT wash_execution_id FROM wash_execution_read_model
  WHERE appointment_id='$APPOINTMENT_ID'::uuid;
 CREATE TEMP TABLE e2e_message_ids ON COMMIT DROP AS SELECT message_id FROM outbox_messages
@@ -542,6 +776,26 @@ DO \$guard\$ BEGIN
       AND e.status='PENDING_ENTRY' AND e.execution_version=1
       AND NOT EXISTS (SELECT 1 FROM wash_resource_assignment_read_model a
         WHERE a.wash_execution_id=e.wash_execution_id))
+   OR ($TERMINAL_MODE=1 AND EXISTS (SELECT 1 FROM wash_execution_read_model e
+    JOIN wash_resource_assignment_read_model a ON a.resource_assignment_id='$RESOURCE_ASSIGNMENT_ID'::uuid
+    WHERE e.wash_execution_id='$WASH_EXECUTION_ID'::uuid AND e.appointment_id='$APPOINTMENT_ID'::uuid
+      AND a.wash_execution_id=e.wash_execution_id AND a.appointment_time_slot_id='$SLOT_ID'::uuid
+      AND a.cabin_id='$CABIN_ID'::uuid AND a.tank_id='$TANK_ID'::uuid AND a.assignment_type='INITIAL'
+      AND (SELECT count(*) FROM wash_resource_assignment_read_model x
+        WHERE x.wash_execution_id=e.wash_execution_id)=1
+      AND e.submitted_exit_version=3
+      AND e.submitted_package_count=$ORIGINAL_PACKAGE_COUNT
+      AND e.submitted_green_paper_cassette_8_count=$ORIGINAL_CASSETTE8_COUNT
+      AND e.submitted_green_paper_cassette_10_count=$ORIGINAL_CASSETTE10_COUNT
+      AND e.submitted_witness_tape_portion_count=$ORIGINAL_WITNESS_COUNT
+      AND ((e.status='EXIT_SUBMITTED' AND e.execution_version=3 AND e.final_exit_version=0
+            AND a.released_at IS NULL)
+        OR (e.status='COMPLETED' AND e.execution_version=4 AND e.final_exit_version=4
+            AND e.final_package_count=$FINAL_PACKAGE_COUNT
+            AND e.final_green_paper_cassette_8_count=$FINAL_CASSETTE8_COUNT
+            AND e.final_green_paper_cassette_10_count=$FINAL_CASSETTE10_COUNT
+            AND e.final_witness_tape_portion_count=$FINAL_WITNESS_COUNT
+            AND a.released_at=e.completed_at AND a.source_version=4)))
  ) THEN RAISE EXCEPTION 'BFF execution changed after cleanup proof'; END IF;
 END \$guard\$;
 DELETE FROM inbox_messages WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids)
@@ -559,6 +813,7 @@ DELETE FROM idempotency_records WHERE operation_id IN (SELECT operation_id FROM 
 DELETE FROM client_operations WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids);
 COMMIT;
 SQL
+  [ -z "$terminal_manifest" ] || rm -f -- "$terminal_manifest"
   rm -f -- "$manifest"
   printf 'Synthetic authorized-entry fixture cleaned.\n'
 }

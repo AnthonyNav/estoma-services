@@ -14,6 +14,13 @@ runner uses the inherited `<RUN_KEY>-register-arrival` and `<RUN_KEY>-decide-ent
 Bootstrap refuses any pre-existing active `NORMAL`/`JOURNEY` candidate, making automatic allocation
 to the manifest tank deterministic rather than relying on resource ordering.
 
+The normal cleanup keeps the original `PENDING_ENTRY|1` and `IN_PROGRESS|2` guards. The
+exit/completion workflow opts into terminal handling only with a mode-`0600`
+`E2E_AUTHORIZED_TERMINAL_MANIFEST` whose execution, assignment, appointment, actors, resources,
+intent keys and material sets match this parent fixture. Terminal guards accept the exact
+`EXIT_SUBMITTED|3` partial history or `COMPLETED|4` history and refuse pending or ambiguous BFF
+operations. The cleanup remains reentrant after its Wash Execution phase.
+
 Audit requires the exact positive result: Wash Execution `IN_PROGRESS` v2, an `AUTHORIZED` validation,
 one active automatic `INITIAL` assignment to the manifest tank, and published
 `WashArrivalRegistered` v1 plus `WashEntryAuthorized`, `WashResourceAssigned`, and

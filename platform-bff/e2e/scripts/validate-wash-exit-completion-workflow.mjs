@@ -112,5 +112,13 @@ for(const [name,token,runtimeToken] of [
     assertStopped(()=>execute(name,response,initial));
   }
 }
-assert(!runner.includes('wash-exit-completion'),'live suite must remain unavailable before terminal cleanup exists');
-console.log('Exit/completion static gate passed: 21 requests, executable terminal/dedupe/conflict assertions, no live runner.');
+for(const required of [
+  'wash-exit-completion','isolated-wash-exit-completion-fixture',
+  "--folder 'Exit and completion contract (live runner gated)'"
+]) assert(runner.includes(required),`live runner is missing ${required}`);
+const launcher=read('runner/run-wash-exit-completion.sh');
+for(const required of ['ambiguous-postman-state.json','terminal_reconciled','audit-clean','E2E_EXIT_FIXTURE_MANIFEST']) {
+  assert(launcher.includes(required),`launcher safety is missing ${required}`);
+}
+assert(launcher.indexOf('terminal_fixture\" audit')<launcher.indexOf('terminal_fixture\" cleanup'),'audit must precede cleanup');
+console.log('Exit/completion gate passed: 21 requests, terminal/dedupe/conflict assertions, reconciled isolated runner.');
