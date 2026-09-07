@@ -19,7 +19,8 @@ public final class EnvelopeValidator {
     if (envelope.messageId() == null) throw new InvalidMessageException("messageId is required");
     if (envelope.messageType() == null || envelope.messageType().isBlank())
       throw new InvalidMessageException("messageType is required");
-    if (envelope.messageVersion() != 1) throw new InvalidMessageException("unsupported envelope version");
+    if (!isSupportedVersion(envelope, expectedKind, allowedTypes))
+      throw new InvalidMessageException("unsupported envelope version");
     if (envelope.messageKind() != expectedKind) throw new InvalidMessageException("unexpected message kind");
     if (!allowedTypes.contains(envelope.messageType())) throw new InvalidMessageException("unsupported message type");
     if (envelope.producer() == null || envelope.producer().isBlank())
@@ -32,6 +33,17 @@ public final class EnvelopeValidator {
     if (envelope.payload() == null || !envelope.payload().isObject())
       throw new InvalidMessageException("payload must be an object");
     return envelope;
+  }
+
+  private static boolean isSupportedVersion(
+      MessageEnvelope envelope, MessageKind expectedKind, Set<String> allowedTypes) {
+    if (envelope.messageVersion() == 1) return true;
+    return envelope.messageVersion() == 2
+        && expectedKind == MessageKind.EVENT
+        && envelope.messageKind() == MessageKind.EVENT
+        && "WashEntryRejected".equals(envelope.messageType())
+        && allowedTypes.contains(envelope.messageType())
+        && "wash-execution".equals(envelope.producer());
   }
 
   private static void validateActor(MessageEnvelope envelope) {

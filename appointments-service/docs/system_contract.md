@@ -939,6 +939,20 @@ Todos entran por application input ports.
 
 ## 21. Mensajería V1
 
+Compatibilidad de lectura acotada para rechazo no clasificado:
+
+```text
+WashEntryRejected V1 → continúa aceptado con su contrato histórico
+WashEntryRejected V2 → aceptado sólo como EVENT de producer wash-execution
+otros messageType/messageKind/producer con messageVersion = 2 → rechazados
+```
+
+El payload V2 es null-free: cuando el rechazo no clasifica verificaciones, omite por completo
+`identityConfirmed` y `requirementsSatisfied`. Appointments no interpreta esos checks; aplica el
+rechazo con `washExecutionId`, `appointmentId`, versión del agregado, metadata de decisión y
+`rejectionReason`, igual que para V1. Esta compatibilidad es únicamente de reader: no habilita a
+Appointments, al BFF ni al owner a producir `WashEntryRejected` V2, ni cambia ningún Command.
+
 Identidad:
 
 ```text

@@ -90,6 +90,40 @@ class MessagingContractTest {
   }
 
   @Test
+  void validatorAcceptsOnlyTrustedWashEntryRejectedV2Events() {
+    EnvelopeJsonCodec codec = new EnvelopeJsonCodec(new ObjectMapper());
+    EnvelopeValidator validator = new EnvelopeValidator(codec);
+    Set<String> allowed = Set.of("WashEntryRejected", "WashExecutionCompleted");
+    MessageEnvelope v2 = event(codec, "WashEntryRejected", 2, "wash-execution", MessageKind.EVENT);
+
+    assertThat(validator.validate(codec.readTree(codec.encode(v2)), MessageKind.EVENT, allowed))
+        .isEqualTo(v2);
+
+    for (MessageEnvelope unsupported : Set.of(
+        event(codec, "WashExecutionCompleted", 2, "wash-execution", MessageKind.EVENT),
+        event(codec, "WashEntryRejected", 2, "academic", MessageKind.EVENT),
+        event(codec, "WashEntryRejected", 2, "wash-execution", MessageKind.COMMAND),
+        event(codec, "WashEntryRejected", 3, "wash-execution", MessageKind.EVENT))) {
+      assertThatThrownBy(() -> validator.validate(
+          codec.readTree(codec.encode(unsupported)), MessageKind.EVENT, allowed))
+          .isInstanceOf(InvalidMessageException.class)
+          .hasMessage("unsupported envelope version");
+    }
+  }
+
+  private static MessageEnvelope event(EnvelopeJsonCodec codec, String type, int version,
+      String producer, MessageKind kind) {
+    UUID executionId = UUID.randomUUID();
+    var payload = codec.readTree("""
+        {"washExecutionId":"%s","appointmentId":"%s","decidedAt":"2026-01-01T10:00:00Z",
+         "decidedByAccountId":"%s","rejectionReason":"Unclassified rejection"}
+        """.formatted(executionId, UUID.randomUUID(), UUID.randomUUID()));
+    return new MessageEnvelope(UUID.randomUUID(), type, version, kind, producer,
+        Instant.parse("2026-01-01T10:00:00Z"), UUID.randomUUID(), null, null, null,
+        executionId, 2, new WireActor("SYSTEM", null, producer), payload);
+  }
+
+  @Test
   void qrTamperingIsRejectedAndSignatureDoesNotDecideEntry() {
     UUID appointmentId = UUID.randomUUID();
     AppointmentQrTokenService qr = new AppointmentQrTokenService(
