@@ -60,6 +60,12 @@ class WashExecutionDomainTest {
         false, false, null, null, UUID.randomUUID(), NOW));
     new EntryValidation(UUID.randomUUID(), executionId, false, false, EntryDecision.REJECTED,
         "Identity mismatch", UUID.randomUUID(), NOW);
+    new EntryValidation(UUID.randomUUID(), executionId, null, null, EntryDecision.REJECTED,
+        "Unclassified operational reason", UUID.randomUUID(), NOW);
+    assertThrows(DomainRuleViolationException.class, () -> new EntryValidation(UUID.randomUUID(), executionId,
+        null, true, EntryDecision.REJECTED, "Partial checks", UUID.randomUUID(), NOW));
+    assertThrows(DomainRuleViolationException.class, () -> new EntryValidation(UUID.randomUUID(), executionId,
+        null, null, EntryDecision.AUTHORIZED, null, UUID.randomUUID(), NOW));
   }
 
   @Test

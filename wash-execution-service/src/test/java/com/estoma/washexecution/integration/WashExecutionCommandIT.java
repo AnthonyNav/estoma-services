@@ -186,16 +186,58 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
 
     dispatch(supervisor, "arrival-rejected",
         new WashExecutionCommand.RegisterWashArrival(executionId, appointment, BASE));
-    CommandOutcome outcome = dispatch(supervisor, "decide-rejected",
-        new WashExecutionCommand.DecideWashEntry(
-            executionId, false, false, EntryDecision.REJECTED, "Identity mismatch",
-            supervisor, BASE.plusSeconds(5 * 60L), 1));
+    var command = new WashExecutionCommand.DecideWashEntry(
+        executionId, false, false, EntryDecision.REJECTED, "Identity mismatch",
+        supervisor, BASE.plusSeconds(5 * 60L), 1);
+    CommandOutcome outcome = dispatch(supervisor, "decide-rejected", command);
 
     assertThat(outcome.status()).isEqualTo(CommandOutcome.Status.SUCCEEDED);
     assertThat(executions.findById(executionId).orElseThrow().status())
         .isEqualTo(WashExecutionStatus.ENTRY_REJECTED);
     assertThat(outboxTypes()).contains("DecideWashEntrySucceeded", "WashEntryRejected");
     assertThat(outboxTypes()).doesNotContain("DecideWashEntryRejected");
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='WashEntryRejected' "
+            + "AND message_version=1 AND aggregate_id=? "
+            + "AND payload_json::jsonb->'identityConfirmed'='false'::jsonb "
+            + "AND payload_json::jsonb->'requirementsSatisfied'='false'::jsonb",
+        Integer.class, executionId)).isEqualTo(1);
+
+    assertThat(dispatch(supervisor, "decide-rejected", command).status())
+        .isEqualTo(CommandOutcome.Status.DUPLICATE);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='WashEntryRejected' "
+            + "AND aggregate_id=?",
+        Integer.class, executionId)).isEqualTo(1);
+  }
+
+  @Test
+  void unclassifiedEntryRejectionIsControlledAndSideEffectFreeWhileFlagIsOff() {
+    UUID supervisor = UUID.randomUUID();
+    UUID student = UUID.randomUUID();
+    authorize(supervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(15 * 60L));
+    UUID appointment = seedAppointment(student, slot, AppointmentType.NORMAL, "SCHEDULED");
+    UUID executionId = UUID.randomUUID();
+    dispatch(supervisor, "arrival-unclassified-off",
+        new WashExecutionCommand.RegisterWashArrival(executionId, appointment, BASE));
+
+    CommandOutcome outcome = dispatch(supervisor, "decide-unclassified-off",
+        new WashExecutionCommand.DecideWashEntry(
+            executionId, null, null, EntryDecision.REJECTED, "Unclassified operational reason",
+            supervisor, BASE.plusSeconds(5 * 60L), 1));
+
+    assertThat(outcome.status()).isEqualTo(CommandOutcome.Status.REJECTED);
+    assertThat(outcome.errorCode()).isEqualTo("UNCLASSIFIED_ENTRY_REJECTION_DISABLED");
+    assertThat(executions.findById(executionId).orElseThrow().status())
+        .isEqualTo(WashExecutionStatus.PENDING_ENTRY);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM entry_validations WHERE wash_execution_id=?",
+        Integer.class, executionId)).isZero();
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='WashEntryRejected' "
+            + "AND aggregate_id=?",
+        Integer.class, executionId)).isZero();
   }
 
   @Test

@@ -35,7 +35,8 @@ public class JdbcEntryValidationRepository implements EntryValidationRepository 
 
   private EntryValidation map(ResultSet rs, int row) throws SQLException {
     return new EntryValidation(rs.getObject("entry_validation_id", UUID.class), rs.getObject("wash_execution_id", UUID.class),
-        rs.getBoolean("identity_confirmed"), rs.getBoolean("requirements_satisfied"),
+        rs.getObject("identity_confirmed", Boolean.class),
+        rs.getObject("requirements_satisfied", Boolean.class),
         EntryDecision.valueOf(rs.getString("decision")), rs.getString("rejection_reason"),
         rs.getObject("decided_by_account_id", UUID.class), rs.getTimestamp("decided_at").toInstant());
   }

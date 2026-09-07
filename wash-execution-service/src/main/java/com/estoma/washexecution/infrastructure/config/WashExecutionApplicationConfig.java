@@ -20,6 +20,7 @@ import com.estoma.washexecution.application.port.WashExecutionRepository;
 import com.estoma.washexecution.application.query.WashExecutionIntegrationQueryService;
 import com.estoma.washexecution.application.resource.ResourceAllocator;
 import java.time.Clock;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -74,11 +75,13 @@ public class WashExecutionApplicationConfig {
       OutboxRepository outbox,
       CommandIdempotencyRepository idempotency,
       JsonCodec json,
-      Clock clock) {
+      Clock clock,
+      @Value("${estoma.entry.unclassified-rejection-enabled:false}")
+          boolean unclassifiedEntryRejectionEnabled) {
     return new WashExecutionCommandService(
         executions, validations, assignments, unavailabilities, affectedExecutions, cleanings,
         appointments, slots, resources, locks, allocator, authorization, readiness, outbox,
-        idempotency, json, clock);
+        idempotency, json, clock, unclassifiedEntryRejectionEnabled);
   }
 
   @Bean
