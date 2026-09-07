@@ -49,6 +49,7 @@ class ProjectionQueriesPostgresIT {
   @Autowired JdbcProjectionReadModelRepository projections;
   @Autowired JdbcWashExitMaterialsProjectionRepository exitMaterials;
   @Autowired JdbcWashCompletionProjectionRepository completions;
+  @Autowired JdbcWashCancellationProjectionRepository cancellations;
   @Autowired JdbcWashSupervisionQueryRepository supervision;
   @Autowired JdbcWashStudentQueryRepository studentQueries;
   @Autowired JdbcAppointmentQrProjectionRepository appointmentQr;
@@ -236,6 +237,196 @@ class ProjectionQueriesPostgresIT {
     assertThat(home.lastResourceAssignmentId()).isNotNull();
     assertThat(home.lastCabinCode()).isEqualTo("C-01");
     assertThat(home.finalPackageCount()).isEqualTo(5);
+  }
+
+  @Test
+  void delayedAssignmentAfterCancellationIsBornReleasedAtTheOwnerTimestamp() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-01T11:00:00Z");
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "CANCELLED", null, null, null, null, null, cancelledAt,
+        "SUPERVISOR_DECISION", null, null, null, null, null, 6, cancelledAt));
+    cancellations.projectCancellation(executionId, 6, cancelledAt);
+
+    projections.upsert(new ProjectionReadModel.ResourceAssignment(
+        assignmentId, executionId, null, null, null, null,
+        "INITIAL", cancelledAt.minusSeconds(600), null, UUID.randomUUID(), 5,
+        cancelledAt.minusSeconds(600)));
+
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query().singleRow();
+    assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(cancelledAt);
+    assertThat(assignment.get("source_version")).isEqualTo(5L);
+  }
+
+  @Test
+  void staleCancellationCannotReleaseCurrentAssignmentAndPendingReassignmentRetainsIt() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant updatedAt = Instant.parse("2026-08-01T11:00:00Z");
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "CANCELLED", null, null, null, null, null, updatedAt,
+        "SUPERVISOR_DECISION", null, null, null, null, null, 6, updatedAt));
+    jdbc.sql("""
+        INSERT INTO wash_resource_assignment_read_model (
+          resource_assignment_id, wash_execution_id, assignment_type, assigned_at,
+          source_message_id, source_version, updated_at)
+        VALUES (:assignmentId, :executionId, 'INITIAL', :assignedAt,
+          :messageId, 4, :assignedAt)
+        """).param("assignmentId", assignmentId).param("executionId", executionId)
+        .param("assignedAt", java.sql.Timestamp.from(updatedAt.minusSeconds(600)))
+        .param("messageId", UUID.randomUUID()).update();
+
+    cancellations.projectCancellation(executionId, 5, updatedAt.minusSeconds(30));
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "PENDING_REASSIGNMENT", null, updatedAt, null, null, null, null,
+        null, null, null, null, null, null, 7, updatedAt.plusSeconds(30)));
+
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query().singleRow();
+    assertThat(assignment.get("released_at")).isNull();
+    assertThat(assignment.get("source_version")).isEqualTo(4L);
+    assertThat(jdbc.sql("""
+        SELECT status FROM wash_execution_read_model WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query(String.class).single())
+        .isEqualTo("PENDING_REASSIGNMENT");
+  }
+
+  @Test
+  void concurrentAssignmentCannotReactivateACancelledExecution() throws Exception {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-01T11:00:00Z");
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "IN_PROGRESS", null, null, cancelledAt.minusSeconds(900), null,
+        null, null, null, null, null, null, null, null, 5, cancelledAt.minusSeconds(900)));
+
+    jdbc.sql("""
+        CREATE FUNCTION block_test_cancel_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.wash_execution_id = '%s'::uuid THEN
+            PERFORM pg_advisory_xact_lock(918273646);
+          END IF;
+          RETURN NEW;
+        END
+        $$
+        """.formatted(executionId)).update();
+    jdbc.sql("""
+        CREATE TRIGGER block_test_cancel_assignment_before_insert
+        BEFORE INSERT ON wash_resource_assignment_read_model
+        FOR EACH ROW EXECUTE FUNCTION block_test_cancel_assignment()
+        """).update();
+
+    var executor = Executors.newFixedThreadPool(2);
+    try (var blocker = dataSource.getConnection()) {
+      blocker.setAutoCommit(false);
+      blocker.createStatement().execute("SELECT pg_advisory_xact_lock(918273646)");
+      CompletableFuture<Void> assignment = CompletableFuture.runAsync(() -> projections.upsert(
+          new ProjectionReadModel.ResourceAssignment(
+              assignmentId, executionId, null, null, null, null,
+              "INITIAL", cancelledAt.minusSeconds(600), null, UUID.randomUUID(), 4,
+              cancelledAt.minusSeconds(600))), executor);
+      awaitAdvisoryWaiters(1);
+
+      CompletableFuture<Void> cancellation = CompletableFuture.runAsync(() ->
+          new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            projections.upsert(new ProjectionReadModel.WashExecution(
+                executionId, null, "NORMAL", "CANCELLED", null, null, null, null, null,
+                cancelledAt, "SUPERVISOR_DECISION", null, null, null, null, null, 6, cancelledAt));
+            cancellations.projectCancellation(executionId, 6, cancelledAt);
+          }), executor);
+      awaitAdvisoryWaiters(2);
+
+      blocker.commit();
+      CompletableFuture.allOf(assignment, cancellation).get(10, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+      jdbc.sql("""
+          DROP TRIGGER IF EXISTS block_test_cancel_assignment_before_insert
+          ON wash_resource_assignment_read_model
+          """).update();
+      jdbc.sql("DROP FUNCTION IF EXISTS block_test_cancel_assignment()")
+          .update();
+    }
+
+    var result = jdbc.sql("""
+        SELECT e.status, ra.released_at
+        FROM wash_execution_read_model e
+        JOIN wash_resource_assignment_read_model ra
+          ON ra.wash_execution_id = e.wash_execution_id
+        WHERE e.wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(result.get("status")).isEqualTo("CANCELLED");
+    assertThat(((java.sql.Timestamp) result.get("released_at")).toInstant()).isEqualTo(cancelledAt);
+
+    UUID inverseExecutionId = UUID.randomUUID();
+    UUID inverseAssignmentId = UUID.randomUUID();
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        inverseExecutionId, null, "NORMAL", "IN_PROGRESS", null, null,
+        cancelledAt.minusSeconds(900), null, null, null, null, null, null, null, null, null, 5,
+        cancelledAt.minusSeconds(900)));
+    jdbc.sql("""
+        CREATE FUNCTION block_test_cancel_execution() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.wash_execution_id = '%s'::uuid AND NEW.status = 'CANCELLED' THEN
+            PERFORM pg_advisory_xact_lock(918273647);
+          END IF;
+          RETURN NEW;
+        END
+        $$
+        """.formatted(inverseExecutionId)).update();
+    jdbc.sql("""
+        CREATE TRIGGER block_test_cancel_execution_before_update
+        BEFORE UPDATE ON wash_execution_read_model
+        FOR EACH ROW EXECUTE FUNCTION block_test_cancel_execution()
+        """).update();
+
+    var inverseExecutor = Executors.newFixedThreadPool(2);
+    try (var blocker = dataSource.getConnection()) {
+      blocker.setAutoCommit(false);
+      blocker.createStatement().execute("SELECT pg_advisory_xact_lock(918273647)");
+      CompletableFuture<Void> cancellation = CompletableFuture.runAsync(() ->
+          new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            projections.upsert(new ProjectionReadModel.WashExecution(
+                inverseExecutionId, null, "NORMAL", "CANCELLED", null, null, null, null, null,
+                cancelledAt, "SUPERVISOR_DECISION", null, null, null, null, null, 6, cancelledAt));
+            cancellations.projectCancellation(inverseExecutionId, 6, cancelledAt);
+          }), inverseExecutor);
+      awaitAdvisoryWaiters(1);
+      CompletableFuture<Void> assignment = CompletableFuture.runAsync(() -> projections.upsert(
+          new ProjectionReadModel.ResourceAssignment(
+              inverseAssignmentId, inverseExecutionId, null, null, null, null,
+              "INITIAL", cancelledAt.minusSeconds(600), null, UUID.randomUUID(), 4,
+              cancelledAt.minusSeconds(600))), inverseExecutor);
+      awaitAdvisoryWaiters(2);
+
+      blocker.commit();
+      CompletableFuture.allOf(cancellation, assignment).get(10, TimeUnit.SECONDS);
+    } finally {
+      inverseExecutor.shutdownNow();
+      jdbc.sql("""
+          DROP TRIGGER IF EXISTS block_test_cancel_execution_before_update
+          ON wash_execution_read_model
+          """).update();
+      jdbc.sql("DROP FUNCTION IF EXISTS block_test_cancel_execution()")
+          .update();
+    }
+
+    var inverseResult = jdbc.sql("""
+        SELECT e.status, ra.released_at
+        FROM wash_execution_read_model e
+        JOIN wash_resource_assignment_read_model ra
+          ON ra.wash_execution_id = e.wash_execution_id
+        WHERE e.wash_execution_id = :executionId
+        """).param("executionId", inverseExecutionId).query().singleRow();
+    assertThat(inverseResult.get("status")).isEqualTo("CANCELLED");
+    assertThat(((java.sql.Timestamp) inverseResult.get("released_at")).toInstant())
+        .isEqualTo(cancelledAt);
   }
 
   @Test
