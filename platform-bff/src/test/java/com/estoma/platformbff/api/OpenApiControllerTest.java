@@ -112,6 +112,31 @@ class OpenApiControllerTest {
         .containsExactlyInAnyOrder("registeredAppointments", "inProcessAppointments",
             "completedAppointments", "deniedAppointments", "cancelledAppointments");
 
+    Map<String, Object> exactExecution = operation(paths,
+        "/api/v1/wash/supervision/executions/{washExecutionId}", "get");
+    assertThat(exactExecution.get("description").toString())
+        .contains("exact local read").contains("no current-service-date filter");
+    assertThat((Map<String, Object>) exactExecution.get("responses"))
+        .containsKeys("200", "400", "401", "403", "404", "503");
+    assertThat((java.util.List<Map<String, Object>>) exactExecution.get("parameters"))
+        .singleElement().satisfies(parameter -> {
+          assertThat(parameter).containsEntry("name", "washExecutionId")
+              .containsEntry("in", "path").containsEntry("required", true);
+          assertThat((Map<String, Object>) parameter.get("schema"))
+              .containsEntry("type", "string").containsEntry("format", "uuid");
+        });
+    Map<String, Object> exactSchema = responseSchema(exactExecution, "200");
+    assertThat((java.util.List<String>) exactSchema.get("required"))
+        .containsExactlyInAnyOrder("serviceDate", "student", "appointment", "washExecution");
+    assertThat((Map<String, Object>) exactSchema.get("properties")).doesNotContainKey("nextAction");
+    Map<String, Object> exactWashExecution = (Map<String, Object>)
+        ((Map<String, Object>) exactSchema.get("properties")).get("washExecution");
+    assertThat((java.util.List<String>) exactWashExecution.get("required"))
+        .containsExactlyInAnyOrder("washExecutionId", "status", "version", "executionVersion",
+            "arrivedAt", "rejectionReason", "exitSubmittedAt", "submittedExitMaterials",
+            "completedAt", "finalExitMaterials", "activeResourceAssignment",
+            "lastResourceAssignment");
+
     Map<String, Object> lookup = operation(paths, "/api/v1/wash/supervision/lookup", "post");
     assertThat(lookup).doesNotContainKey("parameters");
     Map<String, Object> lookupRequest = (Map<String, Object>) ((Map<String, Object>)

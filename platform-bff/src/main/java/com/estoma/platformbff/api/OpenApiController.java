@@ -143,6 +143,11 @@ public class OpenApiController {
           + "feature is disabled by default until the Wash Execution Query owner is deployed.");
       operation.put("x-provider-ready-by-default", false);
     }
+    if (handler.getMethod().getName().equals("supervisorExecution")) {
+      operation.put("description", "Side-effect-free exact local read of one current or historical "
+          + "Wash execution. The path identifier is the only selector; no current-service-date "
+          + "filter or fallback appointment is applied. The response does not grant command permissions.");
+    }
     List<Map<String, Object>> parameters = new ArrayList<>();
     requestHeaders(handler, parameters);
     requestParameters(handler, parameters);
@@ -177,11 +182,24 @@ public class OpenApiController {
           "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
               Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
     }
+    if (handler.getMethod().getName().equals("supervisorExecution")) {
+      responses.put("400", problemResponse("Invalid Wash execution identifier"));
+      responses.put("401", problemResponse("Authentication is required"));
+      responses.put("403", problemResponse("Wash supervisor permission is required"));
+      responses.put("404", problemResponse("Wash execution was not found"));
+      responses.put("503", problemResponse("Required local projection is unavailable or incomplete"));
+    }
     responses.put("default", Map.of("description", "Problem response", "content", Map.of(
         MediaType.APPLICATION_PROBLEM_JSON_VALUE,
         Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
     operation.put("responses", responses);
     return operation;
+  }
+
+  private static Map<String, Object> problemResponse(String description) {
+    return Map.of("description", description,
+        "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+            Map.of("schema", Map.of("$ref", "#/components/schemas/Problem"))));
   }
 
   private static Type requestType(HandlerMethod handler) {

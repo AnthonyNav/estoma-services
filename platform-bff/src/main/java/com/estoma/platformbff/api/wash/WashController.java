@@ -29,6 +29,7 @@ import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ScheduleAppoi
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.SubmitExitRequest;
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorLookupResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorExecutionDetailResponse;
 import jakarta.validation.Valid;
 import java.time.Clock;
 import java.time.Instant;
@@ -286,6 +287,12 @@ public class WashController {
   @PostMapping("/supervision/lookup")
   public SupervisorLookupResponse supervisorLookup(@Valid @RequestBody SupervisorLookupRequest request) {
     return supervision.lookup(request);
+  }
+
+  @GetMapping("/supervision/executions/{washExecutionId}")
+  public SupervisorExecutionDetailResponse supervisorExecution(
+      @PathVariable UUID washExecutionId) {
+    return supervision.execution(washExecutionId);
   }
 
   @GetMapping("/student/home")
