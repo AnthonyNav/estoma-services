@@ -1,7 +1,8 @@
 # WashEntryRejected V2 consumer compatibility
 
-This stage prepares the BFF projection consumer before the Wash Execution owner starts emitting
-`WashEntryRejected` V2. It does not change the public HTTP request or OpenAPI contract.
+This stage prepares the BFF projection consumer to consume `WashEntryRejected` V2. The HTTP
+producer rollout is documented in
+[wash_unclassified_entry_rejection_http_rollout.md](wash_unclassified_entry_rejection_http_rollout.md).
 
 The trust registry accepts V2 only for an `EVENT` envelope whose producer is `wash-execution` and
 whose type is `WashEntryRejected`. All other V2 producer/type combinations remain untrusted. The

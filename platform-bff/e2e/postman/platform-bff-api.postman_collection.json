@@ -17116,13 +17116,13 @@
                         },
                         {
                           "name": "entry-decision",
-                          "description": "",
+                          "description": "Classified entry decisions remain available. Unclassified REJECTED decisions omit both checks, require a reason, and require BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED=true (default false).",
                           "item": [
                             {
                               "name": "Wash Controller decide Entry post api v1 wash executions wash Execution Id entry decision",
                               "request": {
                                 "name": "Wash Controller decide Entry post api v1 wash executions wash Execution Id entry decision",
-                                "description": {},
+                                "description": "AUTHORIZED requires true/true without rejectionReason. REJECTED requires a nonblank reason and either both boolean checks or both checks omitted/null. The omitted/null form is disabled by default.",
                                 "url": {
                                   "path": [
                                     "api",
@@ -17171,7 +17171,7 @@
                                 "method": "POST",
                                 "body": {
                                   "mode": "raw",
-                                  "raw": "{\n  \"identityConfirmed\": \"<boolean>\",\n  \"requirementsSatisfied\": \"<boolean>\",\n  \"expectedVersion\": \"<integer>\",\n  \"decision\": \"<string,null>\",\n  \"rejectionReason\": \"<string,null>\"\n}",
+                                  "raw": "{\n  \"decision\": \"REJECTED\",\n  \"rejectionReason\": \"Motivo operativo\",\n  \"expectedVersion\": 1\n}",
                                   "options": {
                                     "raw": {
                                       "headerFamily": "json",

@@ -1,6 +1,7 @@
 package com.estoma.platformbff.application.commands;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.platformbff.application.operations.IncomingResult;
 import com.estoma.platformbff.application.operations.ResultApplicationService;
@@ -13,6 +14,7 @@ import com.estoma.platformbff.infrastructure.persistence.JdbcOutboxRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -157,6 +159,47 @@ class CommandGatewayPostgresIT {
   }
 
   @Test
+  void unclassifiedEntryNormalizationIsIdempotentAndDistinctFromLegacyFalseChecks() {
+    UUID accountId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    String intent = "{\"washExecutionId\":\"" + executionId + "\",\"decision\":\"REJECTED\","
+        + "\"rejectionReason\":\"Motivo operativo\",\"expectedVersion\":1}";
+    String ownerAtFirstAttempt = intent.substring(0, intent.length() - 1)
+        + ",\"decidedByAccountId\":\"" + accountId
+        + "\",\"decidedAt\":\"2026-09-06T12:00:00Z\"}";
+    String ownerAtRetry = intent.substring(0, intent.length() - 1)
+        + ",\"decidedByAccountId\":\"" + accountId
+        + "\",\"decidedAt\":\"2026-09-06T12:01:00Z\"}";
+
+    var first = gateway.submit(entryDecisionSubmission(
+        accountId, executionId, "unclassified-key", ownerAtFirstAttempt, intent));
+    var retry = gateway.submit(entryDecisionSubmission(
+        accountId, executionId, "unclassified-key", ownerAtRetry, intent));
+
+    assertThat(retry.operationId()).isEqualTo(first.operationId());
+    assertThat(retry.reused()).isTrue();
+    assertThat(count("client_operations")).isEqualTo(1);
+    assertThat(count("idempotency_records")).isEqualTo(1);
+    assertThat(count("outbox_messages")).isEqualTo(1);
+    Map<String, Object> wire = jdbc.sql("""
+        SELECT message_type, message_version, payload FROM outbox_messages
+        WHERE operation_id = :operationId
+        """).param("operationId", first.operationId()).query().singleRow();
+    assertThat(wire.get("message_type")).isEqualTo("DecideWashEntry");
+    assertThat(wire.get("message_version")).isEqualTo(1);
+    assertThat(wire.get("payload").toString())
+        .doesNotContain("identityConfirmed", "requirementsSatisfied", ": null");
+
+    String legacyIntent = intent.substring(0, intent.length() - 1)
+        + ",\"identityConfirmed\":false,\"requirementsSatisfied\":false}";
+    assertThatThrownBy(() -> gateway.submit(entryDecisionSubmission(
+        accountId, executionId, "unclassified-key", legacyIntent, legacyIntent)))
+        .isInstanceOf(CommandGatewayService.IdempotencyConflictException.class);
+    assertThat(count("client_operations")).isEqualTo(1);
+    assertThat(count("outbox_messages")).isEqualTo(1);
+  }
+
+  @Test
   void contradictoryLateResultDoesNotEnterInbox() {
     UUID accountId = UUID.randomUUID();
     var submitted = gateway.submit(submission(accountId, "terminal-key", "Ada"));
@@ -200,6 +243,13 @@ class CommandGatewayPostgresIT {
         ActorContext.account(accountId, "GLOBAL", null),
         aggregateId,
         null);
+  }
+
+  private CommandSubmission entryDecisionSubmission(UUID accountId, UUID executionId, String key,
+      String ownerPayload, String intentPayload) {
+    return new CommandSubmission(
+        "wash-decide-entry", "DecideWashEntry", ownerPayload, intentPayload, key, accountId,
+        ActorContext.account(accountId, "GLOBAL", null), executionId, 1, executionId, 1);
   }
 
   private int count(String table) {
