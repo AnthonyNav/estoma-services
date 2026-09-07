@@ -91,8 +91,14 @@ closure.push(request('35 Home records convergence without replacing exact author
 closure.push(request('36 Exact read is stable','GET','/api/v1/wash/supervision/executions/{{washExecutionId}}','supervisorAccessToken',null,[
   "pm.test('second exact read returns 200',()=>pm.response.to.have.status(200));",'const body=pm.response.json();const e=body.washExecution;',`pm.test('terminal identity and version are stable',()=>{pm.expect(e.executionVersion).to.eql(Number(pm.environment.get('completedVersion')));${completedAssertions.join('')}});`
 ]));
-closure.push(request('37 Logout synthetic supervisor','POST','/api/v1/auth/logout','supervisorAccessToken',null,["pm.test('supervisor logout returns 200',()=>pm.response.to.have.status(200));","pm.environment.unset('supervisorAccessToken');pm.environment.unset('runtimeSupervisorAccessToken');"]));
-closure.push(request('38 Logout synthetic student','POST','/api/v1/auth/logout','accessToken',null,["pm.test('student logout returns 200',()=>pm.response.to.have.status(200));","pm.environment.unset('accessToken');pm.environment.unset('runtimeAccessToken');"]));
+const logout=(token,runtimeToken)=>[
+  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid logout JSON; session revocation unconfirmed');}",
+  "if(pm.response.code!==200||body?.revoked!==true){pm.execution.setNextRequest(null);throw new Error('session revocation unconfirmed; retain session for cleanup');}",
+  "pm.test('session is revoked',()=>pm.expect(body.revoked).to.eql(true));",
+  `pm.environment.unset('${token}');pm.environment.unset('${runtimeToken}');`
+];
+closure.push(request('37 Logout synthetic supervisor','POST','/api/v1/auth/logout','supervisorAccessToken',null,logout('supervisorAccessToken','runtimeSupervisorAccessToken')));
+closure.push(request('38 Logout synthetic student','POST','/api/v1/auth/logout','accessToken',null,logout('accessToken','runtimeAccessToken')));
 collection.item.push({name:'Exit and completion contract (live runner gated)',item:closure});
 
 const environment=JSON.parse(readFileSync(new URL('wash-supervisor-authorized-front-v1.environment.example.json',dir)));

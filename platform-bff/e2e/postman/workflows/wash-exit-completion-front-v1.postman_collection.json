@@ -1584,7 +1584,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('supervisor logout returns 200',()=>pm.response.to.have.status(200));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid logout JSON; session revocation unconfirmed');}",
+                  "if(pm.response.code!==200||body?.revoked!==true){pm.execution.setNextRequest(null);throw new Error('session revocation unconfirmed; retain session for cleanup');}",
+                  "pm.test('session is revoked',()=>pm.expect(body.revoked).to.eql(true));",
                   "pm.environment.unset('supervisorAccessToken');pm.environment.unset('runtimeSupervisorAccessToken');"
                 ]
               }
@@ -1614,7 +1616,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('student logout returns 200',()=>pm.response.to.have.status(200));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid logout JSON; session revocation unconfirmed');}",
+                  "if(pm.response.code!==200||body?.revoked!==true){pm.execution.setNextRequest(null);throw new Error('session revocation unconfirmed; retain session for cleanup');}",
+                  "pm.test('session is revoked',()=>pm.expect(body.revoked).to.eql(true));",
                   "pm.environment.unset('accessToken');pm.environment.unset('runtimeAccessToken');"
                 ]
               }

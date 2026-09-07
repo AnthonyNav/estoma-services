@@ -101,5 +101,16 @@ assertStopped(()=>execute('34 Exact read converges to completed',{__status:503},
 for(const name of ['27 Lookup exit submitted by enrollment','30 Exact read unchanged after stale completion']) assertStopped(()=>execute(name,{__status:502,__jsonError:true},ids));
 
 const runner=read('runner/run.sh');
+for(const [name,token,runtimeToken] of [
+  ['37 Logout synthetic supervisor','supervisorAccessToken','runtimeSupervisorAccessToken'],
+  ['38 Logout synthetic student','accessToken','runtimeAccessToken']
+]){
+  const initial={[token]:'synthetic-token',[runtimeToken]:'synthetic-token'};
+  const cleared=execute(name,{__status:200,revoked:true},initial);
+  assert(!cleared.has(token)&&!cleared.has(runtimeToken));
+  for(const response of [{__status:200,revoked:false},{__status:200},{__status:503},{__status:200,__jsonError:true}]){
+    assertStopped(()=>execute(name,response,initial));
+  }
+}
 assert(!runner.includes('wash-exit-completion'),'live suite must remain unavailable before terminal cleanup exists');
 console.log('Exit/completion static gate passed: 21 requests, executable terminal/dedupe/conflict assertions, no live runner.');
