@@ -1,0 +1,1627 @@
+{
+  "info": {
+    "name": "platform-bff Front V1 - Wash Exit and Completion",
+    "description": "Static contract for the isolated wash-e2e exit/completion chain. Live execution is unsupported and unauthorized until a terminal fixture and cleanup are implemented and verified; no runner exposes this suite.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Prepare appointment",
+      "item": [
+        {
+          "name": "01 Login synthetic student",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"USERNAME\",\n  \"loginIdentifier\": \"{{loginIdentifier}}\",\n  \"password\": \"{{password}}\",\n  \"deviceName\": \"platform-bff-wash-student-e2e\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('login returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('session is NORMAL and complete', () => {",
+                  "  pm.expect(body.accountId).to.eql(pm.environment.get('fixtureStudentAccountId')); ",
+                  "  pm.expect(body.authState).to.eql('NORMAL');",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.accountId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "});",
+                  "pm.environment.set('accessToken', body.accessToken);",
+                  "pm.environment.set('runtimeAccessToken', body.accessToken);",
+                  "pm.environment.set('accountId', body.accountId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 WASH-STU-01 home without appointment",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/wash/student/home"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('home returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('student presentation is complete', () => {",
+                  "  pm.expect(body.student).to.be.an('object');",
+                  "  pm.expect(body.student.firstName).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.fullName).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.studentEnrollment).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.currentSemester).to.be.a('number');",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "});",
+                  "pm.test('fixture begins with no appointment for today', () => pm.expect(body.appointment).to.eql(null));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 WASH-STU-02 form context",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/wash/appointments/form-context"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('form context returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const sections = Array.isArray(body.availableCourseSections) ? body.availableCourseSections : [];",
+                  "const fixtureSectionId = pm.environment.get('fixtureCourseSectionId');",
+                  "const fixtureSections = sections.filter(section => section.courseSectionId === fixtureSectionId && typeof section.nrc === 'string' && section.nrc.startsWith('E2E-'));",
+                  "pm.test('form context belongs to the authenticated synthetic student', () => {",
+                  "  pm.expect(body.student.fullName).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.studentEnrollment).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.student.currentSemester).to.be.a('number');",
+                  "});",
+                  "pm.test('one isolated E2E course section is available', () => pm.expect(fixtureSections).to.have.lengthOf(1));",
+                  "if (fixtureSections.length === 1) pm.environment.set('courseSectionId', fixtureSections[0].courseSectionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 WASH-STU-02 availability cache-aside",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/wash/appointments/availability?appointmentType=NORMAL&instrumentCount=5&pieceType=HIGH_SPEED&courseSectionId={{courseSectionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "wash",
+                "appointments",
+                "availability"
+              ],
+              "query": [
+                {
+                  "key": "appointmentType",
+                  "value": "NORMAL"
+                },
+                {
+                  "key": "instrumentCount",
+                  "value": "5"
+                },
+                {
+                  "key": "pieceType",
+                  "value": "HIGH_SPEED"
+                },
+                {
+                  "key": "courseSectionId",
+                  "value": "{{courseSectionId}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('availabilityAttempts') || 0);",
+                  "if (pm.response.code === 503) {",
+                  "  const problem = pm.response.json();",
+                  "  pm.test('cache miss is a controlled refresh response', () => {",
+                  "    pm.expect(problem.code).to.eql('BFF.PROJECTION_UNAVAILABLE');",
+                  "    pm.expect(pm.response.headers.get('Retry-After')).to.match(/^\\d+$/);",
+                  "  });",
+                  "  pm.environment.set('availabilityAttempts', String(attempts + 1));",
+                  "  pm.test('availability converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('04 WASH-STU-02 availability cache-aside');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else if (pm.response.code === 200) {",
+                  "  pm.test('availability returns 200', () => pm.response.to.have.status(200));",
+                  "  const body = pm.response.json();",
+                  "  pm.test('owner-derived decision permits scheduling', () => {",
+                  "    pm.expect(body.canSchedule).to.eql(true);",
+                  "    pm.expect(body.blockingReasons).to.deep.eql([]);",
+                  "    pm.expect(body.dailyPenaltyPoints).to.eql(0);",
+                  "    pm.expect(body.dailyCompletedAppointments).to.eql(0);",
+                  "    pm.expect(body.exceptionalAuthorizationRequired).to.eql(false);",
+                  "    pm.expect(body.exceptionalAuthorizationAvailable).to.eql(false);",
+                  "    pm.expect(body.exceptionalAuthorizationId).to.eql(null);",
+                  "  });",
+                  "  pm.test('at least one owner-approved slot is returned', () => pm.expect(body.availableTimeSlots).to.be.an('array').and.not.empty);",
+                  "  const fixtureSlotId = pm.environment.get('fixtureAppointmentTimeSlotId');",
+                  "  const slot = body.availableTimeSlots.find(candidate => candidate.appointmentTimeSlotId === fixtureSlotId);",
+                  "  if (slot) {",
+                  "    pm.test('slot carries booking and capacity data', () => {",
+                  "      pm.expect(slot.appointmentTimeSlotId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "      pm.expect(slot.availableCapacity).to.be.above(0);",
+                  "      pm.expect(Date.parse(slot.endsAt)).to.be.above(Date.parse(slot.startsAt));",
+                  "      pm.expect(Date.parse(slot.bookingDeadlineAt)).to.be.at.most(Date.parse(slot.startsAt));",
+                  "    });",
+                  "    pm.environment.set('appointmentTimeSlotId', slot.appointmentTimeSlotId);",
+                  "  } else {",
+                  "    pm.test('availability contains the isolated fixture slot', () => pm.expect.fail('fixture slot is absent'));",
+                  "    pm.execution.setNextRequest(null);",
+                  "  }",
+                  "} else {",
+                  "  pm.test('availability returns only 200 or controlled 503', () => pm.expect.fail('unexpected HTTP ' + pm.response.code));",
+                  "  pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 WASH-STU-02 schedule appointment",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-schedule"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointmentTimeSlotId\": \"{{appointmentTimeSlotId}}\",\n  \"courseSectionId\": \"{{courseSectionId}}\",\n  \"appointmentType\": \"NORMAL\",\n  \"instrumentCount\": 5,\n  \"pieceType\": \"HIGH_SPEED\",\n  \"exceptionalAuthorizationId\": null,\n  \"regulationAccepted\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/appointments"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('schedule intent is durably accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('schedule begins as a pollable operation', () => {",
+                  "  pm.expect(body.status).to.eql('PENDING');",
+                  "  pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.pollPath).to.eql('/api/v1/operations/' + body.operationId);",
+                  "});",
+                  "pm.environment.set('scheduleOperationId', body.operationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 Poll schedule operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/operations/{{scheduleOperationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('schedule operation is visible', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const maxAttempts = Number(pm.environment.get('maxPollAttempts') || 30);",
+                  "const attempts = Number(pm.environment.get('schedulePollAttempts') || 0);",
+                  "if (body.status === 'PENDING') {",
+                  "  pm.environment.set('schedulePollAttempts', String(attempts + 1));",
+                  "  pm.test('schedule completes within the polling budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('06 Poll schedule operation');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.test('schedule succeeds', () => pm.expect(body.status, body.errorCode || 'no error code').to.eql('SUCCEEDED'));",
+                  "  pm.test('schedule result carries owner aggregate identity', () => {",
+                  "    pm.expect(body.data.aggregateId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "    pm.expect(body.data.aggregateVersion).to.eql(1);",
+                  "  });",
+                  "  if (body.status === 'SUCCEEDED') {",
+                  "    pm.environment.set('appointmentId', body.data.aggregateId);",
+                  "    pm.environment.set('appointmentVersion', String(body.data.aggregateVersion));",
+                  "  } else pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 WASH-STU-01 home converges to scheduled",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/wash/student/home"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('scheduled home read returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const expectedId = pm.environment.get('appointmentId');",
+                  "const converged = body.appointment && body.appointment.appointmentId === expectedId && body.appointment.appointmentStatus === 'SCHEDULED';",
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('scheduledHomeAttempts') || 0);",
+                  "if (!converged) {",
+                  "  pm.environment.set('scheduledHomeAttempts', String(attempts + 1));",
+                  "  pm.test('scheduled projection converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('07 WASH-STU-01 home converges to scheduled');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  const appointment = body.appointment;",
+                  "  pm.test('home exposes the #133 cancellation context', () => {",
+                  "    pm.expect(appointment.appointmentVersion).to.eql(1);",
+                  "    pm.expect(appointment.usesExceptionalAuthorization).to.eql(false);",
+                  "    pm.expect(appointment.studentCancellationAction).to.eql('AVAILABLE');",
+                  "    pm.expect(appointment.timeSlot.cancellationDeadlineAt).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  pm.test('home preserves the submitted appointment context', () => {",
+                  "    pm.expect(appointment.appointmentType).to.eql('NORMAL');",
+                  "    pm.expect(appointment.instrumentCount).to.eql(5);",
+                  "    pm.expect(appointment.pieceType).to.eql('HIGH_SPEED');",
+                  "    pm.expect(appointment.courseSection.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "    pm.expect(appointment.timeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  });",
+                  "  pm.environment.set('appointmentVersion', String(appointment.appointmentVersion));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08 Logout synthetic student",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('logout returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('session is revoked', () => pm.expect(body.revoked).to.eql(true));",
+                  "if (body.revoked === true) pm.environment.unset('runtimeAccessToken');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Arrival and authorized entry",
+      "item": [
+        {
+          "name": "09 Login synthetic supervisor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\": \"USERNAME\",\n  \"loginIdentifier\": \"{{supervisorLoginIdentifier}}\",\n  \"password\": \"{{supervisorPassword}}\",\n  \"deviceName\": \"platform-bff-wash-supervisor-entry-e2e\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('supervisor login returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('supervisor session matches the isolated fixture', () => {",
+                  "  pm.expect(body.authState).to.eql('NORMAL');",
+                  "  pm.expect(body.accessToken).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.accountId).to.eql(pm.environment.get('fixtureSupervisorAccountId'));",
+                  "});",
+                  "pm.environment.set('supervisorAccessToken', body.accessToken);",
+                  "pm.environment.set('runtimeSupervisorAccessToken', body.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10 WASH-SUP-01 lookup scheduled appointment",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"studentEnrollment\": \"{{fixtureStudentEnrollment}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/supervision/lookup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('enrollment lookup returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('scheduled lookup preserves the isolated context', () => {",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(body.student.studentAccountId).to.eql(pm.environment.get('fixtureStudentAccountId'));",
+                  "  pm.expect(body.student.studentEnrollment).to.eql(pm.environment.get('fixtureStudentEnrollment'));",
+                  "  pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));",
+                  "  pm.expect(body.appointment.courseSectionReference.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "  pm.expect(body.appointment.appointmentTimeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  pm.expect(body.appointment.appointmentStatus).to.eql('SCHEDULED');",
+                  "  pm.expect(body.nextAction).to.eql('ENTRY');",
+                  "  pm.expect(body.washExecution).to.eql(null);",
+                  "  pm.expect(body.activeResourceAssignment).to.eql(null);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11 WASH-SUP-01 register arrival",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-register-arrival"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appointmentId\": \"{{appointmentId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/arrivals"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('command is durably accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('command begins as a pollable operation', () => {",
+                  "  pm.expect(body.status).to.eql('PENDING');",
+                  "  pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.pollPath).to.eql('/api/v1/operations/' + body.operationId);",
+                  "});",
+                  "pm.environment.set('arrivalOperationId', body.operationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12 Poll arrival operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/operations/{{arrivalOperationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operation is visible', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const maxAttempts = Number(pm.environment.get('maxPollAttempts') || 30);",
+                  "const attempts = Number(pm.environment.get('arrivalPollAttempts') || 0);",
+                  "if (body.status === 'PENDING') {",
+                  "  pm.environment.set('arrivalPollAttempts', String(attempts + 1));",
+                  "  pm.test('operation completes within the polling budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('12 Poll arrival operation');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.test('owner command succeeds', () => {",
+                  "    pm.expect(body.status, body.errorCode || 'no error code').to.eql('SUCCEEDED');",
+                  "    pm.expect(body.publicOperation).to.eql('wash-register-arrival');",
+                  "    pm.expect(body.errorCode).to.eql(null);",
+                  "    pm.expect(body.data).to.deep.eql({\"status\":\"PENDING_ENTRY\"});",
+                  "    pm.expect(body.completedAt).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  if (body.status !== 'SUCCEEDED') pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "13 WASH-SUP-01 lookup converges to pending entry",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"studentEnrollment\": \"{{fixtureStudentEnrollment}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/supervision/lookup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('enrollment lookup returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const execution = body.washExecution;",
+                  "const converged = body.appointment?.appointmentStatus === 'SCHEDULED' && execution?.status === 'PENDING_ENTRY';",
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('pendingEntryLookupAttempts') || 0);",
+                  "if (!converged) {",
+                  "  pm.environment.set('pendingEntryLookupAttempts', String(attempts + 1));",
+                  "  pm.test('pending lookup converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('13 WASH-SUP-01 lookup converges to pending entry');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "pm.test('pending lookup preserves the isolated context', () => {",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(body.student.studentAccountId).to.eql(pm.environment.get('fixtureStudentAccountId'));",
+                  "  pm.expect(body.student.studentEnrollment).to.eql(pm.environment.get('fixtureStudentEnrollment'));",
+                  "  pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));",
+                  "  pm.expect(body.appointment.courseSectionReference.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "  pm.expect(body.appointment.appointmentTimeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  pm.expect(body.appointment.appointmentStatus).to.eql('SCHEDULED');",
+                  "  pm.expect(body.nextAction).to.eql('ENTRY_DECISION');",
+                  "  pm.expect(body.washExecution.washExecutionId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.washExecution.status).to.eql('PENDING_ENTRY');",
+                  "  pm.expect(body.washExecution.executionVersion).to.eql(1);",
+                  "  pm.expect(body.washExecution.arrivedAt).to.be.a('string').and.not.empty;",
+                  "  pm.expect(body.washExecution.rejectionReason).to.eql(null);",
+                  "  pm.expect(body.activeResourceAssignment).to.eql(null);",
+                  "});",
+                  "pm.environment.set('washExecutionId', body.washExecution.washExecutionId);",
+                  "pm.environment.set('washExecutionVersion', String(body.washExecution.executionVersion));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "14 WASH-SUP-01 authorize entry",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-decide-entry"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identityConfirmed\": true,\n  \"requirementsSatisfied\": true,\n  \"decision\": \"AUTHORIZED\",\n  \"expectedVersion\": {{washExecutionVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/entry-decision"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('command is durably accepted', () => pm.response.to.have.status(202));",
+                  "const body = pm.response.json();",
+                  "pm.test('command begins as a pollable operation', () => {",
+                  "  pm.expect(body.status).to.eql('PENDING');",
+                  "  pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);",
+                  "  pm.expect(body.pollPath).to.eql('/api/v1/operations/' + body.operationId);",
+                  "});",
+                  "pm.environment.set('entryDecisionOperationId', body.operationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "15 Poll authorized entry operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/operations/{{entryDecisionOperationId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operation is visible', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const maxAttempts = Number(pm.environment.get('maxPollAttempts') || 30);",
+                  "const attempts = Number(pm.environment.get('entryDecisionPollAttempts') || 0);",
+                  "if (body.status === 'PENDING') {",
+                  "  pm.environment.set('entryDecisionPollAttempts', String(attempts + 1));",
+                  "  pm.test('operation completes within the polling budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('15 Poll authorized entry operation');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "  pm.test('owner command succeeds', () => {",
+                  "    pm.expect(body.status, body.errorCode || 'no error code').to.eql('SUCCEEDED');",
+                  "    pm.expect(body.publicOperation).to.eql('wash-decide-entry');",
+                  "    pm.expect(body.errorCode).to.eql(null);",
+                  "    pm.expect(body.data).to.deep.eql({status:\"IN_PROGRESS\",tankId:pm.environment.get(\"fixtureTankId\")});",
+                  "    pm.expect(body.completedAt).to.be.a('string').and.not.empty;",
+                  "  });",
+                  "  if (body.status !== 'SUCCEEDED') pm.execution.setNextRequest(null);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "16 WASH-SUP-01 lookup converges to authorized entry",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lookupType\": \"STUDENT_ENROLLMENT\",\n  \"studentEnrollment\": \"{{fixtureStudentEnrollment}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/supervision/lookup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('enrollment lookup returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "const execution = body.washExecution;",
+                  "const converged = body.appointment?.appointmentStatus === 'IN_PROGRESS' && execution?.status === 'IN_PROGRESS';",
+                  "const maxAttempts = Number(pm.environment.get('maxReadAttempts') || 20);",
+                  "const attempts = Number(pm.environment.get('authorizedLookupAttempts') || 0);",
+                  "if (!converged) {",
+                  "  pm.environment.set('authorizedLookupAttempts', String(attempts + 1));",
+                  "  pm.test('authorized lookup converges within the retry budget', () => pm.expect(attempts + 1).to.be.below(maxAttempts));",
+                  "  if (attempts + 1 < maxAttempts) pm.execution.setNextRequest('16 WASH-SUP-01 lookup converges to authorized entry');",
+                  "  else pm.execution.setNextRequest(null);",
+                  "} else {",
+                  "pm.test('authorized lookup preserves the isolated context', () => {",
+                  "  pm.expect(body.serviceDate).to.match(/^\\d{4}-\\d{2}-\\d{2}$/);",
+                  "  pm.expect(body.student.studentAccountId).to.eql(pm.environment.get('fixtureStudentAccountId'));",
+                  "  pm.expect(body.student.studentEnrollment).to.eql(pm.environment.get('fixtureStudentEnrollment'));",
+                  "  pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));",
+                  "  pm.expect(body.appointment.courseSectionReference.courseSectionId).to.eql(pm.environment.get('courseSectionId'));",
+                  "  pm.expect(body.appointment.appointmentTimeSlot.appointmentTimeSlotId).to.eql(pm.environment.get('appointmentTimeSlotId'));",
+                  "  pm.expect(body.appointment.appointmentStatus).to.eql('IN_PROGRESS');",
+                  "  pm.expect(body.nextAction).to.eql('EXIT_REVIEW');",
+                  "  pm.expect(body.washExecution.washExecutionId).to.eql(pm.environment.get('washExecutionId'));",
+                  "  pm.expect(body.washExecution.status).to.eql('IN_PROGRESS');",
+                  "  pm.expect(body.washExecution.executionVersion).to.eql(2);",
+                  "  pm.expect(body.washExecution.rejectionReason).to.eql(null);",
+                  "  pm.expect(body.activeResourceAssignment.resourceAssignmentId).to.match(/^[0-9a-f-]{36}$/i);\npm.expect(body.activeResourceAssignment.assignmentType).to.eql('INITIAL');\npm.expect(body.activeResourceAssignment.cabin.resourceId).to.eql(pm.environment.get('fixtureCabinId'));\npm.expect(body.activeResourceAssignment.tank.resourceId).to.eql(pm.environment.get('fixtureTankId'));\npm.expect(body.washExecution.exitSubmittedAt).to.eql(null);",
+                  "});",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "17 Logout synthetic supervisor",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('supervisor logout returns 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('supervisor session is revoked', () => pm.expect(body.revoked).to.eql(true));",
+                  "if (body.revoked === true) pm.environment.unset('runtimeSupervisorAccessToken');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Exit and completion contract (live runner gated)",
+      "item": [
+        {
+          "name": "18 Login synthetic student",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\":\"USERNAME\",\n  \"loginIdentifier\":\"{{loginIdentifier}}\",\n  \"password\":\"{{password}}\",\n  \"deviceName\":\"platform-bff-wash-exit-completion-student\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON login response; workflow stopped');}",
+                  "const exact=pm.response.code===200&&body.accountId===pm.environment.get('fixtureStudentAccountId')&&body.authState==='NORMAL'&&typeof body.accessToken==='string'&&body.accessToken.length>0;if(!exact){pm.execution.setNextRequest(null);throw new Error('isolated login proof failed; workflow stopped');}pm.test('isolated identity is exact',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.set('accessToken',body.accessToken);pm.environment.set('runtimeAccessToken',body.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "19 Login synthetic supervisor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loginType\":\"USERNAME\",\n  \"loginIdentifier\":\"{{supervisorLoginIdentifier}}\",\n  \"password\":\"{{supervisorPassword}}\",\n  \"deviceName\":\"platform-bff-wash-exit-completion-supervisor\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON login response; workflow stopped');}",
+                  "const exact=pm.response.code===200&&body.accountId===pm.environment.get('fixtureSupervisorAccountId')&&body.authState==='NORMAL'&&typeof body.accessToken==='string'&&body.accessToken.length>0;if(!exact){pm.execution.setNextRequest(null);throw new Error('isolated login proof failed; workflow stopped');}pm.test('isolated identity is exact',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.set('supervisorAccessToken',body.accessToken);pm.environment.set('runtimeSupervisorAccessToken',body.accessToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "20 Home proves exact in-progress execution",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/wash/student/home"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON Home response; workflow stopped');}const a=body.appointment;const e=a&&a.washExecution;",
+                  "const exact=a&&e&&a.appointmentId===pm.environment.get('appointmentId')&&a.appointmentStatus==='IN_PROGRESS'&&e.washExecutionId===pm.environment.get('washExecutionId')&&e.status==='IN_PROGRESS'&&e.exitSubmittedAt===null&&e.activeResourceAssignment&&e.activeResourceAssignment.cabinId===pm.environment.get('fixtureCabinId')&&e.activeResourceAssignment.tankId===pm.environment.get('fixtureTankId')&&e.version>0;if(!exact){pm.execution.setNextRequest(null);throw new Error('initial Home identity/state mismatch; workflow stopped');}pm.test('home is the exact isolated execution',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.set('preExitVersion',String(e.version));pm.environment.set('resourceAssignmentId',e.activeResourceAssignment.resourceAssignmentId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "21 Empty exit is invalid",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-invalid-exit"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"materials\":{\"packageCount\":0,\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0},\n  \"expectedVersion\":{{preExitVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/exit"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON negative response; workflow stopped');}",
+                  "const exact=pm.response.code===400&&body.code==='BFF.INVALID_REQUEST'&&body.operationId===undefined;if(!exact){pm.execution.setNextRequest(null);throw new Error('invalid-exit guard failed; workflow stopped');}pm.test('empty exit is rejected without an operation',()=>pm.expect(exact).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "22 Foreign actor cannot submit exit",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-foreign-exit"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"materials\":{\n  \"packageCount\": 2,\n  \"greenPaperCassette8Count\": 1,\n  \"greenPaperCassette10Count\": 0,\n  \"witnessTapePortionCount\": 2\n},\n  \"expectedVersion\":{{preExitVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/exit"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON negative response; workflow stopped');}",
+                  "const exact=pm.response.code===403&&body.code==='BFF.ACCESS_DENIED'&&body.operationId===undefined;if(!exact){pm.execution.setNextRequest(null);throw new Error('foreign-actor guard failed; workflow stopped');}pm.test('foreign actor is denied without an operation',()=>pm.expect(exact).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "23 Submit exit",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-exit"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"materials\":{\n  \"packageCount\": 2,\n  \"greenPaperCassette8Count\": 1,\n  \"greenPaperCassette10Count\": 0,\n  \"witnessTapePortionCount\": 2\n},\n  \"expectedVersion\":{{preExitVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/exit"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('command is accepted asynchronously',()=>pm.response.to.have.status(202));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON receipt; workflow stopped');}",
+                  "if(pm.response.code!==202||!/^[0-9a-f-]{36}$/i.test(body.operationId||'')||body.pollPath!=='/api/v1/operations/'+body.operationId||body.status!=='PENDING'){pm.execution.setNextRequest(null);throw new Error('invalid wash-submit-exit receipt; workflow stopped');}",
+                  "pm.test('receipt is wash-submit-exit',()=>{pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);pm.expect(body.pollPath).to.eql('/api/v1/operations/'+body.operationId);pm.expect(body.status).to.eql('PENDING');pm.expect(body.submittedAt).to.be.a('string');});",
+                  "pm.environment.set('exitOperationId',body.operationId);pm.environment.set('exitOperationIdPollPath',body.pollPath);pm.environment.set('exitOperationIdSubmittedAt',body.submittedAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "24 Retry identical exit",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-exit"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"materials\":{\n  \"packageCount\": 2,\n  \"greenPaperCassette8Count\": 1,\n  \"greenPaperCassette10Count\": 0,\n  \"witnessTapePortionCount\": 2\n},\n  \"expectedVersion\":{{preExitVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/exit"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('exact retry is accepted',()=>pm.response.to.have.status(202));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON retry receipt; workflow stopped');}",
+                  "if(pm.response.code!==202||body.operationId!==pm.environment.get('exitOperationId')||body.pollPath!==pm.environment.get('exitOperationIdPollPath')||body.submittedAt!==pm.environment.get('exitOperationIdSubmittedAt')){pm.execution.setNextRequest(null);throw new Error('idempotent retry did not reuse the exact receipt; workflow stopped');}",
+                  "pm.test('exact retry reuses one operation',()=>pm.expect(body.operationId).to.eql(pm.environment.get('exitOperationId')));",
+                  "pm.expect(body.pollPath).to.eql(pm.environment.get('exitOperationIdPollPath'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "25 Poll exit operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}{{exitOperationIdPollPath}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operation poll returns 200',()=>pm.response.to.have.status(200));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON operation response; workflow stopped');}",
+                  "if(pm.response.code!==200){pm.execution.setNextRequest(null);throw new Error('operation poll failed; workflow stopped');}if(body.status==='PENDING'){const limit=Number(pm.environment.get('maxPollAttempts'));const n=Number(pm.environment.get('exitOperationIdPollAttempts')||0)+1;if(!Number.isInteger(limit)||limit<1||n>=limit){pm.execution.setNextRequest(null);throw new Error('operation poll budget exhausted; workflow stopped');}pm.environment.set('exitOperationIdPollAttempts',String(n));pm.execution.setNextRequest('25 Poll exit operation');}else{",
+                  "const exact=body.operationId===pm.environment.get('exitOperationId')&&body.status==='SUCCEEDED'&&body.publicOperation==='wash-submit-exit'&&body.errorCode===null&&JSON.stringify(body.data)===JSON.stringify({status:\"EXIT_SUBMITTED\"})&&typeof body.completedAt==='string'&&!Object.prototype.hasOwnProperty.call(body.data??{},'aggregateId');if(!exact){pm.execution.setNextRequest(null);throw new Error('unexpected terminal operation envelope; workflow stopped');}pm.test('operation terminal envelope is exact',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.unset('exitOperationIdPollAttempts');}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "26 Home converges to exit submitted",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/wash/student/home"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON Home response; workflow stopped');}const a=body.appointment;const e=a&&a.washExecution;",
+                  "if(pm.response.code===503||(pm.response.code===200&&(!a||a.appointmentId!==pm.environment.get('appointmentId')||!e||e.status!=='EXIT_SUBMITTED'))){const limit=Number(pm.environment.get('maxReadAttempts'));const n=Number(pm.environment.get('exitReadAttempts')||0)+1;if(!Number.isInteger(limit)||limit<1||n>=limit){pm.execution.setNextRequest(null);throw new Error('exit read budget exhausted; workflow stopped');}pm.environment.set('exitReadAttempts',String(n));pm.execution.setNextRequest('26 Home converges to exit submitted');}else{const exact=pm.response.code===200&&e&&e.washExecutionId===pm.environment.get('washExecutionId')&&e.version>Number(pm.environment.get('preExitVersion'))&&typeof e.exitSubmittedAt==='string'&&e.activeResourceAssignment&&e.activeResourceAssignment.resourceAssignmentId===pm.environment.get('resourceAssignmentId')&&e.activeResourceAssignment.cabinId===pm.environment.get('fixtureCabinId')&&e.activeResourceAssignment.tankId===pm.environment.get('fixtureTankId')&&JSON.stringify(e.submittedExitMaterials)===JSON.stringify({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:0,witnessTapePortionCount:2});if(!exact){pm.execution.setNextRequest(null);throw new Error('submitted Home proof failed; workflow stopped');}",
+                  "pm.test('submitted state preserves exact identity, resources and materials',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.set('exitVersion',String(e.version));pm.environment.unset('exitReadAttempts');}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "27 Lookup exit submitted by enrollment",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"lookupType\":\"STUDENT_ENROLLMENT\",\n  \"studentEnrollment\":\"{{fixtureStudentEnrollment}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/supervision/lookup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON lookup response; workflow stopped');}",
+                  "const exact=pm.response.code===200&&body.appointment&&body.washExecution&&body.activeResourceAssignment&&body.appointment.appointmentId===pm.environment.get('appointmentId')&&body.washExecution.washExecutionId===pm.environment.get('washExecutionId')&&body.washExecution.status==='EXIT_SUBMITTED'&&body.nextAction==='EXIT_REVIEW'&&body.activeResourceAssignment.resourceAssignmentId===pm.environment.get('resourceAssignmentId')&&body.activeResourceAssignment.cabin.resourceId===pm.environment.get('fixtureCabinId')&&body.activeResourceAssignment.tank.resourceId===pm.environment.get('fixtureTankId')&&JSON.stringify(body.washExecution.submittedExitMaterials)===JSON.stringify({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:0,witnessTapePortionCount:2});if(!exact){pm.execution.setNextRequest(null);throw new Error('lookup identity/state/material mismatch; workflow stopped');}pm.test('lookup keeps exact execution authority',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.set('exitVersion',String(body.washExecution.executionVersion));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "28 Submit stale completion",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-complete-stale"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"finalMaterials\":{\n  \"packageCount\": 2,\n  \"greenPaperCassette8Count\": 1,\n  \"greenPaperCassette10Count\": 1,\n  \"witnessTapePortionCount\": 2\n},\n  \"expectedVersion\":{{preExitVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('command is accepted asynchronously',()=>pm.response.to.have.status(202));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON receipt; workflow stopped');}",
+                  "if(pm.response.code!==202||!/^[0-9a-f-]{36}$/i.test(body.operationId||'')||body.pollPath!=='/api/v1/operations/'+body.operationId||body.status!=='PENDING'){pm.execution.setNextRequest(null);throw new Error('invalid wash-complete-execution receipt; workflow stopped');}",
+                  "pm.test('receipt is wash-complete-execution',()=>{pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);pm.expect(body.pollPath).to.eql('/api/v1/operations/'+body.operationId);pm.expect(body.status).to.eql('PENDING');pm.expect(body.submittedAt).to.be.a('string');});",
+                  "pm.environment.set('staleCompleteOperationId',body.operationId);pm.environment.set('staleCompleteOperationIdPollPath',body.pollPath);pm.environment.set('staleCompleteOperationIdSubmittedAt',body.submittedAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "29 Poll stale completion",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}{{staleCompleteOperationIdPollPath}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operation poll returns 200',()=>pm.response.to.have.status(200));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON operation response; workflow stopped');}",
+                  "if(pm.response.code!==200){pm.execution.setNextRequest(null);throw new Error('operation poll failed; workflow stopped');}if(body.status==='PENDING'){const limit=Number(pm.environment.get('maxPollAttempts'));const n=Number(pm.environment.get('staleCompleteOperationIdPollAttempts')||0)+1;if(!Number.isInteger(limit)||limit<1||n>=limit){pm.execution.setNextRequest(null);throw new Error('operation poll budget exhausted; workflow stopped');}pm.environment.set('staleCompleteOperationIdPollAttempts',String(n));pm.execution.setNextRequest('29 Poll stale completion');}else{",
+                  "const exact=body.operationId===pm.environment.get('staleCompleteOperationId')&&body.status==='REJECTED'&&body.publicOperation==='wash-complete-execution'&&body.errorCode==='VERSION_CONFLICT'&&JSON.stringify(body.data)===JSON.stringify(null)&&typeof body.completedAt==='string'&&!Object.prototype.hasOwnProperty.call(body.data??{},'aggregateId');if(!exact){pm.execution.setNextRequest(null);throw new Error('unexpected terminal operation envelope; workflow stopped');}pm.test('operation terminal envelope is exact',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.unset('staleCompleteOperationIdPollAttempts');}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "30 Exact read unchanged after stale completion",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/wash/supervision/executions/{{washExecutionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON exact-read response; workflow stopped');}const e=body.washExecution;",
+                  "const exact=pm.response.code===200&&e&&e.washExecutionId===pm.environment.get('washExecutionId')&&e.status==='EXIT_SUBMITTED'&&e.version===e.executionVersion&&e.executionVersion===Number(pm.environment.get('exitVersion'))&&e.finalExitMaterials===null&&JSON.stringify(e.submittedExitMaterials)===JSON.stringify({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:0,witnessTapePortionCount:2});if(!exact){pm.execution.setNextRequest(null);throw new Error('stale completion changed state, materials or exact identity; workflow stopped');}pm.test('stale completion changed nothing',()=>pm.expect(exact).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "31 Complete execution",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-complete"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"finalMaterials\":{\n  \"packageCount\": 2,\n  \"greenPaperCassette8Count\": 1,\n  \"greenPaperCassette10Count\": 1,\n  \"witnessTapePortionCount\": 2\n},\n  \"expectedVersion\":{{exitVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('command is accepted asynchronously',()=>pm.response.to.have.status(202));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON receipt; workflow stopped');}",
+                  "if(pm.response.code!==202||!/^[0-9a-f-]{36}$/i.test(body.operationId||'')||body.pollPath!=='/api/v1/operations/'+body.operationId||body.status!=='PENDING'){pm.execution.setNextRequest(null);throw new Error('invalid wash-complete-execution receipt; workflow stopped');}",
+                  "pm.test('receipt is wash-complete-execution',()=>{pm.expect(body.operationId).to.match(/^[0-9a-f-]{36}$/i);pm.expect(body.pollPath).to.eql('/api/v1/operations/'+body.operationId);pm.expect(body.status).to.eql('PENDING');pm.expect(body.submittedAt).to.be.a('string');});",
+                  "pm.environment.set('completeOperationId',body.operationId);pm.environment.set('completeOperationIdPollPath',body.pollPath);pm.environment.set('completeOperationIdSubmittedAt',body.submittedAt);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "32 Retry identical completion",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{runKey}}-complete"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"finalMaterials\":{\n  \"packageCount\": 2,\n  \"greenPaperCassette8Count\": 1,\n  \"greenPaperCassette10Count\": 1,\n  \"witnessTapePortionCount\": 2\n},\n  \"expectedVersion\":{{exitVersion}}\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/wash/executions/{{washExecutionId}}/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('exact retry is accepted',()=>pm.response.to.have.status(202));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON retry receipt; workflow stopped');}",
+                  "if(pm.response.code!==202||body.operationId!==pm.environment.get('completeOperationId')||body.pollPath!==pm.environment.get('completeOperationIdPollPath')||body.submittedAt!==pm.environment.get('completeOperationIdSubmittedAt')){pm.execution.setNextRequest(null);throw new Error('idempotent retry did not reuse the exact receipt; workflow stopped');}",
+                  "pm.test('exact retry reuses one operation',()=>pm.expect(body.operationId).to.eql(pm.environment.get('completeOperationId')));",
+                  "pm.expect(body.pollPath).to.eql(pm.environment.get('completeOperationIdPollPath'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "33 Poll completion operation",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}{{completeOperationIdPollPath}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('operation poll returns 200',()=>pm.response.to.have.status(200));",
+                  "let body;try{body=pm.response.json();}catch(error){pm.execution.setNextRequest(null);throw new Error('invalid JSON operation response; workflow stopped');}",
+                  "if(pm.response.code!==200){pm.execution.setNextRequest(null);throw new Error('operation poll failed; workflow stopped');}if(body.status==='PENDING'){const limit=Number(pm.environment.get('maxPollAttempts'));const n=Number(pm.environment.get('completeOperationIdPollAttempts')||0)+1;if(!Number.isInteger(limit)||limit<1||n>=limit){pm.execution.setNextRequest(null);throw new Error('operation poll budget exhausted; workflow stopped');}pm.environment.set('completeOperationIdPollAttempts',String(n));pm.execution.setNextRequest('33 Poll completion operation');}else{",
+                  "const exact=body.operationId===pm.environment.get('completeOperationId')&&body.status==='SUCCEEDED'&&body.publicOperation==='wash-complete-execution'&&body.errorCode===null&&JSON.stringify(body.data)===JSON.stringify({status:\"COMPLETED\"})&&typeof body.completedAt==='string'&&!Object.prototype.hasOwnProperty.call(body.data??{},'aggregateId');if(!exact){pm.execution.setNextRequest(null);throw new Error('unexpected terminal operation envelope; workflow stopped');}pm.test('operation terminal envelope is exact',()=>pm.expect(exact).to.eql(true));",
+                  "pm.environment.unset('completeOperationIdPollAttempts');}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "34 Exact read converges to completed",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/wash/supervision/executions/{{washExecutionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body=pm.response.json();const e=body.washExecution;",
+                  "if(pm.response.code===503||(pm.response.code===200&&(!e||e.status!=='COMPLETED'))){const limit=Number(pm.environment.get('maxReadAttempts'));const n=Number(pm.environment.get('completeReadAttempts')||0)+1;if(!Number.isInteger(limit)||limit<1||n>=limit){pm.execution.setNextRequest(null);throw new Error('completion read budget exhausted; workflow stopped');}pm.environment.set('completeReadAttempts',String(n));pm.execution.setNextRequest('34 Exact read converges to completed');}else{if(pm.response.code!==200){pm.execution.setNextRequest(null);throw new Error('exact read failed; workflow stopped');}const terminalExact=body.appointment&&body.appointment.appointmentId===pm.environment.get('appointmentId')&&body.appointment.appointmentStatus==='COMPLETED'&&e.washExecutionId===pm.environment.get('washExecutionId')&&e.version===e.executionVersion&&e.executionVersion>Number(pm.environment.get('exitVersion'))&&typeof e.completedAt==='string'&&e.activeResourceAssignment===null&&e.lastResourceAssignment&&e.lastResourceAssignment.resourceAssignmentId===pm.environment.get('resourceAssignmentId')&&e.lastResourceAssignment.cabin&&e.lastResourceAssignment.cabin.resourceId===pm.environment.get('fixtureCabinId')&&e.lastResourceAssignment.tank&&e.lastResourceAssignment.tank.resourceId===pm.environment.get('fixtureTankId')&&JSON.stringify(e.submittedExitMaterials)===JSON.stringify({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:0,witnessTapePortionCount:2})&&JSON.stringify(e.finalExitMaterials)===JSON.stringify({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:1,witnessTapePortionCount:2});if(!terminalExact){pm.execution.setNextRequest(null);throw new Error('terminal exact-read proof failed; workflow stopped');}",
+                  "pm.test('terminal exact read is authoritative',()=>{pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));pm.expect(body.appointment.appointmentStatus).to.eql('COMPLETED');pm.expect(e.washExecutionId).to.eql(pm.environment.get('washExecutionId'));pm.expect(e.status).to.eql('COMPLETED');pm.expect(e.version).to.eql(e.executionVersion);pm.expect(e.executionVersion).to.be.above(Number(pm.environment.get('exitVersion')));pm.expect(e.completedAt).to.be.a('string');pm.expect(e.activeResourceAssignment).to.eql(null);pm.expect(e.lastResourceAssignment.resourceAssignmentId).to.eql(pm.environment.get('resourceAssignmentId'));pm.expect(e.lastResourceAssignment.cabin.resourceId).to.eql(pm.environment.get('fixtureCabinId'));pm.expect(e.lastResourceAssignment.tank.resourceId).to.eql(pm.environment.get('fixtureTankId'));pm.expect(e.submittedExitMaterials).to.deep.eql({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:0,witnessTapePortionCount:2});pm.expect(e.finalExitMaterials).to.deep.eql({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:1,witnessTapePortionCount:2});});",
+                  "pm.environment.set('completedVersion',String(e.executionVersion));pm.environment.unset('completeReadAttempts');}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "35 Home records convergence without replacing exact authority",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/wash/student/home"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('home returns 200',()=>pm.response.to.have.status(200));",
+                  "const body=pm.response.json();const a=body.appointment;",
+                  "if(a&&a.appointmentId===pm.environment.get('appointmentId')){const e=a.washExecution;pm.test('same home appointment is terminal and exact',()=>{pm.expect(a.appointmentStatus).to.eql('COMPLETED');pm.expect(e.status).to.eql('COMPLETED');pm.expect(e.washExecutionId).to.eql(pm.environment.get('washExecutionId'));pm.expect(e.activeResourceAssignment).to.eql(null);pm.expect(e.lastResourceAssignment.resourceAssignmentId).to.eql(pm.environment.get('resourceAssignmentId'));",
+                  "pm.expect(e.submittedExitMaterials).to.deep.eql({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:0,witnessTapePortionCount:2});",
+                  "pm.expect(e.finalExitMaterials).to.deep.eql({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:1,witnessTapePortionCount:2});",
+                  "});}else{pm.test('a different or absent primary appointment is valid',()=>pm.expect(!a||a.appointmentId!==pm.environment.get('appointmentId')).to.eql(true));}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "36 Exact read is stable",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/wash/supervision/executions/{{washExecutionId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('second exact read returns 200',()=>pm.response.to.have.status(200));",
+                  "const body=pm.response.json();const e=body.washExecution;",
+                  "pm.test('terminal identity and version are stable',()=>{pm.expect(e.executionVersion).to.eql(Number(pm.environment.get('completedVersion')));pm.expect(body.appointment.appointmentId).to.eql(pm.environment.get('appointmentId'));pm.expect(body.appointment.appointmentStatus).to.eql('COMPLETED');pm.expect(e.washExecutionId).to.eql(pm.environment.get('washExecutionId'));pm.expect(e.status).to.eql('COMPLETED');pm.expect(e.version).to.eql(e.executionVersion);pm.expect(e.executionVersion).to.be.above(Number(pm.environment.get('exitVersion')));pm.expect(e.completedAt).to.be.a('string');pm.expect(e.activeResourceAssignment).to.eql(null);pm.expect(e.lastResourceAssignment.resourceAssignmentId).to.eql(pm.environment.get('resourceAssignmentId'));pm.expect(e.lastResourceAssignment.cabin.resourceId).to.eql(pm.environment.get('fixtureCabinId'));pm.expect(e.lastResourceAssignment.tank.resourceId).to.eql(pm.environment.get('fixtureTankId'));pm.expect(e.submittedExitMaterials).to.deep.eql({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:0,witnessTapePortionCount:2});pm.expect(e.finalExitMaterials).to.deep.eql({packageCount:2,greenPaperCassette8Count:1,greenPaperCassette10Count:1,witnessTapePortionCount:2});});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "37 Logout synthetic supervisor",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{supervisorAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('supervisor logout returns 200',()=>pm.response.to.have.status(200));",
+                  "pm.environment.unset('supervisorAccessToken');pm.environment.unset('runtimeSupervisorAccessToken');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "38 Logout synthetic student",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('student logout returns 200',()=>pm.response.to.have.status(200));",
+                  "pm.environment.unset('accessToken');pm.environment.unset('runtimeAccessToken');"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
