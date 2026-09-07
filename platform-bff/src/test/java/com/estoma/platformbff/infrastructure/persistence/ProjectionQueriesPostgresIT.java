@@ -142,9 +142,9 @@ class ProjectionQueriesPostgresIT {
     projections.upsert(execution(executionId, authorizedAt));
 
     exitMaterials.projectSubmittedExitMaterials(
-        executionId, 1, 2, 3, 4, 7, authorizedAt.plusSeconds(30));
+        executionId, 1, 2, 3, 4, authorizedAt.plusSeconds(25), 7, authorizedAt.plusSeconds(30));
     exitMaterials.projectSubmittedExitMaterials(
-        executionId, 9, 9, 9, 9, 6, authorizedAt.plusSeconds(20));
+        executionId, 9, 9, 9, 9, authorizedAt.plusSeconds(15), 6, authorizedAt.plusSeconds(20));
 
     var item = supervision.findPendingReassignments().getFirst();
     assertThat(item.washExecutionId()).isEqualTo(executionId);
@@ -563,7 +563,8 @@ class ProjectionQueriesPostgresIT {
         WHERE appointment_id IN (:completed, :active)
         """).param("completed", completed).param("active", active).update();
     UUID executionId = insertExecution(active, "EXIT_SUBMITTED", latest.plusSeconds(60));
-    exitMaterials.projectSubmittedExitMaterials(executionId, 1, 2, 3, 4, 2, latest.plusSeconds(90));
+    exitMaterials.projectSubmittedExitMaterials(
+        executionId, 1, 2, 3, 4, latest.plusSeconds(60), 2, latest.plusSeconds(90));
 
     var candidates = supervision.findAppointments(accountId, java.time.LocalDate.of(2026, 8, 1));
 

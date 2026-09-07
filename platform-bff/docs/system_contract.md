@@ -300,6 +300,19 @@ default through `BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED`; while disabled 
 after supervisor authorization and before creating a durable operation. Omission and explicit
 null normalize to the same idempotent intent and neither check is sent to the owner.
 
+`POST /api/v1/wash/executions/{washExecutionId}/exit` and `/complete` require all four material
+counters explicitly as JSON int32 integers between `0` and `2147483647`, with at least one counter
+positive. String, fractional, null, omitted, negative and overflowing counters fail at the HTTP
+boundary. Complete retains its route, body, idempotency and owner Command shape.
+
+Supervisor lookup and exact execution reads expose required `canComplete`. It is `true` for
+`EXIT_SUBMITTED` with an active assignment. It is also `true` for `IN_PROGRESS` with an active
+assignment only when `BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED=true`; the flag defaults to
+`false`. `nextAction=EXIT_REVIEW` alone never grants the capability. The POST does not reject based
+on BFF read state because the owner validates the authoritative state asynchronously. Rollout must
+enable the owner first and the BFF capability second; an owner/BFF mismatch ends as the owner's
+functional rejection.
+
 Availability se rige por la resolución owner-derived de la sección 16. No realiza RPC síncrono ni
 calcula reglas de Appointments en el BFF.
 

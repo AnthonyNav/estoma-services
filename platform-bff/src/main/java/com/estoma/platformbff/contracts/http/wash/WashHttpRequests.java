@@ -3,6 +3,7 @@ package com.estoma.platformbff.contracts.http.wash;
 import jakarta.validation.Valid;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -130,13 +131,37 @@ public final class WashHttpRequests {
       @Positive int expectedVersion) {}
 
   public record ExitMaterialsRequest(
-      @PositiveOrZero int packageCount,
-      @PositiveOrZero int greenPaperCassette8Count,
-      @PositiveOrZero int greenPaperCassette10Count,
-      @PositiveOrZero int witnessTapePortionCount) {
+      @NotNull @PositiveOrZero @Max(Integer.MAX_VALUE)
+      @JsonDeserialize(using = StrictIntegerDeserializer.class) Integer packageCount,
+      @NotNull @PositiveOrZero @Max(Integer.MAX_VALUE)
+      @JsonDeserialize(using = StrictIntegerDeserializer.class) Integer greenPaperCassette8Count,
+      @NotNull @PositiveOrZero @Max(Integer.MAX_VALUE)
+      @JsonDeserialize(using = StrictIntegerDeserializer.class) Integer greenPaperCassette10Count,
+      @NotNull @PositiveOrZero @Max(Integer.MAX_VALUE)
+      @JsonDeserialize(using = StrictIntegerDeserializer.class) Integer witnessTapePortionCount) {
     public boolean isEmpty() {
       return packageCount == 0 && greenPaperCassette8Count == 0
           && greenPaperCassette10Count == 0 && witnessTapePortionCount == 0;
+    }
+  }
+
+  /** Rejects Jackson numeric/string coercions only for exit-material counters. */
+  public static final class StrictIntegerDeserializer extends StdDeserializer<Integer> {
+    public StrictIntegerDeserializer() {
+      super(Integer.class);
+    }
+
+    @Override
+    public Integer deserialize(JsonParser parser, DeserializationContext context) {
+      if (!parser.hasToken(JsonToken.VALUE_NUMBER_INT)) {
+        return context.reportInputMismatch(Integer.class, "expected a JSON int32 integer");
+      }
+      return parser.getIntValue();
+    }
+
+    @Override
+    public Integer getNullValue(DeserializationContext context) {
+      return null;
     }
   }
 

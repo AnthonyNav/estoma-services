@@ -127,7 +127,7 @@ class OpenApiControllerTest {
         });
     Map<String, Object> exactSchema = responseSchema(exactExecution, "200");
     assertThat((java.util.List<String>) exactSchema.get("required"))
-        .containsExactlyInAnyOrder("serviceDate", "student", "appointment", "washExecution");
+        .containsExactlyInAnyOrder("serviceDate", "canComplete", "student", "appointment", "washExecution");
     assertThat((Map<String, Object>) exactSchema.get("properties")).doesNotContainKey("nextAction");
     Map<String, Object> exactWashExecution = (Map<String, Object>)
         ((Map<String, Object>) exactSchema.get("properties")).get("washExecution");
@@ -178,7 +178,10 @@ class OpenApiControllerTest {
     assertThat(lookup).containsEntry("x-qr-feature-flag", "BFF_WASH_QR_ENABLED");
     Map<String, Object> lookupSchema = responseSchema(lookup, "200");
     assertThat((java.util.List<String>) lookupSchema.get("required"))
-        .containsExactlyInAnyOrder("serviceDate", "nextAction", "student", "appointment");
+        .containsExactlyInAnyOrder("serviceDate", "nextAction", "canComplete", "student", "appointment");
+    assertThat(lookup).containsEntry("x-direct-supervisor-completion-feature-flag",
+        "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED")
+        .containsEntry("x-direct-supervisor-completion-enabled-by-default", false);
     Map<String, Object> nextAction = (Map<String, Object>)
         ((Map<String, Object>) lookupSchema.get("properties")).get("nextAction");
     assertThat((java.util.List<String>) nextAction.get("enum"))
@@ -188,6 +191,23 @@ class OpenApiControllerTest {
     assertThat((java.util.List<String>) supervisorAppointment.get("required"))
         .containsExactlyInAnyOrder("appointmentId", "appointmentStatus", "appointmentType",
             "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot");
+
+    Map<String, Object> complete = operation(paths,
+        "/api/v1/wash/executions/{washExecutionId}/complete", "post");
+    assertThat(complete).containsEntry("x-direct-supervisor-completion-feature-flag",
+        "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED")
+        .containsEntry("x-direct-supervisor-completion-enabled-by-default", false);
+    Map<String, Object> completeRequest = (Map<String, Object>) ((Map<String, Object>)
+        ((Map<String, Object>) ((Map<String, Object>) complete.get("requestBody")).get("content"))
+            .get("application/json")).get("schema");
+    Map<String, Object> finalMaterials = (Map<String, Object>)
+        ((Map<String, Object>) completeRequest.get("properties")).get("finalMaterials");
+    assertThat((java.util.List<String>) finalMaterials.get("required")).containsExactlyInAnyOrder(
+        "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count",
+        "witnessTapePortionCount");
+    assertThat((Map<String, Object>) ((Map<String, Object>) finalMaterials.get("properties"))
+        .get("packageCount")).containsEntry("minimum", 0)
+        .containsEntry("maximum", (long) Integer.MAX_VALUE);
 
     Map<String, Object> reassignmentCandidates = operation(paths,
         "/api/v1/wash/supervision/pending-reassignments/{washExecutionId}/candidates", "get");

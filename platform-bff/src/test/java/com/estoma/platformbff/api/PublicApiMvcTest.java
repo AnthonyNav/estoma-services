@@ -109,7 +109,7 @@ class PublicApiMvcTest {
     when(supervision.home()).thenReturn(new SupervisorHomeResponse(LocalDate.of(2026, 8, 1),
         new SupervisorHomeSummary(12, 5, 4, 1, 0), 3));
     when(supervision.lookup(any())).thenReturn(new SupervisorLookupResponse(LocalDate.of(2026, 8, 1),
-        NextAction.ENTRY,
+        NextAction.ENTRY, false,
         new SupervisorStudent(UUID.fromString("00000000-0000-0000-0000-000000000010"),
             "Ana García Reyes", "201945678", 7),
         new SupervisorAppointment(UUID.fromString("00000000-0000-0000-0000-000000000011"),
@@ -122,7 +122,7 @@ class PublicApiMvcTest {
         null, null));
     UUID exactExecutionId = UUID.fromString("00000000-0000-0000-0000-000000000020");
     when(supervision.execution(exactExecutionId)).thenReturn(new SupervisorExecutionDetailResponse(
-        LocalDate.of(2026, 7, 31),
+        LocalDate.of(2026, 7, 31), false,
         new SupervisorStudent(UUID.fromString("00000000-0000-0000-0000-000000000010"),
             "Ana García Reyes", "201945678", 7),
         new SupervisorExecutionAppointment(
@@ -350,6 +350,54 @@ class PublicApiMvcTest {
   }
 
   @Test
+  void exitMaterialCountersMustBeCompleteStrictNonnegativeInt32Values() throws Exception {
+    String execution = "/api/v1/wash/executions/00000000-0000-0000-0000-000000000001/";
+    for (String operation : List.of("exit", "complete")) {
+      String property = operation.equals("exit") ? "materials" : "finalMaterials";
+      for (String counters : List.of(
+          "\"packageCount\":1,\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0",
+          "\"packageCount\":null,\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0",
+          "\"packageCount\":\"1\",\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0",
+          "\"packageCount\":1.0,\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0",
+          "\"packageCount\":2147483648,\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0",
+          "\"packageCount\":-1,\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0",
+          "\"packageCount\":0,\"greenPaperCassette8Count\":0,\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0")) {
+        washMvc.perform(post(execution + operation).header("Idempotency-Key", "strict-materials")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"" + property + "\":{" + counters + "},\"expectedVersion\":1}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("BFF.INVALID_REQUEST"));
+      }
+    }
+    verifyNoInteractions(commands);
+  }
+
+  @Test
+  void exitMaterialCountersAcceptTheFullInt32RangeAndPreserveCanonicalPayloads() throws Exception {
+    String execution = "/api/v1/wash/executions/00000000-0000-0000-0000-000000000001/";
+    String counters = "{\"packageCount\":2147483647,\"greenPaperCassette8Count\":0,"
+        + "\"greenPaperCassette10Count\":0,\"witnessTapePortionCount\":0}";
+
+    washMvc.perform(post(execution + "exit").header("Idempotency-Key", "strict-exit")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"materials\":" + counters + ",\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+    washMvc.perform(post(execution + "complete").header("Idempotency-Key", "strict-complete")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"finalMaterials\":" + counters + ",\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+
+    verify(commands).submitEnriched(any(), eq("wash-submit-exit"), eq("SubmitWashExit"),
+        argThat(payload -> Integer.valueOf(Integer.MAX_VALUE).equals(
+            ((Map<?, ?>) payload.get("materials")).get("packageCount"))),
+        anyMap(), eq("strict-exit"), any(), eq(1), any(), eq(1));
+    verify(commands).submitEnriched(any(), eq("wash-complete-execution"), eq("CompleteWashExecution"),
+        argThat(payload -> Integer.valueOf(Integer.MAX_VALUE).equals(
+            ((Map<?, ?>) payload.get("finalMaterials")).get("packageCount"))),
+        anyMap(), eq("strict-complete"), any(), eq(1), any(), eq(1));
+  }
+
+  @Test
   void supervisionAndOwnerDerivedAppointmentAvailabilityAreAvailable() throws Exception {
     washMvc.perform(get("/api/v1/wash/supervision/pending-reassignments"))
         .andExpect(status().isOk());
@@ -381,6 +429,7 @@ class PublicApiMvcTest {
         .andExpect(jsonPath("$.washExecution.washExecutionId").value(executionId.toString()))
         .andExpect(jsonPath("$.washExecution.version").value(6))
         .andExpect(jsonPath("$.washExecution.executionVersion").value(6))
+        .andExpect(jsonPath("$.canComplete").value(false))
         .andExpect(jsonPath("$.nextAction").doesNotExist());
     washMvc.perform(get("/api/v1/wash/supervision/executions/not-a-uuid"))
         .andExpect(status().isBadRequest())
@@ -390,6 +439,7 @@ class PublicApiMvcTest {
             .content("{\"lookupType\":\"STUDENT_ENROLLMENT\",\"studentEnrollment\":\"201945678\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.nextAction").value("ENTRY"))
+        .andExpect(jsonPath("$.canComplete").value(false))
         .andExpect(jsonPath("$.student.studentAccountId")
             .value("00000000-0000-0000-0000-000000000010"))
         .andExpect(jsonPath("$.appointment.appointmentStatus").value("SCHEDULED"));

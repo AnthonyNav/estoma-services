@@ -100,6 +100,8 @@ platform:
   wash:
     # HTTP producer gate; enable only after owner support and all V2 readers are deployed.
     unclassified-entry-rejection-enabled: ${BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED:false}
+    # Advertise direct supervisor completion only after the owner capability is enabled everywhere.
+    direct-supervisor-completion-enabled: ${BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED:false}
     qr:
       # Public Home/lookup gate; enable only after the date-scoped recovery and data audit.
       enabled: ${BFF_WASH_QR_ENABLED:false}

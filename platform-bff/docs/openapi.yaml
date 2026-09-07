@@ -5284,6 +5284,7 @@
     },
     "/api/v1/wash/executions/{washExecutionId}/complete" : {
       "post" : {
+        "description" : "Queues the existing CompleteWashExecution owner command without gating on a possibly stale BFF projection. The owner remains authoritative. Direct IN_PROGRESS completion is rolled out owner-first, then advertised through BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED; it is disabled by default.",
         "operationId" : "WashController_completeWashExecution_post__api_v1_wash_executions_washExecutionId_complete",
         "parameters" : [ {
           "in" : "header",
@@ -5306,6 +5307,7 @@
             "application/json" : {
               "schema" : {
                 "additionalProperties" : false,
+                "description" : "All four material counters are required JSON int32 integers from 0 through 2147483647, and at least one counter must be positive.",
                 "properties" : {
                   "expectedVersion" : {
                     "exclusiveMinimum" : 0,
@@ -5315,18 +5317,22 @@
                     "additionalProperties" : false,
                     "properties" : {
                       "greenPaperCassette10Count" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       },
                       "greenPaperCassette8Count" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       },
                       "packageCount" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       },
                       "witnessTapePortionCount" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       }
@@ -5366,7 +5372,9 @@
         },
         "security" : [ {
           "bearerAuth" : [ ]
-        } ]
+        } ],
+        "x-direct-supervisor-completion-enabled-by-default" : false,
+        "x-direct-supervisor-completion-feature-flag" : "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED"
       }
     },
     "/api/v1/wash/executions/{washExecutionId}/entry-decision" : {
@@ -5487,6 +5495,7 @@
             "application/json" : {
               "schema" : {
                 "additionalProperties" : false,
+                "description" : "All four material counters are required JSON int32 integers from 0 through 2147483647, and at least one counter must be positive.",
                 "properties" : {
                   "expectedVersion" : {
                     "exclusiveMinimum" : 0,
@@ -5496,18 +5505,22 @@
                     "additionalProperties" : false,
                     "properties" : {
                       "greenPaperCassette10Count" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       },
                       "greenPaperCassette8Count" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       },
                       "packageCount" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       },
                       "witnessTapePortionCount" : {
+                        "maximum" : 2147483647,
                         "minimum" : 0,
                         "type" : "integer"
                       }
@@ -6037,7 +6050,7 @@
     },
     "/api/v1/wash/supervision/executions/{washExecutionId}" : {
       "get" : {
-        "description" : "Side-effect-free exact local read of one current or historical Wash execution. The path identifier is the only selector; no current-service-date filter or fallback appointment is applied. The response does not grant command permissions.",
+        "description" : "Side-effect-free exact local read of one current or historical Wash execution. The path identifier is the only selector; no current-service-date filter or fallback appointment is applied. canComplete follows the same active-assignment and rollout-flag rules as lookup and does not replace owner validation.",
         "operationId" : "WashController_supervisorExecution_get__api_v1_wash_supervision_executions_washExecutionId_",
         "parameters" : [ {
           "in" : "path",
@@ -6123,6 +6136,9 @@
                       },
                       "required" : [ "appointmentId", "appointmentVersion", "appointmentStatus", "appointmentType", "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot" ],
                       "type" : "object"
+                    },
+                    "canComplete" : {
+                      "type" : "boolean"
                     },
                     "serviceDate" : {
                       "format" : "date",
@@ -6320,7 +6336,7 @@
                       "type" : "object"
                     }
                   },
-                  "required" : [ "serviceDate", "student", "appointment", "washExecution" ],
+                  "required" : [ "serviceDate", "canComplete", "student", "appointment", "washExecution" ],
                   "type" : "object"
                 }
               }
@@ -6458,7 +6474,7 @@
     },
     "/api/v1/wash/supervision/lookup" : {
       "post" : {
-        "description" : "STUDENT_ENROLLMENT and QR lookups are implemented as side-effect-free local reads. QR is disabled by default through BFF_WASH_QR_ENABLED and returns 503 until the flag is enabled and recovery is READY for the service date; unknown or revoked QR values return 404.",
+        "description" : "STUDENT_ENROLLMENT and QR lookups are implemented as side-effect-free local reads. QR is disabled by default through BFF_WASH_QR_ENABLED and returns 503 until the flag is enabled and recovery is READY for the service date; unknown or revoked QR values return 404. canComplete is true for EXIT_SUBMITTED with an active assignment, and for IN_PROGRESS with an active assignment only when direct supervisor completion is enabled.",
         "operationId" : "WashController_supervisorLookup_post__api_v1_wash_supervision_lookup",
         "requestBody" : {
           "content" : {
@@ -6607,6 +6623,9 @@
                       "required" : [ "appointmentId", "appointmentStatus", "appointmentType", "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot" ],
                       "type" : "object"
                     },
+                    "canComplete" : {
+                      "type" : "boolean"
+                    },
                     "nextAction" : {
                       "enum" : [ "ENTRY", "ENTRY_DECISION", "REASSIGNMENT", "EXIT_REVIEW", "NONE" ],
                       "type" : "string"
@@ -6685,7 +6704,7 @@
                       "type" : [ "object", "null" ]
                     }
                   },
-                  "required" : [ "serviceDate", "nextAction", "student", "appointment" ],
+                  "required" : [ "serviceDate", "nextAction", "canComplete", "student", "appointment" ],
                   "type" : "object"
                 }
               }
@@ -6706,6 +6725,8 @@
         "security" : [ {
           "bearerAuth" : [ ]
         } ],
+        "x-direct-supervisor-completion-enabled-by-default" : false,
+        "x-direct-supervisor-completion-feature-flag" : "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED",
         "x-provider-ready" : {
           "QR" : true,
           "STUDENT_ENROLLMENT" : true

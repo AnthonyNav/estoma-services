@@ -40,7 +40,7 @@ public class ProjectionEventDispatcher {
   /** Compatibility constructor for focused tests that do not exercise the PR5 material projection. */
   public ProjectionEventDispatcher(ProjectionEventRuntime runtime) {
     this(runtime,
-        (executionId, packages, cassette8, cassette10, witnessTape, version, updatedAt) -> {},
+        (executionId, packages, cassette8, cassette10, witnessTape, submittedAt, version, updatedAt) -> {},
         (executionId, packages, cassette8, cassette10, witnessTape, version, completedAt) -> {},
         (executionId, version, cancelledAt) -> {});
   }
@@ -63,7 +63,8 @@ public class ProjectionEventDispatcher {
       if (outcome == ProjectionEventRuntime.DispatchOutcome.APPLIED && submitted != null) {
         exitMaterials.projectSubmittedExitMaterials(event.aggregateId(), submitted.packageCount(),
             submitted.greenPaperCassette8Count(), submitted.greenPaperCassette10Count(),
-            submitted.witnessTapePortionCount(), event.aggregateVersion(), event.occurredAt());
+            submitted.witnessTapePortionCount(), submitted.submittedAt(), event.aggregateVersion(),
+            event.occurredAt());
       }
       if (outcome == ProjectionEventRuntime.DispatchOutcome.APPLIED && completed != null) {
         completion.projectCompletion(event.aggregateId(), completed.packageCount(),
@@ -115,7 +116,8 @@ public class ProjectionEventDispatcher {
         nonnegativeInt(payload, "packageCount"),
         nonnegativeInt(payload, "greenPaperCassette8Count"),
         nonnegativeInt(payload, "greenPaperCassette10Count"),
-        nonnegativeInt(payload, "witnessTapePortionCount"));
+        nonnegativeInt(payload, "witnessTapePortionCount"),
+        requiredInstant(payload, "submittedAt"));
   }
 
   private static CompletedExitMaterials completedExitMaterials(EventEnvelope event) {
@@ -178,6 +180,17 @@ public class ProjectionEventDispatcher {
     return value;
   }
 
+  private static Instant requiredInstant(JsonNode payload, String field) {
+    if (!payload.has(field) || !payload.path(field).isTextual()) {
+      throw new IllegalArgumentException(field + " must be an instant");
+    }
+    try {
+      return Instant.parse(payload.path(field).asText());
+    } catch (RuntimeException invalid) {
+      throw new IllegalArgumentException(field + " must be an instant", invalid);
+    }
+  }
+
   private static Map<String, Object> object(JsonNode node) {
     Map<String, Object> result = new HashMap<>();
     node.properties().forEach(entry -> result.put(entry.getKey(), value(entry.getValue())));
@@ -202,7 +215,8 @@ public class ProjectionEventDispatcher {
       int packageCount,
       int greenPaperCassette8Count,
       int greenPaperCassette10Count,
-      int witnessTapePortionCount) {}
+      int witnessTapePortionCount,
+      Instant submittedAt) {}
 
   private record CompletedExitMaterials(
       int packageCount,

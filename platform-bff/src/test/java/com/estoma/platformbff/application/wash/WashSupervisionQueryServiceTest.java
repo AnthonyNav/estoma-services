@@ -112,6 +112,37 @@ class WashSupervisionQueryServiceTest {
   }
 
   @Test
+  void lookupAdvertisesLegacyCompletionButKeepsDirectCompletionOffByDefault() {
+    when(studentProjections.findAccountIdByStudentEnrollment("201945678"))
+        .thenReturn(Optional.of(ACCOUNT_ID));
+    var inProgress = candidate("IN_PROGRESS", UUID.randomUUID(), "IN_PROGRESS", true, false);
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(inProgress));
+    assertThat(service.lookup(new SupervisorLookupRequest(
+        LookupType.STUDENT_ENROLLMENT, null, "201945678")).canComplete()).isFalse();
+
+    var submitted = candidate("IN_PROGRESS", UUID.randomUUID(), "EXIT_SUBMITTED", true, true);
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(submitted));
+    assertThat(service.lookup(new SupervisorLookupRequest(
+        LookupType.STUDENT_ENROLLMENT, null, "201945678")).canComplete()).isTrue();
+  }
+
+  @Test
+  void enabledDirectCompletionAdvertisesOnlyAnInProgressExecutionWithActiveAssignment() {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, false, true);
+    when(studentProjections.findAccountIdByStudentEnrollment("201945678"))
+        .thenReturn(Optional.of(ACCOUNT_ID));
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(
+        candidate("IN_PROGRESS", UUID.randomUUID(), "IN_PROGRESS", true, false)));
+
+    var response = service.lookup(
+        new SupervisorLookupRequest(LookupType.STUDENT_ENROLLMENT, null, "201945678"));
+
+    assertThat(response.nextAction()).isEqualTo(NextAction.EXIT_REVIEW);
+    assertThat(response.canComplete()).isTrue();
+  }
+
+  @Test
   void pendingReassignmentAfterResourceLossRemainsAnActiveLookup() {
     when(studentProjections.findAccountIdByStudentEnrollment("201945678"))
         .thenReturn(Optional.of(ACCOUNT_ID));
@@ -283,9 +314,43 @@ class WashSupervisionQueryServiceTest {
     assertThat(response.washExecution().finalExitMaterials().witnessTapePortionCount()).isEqualTo(8);
     assertThat(response.washExecution().activeResourceAssignment()).isNull();
     assertThat(response.washExecution().lastResourceAssignment().cabin().code()).isEqualTo("CAB-1");
+    assertThat(response.canComplete()).isFalse();
     verify(authorization).requireWashSupervisor();
     verify(readiness).requireReady("wash-execution", "appointments", "academic", "person",
         "wash-administration");
+  }
+
+  @Test
+  void exactReadUsesTheSameCompletionCapabilityRules() {
+    UUID inProgressId = UUID.randomUUID();
+    UUID submittedId = UUID.randomUUID();
+    when(projections.findExecution(inProgressId)).thenReturn(Optional.of(
+        executionDetail(inProgressId, "IN_PROGRESS", "IN_PROGRESS", true, false, false, false)));
+    when(projections.findExecution(submittedId)).thenReturn(Optional.of(
+        executionDetail(submittedId, "EXIT_SUBMITTED", "IN_PROGRESS", true, false, true, false)));
+
+    assertThat(service.execution(inProgressId).canComplete()).isFalse();
+    assertThat(service.execution(submittedId).canComplete()).isTrue();
+
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, false, true);
+    assertThat(service.execution(inProgressId).canComplete()).isTrue();
+  }
+
+  @Test
+  void exactDirectCompletionKeepsSubmittedValuesNullAndFinalValuesVisible() {
+    UUID executionId = UUID.randomUUID();
+    when(projections.findExecution(executionId)).thenReturn(Optional.of(
+        executionDetail(executionId, "COMPLETED", "COMPLETED", false, true, false, true)));
+
+    var execution = service.execution(executionId).washExecution();
+
+    assertThat(execution.exitSubmittedAt()).isNull();
+    assertThat(execution.submittedExitMaterials()).isNull();
+    assertThat(execution.completedAt()).isEqualTo(NOW);
+    assertThat(execution.finalExitMaterials().packageCount()).isEqualTo(5);
+    assertThat(execution.activeResourceAssignment()).isNull();
+    assertThat(execution.lastResourceAssignment()).isNotNull();
   }
 
   @Test
