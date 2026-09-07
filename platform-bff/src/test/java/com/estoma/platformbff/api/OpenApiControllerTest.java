@@ -28,6 +28,21 @@ class OpenApiControllerTest {
 
   @Test
   @SuppressWarnings("unchecked")
+  void operationNotFoundExplicitlyDocumentsAnEmptyResponse() {
+    Map<String, Object> paths = (Map<String, Object>) openApi.document().get("paths");
+    Map<String, Object> operation = operation(paths, "/api/v1/operations/{operationId}", "get");
+    Map<String, Object> responses = (Map<String, Object>) operation.get("responses");
+    assertThat(responses).containsKeys("200", "400", "401", "404", "default");
+    assertThat((Map<String, Object>) responses.get("404"))
+        .containsEntry("description",
+            "Operation not found or not visible to the current actor; empty response body")
+        .doesNotContainKey("content");
+    assertThat((String) operation.get("description"))
+        .contains("does not prove that the command had no effects");
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
   void documentHasEveryLivePublicRouteWithConcreteSchemasAndAvailabilityProvider() {
     Map<String, Object> document = openApi.document();
     Map<String, Object> paths = (Map<String, Object>) document.get("paths");
