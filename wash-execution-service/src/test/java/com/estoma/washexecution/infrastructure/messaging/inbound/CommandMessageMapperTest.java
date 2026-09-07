@@ -62,6 +62,83 @@ class CommandMessageMapperTest {
         .hasMessage("AMBIGUOUS_OR_INVALID_REASSIGNMENT_PAYLOAD");
   }
 
+  @Test
+  void absentAndExplicitNullEntryChecksNormalizeToSameUnclassifiedCommandAndFingerprint() {
+    UUID executionId = UUID.randomUUID();
+    UUID supervisorId = UUID.randomUUID();
+    ObjectNode absent = entryPayload(executionId, supervisorId);
+    ObjectNode explicitNull = absent.deepCopy();
+    explicitNull.putNull("identityConfirmed");
+    explicitNull.putNull("requirementsSatisfied");
+
+    WashExecutionCommand absentCommand = mapper.map(entryEnvelope(supervisorId, absent)).command();
+    WashExecutionCommand nullCommand = mapper.map(entryEnvelope(supervisorId, explicitNull)).command();
+
+    assertThat(absentCommand).isEqualTo(nullCommand).isEqualTo(
+        new WashExecutionCommand.DecideWashEntry(executionId, null, null,
+            com.estoma.washexecution.domain.execution.EntryDecision.REJECTED,
+            "Unclassified operational reason", supervisorId, ASSIGNED_AT, 1));
+    var fingerprints = new JacksonJsonCodec(json);
+    assertThat(fingerprints.fingerprint(Map.of("operation", "DecideWashEntry", "command", absentCommand)))
+        .isEqualTo(fingerprints.fingerprint(
+            Map.of("operation", "DecideWashEntry", "command", nullCommand)));
+  }
+
+  @Test
+  void partialEntryChecksAreRejectedAndLegacyFingerprintIsUnchanged() {
+    UUID executionId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    UUID supervisorId = UUID.fromString("22222222-2222-2222-2222-222222222222");
+    ObjectNode partial = entryPayload(executionId, supervisorId);
+    partial.put("identityConfirmed", false);
+    assertThatThrownBy(() -> mapper.map(entryEnvelope(supervisorId, partial)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("AMBIGUOUS_OR_INVALID_ENTRY_CHECKS");
+
+    ObjectNode legacyPayload = entryPayload(executionId, supervisorId);
+    legacyPayload.put("identityConfirmed", false);
+    legacyPayload.put("requirementsSatisfied", false);
+    WashExecutionCommand legacy = mapper.map(entryEnvelope(supervisorId, legacyPayload)).command();
+    var primitiveShape = new LegacyDecideWashEntry(executionId, false, false, "REJECTED",
+        "Unclassified operational reason", supervisorId, ASSIGNED_AT, 1);
+    var fingerprints = new JacksonJsonCodec(json);
+    String legacyFingerprint = fingerprints.fingerprint(
+        Map.of("operation", "DecideWashEntry", "command", legacy));
+    assertThat(legacyFingerprint)
+        .isEqualTo(fingerprints.fingerprint(
+            Map.of("operation", "DecideWashEntry", "command", primitiveShape)));
+    assertThat(legacyFingerprint)
+        .isEqualTo("8289aebb852581a1a7cf3ff7895af758b938d0d80b7409f3d9cfd538d0528cfb");
+  }
+
+  private ObjectNode entryPayload(UUID executionId, UUID supervisorId) {
+    ObjectNode payload = json.createObjectNode();
+    payload.put("washExecutionId", executionId.toString());
+    payload.put("decision", "REJECTED");
+    payload.put("rejectionReason", "Unclassified operational reason");
+    payload.put("decidedByAccountId", supervisorId.toString());
+    payload.put("decidedAt", ASSIGNED_AT.toString());
+    payload.put("expectedVersion", 1);
+    return payload;
+  }
+
+  private MessageEnvelope entryEnvelope(UUID supervisorId, ObjectNode payload) {
+    return new MessageEnvelope(
+        UUID.randomUUID(), "DecideWashEntry", 1, MessageKind.COMMAND,
+        "bff", ASSIGNED_AT, UUID.randomUUID(), null, UUID.randomUUID(),
+        "entry:" + UUID.randomUUID(), null, null,
+        new Actor("ACCOUNT", supervisorId, null), payload);
+  }
+
+  private record LegacyDecideWashEntry(
+      UUID washExecutionId,
+      boolean identityConfirmed,
+      boolean requirementsSatisfied,
+      String decision,
+      String rejectionReason,
+      UUID decidedByAccountId,
+      Instant decidedAt,
+      int expectedVersion) {}
+
   private ObjectNode payload(UUID executionId, UUID cabinId, UUID tankId,
       UUID supervisorId, boolean canonical) {
     ObjectNode payload = json.createObjectNode();

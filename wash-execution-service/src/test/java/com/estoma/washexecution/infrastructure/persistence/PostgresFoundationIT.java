@@ -59,6 +59,38 @@ class PostgresFoundationIT extends AbstractPostgresIT {
   }
 
   @Test
+  void entryValidationConstraintAllowsOnlyCompleteLegacyOrUnclassifiedRejectedChecks() {
+    String insert = """
+        INSERT INTO entry_validations(
+          entry_validation_id,wash_execution_id,identity_confirmed,requirements_satisfied,
+          decision,rejection_reason,decided_by_account_id,decided_at,created_at)
+        VALUES(?,?,?,?,?,?,?,now(),now())
+        """;
+
+    UUID unclassified = seedExecution();
+    jdbc.update(insert, UUID.randomUUID(), unclassified, null, null,
+        "REJECTED", "Unclassified operational reason", UUID.randomUUID());
+    assertThat(jdbc.queryForObject(
+        "SELECT identity_confirmed IS NULL AND requirements_satisfied IS NULL "
+            + "FROM entry_validations WHERE wash_execution_id=?",
+        Boolean.class, unclassified)).isTrue();
+
+    UUID legacy = seedExecution();
+    jdbc.update(insert, UUID.randomUUID(), legacy, false, false,
+        "REJECTED", "Legacy classified reason", UUID.randomUUID());
+
+    UUID nullAuthorized = seedExecution();
+    assertThatThrownBy(() -> jdbc.update(insert, UUID.randomUUID(), nullAuthorized, null, null,
+        "AUTHORIZED", null, UUID.randomUUID()))
+        .isInstanceOf(DataIntegrityViolationException.class);
+
+    UUID partialRejected = seedExecution();
+    assertThatThrownBy(() -> jdbc.update(insert, UUID.randomUUID(), partialRejected, null, false,
+        "REJECTED", "Partial checks", UUID.randomUUID()))
+        .isInstanceOf(DataIntegrityViolationException.class);
+  }
+
+  @Test
   void executionRepositoryRoundTripsAndAppointmentIsUnique() {
     Instant now = Instant.parse("2026-08-23T15:00:00Z");
     UUID appointmentId = UUID.randomUUID();

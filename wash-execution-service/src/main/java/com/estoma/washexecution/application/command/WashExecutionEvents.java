@@ -9,8 +9,19 @@ public final class WashExecutionEvents {
 
   public record Event(
       String type,
+      int messageVersion,
       UUID aggregateId,
       int aggregateVersion,
       Instant occurredAt,
-      Map<String, Object> payload) {}
+      Map<String, Object> payload) {
+
+    public Event(
+        String type,
+        UUID aggregateId,
+        int aggregateVersion,
+        Instant occurredAt,
+        Map<String, Object> payload) {
+      this(type, 1, aggregateId, aggregateVersion, occurredAt, payload);
+    }
+  }
 }

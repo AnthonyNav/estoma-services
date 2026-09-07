@@ -55,10 +55,9 @@ public final class CommandMessageMapper {
       case "RegisterWashArrival" -> require(payload,
           "washExecutionId", "appointmentId", "arrivedAt");
       case "DecideWashEntry" -> {
-        require(payload, "washExecutionId", "identityConfirmed", "requirementsSatisfied", "decision",
+        require(payload, "washExecutionId", "decision",
             "decidedByAccountId", "decidedAt", "expectedVersion");
-        requireBoolean(payload, "identityConfirmed");
-        requireBoolean(payload, "requirementsSatisfied");
+        requireEntryCheckShape(payload);
         requireIntegral(payload, "expectedVersion");
       }
       case "ResolvePendingReassignment" -> {
@@ -138,6 +137,19 @@ public final class CommandMessageMapper {
     requireIntegral(materials, "greenPaperCassette8Count");
     requireIntegral(materials, "greenPaperCassette10Count");
     requireIntegral(materials, "witnessTapePortionCount");
+  }
+
+  private static void requireEntryCheckShape(JsonNode payload) {
+    JsonNode identity = payload.get("identityConfirmed");
+    JsonNode requirements = payload.get("requirementsSatisfied");
+    boolean identityNull = identity == null || identity.isNull();
+    boolean requirementsNull = requirements == null || requirements.isNull();
+    if (identityNull && requirementsNull) return;
+    if (identityNull != requirementsNull) {
+      throw invalid("AMBIGUOUS_OR_INVALID_ENTRY_CHECKS");
+    }
+    requireBoolean(payload, "identityConfirmed");
+    requireBoolean(payload, "requirementsSatisfied");
   }
 
   private static void require(JsonNode payload, String... fields) {

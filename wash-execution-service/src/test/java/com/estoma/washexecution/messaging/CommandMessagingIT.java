@@ -19,7 +19,9 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageDeliveryMode;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.TestPropertySource;
 
+@TestPropertySource(properties = "estoma.entry.unclassified-rejection-enabled=true")
 class CommandMessagingIT extends AbstractMessagingIT {
   private static final Instant START = Instant.parse("2026-08-23T10:00:00Z");
 
@@ -181,6 +183,75 @@ class CommandMessagingIT extends AbstractMessagingIT {
         "SELECT count(*) FROM outbox_messages WHERE message_type='WashResourceAssigned' "
             + "AND aggregate_id=?",
         Integer.class, execution)).isEqualTo(1);
+  }
+
+  @Test
+  void unclassifiedEntryRejectionPublishesV2WithoutCheckFields() throws Exception {
+    UUID supervisor = UUID.randomUUID();
+    UUID student = UUID.randomUUID();
+    UUID slot = UUID.randomUUID();
+    UUID appointment = UUID.randomUUID();
+    UUID execution = UUID.randomUUID();
+    seedReady("appointments", "appointments");
+    seedReady("authorization", "authorization");
+    seedSupervisor(supervisor);
+    seedSlot(slot);
+    seedAppointment(appointment, student, slot);
+
+    MessageEnvelope arrival = commandEnvelope(
+        "RegisterWashArrival", supervisor,
+        Map.of("washExecutionId", execution, "appointmentId", appointment, "arrivedAt", START));
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, arrival);
+    awaitCount("SELECT count(*) FROM processed_messages WHERE consumer_name='wash-execution.commands' "
+        + "AND message_id=? AND status='APPLIED'", arrival.messageId(), 1);
+    relay.relay();
+    assertThat(rabbit.receive(BFF_RESULT_QUEUE, 5_000)).isNotNull();
+    assertThat(rabbit.receive(EVENT_TAP_QUEUE, 5_000)).isNotNull();
+
+    MessageEnvelope rejection = commandEnvelope(
+        "DecideWashEntry", supervisor,
+        Map.of(
+            "washExecutionId", execution,
+            "decision", "REJECTED",
+            "rejectionReason", "Unclassified operational reason",
+            "decidedByAccountId", supervisor,
+            "decidedAt", START.plusSeconds(300),
+            "expectedVersion", 1));
+    send(MessagingNames.COMMANDS_EXCHANGE, MessagingNames.LOGICAL_COMPONENT_ID, rejection);
+    awaitCount("SELECT count(*) FROM processed_messages WHERE consumer_name='wash-execution.commands' "
+        + "AND message_id=? AND status='APPLIED'", rejection.messageId(), 1);
+
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM wash_executions WHERE wash_execution_id=? "
+            + "AND status='ENTRY_REJECTED' AND version=2",
+        Integer.class, execution)).isEqualTo(1);
+    assertThat(jdbc.queryForObject(
+        "SELECT identity_confirmed IS NULL AND requirements_satisfied IS NULL "
+            + "FROM entry_validations WHERE wash_execution_id=?",
+        Boolean.class, execution)).isTrue();
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM outbox_messages WHERE message_type='WashEntryRejected' "
+            + "AND message_version=2 AND aggregate_id=? "
+            + "AND NOT jsonb_path_exists(payload_json::jsonb, '$.identityConfirmed') "
+            + "AND NOT jsonb_path_exists(payload_json::jsonb, '$.requirementsSatisfied')",
+        Integer.class, execution)).isEqualTo(1);
+
+    relay.relay();
+    Message resultMessage = rabbit.receive(BFF_RESULT_QUEUE, 5_000);
+    Message eventMessage = rabbit.receive(EVENT_TAP_QUEUE, 5_000);
+    assertThat(resultMessage).isNotNull();
+    assertThat(eventMessage).isNotNull();
+    MessageEnvelope result = codec.decode(resultMessage.getBody());
+    MessageEnvelope event = codec.decode(eventMessage.getBody());
+    assertThat(result.messageType()).isEqualTo("DecideWashEntrySucceeded");
+    assertThat(result.messageVersion()).isEqualTo(1);
+    assertThat(event.messageType()).isEqualTo("WashEntryRejected");
+    assertThat(event.messageVersion()).isEqualTo(2);
+    assertThat(event.actor()).isEqualTo(new Actor("ACCOUNT", supervisor, null));
+    assertThat(event.payload().has("identityConfirmed")).isFalse();
+    assertThat(event.payload().has("requirementsSatisfied")).isFalse();
+    assertThat(event.payload().path("rejectionReason").asText())
+        .isEqualTo("Unclassified operational reason");
   }
 
   @Test
