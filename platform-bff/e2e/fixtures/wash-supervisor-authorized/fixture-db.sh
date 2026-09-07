@@ -796,7 +796,7 @@ DO \$guard\$ BEGIN
             AND e.final_green_paper_cassette_10_count=$FINAL_CASSETTE10_COUNT
             AND e.final_witness_tape_portion_count=$FINAL_WITNESS_COUNT
             AND a.released_at=e.completed_at AND a.source_version=4)))
- ) THEN RAISE EXCEPTION 'BFF execution changed after cleanup proof'; END IF;
+ )) THEN RAISE EXCEPTION 'BFF execution changed after cleanup proof'; END IF;
 END \$guard\$;
 DELETE FROM inbox_messages WHERE operation_id IN (SELECT operation_id FROM e2e_operation_ids)
  OR aggregate_id IN (SELECT wash_execution_id FROM e2e_execution_ids);
