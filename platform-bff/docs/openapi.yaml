@@ -6020,6 +6020,364 @@
         } ]
       }
     },
+    "/api/v1/wash/supervision/executions/{washExecutionId}" : {
+      "get" : {
+        "description" : "Side-effect-free exact local read of one current or historical Wash execution. The path identifier is the only selector; no current-service-date filter or fallback appointment is applied. The response does not grant command permissions.",
+        "operationId" : "WashController_supervisorExecution_get__api_v1_wash_supervision_executions_washExecutionId_",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "washExecutionId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "appointment" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "appointmentId" : {
+                          "format" : "uuid",
+                          "type" : "string"
+                        },
+                        "appointmentStatus" : {
+                          "enum" : [ "SCHEDULED", "CANCELLED", "MISSED", "ENTRY_REJECTED", "IN_PROGRESS", "COMPLETED" ],
+                          "type" : "string"
+                        },
+                        "appointmentTimeSlot" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "appointmentTimeSlotId" : {
+                              "format" : "uuid",
+                              "type" : "string"
+                            },
+                            "endsAt" : {
+                              "format" : "date-time",
+                              "type" : "string"
+                            },
+                            "startsAt" : {
+                              "format" : "date-time",
+                              "type" : "string"
+                            },
+                            "timezone" : {
+                              "type" : "string"
+                            }
+                          },
+                          "required" : [ "appointmentTimeSlotId", "startsAt", "endsAt", "timezone" ],
+                          "type" : "object"
+                        },
+                        "appointmentType" : {
+                          "enum" : [ "NORMAL", "JOURNEY", "IMMUNOCOMPROMISED" ],
+                          "type" : "string"
+                        },
+                        "appointmentVersion" : {
+                          "type" : "integer"
+                        },
+                        "courseSectionReference" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "courseSectionId" : {
+                              "format" : "uuid",
+                              "type" : "string"
+                            },
+                            "name" : {
+                              "type" : [ "string", "null" ]
+                            },
+                            "nrc" : {
+                              "type" : [ "string", "null" ]
+                            }
+                          },
+                          "required" : [ "courseSectionId", "nrc", "name" ],
+                          "type" : [ "object", "null" ]
+                        },
+                        "instrumentCount" : {
+                          "exclusiveMinimum" : 0,
+                          "type" : [ "integer", "null" ]
+                        },
+                        "pieceType" : {
+                          "enum" : [ "HIGH_SPEED", "LOW_SPEED", "CONTRA_ANGLE" ],
+                          "type" : [ "string", "null" ]
+                        }
+                      },
+                      "required" : [ "appointmentId", "appointmentVersion", "appointmentStatus", "appointmentType", "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot" ],
+                      "type" : "object"
+                    },
+                    "serviceDate" : {
+                      "format" : "date",
+                      "type" : "string"
+                    },
+                    "student" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "currentSemester" : {
+                          "exclusiveMinimum" : 0,
+                          "type" : "integer"
+                        },
+                        "displayName" : {
+                          "type" : "string"
+                        },
+                        "studentAccountId" : {
+                          "format" : "uuid",
+                          "type" : "string"
+                        },
+                        "studentEnrollment" : {
+                          "type" : "string"
+                        }
+                      },
+                      "required" : [ "studentAccountId", "displayName", "studentEnrollment", "currentSemester" ],
+                      "type" : "object"
+                    },
+                    "washExecution" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "activeResourceAssignment" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "assignmentType" : {
+                              "type" : "string"
+                            },
+                            "cabin" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "code" : {
+                                  "type" : "string"
+                                },
+                                "name" : {
+                                  "type" : "string"
+                                },
+                                "resourceId" : {
+                                  "format" : "uuid",
+                                  "type" : "string"
+                                }
+                              },
+                              "required" : [ "resourceId", "code", "name" ],
+                              "type" : "object"
+                            },
+                            "resourceAssignmentId" : {
+                              "format" : "uuid",
+                              "type" : "string"
+                            },
+                            "tank" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "code" : {
+                                  "type" : "string"
+                                },
+                                "name" : {
+                                  "type" : "string"
+                                },
+                                "resourceId" : {
+                                  "format" : "uuid",
+                                  "type" : "string"
+                                }
+                              },
+                              "required" : [ "resourceId", "code", "name" ],
+                              "type" : "object"
+                            }
+                          },
+                          "required" : [ "resourceAssignmentId", "assignmentType", "cabin", "tank" ],
+                          "type" : [ "object", "null" ]
+                        },
+                        "arrivedAt" : {
+                          "format" : "date-time",
+                          "type" : "string"
+                        },
+                        "completedAt" : {
+                          "format" : "date-time",
+                          "type" : [ "string", "null" ]
+                        },
+                        "executionVersion" : {
+                          "type" : "integer"
+                        },
+                        "exitSubmittedAt" : {
+                          "format" : "date-time",
+                          "type" : [ "string", "null" ]
+                        },
+                        "finalExitMaterials" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "greenPaperCassette10Count" : {
+                              "type" : "integer"
+                            },
+                            "greenPaperCassette8Count" : {
+                              "type" : "integer"
+                            },
+                            "packageCount" : {
+                              "type" : "integer"
+                            },
+                            "witnessTapePortionCount" : {
+                              "type" : "integer"
+                            }
+                          },
+                          "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                          "type" : [ "object", "null" ]
+                        },
+                        "lastResourceAssignment" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "assignmentType" : {
+                              "type" : "string"
+                            },
+                            "cabin" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "code" : {
+                                  "type" : "string"
+                                },
+                                "name" : {
+                                  "type" : "string"
+                                },
+                                "resourceId" : {
+                                  "format" : "uuid",
+                                  "type" : "string"
+                                }
+                              },
+                              "required" : [ "resourceId", "code", "name" ],
+                              "type" : "object"
+                            },
+                            "resourceAssignmentId" : {
+                              "format" : "uuid",
+                              "type" : "string"
+                            },
+                            "tank" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "code" : {
+                                  "type" : "string"
+                                },
+                                "name" : {
+                                  "type" : "string"
+                                },
+                                "resourceId" : {
+                                  "format" : "uuid",
+                                  "type" : "string"
+                                }
+                              },
+                              "required" : [ "resourceId", "code", "name" ],
+                              "type" : "object"
+                            }
+                          },
+                          "required" : [ "resourceAssignmentId", "assignmentType", "cabin", "tank" ],
+                          "type" : [ "object", "null" ]
+                        },
+                        "rejectionReason" : {
+                          "type" : [ "string", "null" ]
+                        },
+                        "status" : {
+                          "enum" : [ "PENDING_ENTRY", "ENTRY_REJECTED", "PENDING_REASSIGNMENT", "IN_PROGRESS", "EXIT_SUBMITTED", "COMPLETED", "CANCELLED" ],
+                          "type" : "string"
+                        },
+                        "submittedExitMaterials" : {
+                          "additionalProperties" : false,
+                          "properties" : {
+                            "greenPaperCassette10Count" : {
+                              "type" : "integer"
+                            },
+                            "greenPaperCassette8Count" : {
+                              "type" : "integer"
+                            },
+                            "packageCount" : {
+                              "type" : "integer"
+                            },
+                            "witnessTapePortionCount" : {
+                              "type" : "integer"
+                            }
+                          },
+                          "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                          "type" : [ "object", "null" ]
+                        },
+                        "version" : {
+                          "type" : "integer"
+                        },
+                        "washExecutionId" : {
+                          "format" : "uuid",
+                          "type" : "string"
+                        }
+                      },
+                      "required" : [ "washExecutionId", "status", "version", "executionVersion", "arrivedAt", "rejectionReason", "exitSubmittedAt", "submittedExitMaterials", "completedAt", "finalExitMaterials", "activeResourceAssignment", "lastResourceAssignment" ],
+                      "type" : "object"
+                    }
+                  },
+                  "required" : [ "serviceDate", "student", "appointment", "washExecution" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Invalid Wash execution identifier"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Authentication is required"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Wash supervisor permission is required"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Wash execution was not found"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Required local projection is unavailable or incomplete"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
     "/api/v1/wash/supervision/home" : {
       "get" : {
         "operationId" : "WashController_supervisorHome_get__api_v1_wash_supervision_home",

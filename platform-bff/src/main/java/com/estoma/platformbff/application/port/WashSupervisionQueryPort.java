@@ -14,6 +14,8 @@ public interface WashSupervisionQueryPort {
 
   Optional<LookupCandidate> findAppointment(UUID appointmentId, LocalDate serviceDate);
 
+  Optional<ExecutionDetail> findExecution(UUID washExecutionId);
+
   List<PendingReassignment> findPendingReassignments();
 
   record HomeSnapshot(
@@ -64,6 +66,62 @@ public interface WashSupervisionQueryPort {
       Integer submittedGreenPaperCassette8Count,
       Integer submittedGreenPaperCassette10Count,
       Integer submittedWitnessTapePortionCount) {}
+
+  record ExecutionDetail(
+      UUID washExecutionId,
+      String executionStatus,
+      Long executionVersion,
+      Instant arrivedAt,
+      String rejectionReason,
+      Instant exitSubmittedAt,
+      Instant completedAt,
+      UUID appointmentId,
+      Long appointmentVersion,
+      String appointmentStatus,
+      String appointmentType,
+      Integer instrumentCount,
+      String pieceType,
+      UUID courseSectionId,
+      String courseNrc,
+      String courseName,
+      UUID appointmentTimeSlotId,
+      LocalDate serviceDate,
+      Instant slotStartsAt,
+      Instant slotEndsAt,
+      String slotTimezone,
+      UUID studentAccountId,
+      UUID personId,
+      String firstName,
+      String paternalSurname,
+      String maternalSurname,
+      String studentNumber,
+      Integer currentSemester,
+      String academicStatus,
+      long activeAssignmentCount,
+      UUID activeResourceAssignmentId,
+      String activeAssignmentType,
+      UUID activeCabinId,
+      String activeCabinCode,
+      String activeCabinName,
+      UUID activeTankId,
+      String activeTankCode,
+      String activeTankName,
+      UUID lastResourceAssignmentId,
+      String lastAssignmentType,
+      UUID lastCabinId,
+      String lastCabinCode,
+      String lastCabinName,
+      UUID lastTankId,
+      String lastTankCode,
+      String lastTankName,
+      Integer submittedPackageCount,
+      Integer submittedGreenPaperCassette8Count,
+      Integer submittedGreenPaperCassette10Count,
+      Integer submittedWitnessTapePortionCount,
+      Integer finalPackageCount,
+      Integer finalGreenPaperCassette8Count,
+      Integer finalGreenPaperCassette10Count,
+      Integer finalWitnessTapePortionCount) {}
 
   record PendingReassignment(
       UUID washExecutionId,

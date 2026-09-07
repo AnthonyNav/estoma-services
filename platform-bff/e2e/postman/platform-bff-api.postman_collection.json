@@ -19097,6 +19097,55 @@
       ]
     },
     {
+      "name": "wash.supervision.execution-detail",
+      "description": "Exact local read of one current or historical Wash execution. The identifier is the only selector and the response grants no command permission.",
+      "request": {
+        "name": "Wash Controller supervisor Execution get api v1 wash supervision executions washExecutionId",
+        "url": {
+          "path": [
+            "api",
+            "v1",
+            "wash",
+            "supervision",
+            "executions",
+            ":washExecutionId"
+          ],
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "query": [],
+          "variable": [
+            {
+              "key": "washExecutionId",
+              "value": "{{washExecutionId}}"
+            }
+          ]
+        },
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "method": "GET",
+        "body": {},
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{bearerToken}}"
+            }
+          ]
+        }
+      },
+      "response": [],
+      "event": [],
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      }
+    },
+    {
       "name": "wash.reassignment-candidates",
       "description": "Side-effect-free owner-derived reassignment candidate snapshot. The rollout gate is disabled by default until the owner Query is deployed.",
       "request": {

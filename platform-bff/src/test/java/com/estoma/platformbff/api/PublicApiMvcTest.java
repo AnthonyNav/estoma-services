@@ -21,9 +21,12 @@ import com.estoma.platformbff.application.commands.PublicCommandAdapter;
 import com.estoma.platformbff.application.mailbox.MailboxQueryService;
 import com.estoma.platformbff.application.security.EffectiveSystemService;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
+import com.estoma.platformbff.application.security.AuthenticationRequiredException;
+import com.estoma.platformbff.application.security.LocalAuthorizationService.AuthorizationDeniedException;
 import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService.LookupNotFoundException;
+import com.estoma.platformbff.application.wash.WashSupervisionQueryService.ExecutionNotFoundException;
 import com.estoma.platformbff.application.wash.WashStudentQueryService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
@@ -48,6 +51,9 @@ import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.Superv
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeSummary;
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorLookupResponse;
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorStudent;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorExecution;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorExecutionAppointment;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorExecutionDetailResponse;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -109,6 +115,21 @@ class PublicApiMvcTest {
                 Instant.parse("2026-08-01T10:00:00Z"), Instant.parse("2026-08-01T11:00:00Z"),
                 "America/Mexico_City")),
         null, null));
+    UUID exactExecutionId = UUID.fromString("00000000-0000-0000-0000-000000000020");
+    when(supervision.execution(exactExecutionId)).thenReturn(new SupervisorExecutionDetailResponse(
+        LocalDate.of(2026, 7, 31),
+        new SupervisorStudent(UUID.fromString("00000000-0000-0000-0000-000000000010"),
+            "Ana García Reyes", "201945678", 7),
+        new SupervisorExecutionAppointment(
+            UUID.fromString("00000000-0000-0000-0000-000000000011"), 5L, "COMPLETED",
+            "NORMAL", 15, "HIGH_SPEED", null,
+            new AppointmentTimeSlot(UUID.fromString("00000000-0000-0000-0000-000000000013"),
+                Instant.parse("2026-07-31T14:00:00Z"), Instant.parse("2026-07-31T15:00:00Z"),
+                "America/Mexico_City")),
+        new SupervisorExecution(exactExecutionId, "COMPLETED", 6L, 6L,
+            Instant.parse("2026-07-31T13:55:00Z"), null,
+            Instant.parse("2026-07-31T14:40:00Z"), null,
+            Instant.parse("2026-07-31T14:45:00Z"), null, null, null)));
     Clock clock = Clock.fixed(Instant.parse("2026-08-01T10:00:00Z"), java.time.ZoneOffset.UTC);
     mailboxMvc = MockMvcBuilders.standaloneSetup(
         new MailboxController(mailboxQueries, authorization, effectiveSystems, commands, clock))
@@ -217,6 +238,16 @@ class PublicApiMvcTest {
         .andExpect(jsonPath("$.summary.deniedAppointments").value(1))
         .andExpect(jsonPath("$.summary.cancelledAppointments").value(0))
         .andExpect(jsonPath("$.pendingReassignmentsCount").value(3));
+    washMvc.perform(get("/api/v1/wash/supervision/executions/{id}", executionId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.serviceDate").value("2026-07-31"))
+        .andExpect(jsonPath("$.washExecution.washExecutionId").value(executionId.toString()))
+        .andExpect(jsonPath("$.washExecution.version").value(6))
+        .andExpect(jsonPath("$.washExecution.executionVersion").value(6))
+        .andExpect(jsonPath("$.nextAction").doesNotExist());
+    washMvc.perform(get("/api/v1/wash/supervision/executions/not-a-uuid"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("BFF.INVALID_REQUEST"));
     washMvc.perform(post("/api/v1/wash/supervision/lookup")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{\"lookupType\":\"STUDENT_ENROLLMENT\",\"studentEnrollment\":\"201945678\"}"))
@@ -280,6 +311,32 @@ class PublicApiMvcTest {
         .andExpect(jsonPath("$.code").value("BFF.PROJECTION_UNAVAILABLE"))
         .andExpect(content().string(org.hamcrest.Matchers.not(
             org.hamcrest.Matchers.containsString("unready-opaque"))));
+  }
+
+  @Test
+  void exactExecutionMapsAuthenticationAuthorizationNotFoundAndIncompleteProjection() throws Exception {
+    UUID unauthenticated = UUID.fromString("00000000-0000-0000-0000-000000000031");
+    UUID forbidden = UUID.fromString("00000000-0000-0000-0000-000000000032");
+    UUID missing = UUID.fromString("00000000-0000-0000-0000-000000000033");
+    UUID incomplete = UUID.fromString("00000000-0000-0000-0000-000000000034");
+    when(supervision.execution(unauthenticated)).thenThrow(new AuthenticationRequiredException());
+    when(supervision.execution(forbidden)).thenThrow(new AuthorizationDeniedException());
+    when(supervision.execution(missing)).thenThrow(new ExecutionNotFoundException());
+    when(supervision.execution(incomplete))
+        .thenThrow(new ProjectionUnavailableException("incomplete exact execution projection"));
+
+    washMvc.perform(get("/api/v1/wash/supervision/executions/{id}", unauthenticated))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("BFF.AUTHENTICATION_REQUIRED"));
+    washMvc.perform(get("/api/v1/wash/supervision/executions/{id}", forbidden))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("BFF.ACCESS_DENIED"));
+    washMvc.perform(get("/api/v1/wash/supervision/executions/{id}", missing))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("BFF.WASH_EXECUTION_NOT_FOUND"));
+    washMvc.perform(get("/api/v1/wash/supervision/executions/{id}", incomplete))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(jsonPath("$.code").value("BFF.PROJECTION_UNAVAILABLE"));
   }
 
   @Test

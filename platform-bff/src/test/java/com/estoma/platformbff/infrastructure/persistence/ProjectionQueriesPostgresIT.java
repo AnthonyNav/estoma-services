@@ -390,6 +390,116 @@ class ProjectionQueriesPostgresIT {
   }
 
   @Test
+  void exactExecutionReadsHistoricalIdWithOriginalAndFinalMaterialsWithoutSelectingTodaysAppointment() {
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    UUID profileId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant startsAt = Instant.parse("2026-07-31T14:00:00Z");
+    Instant completedAt = Instant.parse("2026-07-31T14:45:00Z");
+    jdbc.sql("""
+        INSERT INTO person_presentation_read_model
+          (person_id, first_name, paternal_surname, status, source_version, updated_at)
+        VALUES (:personId, 'Ana', 'García', 'ACTIVE', 1, :updatedAt)
+        """).param("personId", personId).param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO student_academic_profile_read_model
+          (student_academic_profile_id, person_id, account_id, student_number, current_semester,
+           academic_status, source_version, updated_at)
+        VALUES (:profileId, :personId, :accountId, '201945678', 7, 'INACTIVE', 1, :updatedAt)
+        """).param("profileId", profileId).param("personId", personId).param("accountId", accountId)
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO appointment_time_slot_read_model
+          (appointment_time_slot_id, service_date, starts_at, ends_at, timezone, status, updated_at)
+        VALUES (:slotId, '2026-07-31', :startsAt, :endsAt, 'America/Mexico_City', 'ACTIVE', :updatedAt)
+        """).param("slotId", slotId).param("startsAt", java.sql.Timestamp.from(startsAt))
+        .param("endsAt", java.sql.Timestamp.from(startsAt.plusSeconds(3600)))
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO appointment_read_model
+          (appointment_id, appointment_time_slot_id, student_account_id, appointment_type,
+           instrument_count, piece_type, status, source_version, updated_at)
+        VALUES (:appointmentId, :slotId, :accountId, 'NORMAL', 4, 'LOW_SPEED',
+          'COMPLETED', 5, :updatedAt)
+        """).param("appointmentId", appointmentId).param("slotId", slotId)
+        .param("accountId", accountId).param("updatedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model
+          (wash_execution_id, appointment_id, appointment_type, status, arrived_at,
+           exit_submitted_at, completed_at, execution_version, updated_at,
+           submitted_package_count, submitted_green_paper_cassette_8_count,
+           submitted_green_paper_cassette_10_count, submitted_witness_tape_portion_count,
+           submitted_exit_version,
+           final_package_count, final_green_paper_cassette_8_count,
+           final_green_paper_cassette_10_count, final_witness_tape_portion_count, final_exit_version)
+        VALUES (:executionId, :appointmentId, 'NORMAL', 'COMPLETED', :arrivedAt,
+          :exitSubmittedAt, :completedAt, 6, :completedAt, 1, 2, 3, 4, 5, 5, 6, 7, 8, 6)
+        """).param("executionId", executionId).param("appointmentId", appointmentId)
+        .param("arrivedAt", java.sql.Timestamp.from(startsAt.minusSeconds(300)))
+        .param("exitSubmittedAt", java.sql.Timestamp.from(completedAt.minusSeconds(300)))
+        .param("completedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_cabin_read_model(cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, 'CAB-1', 'Cabina 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", cabinId).param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_tank_read_model(tank_id, cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, :cabinId, 'TANK-1', 'Tanque 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", tankId).param("cabinId", cabinId)
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_resource_assignment_read_model
+          (resource_assignment_id, wash_execution_id, appointment_id, appointment_time_slot_id,
+           cabin_id, tank_id, assignment_type, assigned_at, released_at, source_message_id,
+           source_version, updated_at)
+        VALUES (:assignmentId, :executionId, :appointmentId, :slotId, :cabinId, :tankId,
+          'INITIAL', :assignedAt, :releasedAt, :messageId, 6, :releasedAt)
+        """).param("assignmentId", assignmentId).param("executionId", executionId)
+        .param("appointmentId", appointmentId).param("slotId", slotId).param("cabinId", cabinId)
+        .param("tankId", tankId).param("assignedAt", java.sql.Timestamp.from(startsAt))
+        .param("releasedAt", java.sql.Timestamp.from(completedAt)).param("messageId", UUID.randomUUID())
+        .update();
+    UUID todayAppointment = appointment(accountId, "SCHEDULED",
+        Instant.parse("2026-08-01T14:00:00Z"), java.time.LocalDate.of(2026, 8, 1));
+
+    var detail = supervision.findExecution(executionId).orElseThrow();
+
+    assertThat(detail.washExecutionId()).isEqualTo(executionId);
+    assertThat(detail.appointmentId()).isEqualTo(appointmentId).isNotEqualTo(todayAppointment);
+    assertThat(detail.serviceDate()).isEqualTo(java.time.LocalDate.of(2026, 7, 31));
+    assertThat(detail.academicStatus()).isEqualTo("INACTIVE");
+    assertThat(detail.activeAssignmentCount()).isZero();
+    assertThat(detail.lastResourceAssignmentId()).isEqualTo(assignmentId);
+    assertThat(detail.submittedPackageCount()).isEqualTo(1);
+    assertThat(detail.submittedWitnessTapePortionCount()).isEqualTo(4);
+    assertThat(detail.finalPackageCount()).isEqualTo(5);
+    assertThat(detail.finalWitnessTapePortionCount()).isEqualTo(8);
+    assertThat(supervision.findExecution(UUID.randomUUID())).isEmpty();
+  }
+
+  @Test
+  void exactExecutionKeepsExistingBaseRowWhenItsAppointmentJoinIsMissing() {
+    UUID executionId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model
+          (wash_execution_id, appointment_id, status, execution_version, updated_at)
+        VALUES (:executionId, :appointmentId, 'PENDING_ENTRY', 1, :updatedAt)
+        """).param("executionId", executionId).param("appointmentId", UUID.randomUUID())
+        .param("updatedAt", java.sql.Timestamp.from(Instant.parse("2026-08-01T10:00:00Z"))).update();
+
+    var incomplete = supervision.findExecution(executionId);
+
+    assertThat(incomplete).isPresent();
+    assertThat(incomplete.orElseThrow().appointmentId()).isNull();
+  }
+
+  @Test
   void appointmentQrLookupUsesHashAndExactOpaqueValueAndHidesTombstones() {
     UUID appointmentId = UUID.randomUUID();
     Instant projectedAt = Instant.parse("2026-08-01T10:00:00Z");
