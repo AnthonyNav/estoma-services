@@ -277,3 +277,21 @@ functional pass must NOT be described as clean messaging certification. Correct
 the subscription and migrate the persisted wildcard, then rerun and require zero
 new retry/DLQ messages. Reassignment, exit/completion and email flows are not
 certified by this increment.
+
+## Wash exit and completion — static contract only
+
+`wash-exit-completion-front-v1.postman_collection.json` extends the generated authorized-entry
+contract with student exit and supervisor completion. The public example environment contains empty
+placeholders only. The exact supervisor read is terminal authority; Student Home is supporting
+evidence only when it still selects the same appointment.
+
+This collection has no runner and is not authorized for live or manual execution. Terminal cleanup
+is not implemented. Static checks execute representative assertions against valid and altered
+identity, materials, version, assignment, deduplication and conflict responses:
+
+```sh
+node ../../scripts/generate-wash-exit-completion-workflow.mjs --check
+node ../../scripts/validate-wash-exit-completion-workflow.mjs
+```
+
+Passing these checks is not live certification.

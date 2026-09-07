@@ -104,6 +104,27 @@ The smoke collection may be run against `develop` only from an approved network 
 
 No tokens, passwords, personal data, fixture UUIDs or response captures belong in Git. Keep generated reports under `target/e2e/`, which is ignored by Maven conventions.
 
+## Exit and completion static contract
+
+`postman/workflows/wash-exit-completion-front-v1.postman_collection.json` is a generated static
+contract for `IN_PROGRESS -> EXIT_SUBMITTED -> COMPLETED`. It covers negative exit cases, exact
+idempotent retries, bounded polling, stale completion as `202` followed by
+`REJECTED/VERSION_CONFLICT`, and exact terminal reads.
+
+Do not execute it manually or add it to `runner/run.sh`. Live execution is unsupported and
+unauthorized until a separate change supplies a private terminal manifest, exact three-store audit
+and reentrant cleanup verified by failure injection. The existing authorized-entry cleanup remains
+limited to `PENDING_ENTRY|1` and `IN_PROGRESS|2`.
+
+```sh
+node e2e/scripts/generate-wash-exit-completion-workflow.mjs --check
+node e2e/scripts/validate-wash-exit-completion-workflow.mjs
+```
+
+A future runner must retain the private `0700` report and `0600` runtime-environment pattern, use
+only Newman's CLI/JUnit reporters, preserve a request delay, revoke both sessions, and never persist
+resolved environments, JSON reports, authenticated payloads or tokens.
+
 The reassignment-candidates compatibility runner is a standalone isolated workflow. It creates its
 own two synthetic identities, drives the scheduler's real Query/Result path, proves both a positive
 candidate and a newly refreshed empty result after its tank becomes inactive, then performs fenced
