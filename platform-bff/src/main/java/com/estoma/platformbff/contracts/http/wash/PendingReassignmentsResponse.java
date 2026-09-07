@@ -1,61 +1,69 @@
 package com.estoma.platformbff.contracts.http.wash;
 
+import com.estoma.platformbff.contracts.http.Required;
+import com.estoma.platformbff.contracts.http.RequiredNullable;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
 /** Supervisor view composed from local BFF projections; it carries no owner-wire metadata. */
-public record PendingReassignmentsResponse(List<PendingReassignmentResponse> items) {
+public record PendingReassignmentsResponse(@Required List<PendingReassignmentResponse> items) {
   public record PendingReassignmentResponse(
-      UUID washExecutionId,
-      String washExecutionStatus,
-      Instant authorizedAt,
+      @Required UUID washExecutionId,
+      @Required String washExecutionStatus,
+      @RequiredNullable Instant authorizedAt,
       long executionVersion,
-      AppointmentResponse appointment,
-      StudentResponse student,
-      ActiveAssignmentResponse activeResourceAssignment,
-      SubmittedExitMaterialsResponse submittedExitMaterials,
-      String qrUsageContext) {}
+      @Required AppointmentResponse appointment,
+      @Required StudentResponse student,
+      @RequiredNullable ActiveAssignmentResponse activeResourceAssignment,
+      @RequiredNullable SubmittedExitMaterialsResponse submittedExitMaterials,
+      @Required String qrUsageContext) {}
 
   public record AppointmentResponse(
-      UUID appointmentId,
-      String appointmentType,
-      Integer instrumentCount,
-      String pieceType,
-      String appointmentStatus,
-      CourseSectionResponse courseSectionReference,
-      AppointmentTimeSlotResponse appointmentTimeSlot) {}
+      @Required UUID appointmentId,
+      @Required String appointmentType,
+      @RequiredNullable Integer instrumentCount,
+      @RequiredNullable String pieceType,
+      @Required String appointmentStatus,
+      @RequiredNullable CourseSectionResponse courseSectionReference,
+      @Required AppointmentTimeSlotResponse appointmentTimeSlot) {}
 
   public record AppointmentTimeSlotResponse(
-      UUID appointmentTimeSlotId,
-      LocalDate serviceDate,
-      Instant startsAt,
-      Instant endsAt,
-      String timezone) {}
+      @Required UUID appointmentTimeSlotId,
+      @Required LocalDate serviceDate,
+      @Required Instant startsAt,
+      @Required Instant endsAt,
+      @Required String timezone) {}
 
-  public record CourseSectionResponse(UUID courseSectionId, String nrc, String name) {}
+  public record CourseSectionResponse(
+      @Required UUID courseSectionId,
+      @RequiredNullable String nrc,
+      @RequiredNullable String name) {}
 
   public record StudentResponse(
-      UUID accountId,
-      UUID personId,
-      String displayName,
-      String enrollment,
-      Integer currentSemester,
-      String academicStatus) {}
+      @Required UUID accountId,
+      @Required UUID personId,
+      @Required String displayName,
+      @Required String enrollment,
+      @Required Integer currentSemester,
+      @RequiredNullable String academicStatus) {}
 
   public record ActiveAssignmentResponse(
-      UUID resourceAssignmentId,
-      String assignmentType,
-      Instant assignedAt,
-      ResourceResponse cabin,
-      ResourceResponse tank) {}
+      @Required UUID resourceAssignmentId,
+      @Required String assignmentType,
+      @Required Instant assignedAt,
+      @Required ResourceResponse cabin,
+      @Required ResourceResponse tank) {}
 
-  public record ResourceResponse(UUID resourceId, String code, String name) {}
+  public record ResourceResponse(
+      @Required UUID resourceId,
+      @Required String code,
+      @Required String name) {}
 
   public record SubmittedExitMaterialsResponse(
-      Integer packageCount,
-      Integer greenPaperCassette8Count,
-      Integer greenPaperCassette10Count,
-      Integer witnessTapePortionCount) {}
+      @Required Integer packageCount,
+      @Required Integer greenPaperCassette8Count,
+      @Required Integer greenPaperCassette10Count,
+      @Required Integer witnessTapePortionCount) {}
 }

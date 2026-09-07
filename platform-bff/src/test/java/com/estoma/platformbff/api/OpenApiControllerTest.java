@@ -154,6 +154,30 @@ class OpenApiControllerTest {
         .containsExactlyInAnyOrder("cabinId", "cabinCode", "cabinName", "tankId", "tankCode",
             "tankName", "availableCapacity");
 
+    Map<String, Object> pendingReassignments = operation(paths,
+        "/api/v1/wash/supervision/pending-reassignments", "get");
+    assertThat((Map<String, Object>) pendingReassignments.get("responses")).containsKey("503");
+    Map<String, Object> pendingSchema = responseSchema(pendingReassignments, "200");
+    assertThat((java.util.List<String>) pendingSchema.get("required")).containsExactly("items");
+    Map<String, Object> pendingItem = (Map<String, Object>) ((Map<String, Object>)
+        ((Map<String, Object>) pendingSchema.get("properties")).get("items")).get("items");
+    assertThat((java.util.List<String>) pendingItem.get("required"))
+        .containsExactlyInAnyOrder("washExecutionId", "washExecutionStatus", "authorizedAt",
+            "executionVersion", "appointment", "student", "activeResourceAssignment",
+            "submittedExitMaterials", "qrUsageContext");
+    Map<String, Object> pendingProperties = (Map<String, Object>) pendingItem.get("properties");
+    assertThat((java.util.List<String>) ((Map<String, Object>)
+        pendingProperties.get("activeResourceAssignment")).get("type"))
+        .containsExactly("object", "null");
+    Map<String, Object> pendingAppointment = (Map<String, Object>) pendingProperties.get("appointment");
+    assertThat((java.util.List<String>) pendingAppointment.get("required"))
+        .containsExactlyInAnyOrder("appointmentId", "appointmentType", "instrumentCount",
+            "pieceType", "appointmentStatus", "courseSectionReference", "appointmentTimeSlot");
+    Map<String, Object> pendingStudent = (Map<String, Object>) pendingProperties.get("student");
+    assertThat((java.util.List<String>) pendingStudent.get("required"))
+        .containsExactlyInAnyOrder("accountId", "personId", "displayName", "enrollment",
+            "currentSemester", "academicStatus");
+
     Map<String, Object> temporaryPassword = operation(paths,
         "/api/v1/admin/accounts/{accountId}/temporary-password", "post");
     assertThat((java.util.List<Map<String, Object>>) temporaryPassword.get("parameters"))

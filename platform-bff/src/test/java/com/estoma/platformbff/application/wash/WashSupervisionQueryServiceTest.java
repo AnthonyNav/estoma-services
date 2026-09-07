@@ -26,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -264,6 +265,32 @@ class WashSupervisionQueryServiceTest {
     assertThat(item.qrUsageContext()).isEqualTo("NONE");
   }
 
+  @Test
+  void pendingReassignmentAllowsLegitimateInitialAndOptionalContextToBeAbsent() {
+    when(projections.findPendingReassignments()).thenReturn(List.of(pending(null)));
+
+    var item = service.pendingReassignments().items().getFirst();
+
+    assertThat(item.activeResourceAssignment()).isNull();
+    assertThat(item.submittedExitMaterials()).isNull();
+    assertThat(item.appointment().courseSectionReference()).isNull();
+    assertThat(item.appointment().instrumentCount()).isNull();
+    assertThat(item.appointment().pieceType()).isNull();
+    verify(authorization).requireWashSupervisor();
+    verify(readiness).requireReady("wash-execution", "appointments", "academic", "person",
+        "wash-administration");
+  }
+
+  @ParameterizedTest
+  @EnumSource(InvalidPendingContext.class)
+  void incompletePendingReassignmentFailsTheWholeList(InvalidPendingContext invalid) {
+    when(projections.findPendingReassignments()).thenReturn(List.of(
+        pending(null), pending(invalid)));
+
+    assertThatThrownBy(() -> service.pendingReassignments())
+        .isInstanceOf(ProjectionUnavailableException.class);
+  }
+
   private void assertAction(String executionStatus, NextAction expected) {
     org.mockito.Mockito.reset(studentProjections, projections);
     when(studentProjections.findAccountIdByStudentEnrollment("201945678"))
@@ -298,5 +325,63 @@ class WashSupervisionQueryServiceTest {
         assignment ? "Cabina 1" : null, assignment ? UUID.randomUUID() : null,
         assignment ? "T-01" : null, assignment ? "Tanque 1" : null,
         materials ? 1 : null, materials ? 2 : null, materials ? 3 : null, materials ? 4 : null);
+  }
+
+  private static WashSupervisionQueryPort.PendingReassignment pending(
+      InvalidPendingContext invalid) {
+    boolean assignment = invalid == InvalidPendingContext.PARTIAL_ASSIGNMENT
+        || invalid == InvalidPendingContext.MISSING_ASSIGNMENT_ID;
+    boolean materials = invalid == InvalidPendingContext.PARTIAL_MATERIALS
+        || invalid == InvalidPendingContext.NEGATIVE_MATERIAL;
+    Integer packageCount = materials ? Integer.valueOf(1) : null;
+    Integer cassette8Count = materials ? Integer.valueOf(2) : null;
+    Integer cassette10Count = materials && invalid != InvalidPendingContext.PARTIAL_MATERIALS
+        ? Integer.valueOf(3) : null;
+    Integer witnessTapeCount = materials ? Integer.valueOf(4) : null;
+    if (invalid == InvalidPendingContext.NEGATIVE_MATERIAL) witnessTapeCount = -1;
+    return new WashSupervisionQueryPort.PendingReassignment(
+        invalid == InvalidPendingContext.MISSING_EXECUTION_ID ? null : UUID.randomUUID(),
+        invalid == InvalidPendingContext.INVALID_EXECUTION_STATUS ? "IN_PROGRESS" : "PENDING_REASSIGNMENT",
+        null, invalid == InvalidPendingContext.INVALID_VERSION ? 0 : 4,
+        invalid == InvalidPendingContext.MISSING_APPOINTMENT ? null : UUID.randomUUID(),
+        invalid == InvalidPendingContext.MISSING_APPOINTMENT_TYPE ? null : "NORMAL",
+        null, null,
+        invalid == InvalidPendingContext.INVALID_APPOINTMENT_STATUS ? "COMPLETED" : "SCHEDULED",
+        invalid == InvalidPendingContext.MISSING_SLOT ? null : UUID.randomUUID(), SERVICE_DATE,
+        NOW, invalid == InvalidPendingContext.INVALID_SLOT_RANGE ? NOW : NOW.plusSeconds(3600),
+        invalid == InvalidPendingContext.INVALID_TIMEZONE ? "Not/A_Zone" : "America/Mexico_City",
+        null, null, null, ACCOUNT_ID,
+        invalid == InvalidPendingContext.MISSING_PERSON ? null : UUID.randomUUID(),
+        invalid == InvalidPendingContext.MISSING_NAME ? " " : "Ada", null, null,
+        invalid == InvalidPendingContext.MISSING_ENROLLMENT ? " " : "S001",
+        invalid == InvalidPendingContext.MISSING_SEMESTER ? null : 7, null,
+        invalid == InvalidPendingContext.MISSING_ASSIGNMENT_ID ? null
+            : assignment ? UUID.randomUUID() : null,
+        assignment ? "REASSIGNMENT" : null,
+        invalid == InvalidPendingContext.PARTIAL_ASSIGNMENT ? null : assignment ? NOW : null,
+        assignment ? UUID.randomUUID() : null, assignment ? "CAB-1" : null,
+        assignment ? "Cabin 1" : null, assignment ? UUID.randomUUID() : null,
+        assignment ? "TANK-1" : null, assignment ? "Tank 1" : null,
+        packageCount, cassette8Count, cassette10Count, witnessTapeCount);
+  }
+
+  private enum InvalidPendingContext {
+    MISSING_EXECUTION_ID,
+    INVALID_EXECUTION_STATUS,
+    INVALID_VERSION,
+    MISSING_APPOINTMENT,
+    MISSING_APPOINTMENT_TYPE,
+    INVALID_APPOINTMENT_STATUS,
+    MISSING_SLOT,
+    INVALID_SLOT_RANGE,
+    INVALID_TIMEZONE,
+    MISSING_PERSON,
+    MISSING_NAME,
+    MISSING_ENROLLMENT,
+    MISSING_SEMESTER,
+    PARTIAL_ASSIGNMENT,
+    MISSING_ASSIGNMENT_ID,
+    PARTIAL_MATERIALS,
+    NEGATIVE_MATERIAL
   }
 }

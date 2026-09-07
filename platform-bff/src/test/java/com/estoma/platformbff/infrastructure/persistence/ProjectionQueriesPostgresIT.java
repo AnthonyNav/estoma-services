@@ -1,8 +1,16 @@
 package com.estoma.platformbff.infrastructure.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
+import com.estoma.platformbff.application.port.WashStudentQueryPort;
+import com.estoma.platformbff.application.projection.ProjectionReadinessService;
 import com.estoma.platformbff.application.projection.ProjectionReadModel;
+import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
+import com.estoma.platformbff.application.security.LocalAuthorizationService;
+import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -132,6 +140,81 @@ class ProjectionQueriesPostgresIT {
     assertThat(supervision.findPendingReassignments())
         .extracting(item -> item.washExecutionId())
         .containsExactly(firstId, secondId, laterId);
+  }
+
+  @Test
+  void pendingReassignmentWithMissingAppointmentIsNotHiddenAndFailsCompositionClosed() {
+    Instant updatedAt = Instant.parse("2026-08-01T10:00:00Z");
+    UUID executionId = UUID.randomUUID();
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, UUID.randomUUID(), null, "PENDING_REASSIGNMENT", null, updatedAt,
+        null, null, null, null, null, null, null, null, null, null, 2, updatedAt));
+
+    assertThat(supervision.findPendingReassignments())
+        .singleElement()
+        .satisfies(value -> {
+          assertThat(value.washExecutionId()).isEqualTo(executionId);
+          assertThat(value.appointmentId()).isNull();
+        });
+    assertThatThrownBy(() -> pendingService().pendingReassignments())
+        .isInstanceOf(ProjectionUnavailableException.class);
+  }
+
+  @Test
+  void pendingInitialAssignmentAllowsOptionalClinicalAndResourceContextToBeAbsent() {
+    Instant startsAt = Instant.parse("2026-08-01T10:00:00Z");
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    UUID profileId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO person_presentation_read_model (
+          person_id, first_name, source_version, updated_at)
+        VALUES (:personId, 'Ada', 1, :updatedAt)
+        """).param("personId", personId)
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO student_academic_profile_read_model (
+          student_academic_profile_id, person_id, account_id, student_number,
+          current_semester, source_version, updated_at)
+        VALUES (:profileId, :personId, :accountId, 'S001', 7, 1, :updatedAt)
+        """).param("profileId", profileId).param("personId", personId)
+        .param("accountId", accountId)
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO appointment_time_slot_read_model (
+          appointment_time_slot_id, service_date, starts_at, ends_at, timezone, updated_at)
+        VALUES (:slotId, '2026-08-01', :startsAt, :endsAt, 'America/Mexico_City', :updatedAt)
+        """).param("slotId", slotId).param("startsAt", java.sql.Timestamp.from(startsAt))
+        .param("endsAt", java.sql.Timestamp.from(startsAt.plusSeconds(3600)))
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO appointment_read_model (
+          appointment_id, appointment_time_slot_id, student_account_id, appointment_type,
+          status, source_version, updated_at)
+        VALUES (:appointmentId, :slotId, :accountId, 'NORMAL', 'SCHEDULED', 1, :updatedAt)
+        """).param("appointmentId", appointmentId).param("slotId", slotId)
+        .param("accountId", accountId)
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model (
+          wash_execution_id, appointment_id, status, authorized_at, execution_version, updated_at)
+        VALUES (:executionId, :appointmentId, 'PENDING_REASSIGNMENT', :authorizedAt, 2, :updatedAt)
+        """).param("executionId", executionId).param("appointmentId", appointmentId)
+        .param("authorizedAt", java.sql.Timestamp.from(startsAt))
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+
+    var item = pendingService().pendingReassignments().items().getFirst();
+
+    assertThat(item.washExecutionId()).isEqualTo(executionId);
+    assertThat(item.appointment().instrumentCount()).isNull();
+    assertThat(item.appointment().pieceType()).isNull();
+    assertThat(item.appointment().courseSectionReference()).isNull();
+    assertThat(item.student().academicStatus()).isNull();
+    assertThat(item.activeResourceAssignment()).isNull();
+    assertThat(item.submittedExitMaterials()).isNull();
   }
 
   @Test
@@ -477,6 +560,12 @@ class ProjectionQueriesPostgresIT {
 
   private static ProjectionReadModel.MailboxMessage message(UUID id, UUID accountId, Instant createdAt) {
     return message(id, accountId, "LAVADO_ULTRASONICO", createdAt);
+  }
+
+  private WashSupervisionQueryService pendingService() {
+    return new WashSupervisionQueryService(mock(LocalAuthorizationService.class),
+        mock(ProjectionReadinessService.class), supervision, mock(WashStudentQueryPort.class),
+        Clock.systemUTC());
   }
 
   private static ProjectionReadModel.MailboxMessage message(UUID id, UUID accountId, String systemCode, Instant createdAt) {

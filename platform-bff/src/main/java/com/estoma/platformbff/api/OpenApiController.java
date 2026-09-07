@@ -143,6 +143,13 @@ public class OpenApiController {
           + "feature is disabled by default until the Wash Execution Query owner is deployed.");
       operation.put("x-provider-ready-by-default", false);
     }
+    if (handler.getMethod().getName().equals("pendingReassignments")) {
+      operation.put("description", "Every item in a 200 response has required execution, student, "
+          + "appointment, and time-slot context. A missing required projection fails the whole read "
+          + "with 503 and is never hidden as an empty list. Resource assignment, submitted exit "
+          + "materials, course, instrumentCount, pieceType, and academicStatus remain nullable "
+          + "when functionally absent.");
+    }
     List<Map<String, Object>> parameters = new ArrayList<>();
     requestHeaders(handler, parameters);
     requestParameters(handler, parameters);
@@ -174,6 +181,11 @@ public class OpenApiController {
     }
     if (handler.getMethod().getName().equals("reassignmentCandidates")) {
       responses.put("503", Map.of("description", "Required fresh local snapshot is unavailable",
+          "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
+    }
+    if (handler.getMethod().getName().equals("pendingReassignments")) {
+      responses.put("503", Map.of("description", "Required local projection context is unavailable",
           "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
               Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
     }
