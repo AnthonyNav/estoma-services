@@ -35,6 +35,7 @@ public final class WashSupervisorResponses {
   public record SupervisorLookupResponse(
       @Required LocalDate serviceDate,
       @Required NextAction nextAction,
+      @Required boolean canComplete,
       @Required SupervisorStudent student,
       @Required SupervisorAppointment appointment,
       SupervisorWashExecution washExecution,
@@ -43,6 +44,7 @@ public final class WashSupervisorResponses {
   /** Exact, read-only supervisor view of one current or historical Wash execution. */
   public record SupervisorExecutionDetailResponse(
       @Required LocalDate serviceDate,
+      @Required boolean canComplete,
       @Required SupervisorStudent student,
       @Required SupervisorExecutionAppointment appointment,
       @Required SupervisorExecution washExecution) {}

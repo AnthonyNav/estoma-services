@@ -16874,7 +16874,7 @@
                         },
                         {
                           "name": "complete",
-                          "description": "",
+                          "description": "Queues the existing owner command without a stale-projection gate. Direct IN_PROGRESS completion is advertised only after owner-first rollout through BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED, default false.",
                           "item": [
                             {
                               "name": "Wash Controller complete Wash Execution post api v1 wash executions wash Execution Id complete",
@@ -16929,7 +16929,7 @@
                                 "method": "POST",
                                 "body": {
                                   "mode": "raw",
-                                  "raw": "{\n  \"expectedVersion\": \"<integer>\",\n  \"finalMaterials\": null\n}",
+                                  "raw": "{\n  \"expectedVersion\": 1,\n  \"finalMaterials\": {\n    \"packageCount\": 1,\n    \"greenPaperCassette8Count\": 0,\n    \"greenPaperCassette10Count\": 0,\n    \"witnessTapePortionCount\": 0\n  }\n}",
                                   "options": {
                                     "raw": {
                                       "headerFamily": "json",
@@ -17007,7 +17007,7 @@
                                     "method": "POST",
                                     "body": {
                                       "mode": "raw",
-                                      "raw": "{\n  \"expectedVersion\": \"<integer>\",\n  \"finalMaterials\": null\n}",
+                                      "raw": "{\n  \"expectedVersion\": 1,\n  \"finalMaterials\": {\n    \"packageCount\": 1,\n    \"greenPaperCassette8Count\": 0,\n    \"greenPaperCassette10Count\": 0,\n    \"witnessTapePortionCount\": 0\n  }\n}",
                                       "options": {
                                         "raw": {
                                           "headerFamily": "json",
@@ -17087,7 +17087,7 @@
                                     "method": "POST",
                                     "body": {
                                       "mode": "raw",
-                                      "raw": "{\n  \"expectedVersion\": \"<integer>\",\n  \"finalMaterials\": null\n}",
+                                      "raw": "{\n  \"expectedVersion\": 1,\n  \"finalMaterials\": {\n    \"packageCount\": 1,\n    \"greenPaperCassette8Count\": 0,\n    \"greenPaperCassette10Count\": 0,\n    \"witnessTapePortionCount\": 0\n  }\n}",
                                       "options": {
                                         "raw": {
                                           "headerFamily": "json",
@@ -17413,7 +17413,7 @@
                                 "method": "POST",
                                 "body": {
                                   "mode": "raw",
-                                  "raw": "{\n  \"expectedVersion\": \"<integer>\",\n  \"materials\": {\n    \"packageCount\": \"<integer>\",\n    \"greenPaperCassette8Count\": \"<integer>\",\n    \"greenPaperCassette10Count\": \"<integer>\",\n    \"witnessTapePortionCount\": \"<integer>\"\n  }\n}",
+                                  "raw": "{\n  \"expectedVersion\": 1,\n  \"materials\": {\n    \"packageCount\": 1,\n    \"greenPaperCassette8Count\": 0,\n    \"greenPaperCassette10Count\": 0,\n    \"witnessTapePortionCount\": 0\n  }\n}",
                                   "options": {
                                     "raw": {
                                       "headerFamily": "json",
@@ -17491,7 +17491,7 @@
                                     "method": "POST",
                                     "body": {
                                       "mode": "raw",
-                                      "raw": "{\n  \"expectedVersion\": \"<integer>\",\n  \"materials\": {\n    \"packageCount\": \"<integer>\",\n    \"greenPaperCassette8Count\": \"<integer>\",\n    \"greenPaperCassette10Count\": \"<integer>\",\n    \"witnessTapePortionCount\": \"<integer>\"\n  }\n}",
+                                      "raw": "{\n  \"expectedVersion\": 1,\n  \"materials\": {\n    \"packageCount\": 1,\n    \"greenPaperCassette8Count\": 0,\n    \"greenPaperCassette10Count\": 0,\n    \"witnessTapePortionCount\": 0\n  }\n}",
                                       "options": {
                                         "raw": {
                                           "headerFamily": "json",
@@ -17571,7 +17571,7 @@
                                     "method": "POST",
                                     "body": {
                                       "mode": "raw",
-                                      "raw": "{\n  \"expectedVersion\": \"<integer>\",\n  \"materials\": {\n    \"packageCount\": \"<integer>\",\n    \"greenPaperCassette8Count\": \"<integer>\",\n    \"greenPaperCassette10Count\": \"<integer>\",\n    \"witnessTapePortionCount\": \"<integer>\"\n  }\n}",
+                                      "raw": "{\n  \"expectedVersion\": 1,\n  \"materials\": {\n    \"packageCount\": 1,\n    \"greenPaperCassette8Count\": 0,\n    \"greenPaperCassette10Count\": 0,\n    \"witnessTapePortionCount\": 0\n  }\n}",
                                       "options": {
                                         "raw": {
                                           "headerFamily": "json",
@@ -18565,7 +18565,7 @@
                           "request": {
                             "name": "Wash Controller supervisor Lookup post api v1 wash supervision lookup",
                             "description": {
-                              "content": "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is explicitly gated until the owner-backed QR projection is available and returns 503.",
+                              "content": "Manual STUDENT_ENROLLMENT lookup is provider-ready; QR lookup is rollout-gated. canComplete is always present: EXIT_SUBMITTED with an active assignment is true; IN_PROGRESS with an active assignment is true only when BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED is enabled.",
                               "type": "text/plain"
                             },
                             "url": {
@@ -18670,7 +18670,7 @@
                                   "value": "application/json"
                                 }
                               ],
-                              "body": "{\n  \"serviceDate\": \"<date>\",\n  \"nextAction\": \"EXIT_REVIEW\",\n  \"student\": {\n    \"studentAccountId\": \"<uuid>\",\n    \"displayName\": \"<string>\",\n    \"studentEnrollment\": \"<string>\",\n    \"currentSemester\": \"<integer>\"\n  },\n  \"appointment\": {\n    \"appointmentId\": \"<uuid>\",\n    \"appointmentStatus\": \"MISSED\",\n    \"appointmentType\": \"NORMAL\",\n    \"instrumentCount\": \"<integer>\",\n    \"pieceType\": \"LOW_SPEED\",\n    \"courseSectionReference\": {\n      \"courseSectionId\": \"<uuid>\",\n      \"nrc\": \"<string>\",\n      \"name\": \"<string>\"\n    },\n    \"appointmentTimeSlot\": {\n      \"appointmentTimeSlotId\": \"<uuid>\",\n      \"startsAt\": \"<dateTime>\",\n      \"endsAt\": \"<dateTime>\",\n      \"timezone\": \"<string>\"\n    }\n  },\n  \"activeResourceAssignment\": {\n    \"resourceAssignmentId\": \"<uuid>\",\n    \"assignmentType\": \"<string>\",\n    \"cabin\": {\n      \"resourceId\": \"<uuid>\",\n      \"code\": \"<string>\",\n      \"name\": \"<string>\"\n    },\n    \"tank\": {\n      \"resourceId\": \"<uuid>\",\n      \"code\": \"<string>\",\n      \"name\": \"<string>\"\n    }\n  },\n  \"washExecution\": {\n    \"washExecutionId\": \"<uuid>\",\n    \"status\": \"PENDING_REASSIGNMENT\",\n    \"executionVersion\": \"<integer>\",\n    \"arrivedAt\": \"<dateTime>\",\n    \"exitSubmittedAt\": \"<string,null-date-time>\",\n    \"rejectionReason\": \"<string,null>\",\n    \"submittedExitMaterials\": {\n      \"packageCount\": \"<integer>\",\n      \"greenPaperCassette8Count\": \"<integer>\",\n      \"greenPaperCassette10Count\": \"<integer>\",\n      \"witnessTapePortionCount\": \"<integer>\"\n    }\n  }\n}",
+                              "body": "{\n  \"serviceDate\": \"<date>\",\n  \"nextAction\": \"EXIT_REVIEW\",\n  \"canComplete\": false,\n  \"student\": {\n    \"studentAccountId\": \"<uuid>\",\n    \"displayName\": \"<string>\",\n    \"studentEnrollment\": \"<string>\",\n    \"currentSemester\": \"<integer>\"\n  },\n  \"appointment\": {\n    \"appointmentId\": \"<uuid>\",\n    \"appointmentStatus\": \"MISSED\",\n    \"appointmentType\": \"NORMAL\",\n    \"instrumentCount\": \"<integer>\",\n    \"pieceType\": \"LOW_SPEED\",\n    \"courseSectionReference\": {\n      \"courseSectionId\": \"<uuid>\",\n      \"nrc\": \"<string>\",\n      \"name\": \"<string>\"\n    },\n    \"appointmentTimeSlot\": {\n      \"appointmentTimeSlotId\": \"<uuid>\",\n      \"startsAt\": \"<dateTime>\",\n      \"endsAt\": \"<dateTime>\",\n      \"timezone\": \"<string>\"\n    }\n  },\n  \"activeResourceAssignment\": {\n    \"resourceAssignmentId\": \"<uuid>\",\n    \"assignmentType\": \"<string>\",\n    \"cabin\": {\n      \"resourceId\": \"<uuid>\",\n      \"code\": \"<string>\",\n      \"name\": \"<string>\"\n    },\n    \"tank\": {\n      \"resourceId\": \"<uuid>\",\n      \"code\": \"<string>\",\n      \"name\": \"<string>\"\n    }\n  },\n  \"washExecution\": {\n    \"washExecutionId\": \"<uuid>\",\n    \"status\": \"PENDING_REASSIGNMENT\",\n    \"executionVersion\": \"<integer>\",\n    \"arrivedAt\": \"<dateTime>\",\n    \"exitSubmittedAt\": \"<string,null-date-time>\",\n    \"rejectionReason\": \"<string,null>\",\n    \"submittedExitMaterials\": {\n      \"packageCount\": \"<integer>\",\n      \"greenPaperCassette8Count\": \"<integer>\",\n      \"greenPaperCassette10Count\": \"<integer>\",\n      \"witnessTapePortionCount\": \"<integer>\"\n    }\n  }\n}",
                               "cookie": [],
                               "_postman_previewlanguage": "json"
                             },
@@ -19098,7 +19098,7 @@
     },
     {
       "name": "wash.supervision.execution-detail",
-      "description": "Exact local read of one current or historical Wash execution. The identifier is the only selector and the response grants no command permission.",
+      "description": "Exact local read of one current or historical Wash execution. canComplete is always present and follows the active-assignment and BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED rules; the owner remains authoritative.",
       "request": {
         "name": "Wash Controller supervisor Execution get api v1 wash supervision executions washExecutionId",
         "url": {

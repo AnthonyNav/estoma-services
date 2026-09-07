@@ -130,6 +130,11 @@ public class OpenApiController {
             + "REJECTED requires a nonblank rejectionReason and either two boolean checks or both "
             + "checks omitted/null. Omitted/null checks are the gated unclassified-rejection capability.");
       }
+      if (handler.getMethod().getName().equals("submitExit")
+          || handler.getMethod().getName().equals("completeWashExecution")) {
+        requestSchema.put("description", "All four material counters are required JSON int32 integers "
+            + "from 0 through 2147483647, and at least one counter must be positive.");
+      }
       operation.put("requestBody", Map.of("required", true, "content", Map.of(
           MediaType.APPLICATION_JSON_VALUE, Map.of("schema", requestSchema))));
     }
@@ -137,10 +142,14 @@ public class OpenApiController {
       operation.put("description", "STUDENT_ENROLLMENT and QR lookups are implemented as side-effect-free "
           + "local reads. QR is disabled by default through BFF_WASH_QR_ENABLED and returns 503 until "
           + "the flag is enabled and recovery is READY for the service date; unknown or revoked QR values "
-          + "return 404.");
+          + "return 404. canComplete is true for EXIT_SUBMITTED with an active assignment, and for "
+          + "IN_PROGRESS with an active assignment only when direct supervisor completion is enabled.");
       operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", true));
       operation.put("x-provider-ready-by-default", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
       operation.put("x-qr-feature-flag", "BFF_WASH_QR_ENABLED");
+      operation.put("x-direct-supervisor-completion-feature-flag",
+          "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED");
+      operation.put("x-direct-supervisor-completion-enabled-by-default", false);
     }
     if (handler.getMethod().getName().equals("reassignmentCandidates")) {
       operation.put("description", "Side-effect-free local read of an owner-ranked snapshot. "
@@ -152,7 +161,17 @@ public class OpenApiController {
     if (handler.getMethod().getName().equals("supervisorExecution")) {
       operation.put("description", "Side-effect-free exact local read of one current or historical "
           + "Wash execution. The path identifier is the only selector; no current-service-date "
-          + "filter or fallback appointment is applied. The response does not grant command permissions.");
+          + "filter or fallback appointment is applied. canComplete follows the same active-assignment "
+          + "and rollout-flag rules as lookup and does not replace owner validation.");
+    }
+    if (handler.getMethod().getName().equals("completeWashExecution")) {
+      operation.put("description", "Queues the existing CompleteWashExecution owner command without "
+          + "gating on a possibly stale BFF projection. The owner remains authoritative. Direct "
+          + "IN_PROGRESS completion is rolled out owner-first, then advertised through "
+          + "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED; it is disabled by default.");
+      operation.put("x-direct-supervisor-completion-feature-flag",
+          "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED");
+      operation.put("x-direct-supervisor-completion-enabled-by-default", false);
     }
     if (handler.getMethod().getName().equals("decideEntry")) {
       operation.put("description", "Classified entry decisions remain available. Unclassified "

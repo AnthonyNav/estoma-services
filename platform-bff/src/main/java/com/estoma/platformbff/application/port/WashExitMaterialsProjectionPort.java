@@ -11,6 +11,7 @@ public interface WashExitMaterialsProjectionPort {
       int greenPaperCassette8Count,
       int greenPaperCassette10Count,
       int witnessTapePortionCount,
+      Instant submittedAt,
       long executionVersion,
       Instant updatedAt);
 }

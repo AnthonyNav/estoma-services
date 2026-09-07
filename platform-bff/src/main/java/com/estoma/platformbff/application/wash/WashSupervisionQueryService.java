@@ -72,13 +72,16 @@ public class WashSupervisionQueryService {
   private final AppointmentQrReadPort appointmentQr;
   private final AppointmentQrRecoveryService qrRecovery;
   private final boolean qrEnabled;
+  private final boolean directSupervisorCompletionEnabled;
 
   @Autowired
   public WashSupervisionQueryService(LocalAuthorizationService authorization,
       ProjectionReadinessService readiness, WashSupervisionQueryPort projections,
       WashStudentQueryPort studentProjections, Clock clock, AppointmentQrReadPort appointmentQr,
       AppointmentQrRecoveryService qrRecovery,
-      @Value("${platform.wash.qr.enabled:false}") boolean qrEnabled) {
+      @Value("${platform.wash.qr.enabled:false}") boolean qrEnabled,
+      @Value("${platform.wash.direct-supervisor-completion-enabled:false}")
+      boolean directSupervisorCompletionEnabled) {
     this.authorization = authorization;
     this.readiness = readiness;
     this.projections = projections;
@@ -87,12 +90,21 @@ public class WashSupervisionQueryService {
     this.appointmentQr = appointmentQr;
     this.qrRecovery = qrRecovery;
     this.qrEnabled = qrEnabled;
+    this.directSupervisorCompletionEnabled = directSupervisorCompletionEnabled;
+  }
+
+  public WashSupervisionQueryService(LocalAuthorizationService authorization,
+      ProjectionReadinessService readiness, WashSupervisionQueryPort projections,
+      WashStudentQueryPort studentProjections, Clock clock, AppointmentQrReadPort appointmentQr,
+      AppointmentQrRecoveryService qrRecovery, boolean qrEnabled) {
+    this(authorization, readiness, projections, studentProjections, clock, appointmentQr,
+        qrRecovery, qrEnabled, false);
   }
 
   public WashSupervisionQueryService(LocalAuthorizationService authorization,
       ProjectionReadinessService readiness, WashSupervisionQueryPort projections,
       WashStudentQueryPort studentProjections, Clock clock) {
-    this(authorization, readiness, projections, studentProjections, clock, null, null, false);
+    this(authorization, readiness, projections, studentProjections, clock, null, null, false, false);
   }
 
   public SupervisorHomeResponse home() {
@@ -243,7 +255,8 @@ public class WashSupervisionQueryService {
         value.executionStatus(), value.executionVersion(), value.executionVersion(), value.arrivedAt(),
         value.rejectionReason(), value.exitSubmittedAt(), submitted, value.completedAt(), completed,
         active, last);
-    return new SupervisorExecutionDetailResponse(value.serviceDate(), student, appointment, execution);
+    return new SupervisorExecutionDetailResponse(value.serviceDate(), canComplete(value.executionStatus(), active),
+        student, appointment, execution);
   }
 
   private PendingReassignmentResponse compose(WashSupervisionQueryPort.PendingReassignment value) {
@@ -297,7 +310,14 @@ public class WashSupervisionQueryService {
             lookupResource(value.tankId(), value.tankCode(), value.tankName()));
     SupervisorStudent student = new SupervisorStudent(value.studentAccountId(), displayName(value),
         value.studentNumber(), value.currentSemester());
-    return new SupervisorLookupResponse(serviceDate, action, student, appointment, execution, assignment);
+    return new SupervisorLookupResponse(serviceDate, action,
+        canComplete(value.executionStatus(), assignment), student, appointment, execution, assignment);
+  }
+
+  private boolean canComplete(String executionStatus, ActiveResourceAssignment activeAssignment) {
+    if (activeAssignment == null) return false;
+    if ("EXIT_SUBMITTED".equals(executionStatus)) return true;
+    return directSupervisorCompletionEnabled && "IN_PROGRESS".equals(executionStatus);
   }
 
   private boolean isActive(WashSupervisionQueryPort.LookupCandidate value) {

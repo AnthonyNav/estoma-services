@@ -433,6 +433,121 @@ class ProjectionEventRuntimePostgresIT {
   }
 
   @Test
+  void directCompletedV1AfterStartedKeepsSubmittedMaterialsNullAndReleasesTheLastAssignment() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-23T20:00:00Z");
+    runtime.dispatch(event("WashResourceAssigned", "wash-execution", UUID.randomUUID(), executionId, 5,
+        Map.of("resourceAssignmentId", assignmentId.toString(), "washExecutionId", executionId.toString(),
+            "appointmentId", appointmentId.toString(), "appointmentTimeSlotId", slotId.toString(),
+            "cabinId", cabinId.toString(), "tankId", tankId.toString(), "assignmentType", "INITIAL",
+            "assignedAt", completedAt.minusSeconds(600).toString())));
+    runtime.dispatch(event("WashExecutionStarted", "wash-execution", UUID.randomUUID(), executionId, 5,
+        Map.of("washExecutionId", executionId.toString(), "appointmentId", appointmentId.toString(),
+            "executionStatus", "IN_PROGRESS", "executionVersion", 5, "appointmentType", "NORMAL",
+            "appointmentTimeSlotId", slotId.toString(), "resourceAssignmentId", assignmentId.toString(),
+            "cabinId", cabinId.toString(), "tankId", tankId.toString(),
+            "startedAt", completedAt.minusSeconds(600).toString())));
+
+    EventEnvelope completed = envelope(UUID.randomUUID(), executionId, 6,
+        completionPayload(executionId, appointmentId, completedAt, 5));
+    assertThat(dispatcher.dispatch(completed))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    assertThat(dispatcher.dispatch(completed))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    var execution = jdbc.sql("""
+        SELECT status, exit_submitted_at, completed_at,
+               submitted_package_count, submitted_green_paper_cassette_8_count,
+               submitted_green_paper_cassette_10_count, submitted_witness_tape_portion_count,
+               final_package_count, final_green_paper_cassette_8_count,
+               final_green_paper_cassette_10_count, final_witness_tape_portion_count,
+               execution_version
+        FROM wash_execution_read_model WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(execution.get("status")).isEqualTo("COMPLETED");
+    assertThat(execution.get("exit_submitted_at")).isNull();
+    assertThat(execution.get("submitted_package_count")).isNull();
+    assertThat(execution.get("submitted_green_paper_cassette_8_count")).isNull();
+    assertThat(execution.get("submitted_green_paper_cassette_10_count")).isNull();
+    assertThat(execution.get("submitted_witness_tape_portion_count")).isNull();
+    assertThat(((java.sql.Timestamp) execution.get("completed_at")).toInstant()).isEqualTo(completedAt);
+    assertThat(execution.get("final_package_count")).isEqualTo(5);
+    assertThat(execution.get("final_green_paper_cassette_8_count")).isEqualTo(1);
+    assertThat(execution.get("final_green_paper_cassette_10_count")).isEqualTo(2);
+    assertThat(execution.get("final_witness_tape_portion_count")).isEqualTo(3);
+    assertThat(execution.get("execution_version")).isEqualTo(6L);
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query().singleRow();
+    assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(completedAt);
+    assertThat(assignment.get("source_version")).isEqualTo(6L);
+    assertThat(jdbc.sql("""
+        SELECT count(*) FROM wash_resource_assignment_read_model
+        WHERE wash_execution_id = :executionId AND released_at IS NULL
+        """).param("executionId", executionId).query(Long.class).single()).isZero();
+
+  }
+
+  @Test
+  void delayedReviewedExitV1BackfillsOriginalsWithoutChangingCompletedStateFinalsOrRelease() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = seedPendingExecutionWithAssignment(executionId, 4);
+    UUID appointmentId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    Instant completedAt = Instant.parse("2026-08-23T20:00:00Z");
+    assertThat(runtime.dispatch(event("WashExecutionStarted", "wash-execution", UUID.randomUUID(),
+        executionId, 4, Map.of("washExecutionId", executionId.toString(),
+            "appointmentId", appointmentId.toString(), "executionStatus", "IN_PROGRESS",
+            "executionVersion", 4, "appointmentType", "NORMAL",
+            "appointmentTimeSlotId", slotId.toString(),
+            "resourceAssignmentId", assignmentId.toString(), "cabinId", cabinId.toString(),
+            "tankId", tankId.toString(), "startedAt", completedAt.minusSeconds(600).toString()))))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+
+    assertThat(dispatcher.dispatch(envelope(UUID.randomUUID(), executionId, 6,
+        completionPayload(executionId, appointmentId, completedAt, 5))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    Instant submittedAt = completedAt.minusSeconds(60);
+    assertThat(dispatcher.dispatch(exitSubmittedEnvelope(
+        UUID.randomUUID(), executionId, appointmentId, 5, submittedAt)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    var projected = jdbc.sql("""
+        SELECT status, exit_submitted_at, completed_at, submitted_package_count,
+               submitted_green_paper_cassette_8_count,
+               submitted_green_paper_cassette_10_count,
+               submitted_witness_tape_portion_count,
+               final_package_count, final_exit_version, execution_version
+        FROM wash_execution_read_model WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(projected.get("status")).isEqualTo("COMPLETED");
+    assertThat(((java.sql.Timestamp) projected.get("exit_submitted_at")).toInstant())
+        .isEqualTo(submittedAt);
+    assertThat(projected.get("submitted_package_count")).isEqualTo(1);
+    assertThat(projected.get("submitted_green_paper_cassette_8_count")).isEqualTo(2);
+    assertThat(projected.get("submitted_green_paper_cassette_10_count")).isEqualTo(3);
+    assertThat(projected.get("submitted_witness_tape_portion_count")).isEqualTo(4);
+    assertThat(((java.sql.Timestamp) projected.get("completed_at")).toInstant()).isEqualTo(completedAt);
+    assertThat(projected.get("final_package_count")).isEqualTo(5);
+    assertThat(projected.get("final_exit_version")).isEqualTo(6L);
+    assertThat(projected.get("execution_version")).isEqualTo(6L);
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query().singleRow();
+    assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(completedAt);
+    assertThat(assignment.get("source_version")).isEqualTo(6L);
+  }
+
+  @Test
   void originalRedeliveryBackfillsACompletedRowWhoseInboxEntryPredatesFinalProjection() {
     UUID executionId = UUID.randomUUID();
     UUID messageId = UUID.randomUUID();
@@ -733,10 +848,18 @@ class ProjectionEventRuntimePostgresIT {
   }
 
   private static Map<String, Object> completionPayload(UUID executionId, Instant completedAt, int packages) {
+    return completionPayload(executionId, UUID.randomUUID(), completedAt, packages);
+  }
+
+  private static Map<String, Object> completionPayload(
+      UUID executionId, UUID appointmentId, Instant completedAt, int packages) {
     Map<String, Object> payload = new HashMap<>();
     payload.put("washExecutionId", executionId.toString());
+    payload.put("appointmentId", appointmentId.toString());
+    payload.put("appointmentType", "NORMAL");
     payload.put("executionStatus", "COMPLETED");
     payload.put("executionVersion", 6);
+    payload.put("completedByAccountId", UUID.randomUUID().toString());
     payload.put("completedAt", completedAt.toString());
     payload.put("finalPackageCount", packages);
     payload.put("finalGreenPaperCassette8Count", 1);
@@ -750,6 +873,25 @@ class ProjectionEventRuntimePostgresIT {
     return new EventEnvelope(messageId, "WashExecutionCompleted", 1, MessageKind.EVENT,
         "wash-execution", Instant.parse("2026-08-23T20:00:00Z"), UUID.randomUUID(), UUID.randomUUID(),
         null, null, executionId, version, ActorContext.anonymous(),
+        JsonMapper.builder().findAndAddModules().build().valueToTree(payload));
+  }
+
+  private static EventEnvelope exitSubmittedEnvelope(
+      UUID messageId, UUID executionId, UUID appointmentId, int version, Instant submittedAt) {
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("washExecutionId", executionId.toString());
+    payload.put("appointmentId", appointmentId.toString());
+    payload.put("executionStatus", "EXIT_SUBMITTED");
+    payload.put("executionVersion", version);
+    payload.put("submittedAt", submittedAt.toString());
+    payload.put("submittedByStudentAccountId", UUID.randomUUID().toString());
+    payload.put("packageCount", 1);
+    payload.put("greenPaperCassette8Count", 2);
+    payload.put("greenPaperCassette10Count", 3);
+    payload.put("witnessTapePortionCount", 4);
+    return new EventEnvelope(messageId, "WashExitSubmitted", 1, MessageKind.EVENT,
+        "wash-execution", submittedAt, UUID.randomUUID(), UUID.randomUUID(), null, null,
+        executionId, version, ActorContext.anonymous(),
         JsonMapper.builder().findAndAddModules().build().valueToTree(payload));
   }
 

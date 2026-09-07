@@ -2,6 +2,18 @@
 
 Spring Boot service that provides the client-facing API and composition boundary for Estoma applications.
 
+## Direct supervisor completion capability
+
+Supervisor lookup and exact execution reads expose the required `canComplete` boolean. Existing
+`EXIT_SUBMITTED` executions with an active assignment remain completable. Direct completion from
+`IN_PROGRESS` is advertised only when `BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED=true`; the
+flag defaults to `false` and must only be enabled after the Wash Execution owner capability is
+enabled on every owner instance. The completion POST remains an asynchronous owner command and
+does not gate on a potentially stale BFF projection.
+
+Both student exit and supervisor completion requests require all four material counters as JSON
+int32 integers from 0 through 2147483647, with at least one positive value.
+
 ## Reassignment candidate snapshots
 
 `GET /api/v1/wash/supervision/pending-reassignments/{washExecutionId}/candidates` is a
