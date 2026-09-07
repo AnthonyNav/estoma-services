@@ -203,8 +203,8 @@ public final class WashExecutionCommandService {
 
     if (c.decision() == EntryDecision.REJECTED) {
       execution.rejectEntry();
-      validations.save(validation);
       executions.save(execution, c.expectedVersion());
+      validations.save(validation);
       Map<String, Object> payload = entryValidationPayload(execution, validation);
       payload.put("rejectionReason", validation.rejectionReason());
       return change(execution, data("status", execution.status().name()),
@@ -225,8 +225,8 @@ public final class WashExecutionCommandService {
 
     if (candidate.isEmpty()) {
       execution.authorizeWithoutResource();
-      validations.save(validation);
       executions.save(execution, c.expectedVersion());
+      validations.save(validation);
       Map<String, Object> authorized = entryValidationPayload(execution, validation);
       Map<String, Object> pending = executionBase(execution);
       pending.put("appointmentType", execution.appointmentType().name());
@@ -241,8 +241,8 @@ public final class WashExecutionCommandService {
         candidate.get().cabinId(), candidate.get().tankId(), AssignmentType.INITIAL, null, c.decidedAt());
     execution.start(c.decidedAt());
 
-    validations.save(validation);
     executions.save(execution, c.expectedVersion());
+    validations.save(validation);
     assignments.save(assignment);
 
     Map<String, Object> authorized = entryValidationPayload(execution, validation);

@@ -9,6 +9,8 @@ import com.estoma.washexecution.application.command.CommandOutcome;
 import com.estoma.washexecution.application.command.CommandRequest;
 import com.estoma.washexecution.application.command.WashExecutionCommand;
 import com.estoma.washexecution.application.port.CleaningPeriodRepository;
+import com.estoma.washexecution.application.port.EntryValidationRepository;
+import com.estoma.washexecution.application.port.OptimisticConcurrencyException;
 import com.estoma.washexecution.application.port.ResourceAssignmentRepository;
 import com.estoma.washexecution.application.port.ResourceUnavailabilityRepository;
 import com.estoma.washexecution.application.port.WashExecutionCommandUseCase;
@@ -25,6 +27,7 @@ import com.estoma.washexecution.domain.execution.UnavailabilityCauseType;
 import com.estoma.washexecution.domain.execution.WashExecution;
 import com.estoma.washexecution.domain.execution.WashExecutionStatus;
 import com.estoma.washexecution.infrastructure.persistence.jdbc.JdbcTemporal;
+import com.estoma.washexecution.infrastructure.persistence.jdbc.JdbcEntryValidationRepository;
 import com.estoma.washexecution.infrastructure.messaging.inbound.TransientFailureClassifier;
 import com.estoma.washexecution.testsupport.AbstractPostgresIT;
 import java.time.Instant;
@@ -35,6 +38,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,12 +64,78 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
   @Autowired CleaningPeriodRepository cleanings;
   @Autowired PlatformTransactionManager transactionManager;
   @Autowired DecisionClock decisionClock;
+  @Autowired CoordinatedEntryValidationRepository coordinatedValidations;
 
   @TestConfiguration
   static class ClockConfiguration {
     @Bean
     @Primary
     DecisionClock decisionClock() { return new DecisionClock(); }
+
+    @Bean
+    @Primary
+    CoordinatedEntryValidationRepository coordinatedEntryValidationRepository(
+        JdbcEntryValidationRepository delegate) {
+      return new CoordinatedEntryValidationRepository(delegate);
+    }
+  }
+
+  static final class CoordinatedEntryValidationRepository implements EntryValidationRepository {
+    private final EntryValidationRepository delegate;
+    private volatile UUID coordinatedExecutionId;
+    private volatile CountDownLatch bothRead;
+    private volatile CountDownLatch releaseLoser;
+
+    CoordinatedEntryValidationRepository(EntryValidationRepository delegate) {
+      this.delegate = delegate;
+    }
+
+    void coordinate(UUID executionId) {
+      coordinatedExecutionId = executionId;
+      bothRead = new CountDownLatch(2);
+      releaseLoser = new CountDownLatch(1);
+    }
+
+    void awaitBothRead() throws InterruptedException {
+      if (!bothRead.await(5, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("entry decisions did not both read the initial state");
+      }
+    }
+
+    void releaseLoser() { releaseLoser.countDown(); }
+
+    void clear() {
+      coordinatedExecutionId = null;
+      if (releaseLoser != null) releaseLoser.countDown();
+    }
+
+    @Override
+    public java.util.Optional<com.estoma.washexecution.domain.execution.EntryValidation>
+        findByExecutionId(UUID executionId) {
+      var result = delegate.findByExecutionId(executionId);
+      CountDownLatch reads = bothRead;
+      CountDownLatch loser = releaseLoser;
+      if (executionId.equals(coordinatedExecutionId) && result.isEmpty() && reads != null && loser != null) {
+        reads.countDown();
+        await(reads);
+        if (Thread.currentThread().getName().contains("entry-loser")) await(loser);
+      }
+      return result;
+    }
+
+    @Override
+    public void save(com.estoma.washexecution.domain.execution.EntryValidation validation) {
+      delegate.save(validation);
+    }
+
+    private static void await(CountDownLatch latch) {
+      try {
+        if (!latch.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("entry race timed out");
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException(interrupted);
+      }
+    }
   }
 
   static final class DecisionClock extends Clock {
@@ -209,6 +279,75 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
         "SELECT count(*) FROM outbox_messages WHERE message_type='WashEntryRejected' "
             + "AND aggregate_id=?",
         Integer.class, executionId)).isEqualTo(1);
+  }
+
+  @Test
+  void concurrentApprovalAndRejectionRollBackThenRedeliverLoserAsVersionConflict() throws Exception {
+    UUID rejectingSupervisor = UUID.randomUUID();
+    UUID approvingSupervisor = UUID.randomUUID();
+    authorize(rejectingSupervisor, "SUPERVISOR_LAVADO");
+    authorize(approvingSupervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(15 * 60L));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.NORMAL, "SCHEDULED");
+    UUID cabin = UUID.randomUUID();
+    UUID tank = UUID.randomUUID();
+    seedCabin(cabin, "C-ENTRY-RACE", "NORMAL");
+    seedTank(tank, cabin, "T-ENTRY-RACE", 1);
+    UUID executionId = UUID.randomUUID();
+    assertThat(dispatch(rejectingSupervisor, "arrival-entry-race",
+        new WashExecutionCommand.RegisterWashArrival(executionId, appointment, BASE)).status())
+        .isEqualTo(CommandOutcome.Status.SUCCEEDED);
+
+    CommandRequest winner = new CommandRequest(metadata(rejectingSupervisor, "reject-entry-race"),
+        new WashExecutionCommand.DecideWashEntry(executionId, false, false, EntryDecision.REJECTED,
+            "Identity mismatch", rejectingSupervisor, BASE.plusSeconds(60), 1));
+    CommandRequest loser = new CommandRequest(metadata(approvingSupervisor, "approve-entry-race"),
+        new WashExecutionCommand.DecideWashEntry(executionId, true, true, EntryDecision.AUTHORIZED,
+            null, approvingSupervisor, BASE.plusSeconds(60), 1));
+
+    assertConcurrentLoserRedeliversAsVersionConflict(executionId, winner, loser);
+
+    assertThat(executions.findById(executionId).orElseThrow().status())
+        .isEqualTo(WashExecutionStatus.ENTRY_REJECTED);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM entry_validations WHERE wash_execution_id=?", Integer.class, executionId))
+        .isEqualTo(1);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM resource_assignments WHERE wash_execution_id=?", Integer.class, executionId))
+        .isZero();
+    assertThat(outboxTypes().stream().filter("WashEntryRejected"::equals).count()).isEqualTo(1);
+    assertThat(outboxTypes()).doesNotContain(
+        "WashEntryAuthorized", "WashResourceAssigned", "WashExecutionStarted");
+  }
+
+  @Test
+  void concurrentRejectionsRollBackThenRedeliverLoserAsVersionConflict() throws Exception {
+    UUID firstSupervisor = UUID.randomUUID();
+    UUID secondSupervisor = UUID.randomUUID();
+    authorize(firstSupervisor, "SUPERVISOR_LAVADO");
+    authorize(secondSupervisor, "SUPERVISOR_LAVADO");
+    UUID slot = seedSlot(UUID.randomUUID(), BASE.plusSeconds(15 * 60L));
+    UUID appointment = seedAppointment(UUID.randomUUID(), slot, AppointmentType.NORMAL, "SCHEDULED");
+    UUID executionId = UUID.randomUUID();
+    assertThat(dispatch(firstSupervisor, "arrival-rejection-race",
+        new WashExecutionCommand.RegisterWashArrival(executionId, appointment, BASE)).status())
+        .isEqualTo(CommandOutcome.Status.SUCCEEDED);
+
+    CommandRequest winner = new CommandRequest(metadata(firstSupervisor, "first-rejection-race"),
+        new WashExecutionCommand.DecideWashEntry(executionId, false, false, EntryDecision.REJECTED,
+            "First rejection", firstSupervisor, BASE.plusSeconds(60), 1));
+    CommandRequest loser = new CommandRequest(metadata(secondSupervisor, "second-rejection-race"),
+        new WashExecutionCommand.DecideWashEntry(executionId, false, false, EntryDecision.REJECTED,
+            "Second rejection", secondSupervisor, BASE.plusSeconds(60), 1));
+
+    assertConcurrentLoserRedeliversAsVersionConflict(executionId, winner, loser);
+
+    assertThat(executions.findById(executionId).orElseThrow().status())
+        .isEqualTo(WashExecutionStatus.ENTRY_REJECTED);
+    assertThat(jdbc.queryForObject(
+        "SELECT count(*) FROM entry_validations WHERE wash_execution_id=?", Integer.class, executionId))
+        .isEqualTo(1);
+    assertThat(outboxTypes().stream().filter("WashEntryRejected"::equals).count()).isEqualTo(1);
   }
 
   @Test
@@ -707,6 +846,35 @@ class WashExecutionCommandIT extends AbstractPostgresIT {
 
   private CommandOutcome dispatch(UUID actor, String key, WashExecutionCommand command) {
     return commands.dispatch(new CommandRequest(metadata(actor, key), command));
+  }
+
+  private void assertConcurrentLoserRedeliversAsVersionConflict(UUID executionId,
+      CommandRequest winnerRequest, CommandRequest loserRequest) throws Exception {
+    coordinatedValidations.coordinate(executionId);
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var winner = executor.submit(() -> {
+        Thread.currentThread().setName("entry-winner");
+        return commands.dispatch(winnerRequest);
+      });
+      var loser = executor.submit(() -> {
+        Thread.currentThread().setName("entry-loser");
+        return commands.dispatch(loserRequest);
+      });
+      coordinatedValidations.awaitBothRead();
+      assertThat(winner.get(10, TimeUnit.SECONDS).status()).isEqualTo(CommandOutcome.Status.SUCCEEDED);
+      coordinatedValidations.releaseLoser();
+      assertThatThrownBy(() -> loser.get(10, TimeUnit.SECONDS))
+          .isInstanceOf(ExecutionException.class)
+          .hasCauseInstanceOf(OptimisticConcurrencyException.class)
+          .satisfies(error -> assertThat(new TransientFailureClassifier().isTransient(error)).isTrue());
+    } finally {
+      coordinatedValidations.clear();
+    }
+
+    CommandOutcome redelivered = commands.dispatch(loserRequest);
+    assertThat(redelivered.status()).isEqualTo(CommandOutcome.Status.REJECTED);
+    assertThat(redelivered.errorCode()).isEqualTo("VERSION_CONFLICT");
+    assertThat(executions.findById(executionId).orElseThrow().version()).isEqualTo(2);
   }
 
   private CommandMetadata metadata(UUID actor, String key) {
