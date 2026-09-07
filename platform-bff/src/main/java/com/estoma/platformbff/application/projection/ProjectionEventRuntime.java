@@ -74,6 +74,17 @@ public class ProjectionEventRuntime {
         || !contract.allowedFields().containsAll(event.payload().keySet())) {
       throw new IllegalArgumentException("projection payload shape is not registered");
     }
+    if ("wash-execution".equals(event.producer())
+        && "WashEntryRejected".equals(event.messageType())
+        && event.messageVersion() == 2) {
+      boolean hasIdentity = event.payload().containsKey("identityConfirmed");
+      boolean hasRequirements = event.payload().containsKey("requirementsSatisfied");
+      if (hasIdentity != hasRequirements
+          || (hasIdentity && (!(event.payload().get("identityConfirmed") instanceof Boolean)
+              || !(event.payload().get("requirementsSatisfied") instanceof Boolean)))) {
+        throw new IllegalArgumentException("V2 entry checks must be an absent or boolean pair");
+      }
+    }
     if ("appointments".equals(event.producer())
         && "AppointmentScheduled".equals(event.messageType())
         && event.payload().containsKey("qrRepresentation")) {
@@ -248,15 +259,23 @@ public class ProjectionEventRuntime {
   }
 
   private static void registerWashExecution(Map<EventKey, Contract> entries) {
+    Set<String> executionFields = Set.of("washExecutionId", "appointmentId", "appointmentTimeSlotId",
+        "executionStatus", "appointmentType", "resourceAssignmentId", "cabinId", "tankId",
+        "executionVersion", "entryValidationId", "identityConfirmed", "requirementsSatisfied",
+        "decidedByAccountId", "decidedAt", "arrivedAt", "authorizedAt", "startedAt", "submittedAt",
+        "completedAt", "cancelledAt", "cancellationType", "cancellationSubreason",
+        "cancellationReason", "rejectionReason", "hadActiveAssignment", "reason",
+        "cancelledByAccountId", "completedByAccountId", "submittedByStudentAccountId",
+        "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count",
+        "witnessTapePortionCount", "finalPackageCount", "finalGreenPaperCassette8Count",
+        "finalGreenPaperCassette10Count", "finalWitnessTapePortionCount");
     for (String type : Set.of("WashArrivalRegistered", "WashEntryAuthorized", "WashEntryRejected", "WashExecutionStarted",
         "WashExecutionPendingReassignment", "WashExecutionCompleted", "WashExecutionCancelled", "WashExitSubmitted")) {
       register(entries, "wash-execution", type, Set.of("washExecutionId"),
-          Set.of("washExecutionId", "appointmentId", "appointmentTimeSlotId", "executionStatus", "appointmentType", "resourceAssignmentId", "cabinId", "tankId",
-              "executionVersion", "entryValidationId", "identityConfirmed", "requirementsSatisfied", "decidedByAccountId", "decidedAt",
-              "arrivedAt", "authorizedAt", "startedAt", "submittedAt", "completedAt", "cancelledAt", "cancellationType", "cancellationSubreason", "cancellationReason", "rejectionReason", "hadActiveAssignment", "reason",
-              "cancelledByAccountId", "completedByAccountId", "submittedByStudentAccountId", "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount",
-              "finalPackageCount", "finalGreenPaperCassette8Count", "finalGreenPaperCassette10Count", "finalWitnessTapePortionCount"), true);
+          executionFields, true);
     }
+    register(entries, "wash-execution", "WashEntryRejected", 2, Set.of("washExecutionId"),
+        executionFields, true);
     register(entries, "wash-execution", "WashResourceAssigned",
         Set.of("resourceAssignmentId", "washExecutionId", "cabinId", "tankId", "assignmentType", "assignedAt"),
         Set.of("resourceAssignmentId", "washExecutionId", "appointmentId", "appointmentTimeSlotId", "cabinId", "tankId", "assignmentType", "assignedByAccountId", "assignedAt"), true);
@@ -277,7 +296,12 @@ public class ProjectionEventRuntime {
 
   private static void register(Map<EventKey, Contract> entries, String producer, String type,
       Set<String> required, Set<String> allowed, boolean aggregateRequired) {
-    entries.put(new EventKey(producer, type, 1),
+    register(entries, producer, type, 1, required, allowed, aggregateRequired);
+  }
+
+  private static void register(Map<EventKey, Contract> entries, String producer, String type,
+      int version, Set<String> required, Set<String> allowed, boolean aggregateRequired) {
+    entries.put(new EventKey(producer, type, version),
         new Contract(Set.copyOf(required), Set.copyOf(allowed), aggregateRequired, aggregateRequired));
   }
 

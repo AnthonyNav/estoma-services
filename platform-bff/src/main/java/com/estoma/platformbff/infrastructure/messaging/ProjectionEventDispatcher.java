@@ -47,6 +47,7 @@ public class ProjectionEventDispatcher {
       return DispatchOutcome.UNTRUSTED;
     }
     try {
+      validateWashEntryRejectedV2(event);
       SubmittedExitMaterials submitted = submittedExitMaterials(event);
       CompletedExitMaterials completed = completedExitMaterials(event);
       var outcome = runtime.dispatch(new ProjectionEvent(
@@ -70,6 +71,20 @@ public class ProjectionEventDispatcher {
       };
     } catch (IllegalArgumentException invalid) {
       return DispatchOutcome.UNTRUSTED;
+    }
+  }
+
+  private static void validateWashEntryRejectedV2(EventEnvelope event) {
+    if (!"wash-execution".equals(event.producer())
+        || !"WashEntryRejected".equals(event.messageType())
+        || event.messageVersion() != 2) return;
+    JsonNode payload = event.payload();
+    boolean hasIdentity = payload.has("identityConfirmed");
+    boolean hasRequirements = payload.has("requirementsSatisfied");
+    if (hasIdentity != hasRequirements
+        || (hasIdentity && (!payload.path("identityConfirmed").isBoolean()
+            || !payload.path("requirementsSatisfied").isBoolean()))) {
+      throw new IllegalArgumentException("V2 entry checks must be an absent or boolean pair");
     }
   }
 

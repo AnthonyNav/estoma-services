@@ -266,6 +266,102 @@ class ProjectionEventRuntimePostgresIT {
   }
 
   @Test
+  void washEntryRejectedV2WithoutChecksProjectsReasonAndStatusFromAccountActor() {
+    UUID executionId = UUID.randomUUID();
+    UUID messageId = UUID.randomUUID();
+    String reason = "Motivo libre sin clasificación";
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("washExecutionId", executionId.toString());
+    payload.put("executionStatus", "ENTRY_REJECTED");
+    payload.put("executionVersion", 2);
+    payload.put("rejectionReason", reason);
+    payload.put("decidedByAccountId", UUID.randomUUID().toString());
+    payload.put("decidedAt", now());
+
+    assertThat(dispatcher.dispatch(rejectionEnvelope(messageId, "WashEntryRejected", 2,
+        "wash-execution", MessageKind.EVENT, executionId, payload)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    var projected = jdbc.sql("""
+        SELECT status, rejection_reason, execution_version
+        FROM wash_execution_read_model WHERE wash_execution_id = :id
+        """).param("id", executionId).query().singleRow();
+    assertThat(projected.get("status")).isEqualTo("ENTRY_REJECTED");
+    assertThat(projected.get("rejection_reason")).isEqualTo(reason);
+    assertThat(projected.get("execution_version")).isEqualTo(2L);
+    assertThat(jdbc.sql("""
+        SELECT count(*) FROM inbox_messages
+        WHERE message_id = :id AND message_version = 2 AND producer = 'wash-execution'
+        """).param("id", messageId).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
+  void washEntryRejectedV1AndClassifiedV2WithDeclaredChecksRemainSupported() {
+    UUID v1ExecutionId = UUID.randomUUID();
+    UUID v2ExecutionId = UUID.randomUUID();
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("washExecutionId", v1ExecutionId.toString());
+    payload.put("executionStatus", "ENTRY_REJECTED");
+    payload.put("rejectionReason", "Identidad no confirmada");
+    payload.put("identityConfirmed", false);
+    payload.put("requirementsSatisfied", true);
+
+    assertThat(dispatcher.dispatch(rejectionEnvelope(UUID.randomUUID(), "WashEntryRejected", 1,
+        "wash-execution", MessageKind.EVENT, v1ExecutionId, payload)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    payload.put("washExecutionId", v2ExecutionId.toString());
+    assertThat(dispatcher.dispatch(rejectionEnvelope(UUID.randomUUID(), "WashEntryRejected", 2,
+        "wash-execution", MessageKind.EVENT, v2ExecutionId, payload)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    assertThat(jdbc.sql("""
+        SELECT status, rejection_reason FROM wash_execution_read_model
+        WHERE wash_execution_id IN (:v1Id, :v2Id) ORDER BY wash_execution_id
+        """).param("v1Id", v1ExecutionId).param("v2Id", v2ExecutionId)
+        .query((rs, row) -> rs.getString("status") + ":" + rs.getString("rejection_reason"))
+        .list()).containsExactly(
+            "ENTRY_REJECTED:Identidad no confirmada",
+            "ENTRY_REJECTED:Identidad no confirmada");
+  }
+
+  @Test
+  void v2RegistrationDoesNotBroadenProducerTypeKindOrPayloadTrust() {
+    UUID executionId = UUID.randomUUID();
+    Map<String, Object> valid = new HashMap<>();
+    valid.put("washExecutionId", executionId.toString());
+    valid.put("rejectionReason", "Motivo libre");
+    Map<String, Object> partialChecks = new HashMap<>(valid);
+    partialChecks.put("identityConfirmed", false);
+    Map<String, Object> nullChecks = new HashMap<>(valid);
+    nullChecks.put("identityConfirmed", null);
+    nullChecks.put("requirementsSatisfied", null);
+    Map<String, Object> nonBooleanChecks = new HashMap<>(valid);
+    nonBooleanChecks.put("identityConfirmed", "false");
+    nonBooleanChecks.put("requirementsSatisfied", "false");
+    Map<String, Object> unexpected = new HashMap<>(valid);
+    unexpected.put("rawToken", "must-not-cross-the-trust-boundary");
+
+    assertThat(dispatcher.dispatch(rejectionEnvelope(UUID.randomUUID(), "WashEntryRejected", 2,
+        "intruder", MessageKind.EVENT, executionId, valid)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    assertThat(dispatcher.dispatch(rejectionEnvelope(UUID.randomUUID(), "WashEntryAuthorized", 2,
+        "wash-execution", MessageKind.EVENT, executionId, valid)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    assertThat(dispatcher.dispatch(rejectionEnvelope(UUID.randomUUID(), "WashEntryRejected", 2,
+        "wash-execution", MessageKind.COMMAND, executionId, valid)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    for (Map<String, Object> invalid : java.util.List.of(
+        partialChecks, nullChecks, nonBooleanChecks, unexpected)) {
+      assertThat(dispatcher.dispatch(rejectionEnvelope(UUID.randomUUID(), "WashEntryRejected", 2,
+          "wash-execution", MessageKind.EVENT, executionId, invalid)))
+          .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    }
+
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages").query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM wash_execution_read_model").query(Long.class).single())
+        .isZero();
+  }
+
+  @Test
   void completedEventProjectsFinalMaterialsAndDuplicateMessageCannotRewriteThem() {
     UUID executionId = UUID.randomUUID();
     UUID messageId = UUID.randomUUID();
@@ -418,6 +514,15 @@ class ProjectionEventRuntimePostgresIT {
     return new EventEnvelope(messageId, "WashExecutionCompleted", 1, MessageKind.EVENT,
         "wash-execution", Instant.parse("2026-08-23T20:00:00Z"), UUID.randomUUID(), UUID.randomUUID(),
         null, null, executionId, version, ActorContext.anonymous(),
+        JsonMapper.builder().findAndAddModules().build().valueToTree(payload));
+  }
+
+  private static EventEnvelope rejectionEnvelope(UUID messageId, String messageType,
+      int messageVersion, String producer, MessageKind messageKind, UUID executionId,
+      Map<String, Object> payload) {
+    return new EventEnvelope(messageId, messageType, messageVersion, messageKind, producer,
+        Instant.parse(now()), UUID.randomUUID(), UUID.randomUUID(), null, null, executionId, 2,
+        ActorContext.account(UUID.randomUUID(), "SYSTEM_PERSONNEL", "LAVADO_ULTRASONICO"),
         JsonMapper.builder().findAndAddModules().build().valueToTree(payload));
   }
 
