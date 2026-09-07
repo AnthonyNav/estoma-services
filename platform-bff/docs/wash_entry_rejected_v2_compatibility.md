@@ -5,7 +5,11 @@ This stage prepares the BFF projection consumer before the Wash Execution owner 
 
 The trust registry accepts V2 only for an `EVENT` envelope whose producer is `wash-execution` and
 whose type is `WashEntryRejected`. All other V2 producer/type combinations remain untrusted. The
-payload uses the existing Wash Execution event allowlist and still requires `washExecutionId`.
+payload uses the existing Wash Execution event allowlist and requires the canonical fields other
+than the omitted checks: `washExecutionId`, `appointmentId`, `entryValidationId`, `rejectionReason`,
+`decidedByAccountId`, `decidedAt`, `executionStatus` and `executionVersion`. The reason must be a
+nonblank string, state must be `ENTRY_REJECTED`, identifiers and timestamp must parse, and execution
+identity/version must match the envelope. Explicit null fields are rejected before adaptation.
 
 V2 represents an unclassified rejection by omitting both `identityConfirmed` and
 `requirementsSatisfied`. A legacy classified pair remains compatible when both keys are present as

@@ -79,6 +79,9 @@ public class ProjectionEventDispatcher {
         || !"WashEntryRejected".equals(event.messageType())
         || event.messageVersion() != 2) return;
     JsonNode payload = event.payload();
+    if (payload.properties().stream().anyMatch(field -> field.getValue().isNull())) {
+      throw new IllegalArgumentException("V2 rejection payload must omit null fields");
+    }
     boolean hasIdentity = payload.has("identityConfirmed");
     boolean hasRequirements = payload.has("requirementsSatisfied");
     if (hasIdentity != hasRequirements

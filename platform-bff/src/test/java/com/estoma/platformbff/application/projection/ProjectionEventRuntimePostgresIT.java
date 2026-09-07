@@ -271,7 +271,7 @@ class ProjectionEventRuntimePostgresIT {
     UUID messageId = UUID.randomUUID();
     String reason = "Motivo libre sin clasificación";
     Map<String, Object> payload = new HashMap<>();
-    payload.put("washExecutionId", executionId.toString());
+    payload.putAll(validRejectionPayload(executionId));
     payload.put("executionStatus", "ENTRY_REJECTED");
     payload.put("executionVersion", 2);
     payload.put("rejectionReason", reason);
@@ -300,7 +300,7 @@ class ProjectionEventRuntimePostgresIT {
     UUID v1ExecutionId = UUID.randomUUID();
     UUID v2ExecutionId = UUID.randomUUID();
     Map<String, Object> payload = new HashMap<>();
-    payload.put("washExecutionId", v1ExecutionId.toString());
+    payload.putAll(validRejectionPayload(v1ExecutionId));
     payload.put("executionStatus", "ENTRY_REJECTED");
     payload.put("rejectionReason", "Identidad no confirmada");
     payload.put("identityConfirmed", false);
@@ -327,7 +327,7 @@ class ProjectionEventRuntimePostgresIT {
   void v2RegistrationDoesNotBroadenProducerTypeKindOrPayloadTrust() {
     UUID executionId = UUID.randomUUID();
     Map<String, Object> valid = new HashMap<>();
-    valid.put("washExecutionId", executionId.toString());
+    valid.putAll(validRejectionPayload(executionId));
     valid.put("rejectionReason", "Motivo libre");
     Map<String, Object> partialChecks = new HashMap<>(valid);
     partialChecks.put("identityConfirmed", false);
@@ -359,6 +359,54 @@ class ProjectionEventRuntimePostgresIT {
     assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages").query(Long.class).single()).isZero();
     assertThat(jdbc.sql("SELECT count(*) FROM wash_execution_read_model").query(Long.class).single())
         .isZero();
+  }
+
+  @Test
+  void rejectedV2MissingOrContradictoryRequiredContextCannotReachInbox() {
+    UUID executionId = UUID.randomUUID();
+    java.util.List<Map<String, Object>> invalidPayloads = new java.util.ArrayList<>();
+    for (String field : validRejectionPayload(executionId).keySet()) {
+      Map<String, Object> missing = validRejectionPayload(executionId);
+      missing.remove(field);
+      invalidPayloads.add(missing);
+      Map<String, Object> explicitNull = validRejectionPayload(executionId);
+      explicitNull.put(field, null);
+      invalidPayloads.add(explicitNull);
+    }
+    for (Object invalidReason : java.util.List.of("", "  ", 123)) {
+      Map<String, Object> invalid = validRejectionPayload(executionId);
+      invalid.put("rejectionReason", invalidReason);
+      invalidPayloads.add(invalid);
+    }
+    for (Map.Entry<String, Object> invalidField : Map.<String, Object>of(
+        "executionStatus", "IN_PROGRESS", "executionVersion", 3,
+        "decidedAt", "not-a-time", "appointmentId", "not-a-uuid",
+        "washExecutionId", UUID.randomUUID().toString()).entrySet()) {
+      Map<String, Object> invalid = validRejectionPayload(executionId);
+      invalid.put(invalidField.getKey(), invalidField.getValue());
+      invalidPayloads.add(invalid);
+    }
+    for (Map<String, Object> payload : invalidPayloads) {
+      assertThat(dispatcher.dispatch(rejectionEnvelope(UUID.randomUUID(), "WashEntryRejected", 2,
+          "wash-execution", MessageKind.EVENT, executionId, payload)))
+          .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    }
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages").query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM wash_execution_read_model").query(Long.class).single())
+        .isZero();
+  }
+
+  private static Map<String, Object> validRejectionPayload(UUID executionId) {
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("washExecutionId", executionId.toString());
+    payload.put("appointmentId", UUID.randomUUID().toString());
+    payload.put("entryValidationId", UUID.randomUUID().toString());
+    payload.put("rejectionReason", "Motivo libre");
+    payload.put("decidedByAccountId", UUID.randomUUID().toString());
+    payload.put("decidedAt", now());
+    payload.put("executionStatus", "ENTRY_REJECTED");
+    payload.put("executionVersion", 2);
+    return payload;
   }
 
   @Test

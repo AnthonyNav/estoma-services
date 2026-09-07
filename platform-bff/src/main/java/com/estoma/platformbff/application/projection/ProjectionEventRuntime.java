@@ -77,6 +77,34 @@ public class ProjectionEventRuntime {
     if ("wash-execution".equals(event.producer())
         && "WashEntryRejected".equals(event.messageType())
         && event.messageVersion() == 2) {
+      Map<String, Object> payload = event.payload();
+      if (!(payload.get("rejectionReason") instanceof String reason) || reason.isBlank()
+          || !"ENTRY_REJECTED".equals(payload.get("executionStatus"))) {
+        throw new IllegalArgumentException("V2 rejection requires a reason and ENTRY_REJECTED state");
+      }
+      for (String field : Set.of("washExecutionId", "appointmentId", "entryValidationId",
+          "decidedByAccountId")) {
+        if (!(payload.get(field) instanceof String id)) {
+          throw new IllegalArgumentException("V2 rejection identifier is required");
+        }
+        UUID parsed = UUID.fromString(id);
+        if ("washExecutionId".equals(field) && !parsed.equals(event.aggregateId())) {
+          throw new IllegalArgumentException("V2 rejection aggregate identity contradicts payload");
+        }
+      }
+      if (!(payload.get("decidedAt") instanceof String decidedAt)) {
+        throw new IllegalArgumentException("V2 rejection decision timestamp is required");
+      }
+      try {
+        Instant.parse(decidedAt);
+      } catch (java.time.DateTimeException invalidTime) {
+        throw new IllegalArgumentException("V2 rejection decision timestamp is invalid", invalidTime);
+      }
+      Object version = payload.get("executionVersion");
+      if (!(version instanceof Integer || version instanceof Long)
+          || ((Number) version).longValue() != event.aggregateVersion().longValue()) {
+        throw new IllegalArgumentException("V2 rejection execution version contradicts envelope");
+      }
       boolean hasIdentity = event.payload().containsKey("identityConfirmed");
       boolean hasRequirements = event.payload().containsKey("requirementsSatisfied");
       if (hasIdentity != hasRequirements
@@ -274,7 +302,9 @@ public class ProjectionEventRuntime {
       register(entries, "wash-execution", type, Set.of("washExecutionId"),
           executionFields, true);
     }
-    register(entries, "wash-execution", "WashEntryRejected", 2, Set.of("washExecutionId"),
+    register(entries, "wash-execution", "WashEntryRejected", 2,
+        Set.of("washExecutionId", "appointmentId", "entryValidationId", "rejectionReason",
+            "decidedByAccountId", "decidedAt", "executionStatus", "executionVersion"),
         executionFields, true);
     register(entries, "wash-execution", "WashResourceAssigned",
         Set.of("resourceAssignmentId", "washExecutionId", "cabinId", "tankId", "assignmentType", "assignedAt"),
