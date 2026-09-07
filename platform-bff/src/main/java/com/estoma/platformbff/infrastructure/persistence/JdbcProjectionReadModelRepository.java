@@ -740,7 +740,9 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   }
 
   private void execution(ProjectionReadModel.WashExecution v) {
-    if ("COMPLETED".equals(v.status())) lockWashExecution(v.washExecutionId());
+    if ("COMPLETED".equals(v.status()) || "CANCELLED".equals(v.status())) {
+      lockWashExecution(v.washExecutionId());
+    }
     jdbc.sql("""
         INSERT INTO wash_execution_read_model(wash_execution_id, appointment_id, appointment_type, status, arrived_at, authorized_at, started_at, exit_submitted_at, completed_at, cancelled_at, cancellation_type, rejection_reason, execution_version, updated_at)
         VALUES (:id, :appointmentId, :appointmentType, :status, :arrivedAt, :authorizedAt, :startedAt, :exitSubmittedAt, :completedAt, :cancelledAt, :cancellationType, :rejectionReason, :version, :updatedAt)
@@ -757,6 +759,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
         SELECT :id, :executionId, :appointmentId, :slotId, :cabinId, :tankId, :type, :assignedAt,
           COALESCE(:releasedAt, CASE
             WHEN e.status = 'COMPLETED' AND e.execution_version >= :version THEN e.completed_at
+            WHEN e.status = 'CANCELLED' AND e.execution_version >= :version THEN e.cancelled_at
             ELSE NULL
           END),
           :messageId, :version, :updatedAt

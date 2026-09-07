@@ -2,6 +2,7 @@ package com.estoma.platformbff.infrastructure.messaging;
 
 import com.estoma.platformbff.application.port.WashExitMaterialsProjectionPort;
 import com.estoma.platformbff.application.port.WashCompletionProjectionPort;
+import com.estoma.platformbff.application.port.WashCancellationProjectionPort;
 import com.estoma.platformbff.application.projection.ProjectionEvent;
 import com.estoma.platformbff.application.projection.ProjectionEventRuntime;
 import com.estoma.platformbff.contracts.messaging.EventEnvelope;
@@ -23,21 +24,25 @@ public class ProjectionEventDispatcher {
   private final ProjectionEventRuntime runtime;
   private final WashExitMaterialsProjectionPort exitMaterials;
   private final WashCompletionProjectionPort completion;
+  private final WashCancellationProjectionPort cancellation;
 
   @Autowired
   public ProjectionEventDispatcher(ProjectionEventRuntime runtime,
       WashExitMaterialsProjectionPort exitMaterials,
-      WashCompletionProjectionPort completion) {
+      WashCompletionProjectionPort completion,
+      WashCancellationProjectionPort cancellation) {
     this.runtime = runtime;
     this.exitMaterials = exitMaterials;
     this.completion = completion;
+    this.cancellation = cancellation;
   }
 
   /** Compatibility constructor for focused tests that do not exercise the PR5 material projection. */
   public ProjectionEventDispatcher(ProjectionEventRuntime runtime) {
     this(runtime,
         (executionId, packages, cassette8, cassette10, witnessTape, version, updatedAt) -> {},
-        (executionId, packages, cassette8, cassette10, witnessTape, version, completedAt) -> {});
+        (executionId, packages, cassette8, cassette10, witnessTape, version, completedAt) -> {},
+        (executionId, version, cancelledAt) -> {});
   }
 
   @Transactional
@@ -50,6 +55,7 @@ public class ProjectionEventDispatcher {
       validateWashEntryRejectedV2(event);
       SubmittedExitMaterials submitted = submittedExitMaterials(event);
       CompletedExitMaterials completed = completedExitMaterials(event);
+      CancelledExecution cancelled = cancelledExecution(event);
       var outcome = runtime.dispatch(new ProjectionEvent(
           event.messageId(), event.messageType(), event.messageVersion(), event.producer(),
           event.occurredAt(), event.correlationId(), event.causationId(), event.aggregateId(),
@@ -63,6 +69,10 @@ public class ProjectionEventDispatcher {
         completion.projectCompletion(event.aggregateId(), completed.packageCount(),
             completed.greenPaperCassette8Count(), completed.greenPaperCassette10Count(),
             completed.witnessTapePortionCount(), event.aggregateVersion(), completed.completedAt());
+      }
+      if (outcome == ProjectionEventRuntime.DispatchOutcome.APPLIED && cancelled != null) {
+        cancellation.projectCancellation(
+            event.aggregateId(), event.aggregateVersion(), cancelled.cancelledAt());
       }
       return switch (outcome) {
         case APPLIED -> DispatchOutcome.APPLIED;
@@ -130,6 +140,34 @@ public class ProjectionEventDispatcher {
     return completed;
   }
 
+  private static CancelledExecution cancelledExecution(EventEnvelope event) {
+    if (!"wash-execution".equals(event.producer())
+        || !"WashExecutionCancelled".equals(event.messageType())) return null;
+    JsonNode payload = event.payload();
+    if (!payload.has("cancelledAt") || !payload.path("cancelledAt").isTextual()) {
+      throw new IllegalArgumentException("cancelledAt must be an instant");
+    }
+    Instant cancelledAt;
+    try {
+      cancelledAt = Instant.parse(payload.path("cancelledAt").asText());
+    } catch (RuntimeException invalid) {
+      throw new IllegalArgumentException("cancelledAt must be an instant", invalid);
+    }
+    if (payload.has("executionVersion")) {
+      JsonNode version = payload.path("executionVersion");
+      if (!version.isIntegralNumber() || !version.canConvertToLong() || event.aggregateVersion() == null
+          || version.longValue() != event.aggregateVersion().longValue()) {
+        throw new IllegalArgumentException("executionVersion must match aggregateVersion");
+      }
+    }
+    if (payload.has("executionStatus")
+        && (!payload.path("executionStatus").isTextual()
+            || !"CANCELLED".equals(payload.path("executionStatus").asText()))) {
+      throw new IllegalArgumentException("executionStatus must be CANCELLED");
+    }
+    return new CancelledExecution(cancelledAt);
+  }
+
   private static int nonnegativeInt(JsonNode payload, String field) {
     if (!payload.has(field) || !payload.path(field).isIntegralNumber()
         || !payload.path(field).canConvertToInt()) {
@@ -172,4 +210,6 @@ public class ProjectionEventDispatcher {
       int greenPaperCassette10Count,
       int witnessTapePortionCount,
       Instant completedAt) {}
+
+  private record CancelledExecution(Instant cancelledAt) {}
 }

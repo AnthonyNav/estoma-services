@@ -484,6 +484,194 @@ class ProjectionEventRuntimePostgresIT {
   }
 
   @Test
+  void cancelledEventAtomicallyProjectsOwnerTimestampAndReleasesActiveAssignment() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = seedPendingExecutionWithAssignment(executionId, 5);
+    UUID messageId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-23T20:15:00Z");
+
+    assertThat(dispatcher.dispatch(cancellationEnvelope(
+        messageId, executionId, 6, cancellationPayload(executionId, 6, cancelledAt))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    var execution = jdbc.sql("""
+        SELECT status, execution_version, cancelled_at FROM wash_execution_read_model
+        WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(execution.get("status")).isEqualTo("CANCELLED");
+    assertThat(execution.get("execution_version")).isEqualTo(6L);
+    assertThat(((java.sql.Timestamp) execution.get("cancelled_at")).toInstant()).isEqualTo(cancelledAt);
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query().singleRow();
+    assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(cancelledAt);
+    assertThat(assignment.get("source_version")).isEqualTo(6L);
+    assertThat(jdbc.sql("""
+        SELECT count(*) FROM wash_resource_assignment_read_model
+        WHERE wash_execution_id = :executionId AND released_at IS NULL
+        """).param("executionId", executionId).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :messageId")
+        .param("messageId", messageId).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
+  void cancellationWithoutAssignmentProjectsExecutionAndInboxWithoutInventingAssignment() {
+    UUID executionId = UUID.randomUUID();
+    UUID messageId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-23T20:15:00Z");
+
+    assertThat(dispatcher.dispatch(cancellationEnvelope(
+        messageId, executionId, 2, cancellationPayload(executionId, 2, cancelledAt))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    assertThat(jdbc.sql("""
+        SELECT status FROM wash_execution_read_model WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query(String.class).single()).isEqualTo("CANCELLED");
+    assertThat(jdbc.sql("SELECT count(*) FROM wash_resource_assignment_read_model")
+        .query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :messageId")
+        .param("messageId", messageId).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
+  void invalidCancellationWireIsRejectedBeforeInboxAndReadModels() {
+    UUID executionId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-23T20:15:00Z");
+    java.util.List<Map<String, Object>> invalidPayloads = new java.util.ArrayList<>();
+    Map<String, Object> missingTimestamp = cancellationPayload(executionId, 6, cancelledAt);
+    missingTimestamp.remove("cancelledAt");
+    invalidPayloads.add(missingTimestamp);
+    Map<String, Object> malformedTimestamp = cancellationPayload(executionId, 6, cancelledAt);
+    malformedTimestamp.put("cancelledAt", "not-an-instant");
+    invalidPayloads.add(malformedTimestamp);
+    Map<String, Object> mismatchedVersion = cancellationPayload(executionId, 7, cancelledAt);
+    invalidPayloads.add(mismatchedVersion);
+    Map<String, Object> oversizedVersion = cancellationPayload(executionId, 6, cancelledAt);
+    oversizedVersion.put("executionVersion", new java.math.BigInteger("9223372036854775810"));
+    invalidPayloads.add(oversizedVersion);
+    Map<String, Object> contradictoryStatus = cancellationPayload(executionId, 6, cancelledAt);
+    contradictoryStatus.put("executionStatus", "PENDING_REASSIGNMENT");
+    invalidPayloads.add(contradictoryStatus);
+
+    for (Map<String, Object> payload : invalidPayloads) {
+      assertThat(dispatcher.dispatch(cancellationEnvelope(
+          UUID.randomUUID(), executionId, 6, payload)))
+          .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.UNTRUSTED);
+    }
+
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages").query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM wash_execution_read_model").query(Long.class).single())
+        .isZero();
+    assertThat(jdbc.sql("SELECT count(*) FROM wash_resource_assignment_read_model")
+        .query(Long.class).single()).isZero();
+  }
+
+  @Test
+  void duplicateAndHistoricalCancellationRedeliveryUseExactOwnerTimestampFence() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = seedPendingExecutionWithAssignment(executionId, 5);
+    UUID messageId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-23T20:15:00Z");
+    assertThat(dispatcher.dispatch(cancellationEnvelope(
+        messageId, executionId, 6, cancellationPayload(executionId, 6, cancelledAt))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+
+    Map<String, Object> mutatedDuplicate = cancellationPayload(
+        executionId, 6, cancelledAt.plusSeconds(30));
+    assertThat(dispatcher.dispatch(cancellationEnvelope(
+        messageId, executionId, 6, mutatedDuplicate)))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    assertThat(jdbc.sql("""
+        SELECT released_at FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query(Instant.class).single()).isEqualTo(cancelledAt);
+
+    UUID historicalExecutionId = UUID.randomUUID();
+    UUID historicalAssignmentId = UUID.randomUUID();
+    UUID historicalMessageId = UUID.randomUUID();
+    seedCancelledExecutionAndActiveAssignment(
+        historicalExecutionId, historicalAssignmentId, 6, cancelledAt);
+    seedCancellationInbox(historicalMessageId, historicalExecutionId, 6, cancelledAt);
+
+    assertThat(dispatcher.dispatch(cancellationEnvelope(historicalMessageId, historicalExecutionId, 6,
+        cancellationPayload(historicalExecutionId, 6, cancelledAt.plusSeconds(30)))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    assertThat(jdbc.sql("""
+        SELECT released_at FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", historicalAssignmentId).query(Instant.class).optional()).isEmpty();
+
+    assertThat(dispatcher.dispatch(cancellationEnvelope(historicalMessageId, historicalExecutionId, 6,
+        cancellationPayload(historicalExecutionId, 6, cancelledAt))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    assertThat(jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", historicalAssignmentId)
+        .query((rs, row) -> rs.getTimestamp("released_at").toInstant() + ":" + rs.getLong("source_version"))
+        .single()).isEqualTo(cancelledAt + ":6");
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :messageId")
+        .param("messageId", historicalMessageId).query(Long.class).single()).isEqualTo(1L);
+  }
+
+  @Test
+  void cancellationReleaseFailureRollsBackInboxExecutionAndAssignmentThenRedeliveryApplies() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = seedPendingExecutionWithAssignment(executionId, 5);
+    UUID messageId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-23T20:15:00Z");
+    jdbc.sql("""
+        CREATE FUNCTION fail_test_cancellation_release() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.wash_execution_id = '%s'::uuid THEN
+            RAISE EXCEPTION 'test cancellation release failure';
+          END IF;
+          RETURN NEW;
+        END
+        $$
+        """.formatted(executionId)).update();
+    jdbc.sql("""
+        CREATE TRIGGER fail_test_cancellation_release_before_update
+        BEFORE UPDATE ON wash_resource_assignment_read_model
+        FOR EACH ROW EXECUTE FUNCTION fail_test_cancellation_release()
+        """).update();
+    try {
+      assertThatThrownBy(() -> dispatcher.dispatch(cancellationEnvelope(
+          messageId, executionId, 6, cancellationPayload(executionId, 6, cancelledAt))))
+          .isInstanceOf(org.springframework.dao.DataAccessException.class);
+    } finally {
+      jdbc.sql("""
+          DROP TRIGGER IF EXISTS fail_test_cancellation_release_before_update
+          ON wash_resource_assignment_read_model
+          """).update();
+      jdbc.sql("DROP FUNCTION IF EXISTS fail_test_cancellation_release()")
+          .update();
+    }
+
+    assertThat(jdbc.sql("SELECT count(*) FROM inbox_messages WHERE message_id = :messageId")
+        .param("messageId", messageId).query(Long.class).single()).isZero();
+    assertThat(jdbc.sql("""
+        SELECT status, execution_version FROM wash_execution_read_model
+        WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId)
+        .query((rs, row) -> rs.getString("status") + ":" + rs.getLong("execution_version"))
+        .single()).isEqualTo("PENDING_REASSIGNMENT:5");
+    assertThat(jdbc.sql("""
+        SELECT released_at FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query(Instant.class).optional()).isEmpty();
+
+    assertThat(dispatcher.dispatch(cancellationEnvelope(
+        messageId, executionId, 6, cancellationPayload(executionId, 6, cancelledAt))))
+        .isEqualTo(ProjectionEventDispatcher.DispatchOutcome.APPLIED);
+    assertThat(jdbc.sql("""
+        SELECT released_at FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query(Instant.class).single()).isEqualTo(cancelledAt);
+  }
+
+  @Test
   void communicationsVisitUsesVisitedAtAsMonotonicFenceWithoutAggregateMetadata() {
     UUID accountId = UUID.randomUUID();
     Instant newer = Instant.parse("2026-08-23T21:00:00Z");
@@ -563,6 +751,77 @@ class ProjectionEventRuntimePostgresIT {
         "wash-execution", Instant.parse("2026-08-23T20:00:00Z"), UUID.randomUUID(), UUID.randomUUID(),
         null, null, executionId, version, ActorContext.anonymous(),
         JsonMapper.builder().findAndAddModules().build().valueToTree(payload));
+  }
+
+  private static Map<String, Object> cancellationPayload(
+      UUID executionId, int version, Instant cancelledAt) {
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("washExecutionId", executionId.toString());
+    payload.put("executionStatus", "CANCELLED");
+    payload.put("executionVersion", version);
+    payload.put("cancelledAt", cancelledAt.toString());
+    payload.put("cancellationType", "SUPERVISOR_DECISION");
+    return payload;
+  }
+
+  private static EventEnvelope cancellationEnvelope(UUID messageId, UUID executionId, int version,
+      Map<String, Object> payload) {
+    return new EventEnvelope(messageId, "WashExecutionCancelled", 1, MessageKind.EVENT,
+        "wash-execution", Instant.parse("2026-08-23T20:30:00Z"), UUID.randomUUID(), UUID.randomUUID(),
+        null, null, executionId, version, ActorContext.anonymous(),
+        JsonMapper.builder().findAndAddModules().build().valueToTree(payload));
+  }
+
+  private UUID seedPendingExecutionWithAssignment(UUID executionId, int version) {
+    Instant updatedAt = Instant.parse("2026-08-23T20:00:00Z");
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model (
+          wash_execution_id, status, authorized_at, execution_version, updated_at)
+        VALUES (:executionId, 'PENDING_REASSIGNMENT', :updatedAt, :version, :updatedAt)
+        """).param("executionId", executionId).param("version", version)
+        .param("updatedAt", java.sql.Timestamp.from(updatedAt)).update();
+    UUID assignmentId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO wash_resource_assignment_read_model (
+          resource_assignment_id, wash_execution_id, assignment_type, assigned_at,
+          source_message_id, source_version, updated_at)
+        VALUES (:assignmentId, :executionId, 'INITIAL', :updatedAt,
+          :messageId, :version, :updatedAt)
+        """).param("assignmentId", assignmentId).param("executionId", executionId)
+        .param("messageId", UUID.randomUUID()).param("version", version)
+        .param("updatedAt", java.sql.Timestamp.from(updatedAt)).update();
+    return assignmentId;
+  }
+
+  private void seedCancelledExecutionAndActiveAssignment(
+      UUID executionId, UUID assignmentId, int version, Instant cancelledAt) {
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model (
+          wash_execution_id, status, cancelled_at, execution_version, updated_at)
+        VALUES (:executionId, 'CANCELLED', :cancelledAt, :version, :cancelledAt)
+        """).param("executionId", executionId).param("version", version)
+        .param("cancelledAt", java.sql.Timestamp.from(cancelledAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_resource_assignment_read_model (
+          resource_assignment_id, wash_execution_id, assignment_type, assigned_at,
+          source_message_id, source_version, updated_at)
+        VALUES (:assignmentId, :executionId, 'INITIAL', :assignedAt,
+          :messageId, :sourceVersion, :assignedAt)
+        """).param("assignmentId", assignmentId).param("executionId", executionId)
+        .param("assignedAt", java.sql.Timestamp.from(cancelledAt.minusSeconds(600)))
+        .param("messageId", UUID.randomUUID()).param("sourceVersion", version - 1).update();
+  }
+
+  private void seedCancellationInbox(
+      UUID messageId, UUID executionId, int version, Instant cancelledAt) {
+    jdbc.sql("""
+        INSERT INTO inbox_messages (
+          consumer_name, message_id, message_kind, message_type, message_version, producer,
+          aggregate_id, aggregate_version, received_at, applied_at)
+        VALUES ('bff-projection-runtime', :messageId, 'EVENT', 'WashExecutionCancelled', 1,
+          'wash-execution', :executionId, :version, :cancelledAt, :cancelledAt)
+        """).param("messageId", messageId).param("executionId", executionId)
+        .param("version", version).param("cancelledAt", java.sql.Timestamp.from(cancelledAt)).update();
   }
 
   private static EventEnvelope rejectionEnvelope(UUID messageId, String messageType,
