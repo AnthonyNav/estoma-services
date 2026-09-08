@@ -104,26 +104,36 @@ The smoke collection may be run against `develop` only from an approved network 
 
 No tokens, passwords, personal data, fixture UUIDs or response captures belong in Git. Keep generated reports under `target/e2e/`, which is ignored by Maven conventions.
 
-## Exit and completion static contract
+## Exit and completion isolated runner
 
-`postman/workflows/wash-exit-completion-front-v1.postman_collection.json` is a generated static
+`postman/workflows/wash-exit-completion-front-v1.postman_collection.json` is a generated
 contract for `IN_PROGRESS -> EXIT_SUBMITTED -> COMPLETED`. It covers negative exit cases, exact
 idempotent retries, bounded polling, stale completion as `202` followed by
 `REJECTED/VERSION_CONFLICT`, and exact terminal reads.
 
-Do not execute it manually or add it to `runner/run.sh`. Live execution is unsupported and
-unauthorized until a separate change supplies a private terminal manifest, exact three-store audit
-and reentrant cleanup verified by failure injection. The existing authorized-entry cleanup remains
-limited to `PENDING_ENTRY|1` and `IN_PROGRESS|2`.
+Run it only through the isolated wrapper after the identity fixture has produced its protected
+credentials file:
+
+```sh
+E2E_REPORT_DIR="$PWD/target/e2e/isolated-identities" \
+BFF_BASE_URL=http://127.0.0.1:18080 \
+E2E_PSQL_EXEC="$PWD/e2e/runner/wash-isolated-psql.sh" \
+node e2e/runner/run-wash-exit-completion.mjs
+```
+
+The wrapper composes student, supervisor and authorized-entry fixtures, creates a private terminal
+handoff, executes Newman, audits convergence, and cleans in dependency order. It deletes terminal
+state only after the audit reconciles the exact completed history. An interrupted or failed Newman
+run preserves the `0700` report directory, `0600` manifests, the latest Postman state and database
+evidence for manual reconciliation; do not issue a new idempotency key.
 
 ```sh
 node e2e/scripts/generate-wash-exit-completion-workflow.mjs --check
 node e2e/scripts/validate-wash-exit-completion-workflow.mjs
 ```
 
-A future runner must retain the private `0700` report and `0600` runtime-environment pattern, use
-only Newman's CLI/JUnit reporters, preserve a request delay, revoke both sessions, and never persist
-resolved environments, JSON reports, authenticated payloads or tokens.
+These assets prepare the fixture-backed run. They do not certify that identities are provisioned or
+that the journey has passed against a deployed environment.
 
 The reassignment-candidates compatibility runner is a standalone isolated workflow. It creates its
 own two synthetic identities, drives the scheduler's real Query/Result path, proves both a positive

@@ -110,7 +110,9 @@ public class OpenApiController {
     operation.put("operationId", handler.getBeanType().getSimpleName() + "_"
         + handler.getMethod().getName() + "_" + method.name().toLowerCase() + "_"
         + path.replaceAll("[^A-Za-z0-9]+", "_"));
-    if (!ANONYMOUS.contains(path)) {
+    if (path.equals("/api/v1/operations/{operationId}")) {
+      operation.put("security", List.of(Map.of("bearerAuth", List.of()), Map.of()));
+    } else if (!ANONYMOUS.contains(path)) {
       operation.put("security", List.of(Map.of("bearerAuth", List.of())));
     }
     Type requestType = requestType(handler);
@@ -238,6 +240,18 @@ public class OpenApiController {
       responses.put("503", Map.of("description", "Required local projection context is unavailable",
           "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
               Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
+    }
+    if (path.equals("/api/v1/operations/{operationId}") && method == RequestMethod.GET) {
+      operation.put("description", "Returns only an operation visible to the current actor. "
+          + "An unknown operation or one belonging to a different actor returns the same empty 404. "
+          + "A 404 does not prove that the command had no effects and must not trigger a new "
+          + "idempotency key automatically. Restore the original session and reconcile the exact "
+          + "business entity before allowing a new intent. Without a bearer token only anonymous "
+          + "operations are visible; an invalid or revoked bearer token returns 401.");
+      responses.put("400", problemResponse("Invalid operation identifier"));
+      responses.put("401", problemResponse("Bearer token is invalid or no longer accepted"));
+      responses.put("404", Map.of("description",
+          "Operation not found or not visible to the current actor; empty response body"));
     }
     responses.put("default", Map.of("description", "Problem response", "content", Map.of(
         MediaType.APPLICATION_PROBLEM_JSON_VALUE,
