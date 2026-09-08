@@ -396,6 +396,17 @@ SQL
         [ "$proof" = 1 ] || fail "cleanup refused: IN_PROGRESS execution is not the exact authorized fixture"
         expected_execution='IN_PROGRESS|2'; expected_appointment='IN_PROGRESS|3'
         expected_bff_consumed='1|1|1|1'
+        if [ "$TERMINAL_MODE" = 1 ]; then
+          expected_bff_consumed='1|1|1|1|0|0'
+          # A rejected exit is safe to abandon only after the owner proves no transition.
+          rejected_exit=$(sql "$execution_database" <<SQL
+SELECT count(*) FROM command_idempotency_records
+WHERE producer='bff' AND operation_type='SubmitWashExit' AND idempotency_key='$EXIT_KEY'
+ AND status='REJECTED' AND error_code='ACTOR_NOT_AUTHORIZED' AND completed_at IS NOT NULL;
+SQL
+          )
+          [ "$rejected_exit" = 1 ] || fail "cleanup refused: initial exit rejection is not proven by owner"
+        fi
         ;;
       'PENDING_ENTRY|1')
         proof=$(sql "$execution_database" <<SQL
@@ -506,6 +517,15 @@ SELECT
 SQL
       )
       case "$expected_execution:$operation_proof" in
+        'IN_PROGRESS|2:0|0|0|0|1')
+          rejected_exit=$(sql "$bff_database" <<SQL
+SELECT count(*) FROM client_operations WHERE actor_account_id='$STUDENT_ACCOUNT_ID'::uuid
+ AND idempotency_key='$EXIT_KEY' AND public_operation='wash-submit-exit'
+ AND status='REJECTED' AND error_code='ACTOR_NOT_AUTHORIZED' AND completed_at IS NOT NULL;
+SQL
+          )
+          [ "$rejected_exit" = 1 ] || fail "cleanup refused: initial exit rejection is not proven by BFF"
+          ;;
         'EXIT_SUBMITTED|3:0|1|0|0|1'|'EXIT_SUBMITTED|3:0|1|1|0|2') ;;
         'COMPLETED|4:0|1|1|1|3') ;;
         *) fail "cleanup refused: terminal BFF operations are missing or ambiguous" ;;

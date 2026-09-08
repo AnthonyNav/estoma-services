@@ -14,6 +14,7 @@ entry_manifest="$report_dir/entry-fixture.env"
 image=${E2E_RUNNER_IMAGE:-platform-bff-e2e:local}
 entry_fixture="$e2e_dir/fixtures/wash-supervisor-authorized/fixture-db.sh"
 terminal_fixture="$e2e_dir/fixtures/wash-exit-completion/fixture-db.sh"
+student_authorization="$e2e_dir/fixtures/wash-exit-completion/student-authorization.sh"
 terminal_manifest="$report_dir/exit-terminal-fixture.env"
 suite=wash-supervisor-authorized
 
@@ -102,6 +103,9 @@ finish() {
   elif [ "$prepare_started" -eq 1 ]; then
     printf 'Prepare started without a fixture manifest; preserve dependencies for inspection.\n' >&2
     cleanup_status=1
+  fi
+  if [ "$cleanup_status" -eq 0 ]; then
+    "$student_authorization" cleanup || cleanup_status=$?
   fi
   if [ "$supervisor_ready" -eq 1 ] && [ "$cleanup_status" -eq 0 ]; then
     E2E_REPORT_DIR="$report_dir" E2E_PSQL_EXEC="$E2E_PSQL_EXEC" E2E_STUDENT_FIXTURE_MANIFEST="$student_manifest" E2E_SUPERVISOR_FIXTURE_MANIFEST="$supervisor_manifest" E2E_BFF_DATABASE="${E2E_BFF_DATABASE:-platform_bff_db}" "$supervisor_fixture" cleanup || cleanup_status=$?
@@ -203,5 +207,6 @@ run_phase decision "$runtime_environment" "$decision_state"
 E2E_REPORT_DIR="$report_dir" E2E_PSQL_EXEC="$E2E_PSQL_EXEC" E2E_STUDENT_FIXTURE_MANIFEST="$student_manifest" E2E_SUPERVISOR_FIXTURE_MANIFEST="$supervisor_manifest" E2E_ENTRY_FIXTURE_MANIFEST="$entry_manifest" "$entry_fixture" audit
 E2E_REPORT_DIR="$report_dir" E2E_PSQL_EXEC="$E2E_PSQL_EXEC" E2E_ENTRY_FIXTURE_MANIFEST="$entry_manifest" E2E_EXIT_FIXTURE_MANIFEST="$terminal_manifest" "$terminal_fixture" bootstrap
 terminal_ready=1
+"$student_authorization" bootstrap
 suite=wash-exit-completion
 run_phase closure "$decision_state" "$closure_state"

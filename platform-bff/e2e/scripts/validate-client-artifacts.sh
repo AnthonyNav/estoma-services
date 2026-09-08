@@ -17,6 +17,7 @@ node e2e/scripts/validate-wash-exit-completion-workflow.mjs
 node --check e2e/runner/run-wash-exit-completion.mjs
 sh -n e2e/runner/run-wash-exit-completion.sh
 sh -n e2e/fixtures/wash-exit-completion/fixture-db.sh
+sh -n e2e/fixtures/wash-exit-completion/student-authorization.sh
 sh -n e2e/scripts/test-wash-exit-completion-postgres.sh
 sh e2e/scripts/test-wash-exit-completion-cleanup-retry.sh
 node --check e2e/runner/run-wash-supervisor-authorized.mjs
