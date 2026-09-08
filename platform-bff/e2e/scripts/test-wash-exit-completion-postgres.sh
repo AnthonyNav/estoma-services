@@ -344,6 +344,67 @@ assert_rejected_seed_intact() {
   [ -f "$terminal_manifest" ] && [ -f "$entry_manifest" ]
 }
 
+# The terminal actor needs its own owner authorization, with guarded cleanup.
+write_manifests
+student_auth="$platform_dir/e2e/fixtures/wash-exit-completion/student-authorization.sh"
+run_student_auth() {
+ E2E_ISOLATED_NAMESPACE=wash-e2e E2E_REPORT_DIR="$report_dir" E2E_PSQL_EXEC="$test_root/fixture-psql" \
+ E2E_ENTRY_FIXTURE_MANIFEST="$entry_manifest" "$student_auth" "$1"
+}
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d wash_execution_db >/dev/null <<SQL
+INSERT INTO appointment_projection(appointment_id,student_account_id,appointment_time_slot_id,course_section_id,
+ appointment_type,instrument_count,piece_type,appointment_status,source_version,updated_at)
+VALUES('$appointment_id','$student_id','$slot_id','$system_id','NORMAL',1,'HIGH_SPEED','IN_PROGRESS',3,CURRENT_TIMESTAMP);
+SQL
+run_student_auth bootstrap >/dev/null
+[ "$(docker exec "$container" psql -X -U postgres -Atq -d wash_execution_db -c "SELECT role_code FROM authorization_role_projection WHERE account_id='$student_id'")" = ALUMNO ]
+if run_student_auth cleanup >/dev/null 2>&1; then
+ printf 'authorization cleanup removed live appointment dependency\n' >&2; exit 1
+fi
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d wash_execution_db -c "DELETE FROM appointment_projection WHERE appointment_id='$appointment_id'; UPDATE authorization_role_projection SET role_code='SUPERVISOR_LAVADO' WHERE account_id='$student_id'" >/dev/null
+if run_student_auth cleanup >/dev/null 2>&1; then
+ printf 'authorization cleanup removed changed role\n' >&2; exit 1
+fi
+[ -f "$report_dir/exit-student-authorization.env" ]
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d wash_execution_db -c "UPDATE authorization_role_projection SET role_code='ALUMNO' WHERE account_id='$student_id'" >/dev/null
+run_student_auth cleanup >/dev/null
+run_student_auth cleanup >/dev/null
+[ "$(docker exec "$container" psql -X -U postgres -Atq -d wash_execution_db -c "SELECT count(*) FROM authorization_role_projection WHERE account_id='$student_id'")" = 0 ]
+[ "$(docker exec "$container" psql -X -U postgres -Atq -d wash_execution_db -c "SELECT count(*) FROM authorization_access_projection WHERE account_id='$student_id'")" = 0 ]
+printf 'Student owner authorization and dependency/change guards passed.\n'
+
+seed_case EXIT_SUBMITTED
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d wash_execution_db >/dev/null <<SQL
+UPDATE wash_executions SET status='IN_PROGRESS',version=2,exit_submitted_at=NULL,
+ exit_submitted_by_account_id=NULL,package_count=NULL,green_paper_cassette_8_count=NULL,
+ green_paper_cassette_10_count=NULL,witness_tape_portion_count=NULL WHERE wash_execution_id='$execution_id';
+DELETE FROM outbox_messages WHERE message_id='$exit_message_id';
+UPDATE command_idempotency_records SET status='REJECTED',error_code='ACTOR_NOT_AUTHORIZED'
+ WHERE idempotency_key='$run_key-exit';
+SQL
+docker exec -i "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d platform_bff_db >/dev/null <<SQL
+UPDATE wash_execution_read_model SET status='IN_PROGRESS',execution_version=2,exit_submitted_at=NULL,
+ submitted_exit_version=0,submitted_package_count=NULL,submitted_green_paper_cassette_8_count=NULL,
+ submitted_green_paper_cassette_10_count=NULL,submitted_witness_tape_portion_count=NULL WHERE wash_execution_id='$execution_id';
+UPDATE wash_resource_assignment_read_model SET source_version=2 WHERE resource_assignment_id='$assignment_id';
+DELETE FROM inbox_messages WHERE message_id='$exit_message_id';
+UPDATE client_operations SET status='REJECTED',error_code='ACTOR_NOT_AUTHORIZED',result_data=NULL
+ WHERE idempotency_key='$run_key-exit';
+SQL
+# A matching BFF rejection alone is insufficient: preserve everything if owner disagrees.
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d wash_execution_db -c "UPDATE command_idempotency_records SET error_code='VERSION_CONFLICT' WHERE idempotency_key='$run_key-exit'" >/dev/null
+if run_terminal_cleanup >/dev/null 2>&1; then
+  printf 'unmatched owner rejection unexpectedly accepted\n' >&2; exit 1
+fi
+[ -f "$terminal_manifest" ]
+[ "$(docker exec "$container" psql -X -U postgres -Atq -d wash_execution_db -c "SELECT count(*) FROM wash_executions WHERE wash_execution_id='$execution_id'")" = 1 ]
+docker exec "$container" psql -X -v ON_ERROR_STOP=1 -U postgres -d wash_execution_db -c "UPDATE command_idempotency_records SET error_code='ACTOR_NOT_AUTHORIZED' WHERE idempotency_key='$run_key-exit'" >/dev/null
+run_terminal_cleanup >/dev/null
+[ "$(docker exec "$container" psql -X -U postgres -Atq -d wash_execution_db -c "SELECT count(*) FROM wash_executions WHERE wash_execution_id='$execution_id'")" = 0 ]
+[ "$(docker exec "$container" psql -X -U postgres -Atq -d platform_bff_db -c "SELECT count(*) FROM client_operations WHERE idempotency_key='$run_key-exit'")" = 0 ]
+teardown_dependent_appointment_seed
+printf 'Rejected exit with unchanged owner state cleaned only after matching rejection proof.\n'
+
 seed_case EXIT_SUBMITTED
 prepare_partial_audit_evidence
 run_terminal_cleanup >/dev/null

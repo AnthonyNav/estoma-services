@@ -23,3 +23,10 @@ refusal of ambiguous BFF operations, and the real `audit-clean` queries.
 This is a database fixture test, not a live HTTP certification. To keep its seed focused, it removes
 the synthetic Appointments-owned rows directly before `audit-clean`; it does not exercise the
 supervisor and student parent fixture cleanup chain.
+
+The live runner prepares a fresh student's ALUMNO/ACTIVE projections in Wash Execution
+using student-authorization.sh. Its separate private manifest survives failures; cleanup
+refuses live appointment dependencies or changed authorization and runs after entry cleanup.
+A failed initial exit can be cleaned only while execution remains IN_PROGRESS v2 and both
+owner and BFF prove the exact ACTOR_NOT_AUTHORIZED rejection. Other ambiguous outcomes
+remain preserved. The PostgreSQL CI regression exercises both guards.
