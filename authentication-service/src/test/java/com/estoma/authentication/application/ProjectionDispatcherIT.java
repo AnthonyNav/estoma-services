@@ -1,6 +1,7 @@
 package com.estoma.authentication.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.estoma.authentication.application.port.AccountRepository;
 import com.estoma.authentication.application.port.PersonStatusProjectionRepository;
@@ -20,6 +21,8 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.exc.MismatchedInputException;
 
 class ProjectionDispatcherIT extends AbstractPostgresIT {
 
@@ -29,6 +32,7 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
   @Autowired private SessionRepository sessionRepository;
   @Autowired private StudentNumberSyncRepository studentNumberSyncRepository;
   @Autowired private JdbcClient jdbc;
+  @Autowired private ObjectMapper mapper;
 
   @Test
   void personCreatedInitializesTheProjection() {
@@ -38,6 +42,56 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
 
     assertThat(outcome).isInstanceOf(ProjectionOutcome.Applied.class);
     assertThat(personStatusProjectionRepository.findByPersonId(personId).orElseThrow().status()).isEqualTo("ACTIVE");
+  }
+
+  @Test
+  void canonicalUsersPersonPayloadsUseVersionAndAdvanceThroughAllStatusEvents() {
+    UUID personId = UUID.randomUUID();
+    var created = mapper.createObjectNode();
+    created.put("personId", personId.toString());
+    created.put("firstName", "Initial");
+    created.put("paternalSurname", "Administrator");
+    created.put("institutionalEmail", "initial." + personId + "@example.test");
+    created.put("status", "ACTIVE");
+    created.put("version", 1);
+    created.put("createdAt", "2026-09-08T12:00:00Z");
+    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_CREATED, created, personId, 1));
+
+    var deactivated = mapper.createObjectNode();
+    deactivated.put("personId", personId.toString());
+    deactivated.put("status", "INACTIVE");
+    deactivated.put("version", 2);
+    deactivated.put("deactivatedAt", "2026-09-08T12:01:00Z");
+    deactivated.put("reasonCode", "ADMINISTRATIVE");
+    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_DEACTIVATED, deactivated, personId, 2));
+
+    var activated = mapper.createObjectNode();
+    activated.put("personId", personId.toString());
+    activated.put("status", "ACTIVE");
+    activated.put("version", 3);
+    activated.put("activatedAt", "2026-09-08T12:02:00Z");
+    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_ACTIVATED, activated, personId, 3));
+
+    var projection = personStatusProjectionRepository.findByPersonId(personId).orElseThrow();
+    assertThat(projection.status()).isEqualTo("ACTIVE");
+    assertThat(projection.sourceVersion()).isEqualTo(3);
+  }
+
+  @Test
+  void malformedPersonPayloadRollsBackInboxSoTheSameMessageIdCanBeRedelivered() {
+    UUID personId = UUID.randomUUID();
+    UUID messageId = UUID.randomUUID();
+    var obsoleteShape = mapper.createObjectNode();
+    obsoleteShape.put("personId", personId.toString());
+    obsoleteShape.put("status", "ACTIVE");
+    obsoleteShape.put("sourceVersion", 1);
+
+    assertThatThrownBy(() -> dispatcher.dispatch(
+        Envelopes.event(ConsumedEventTypes.PERSON_CREATED, obsoleteShape, personId, 1, messageId)))
+        .isInstanceOf(MismatchedInputException.class);
+
+    assertThat(jdbc.sql("SELECT count(*) FROM processed_messages WHERE consumer_name = 'authentication-service.events' AND message_id = :messageId")
+        .param("messageId", messageId).query(Long.class).single()).isZero();
   }
 
   @Test
@@ -53,9 +107,9 @@ class ProjectionDispatcherIT extends AbstractPostgresIT {
     sessionRepository.insert(Session.createNormal(firstSessionId, firstAccountId, "first-token", null, null, null, now, now.plusSeconds(60), now.plusSeconds(120)));
     sessionRepository.insert(Session.createNormal(secondSessionId, secondAccountId, "second-token", null, null, null, now, now.plusSeconds(60), now.plusSeconds(120)));
 
-    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_CREATED, new PersonStatusEventPayload(personId, "ACTIVE", 99), personId, 1));
+    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_CREATED, new PersonStatusEventPayload(personId, "ACTIVE", 1), personId, 1));
 
-    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_DEACTIVATED, new PersonStatusEventPayload(personId, "INACTIVE", 1), personId, 2));
+    dispatcher.dispatch(Envelopes.event(ConsumedEventTypes.PERSON_DEACTIVATED, new PersonStatusEventPayload(personId, "INACTIVE", 2), personId, 2));
 
     var projection = personStatusProjectionRepository.findByPersonId(personId).orElseThrow();
     assertThat(projection.status()).isEqualTo("INACTIVE");

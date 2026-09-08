@@ -71,6 +71,7 @@ class EnvelopeValidatorTest {
     var payload = mapper.createObjectNode();
     payload.put("personId", personId.toString());
     payload.put("status", "ACTIVE");
+    payload.put("version", 1);
 
     assertThatCode(() -> validator.validateEvent(event("PersonCreated", "users", personId, payload)))
         .doesNotThrowAnyException();
@@ -81,6 +82,7 @@ class EnvelopeValidatorTest {
     UUID personId = UUID.randomUUID();
     var payload = mapper.createObjectNode();
     payload.put("personId", personId.toString());
+    payload.put("version", 1);
 
     assertThatThrownBy(() -> validator.validateEvent(event("PersonCreated", "academic", personId, payload)))
         .isInstanceOf(InvalidMessageException.class);
@@ -90,9 +92,45 @@ class EnvelopeValidatorTest {
   void rejectsPersonEventWhoseEnvelopeAggregateDiffersFromPayload() {
     var payload = mapper.createObjectNode();
     payload.put("personId", UUID.randomUUID().toString());
+    payload.put("version", 1);
 
     assertThatThrownBy(() -> validator.validateEvent(event("PersonDeactivated", "users", UUID.randomUUID(), payload)))
         .isInstanceOf(InvalidMessageException.class);
+  }
+
+  @Test
+  void rejectsPersonEventWhenPayloadVersionIsMissingOrDiffersFromAggregateVersion() {
+    UUID personId = UUID.randomUUID();
+    var missing = mapper.createObjectNode();
+    missing.put("personId", personId.toString());
+    missing.put("status", "ACTIVE");
+    var mismatched = missing.deepCopy();
+    mismatched.put("version", 2);
+
+    assertThatThrownBy(() -> validator.validateEvent(event("PersonCreated", "users", personId, missing)))
+        .isInstanceOf(InvalidMessageException.class)
+        .hasMessageContaining("payload.version");
+    assertThatThrownBy(() -> validator.validateEvent(event("PersonActivated", "users", personId, mismatched)))
+        .isInstanceOf(InvalidMessageException.class)
+        .hasMessageContaining("match aggregateVersion");
+  }
+
+  @Test
+  void rejectsUnsupportedEnvelopeVersionForPersonEvents() {
+    UUID personId = UUID.randomUUID();
+    var payload = mapper.createObjectNode();
+    payload.put("personId", personId.toString());
+    payload.put("status", "ACTIVE");
+    payload.put("version", 1);
+    MessageEnvelope valid = event("PersonCreated", "users", personId, payload);
+    MessageEnvelope unsupported = new MessageEnvelope(
+        valid.messageId(), valid.messageType(), 2, valid.messageKind(), valid.producer(), valid.occurredAt(),
+        valid.correlationId(), valid.causationId(), valid.operationId(), valid.idempotencyKey(),
+        valid.aggregateId(), valid.aggregateVersion(), valid.actor(), valid.payload());
+
+    assertThatThrownBy(() -> validator.validateEvent(unsupported))
+        .isInstanceOf(InvalidMessageException.class)
+        .hasMessageContaining("unsupported messageVersion");
   }
 
   @Test
