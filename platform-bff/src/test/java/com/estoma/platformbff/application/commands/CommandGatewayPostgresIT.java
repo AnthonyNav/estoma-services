@@ -74,6 +74,19 @@ class CommandGatewayPostgresIT {
   }
 
   @Test
+  void retryPreservesTheSubmittedTimestampAfterDatabaseRoundTrip() {
+    var command = submission(UUID.randomUUID(), "stable-receipt-time", "Ada");
+    var first = gateway.submit(command);
+    var retry = gateway.submit(command);
+
+    assertThat(retry.operationId()).isEqualTo(first.operationId());
+    assertThat(retry.pollPath()).isEqualTo(first.pollPath());
+    assertThat(retry.submittedAt()).isEqualTo(first.submittedAt());
+    assertThat(operations.findById(first.operationId()).orElseThrow().createdAt())
+        .isEqualTo(first.submittedAt());
+  }
+
+  @Test
   void pendingOperationHasNoIdempotencyExpiryUntilTerminalResult() {
     UUID accountId = UUID.randomUUID();
     var submitted = gateway.submit(submission(accountId, "ttl-key", "Ada"));

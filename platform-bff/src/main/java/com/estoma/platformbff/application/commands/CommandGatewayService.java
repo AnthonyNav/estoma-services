@@ -15,6 +15,7 @@ import com.estoma.platformbff.domain.messaging.OutboxStatus;
 import com.estoma.platformbff.domain.operation.ClientOperation;
 import com.estoma.platformbff.domain.operation.OperationStatus;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,7 +63,8 @@ public class CommandGatewayService {
       return resolveExisting(existing.get(), fingerprint);
     }
 
-    Instant now = Instant.now();
+    // Return the same timestamp precision that PostgreSQL persists for retries.
+    Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
     UUID operationId = UUID.randomUUID();
     UUID correlationId = UUID.randomUUID();
     var operation = new ClientOperation(
