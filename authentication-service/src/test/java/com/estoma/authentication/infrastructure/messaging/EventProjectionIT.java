@@ -17,10 +17,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * End-to-end proof that {@code EventListener} correctly wires {@code
- * ProjectionDispatcher} to real RabbitMQ, binding on the routing key
- * {@code users-service} actually publishes ({@code identity.person.*},
- * not the {@code users.person.*} example string in
- * messaging-architecture.md §4 -- see {@link AmqpNames}).
+ * ProjectionDispatcher} to real RabbitMQ on the canonical
+ * {@code users.person.*} route. The typed payload also serializes Users'
+ * canonical {@code version} field, guarding the complete broker-to-projection
+ * path against consumer DTO drift.
  */
 class EventProjectionIT extends AbstractRabbitMqIT {
 

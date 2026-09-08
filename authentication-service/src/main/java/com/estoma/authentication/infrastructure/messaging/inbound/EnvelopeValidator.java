@@ -84,7 +84,10 @@ public class EnvelopeValidator {
     }
 
     UUID payloadAggregate = switch (envelope.messageType()) {
-      case "PersonCreated", "PersonActivated", "PersonDeactivated" -> requireUuid(envelope.payload(), "personId");
+      case "PersonCreated", "PersonActivated", "PersonDeactivated" -> {
+        requireMatchingPersonVersion(envelope);
+        yield requireUuid(envelope.payload(), "personId");
+      }
       case "StudentNumberCorrected" -> requireUuid(envelope.payload(), "studentAcademicProfileId");
       default -> throw new InvalidMessageException("unrecognized external event messageType " + envelope.messageType());
     };
@@ -154,6 +157,17 @@ public class EnvelopeValidator {
       return UUID.fromString(node.path(field).asString());
     } catch (RuntimeException exception) {
       throw new InvalidMessageException(field + " must be a UUID");
+    }
+  }
+
+  private static void requireMatchingPersonVersion(MessageEnvelope envelope) {
+    JsonNode version = envelope.payload().get("version");
+    if (version == null || !version.isIntegralNumber() || !version.canConvertToInt()
+        || version.asInt() < 1) {
+      throw new InvalidMessageException("Person event payload.version must be a positive integer");
+    }
+    if (version.asInt() != envelope.aggregateVersion()) {
+      throw new InvalidMessageException("Person event payload.version must match aggregateVersion");
     }
   }
 
