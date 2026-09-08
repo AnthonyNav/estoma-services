@@ -184,6 +184,13 @@ public class OpenApiController {
       operation.put("x-unclassified-rejection-feature-flag",
           "BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED");
     }
+    if (handler.getMethod().getName().equals("pendingReassignments")) {
+      operation.put("description", "Every item in a 200 response has required execution, student, "
+          + "appointment, and time-slot context. A missing required projection fails the whole read "
+          + "with 503 and is never hidden as an empty list. Resource assignment, submitted exit "
+          + "materials, course, instrumentCount, pieceType, and academicStatus remain nullable "
+          + "when functionally absent.");
+    }
     List<Map<String, Object>> parameters = new ArrayList<>();
     requestHeaders(handler, parameters);
     requestParameters(handler, parameters);
@@ -228,6 +235,11 @@ public class OpenApiController {
     if (handler.getMethod().getName().equals("decideEntry")) {
       responses.put("503", problemResponse(
           "Unclassified entry rejection is disabled; no operation was created"));
+    }
+    if (handler.getMethod().getName().equals("pendingReassignments")) {
+      responses.put("503", Map.of("description", "Required local projection context is unavailable",
+          "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
     }
     if (path.equals("/api/v1/operations/{operationId}") && method == RequestMethod.GET) {
       operation.put("description", "Returns only an operation visible to the current actor. "

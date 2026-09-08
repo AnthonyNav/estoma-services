@@ -475,6 +475,17 @@ class PublicApiMvcTest {
   }
 
   @Test
+  void pendingReassignmentContextFailureIsAControlledWholeListUnavailableResponse() throws Exception {
+    when(supervision.pendingReassignments())
+        .thenThrow(new ProjectionUnavailableException("incomplete pending reassignment"));
+
+    washMvc.perform(get("/api/v1/wash/supervision/pending-reassignments"))
+        .andExpect(status().isServiceUnavailable())
+        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+        .andExpect(jsonPath("$.code").value("BFF.PROJECTION_UNAVAILABLE"));
+  }
+
+  @Test
   void qrLookupExposesUniformNotFoundAndProjectionUnavailableProblemsWithoutEchoingTheValue()
       throws Exception {
     when(supervision.lookup(argThat(request -> request != null

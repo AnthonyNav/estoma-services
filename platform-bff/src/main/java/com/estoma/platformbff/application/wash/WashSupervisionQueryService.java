@@ -166,7 +166,10 @@ public class WashSupervisionQueryService {
     readiness.requireReady("wash-execution", "appointments", "academic", "person",
         "wash-administration");
     List<PendingReassignmentResponse> items = projections.findPendingReassignments().stream()
-        .map(this::compose)
+        .map(value -> {
+          requirePendingReassignmentContext(value);
+          return compose(value);
+        })
         .toList();
     return new PendingReassignmentsResponse(items);
   }
@@ -257,6 +260,48 @@ public class WashSupervisionQueryService {
         active, last);
     return new SupervisorExecutionDetailResponse(value.serviceDate(), canComplete(value.executionStatus(), active),
         student, appointment, execution);
+  }
+
+  private static void requirePendingReassignmentContext(
+      WashSupervisionQueryPort.PendingReassignment value) {
+    if (value.washExecutionId() == null
+        || !"PENDING_REASSIGNMENT".equals(value.executionStatus())
+        || value.executionVersion() <= 0
+        || value.appointmentId() == null
+        || !hasStatus(Set.of("SCHEDULED", "IN_PROGRESS"), value.appointmentStatus())
+        || isBlank(value.appointmentType())
+        || value.appointmentTimeSlotId() == null
+        || value.serviceDate() == null
+        || value.slotStartsAt() == null
+        || value.slotEndsAt() == null
+        || !value.slotStartsAt().isBefore(value.slotEndsAt())
+        || !isValidZone(value.slotTimezone())
+        || value.studentAccountId() == null
+        || value.personId() == null
+        || isBlank(displayName(value))
+        || isBlank(value.studentNumber())
+        || value.currentSemester() == null) {
+      throw new ProjectionUnavailableException("pending reassignment projection is incomplete");
+    }
+    boolean assignmentPresent = value.resourceAssignmentId() != null || value.assignmentType() != null
+        || value.assignedAt() != null || value.cabinId() != null || value.cabinCode() != null
+        || value.cabinName() != null || value.tankId() != null || value.tankCode() != null
+        || value.tankName() != null;
+    if (assignmentPresent
+        && (value.resourceAssignmentId() == null || isBlank(value.assignmentType())
+            || value.assignedAt() == null || value.cabinId() == null || isBlank(value.cabinCode())
+            || isBlank(value.cabinName()) || value.tankId() == null || isBlank(value.tankCode())
+            || isBlank(value.tankName()))) {
+      throw new ProjectionUnavailableException("pending reassignment assignment is incomplete");
+    }
+    List<Integer> materials = java.util.Arrays.asList(value.submittedPackageCount(),
+        value.submittedGreenPaperCassette8Count(), value.submittedGreenPaperCassette10Count(),
+        value.submittedWitnessTapePortionCount());
+    long present = materials.stream().filter(java.util.Objects::nonNull).count();
+    if ((present != 0 && present != materials.size())
+        || materials.stream().filter(java.util.Objects::nonNull).anyMatch(count -> count < 0)) {
+      throw new ProjectionUnavailableException("pending reassignment materials are incomplete");
+    }
   }
 
   private PendingReassignmentResponse compose(WashSupervisionQueryPort.PendingReassignment value) {

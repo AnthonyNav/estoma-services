@@ -6767,6 +6767,7 @@
     },
     "/api/v1/wash/supervision/pending-reassignments" : {
       "get" : {
+        "description" : "Every item in a 200 response has required execution, student, appointment, and time-slot context. A missing required projection fails the whole read with 503 and is never hidden as an empty list. Resource assignment, submitted exit materials, course, instrumentCount, pieceType, and academicStatus remain nullable when functionally absent.",
         "operationId" : "WashController_pendingReassignments_get__api_v1_wash_supervision_pending_reassignments",
         "responses" : {
           "200" : {
@@ -6784,48 +6785,51 @@
                             "properties" : {
                               "assignedAt" : {
                                 "format" : "date-time",
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "assignmentType" : {
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "cabin" : {
                                 "additionalProperties" : false,
                                 "properties" : {
                                   "code" : {
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "name" : {
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "resourceId" : {
                                     "format" : "uuid",
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   }
                                 },
-                                "type" : [ "object", "null" ]
+                                "required" : [ "resourceId", "code", "name" ],
+                                "type" : "object"
                               },
                               "resourceAssignmentId" : {
                                 "format" : "uuid",
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "tank" : {
                                 "additionalProperties" : false,
                                 "properties" : {
                                   "code" : {
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "name" : {
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "resourceId" : {
                                     "format" : "uuid",
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   }
                                 },
-                                "type" : [ "object", "null" ]
+                                "required" : [ "resourceId", "code", "name" ],
+                                "type" : "object"
                               }
                             },
+                            "required" : [ "resourceAssignmentId", "assignmentType", "assignedAt", "cabin", "tank" ],
                             "type" : [ "object", "null" ]
                           },
                           "appointment" : {
@@ -6833,45 +6837,46 @@
                             "properties" : {
                               "appointmentId" : {
                                 "format" : "uuid",
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "appointmentStatus" : {
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "appointmentTimeSlot" : {
                                 "additionalProperties" : false,
                                 "properties" : {
                                   "appointmentTimeSlotId" : {
                                     "format" : "uuid",
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "endsAt" : {
                                     "format" : "date-time",
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "serviceDate" : {
                                     "format" : "date",
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "startsAt" : {
                                     "format" : "date-time",
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "timezone" : {
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   }
                                 },
-                                "type" : [ "object", "null" ]
+                                "required" : [ "appointmentTimeSlotId", "serviceDate", "startsAt", "endsAt", "timezone" ],
+                                "type" : "object"
                               },
                               "appointmentType" : {
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "courseSectionReference" : {
                                 "additionalProperties" : false,
                                 "properties" : {
                                   "courseSectionId" : {
                                     "format" : "uuid",
-                                    "type" : [ "string", "null" ]
+                                    "type" : "string"
                                   },
                                   "name" : {
                                     "type" : [ "string", "null" ]
@@ -6880,6 +6885,7 @@
                                     "type" : [ "string", "null" ]
                                   }
                                 },
+                                "required" : [ "courseSectionId", "nrc", "name" ],
                                 "type" : [ "object", "null" ]
                               },
                               "instrumentCount" : {
@@ -6889,7 +6895,8 @@
                                 "type" : [ "string", "null" ]
                               }
                             },
-                            "type" : [ "object", "null" ]
+                            "required" : [ "appointmentId", "appointmentType", "instrumentCount", "pieceType", "appointmentStatus", "courseSectionReference", "appointmentTimeSlot" ],
+                            "type" : "object"
                           },
                           "authorizedAt" : {
                             "format" : "date-time",
@@ -6899,7 +6906,7 @@
                             "type" : "integer"
                           },
                           "qrUsageContext" : {
-                            "type" : [ "string", "null" ]
+                            "type" : "string"
                           },
                           "student" : {
                             "additionalProperties" : false,
@@ -6909,61 +6916,74 @@
                               },
                               "accountId" : {
                                 "format" : "uuid",
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "currentSemester" : {
-                                "type" : [ "integer", "null" ]
+                                "type" : "integer"
                               },
                               "displayName" : {
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "enrollment" : {
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               },
                               "personId" : {
                                 "format" : "uuid",
-                                "type" : [ "string", "null" ]
+                                "type" : "string"
                               }
                             },
-                            "type" : [ "object", "null" ]
+                            "required" : [ "accountId", "personId", "displayName", "enrollment", "currentSemester", "academicStatus" ],
+                            "type" : "object"
                           },
                           "submittedExitMaterials" : {
                             "additionalProperties" : false,
                             "properties" : {
                               "greenPaperCassette10Count" : {
-                                "type" : [ "integer", "null" ]
+                                "type" : "integer"
                               },
                               "greenPaperCassette8Count" : {
-                                "type" : [ "integer", "null" ]
+                                "type" : "integer"
                               },
                               "packageCount" : {
-                                "type" : [ "integer", "null" ]
+                                "type" : "integer"
                               },
                               "witnessTapePortionCount" : {
-                                "type" : [ "integer", "null" ]
+                                "type" : "integer"
                               }
                             },
+                            "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
                             "type" : [ "object", "null" ]
                           },
                           "washExecutionId" : {
                             "format" : "uuid",
-                            "type" : [ "string", "null" ]
+                            "type" : "string"
                           },
                           "washExecutionStatus" : {
-                            "type" : [ "string", "null" ]
+                            "type" : "string"
                           }
                         },
-                        "required" : [ "executionVersion" ],
+                        "required" : [ "washExecutionId", "washExecutionStatus", "authorizedAt", "executionVersion", "appointment", "student", "activeResourceAssignment", "submittedExitMaterials", "qrUsageContext" ],
                         "type" : "object"
                       },
-                      "type" : [ "array", "null" ]
+                      "type" : "array"
                     }
                   },
+                  "required" : [ "items" ],
                   "type" : "object"
                 }
               }
             },
             "description" : "Successful response"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Required local projection context is unavailable"
           },
           "default" : {
             "content" : {
