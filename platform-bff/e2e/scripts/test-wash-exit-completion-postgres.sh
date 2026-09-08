@@ -12,7 +12,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 platform_dir=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 terminal_fixture="$platform_dir/e2e/fixtures/wash-exit-completion/fixture-db.sh"
 test_root=$(mktemp -d)
-container="wash-terminal-schema-$$"
+container="wash-terminal-schema-$(basename "$test_root")"
 
 cleanup_test() {
   docker rm -f "$container" >/dev/null 2>&1 || true

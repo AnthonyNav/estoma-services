@@ -29,6 +29,14 @@ steps:
     commands:
       - sh e2e/scripts/validate-client-artifacts.sh
 
+  - name: terminal-cleanup-postgres
+    image: docker:cli@sha256:eccaacfeed644c7de222ff047483568cb988dde95476fbaaf10ea2d04921bb66
+    directory: platform-bff
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    commands:
+      - sh e2e/scripts/test-wash-exit-completion-postgres.sh
+
   - name: test
     image: maven:3.9.16-eclipse-temurin-25
     directory: platform-bff
