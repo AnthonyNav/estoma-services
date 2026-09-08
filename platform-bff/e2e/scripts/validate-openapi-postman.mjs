@@ -22,8 +22,10 @@ function requiresIdempotency(operation) {
     && parameter.name.toLowerCase() === 'idempotency-key');
 }
 
-function requiresBearer(operation) {
-  return Array.isArray(operation.security) && operation.security.some((requirement) => 'bearerAuth' in requirement);
+function bearerMode(operation) {
+  const security = operation.security ?? [];
+  if (!security.some((requirement) => 'bearerAuth' in requirement)) return 'absent';
+  return security.some((requirement) => Object.keys(requirement).length === 0) ? 'optional' : 'required';
 }
 
 function operationKey(method, path) {
@@ -37,7 +39,7 @@ function collectOpenApi(document) {
       if (!methods.has(method)) continue;
       operations.set(operationKey(method, path), {
         idempotency: requiresIdempotency(operation),
-        bearer: requiresBearer(operation),
+        bearer: bearerMode(operation),
       });
     }
   }
@@ -71,13 +73,18 @@ function collectPostman(items, operations = new Map()) {
 const openApi = collectOpenApi(readJson(openApiPath));
 const postman = collectPostman(readJson(collectionPath).item);
 const errors = [];
+if (openApi.get('GET /api/v1/operations/{operationId}')?.bearer !== 'optional') {
+  errors.push('operation lookup must declare optional bearer authentication');
+}
 for (const key of openApi.keys()) if (!postman.has(key)) errors.push(`missing from collection: ${key}`);
 for (const key of postman.keys()) if (!openApi.has(key)) errors.push(`not declared by OpenAPI: ${key}`);
 for (const [key, expected] of openApi) {
   const actual = postman.get(key);
   if (!actual) continue;
   if (expected.idempotency !== actual.idempotency) errors.push(`Idempotency-Key mismatch: ${key}`);
-  if (expected.bearer !== actual.bearer) errors.push(`bearer security mismatch: ${key}`);
+  // The catalogue defaults optional authentication to the ACCOUNT workflow.
+  // Anonymous operation receipts can explicitly select No Auth in Postman.
+  if ((expected.bearer !== 'absent') !== actual.bearer) errors.push(`bearer security mismatch (${expected.bearer}): ${key}`);
 }
 
 if (errors.length) {

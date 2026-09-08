@@ -14884,7 +14884,7 @@
                       "name": "Operations Controller get get api v1 operations operation Id_",
                       "request": {
                         "name": "Operations Controller get get api v1 operations operation Id_",
-                        "description": {},
+                        "description": "Optional bearer authentication. ACCOUNT operations require the original account token (default). For an anonymous receipt select No Auth; missing or foreign account context returns an empty 404.",
                         "url": {
                           "path": [
                             "api",
@@ -14917,7 +14917,16 @@
                         ],
                         "method": "GET",
                         "body": {},
-                        "auth": null
+                        "auth": {
+                          "type": "bearer",
+                          "bearer": [
+                            {
+                              "key": "token",
+                              "value": "{{bearerToken}}",
+                              "type": "string"
+                            }
+                          ]
+                        }
                       },
                       "response": [
                         {
