@@ -7,8 +7,8 @@ import java.util.UUID;
 public record EntryValidation(
     UUID entryValidationId,
     UUID washExecutionId,
-    boolean identityConfirmed,
-    boolean requirementsSatisfied,
+    Boolean identityConfirmed,
+    Boolean requirementsSatisfied,
     EntryDecision decision,
     String rejectionReason,
     UUID decidedByAccountId,
@@ -20,11 +20,17 @@ public record EntryValidation(
       throw new DomainRuleViolationException("INVALID_ENTRY_VALIDATION");
     }
     if (decision == EntryDecision.AUTHORIZED) {
-      if (!identityConfirmed || !requirementsSatisfied || rejectionReason != null) {
+      if (!Boolean.TRUE.equals(identityConfirmed) || !Boolean.TRUE.equals(requirementsSatisfied)
+          || rejectionReason != null) {
         throw new DomainRuleViolationException("INVALID_AUTHORIZED_ENTRY");
       }
-    } else if (rejectionReason == null || rejectionReason.isBlank()) {
-      throw new DomainRuleViolationException("REJECTION_REASON_REQUIRED");
+    } else {
+      if (rejectionReason == null || rejectionReason.isBlank()) {
+        throw new DomainRuleViolationException("REJECTION_REASON_REQUIRED");
+      }
+      if ((identityConfirmed == null) != (requirementsSatisfied == null)) {
+        throw new DomainRuleViolationException("INVALID_ENTRY_VALIDATION");
+      }
     }
   }
 }

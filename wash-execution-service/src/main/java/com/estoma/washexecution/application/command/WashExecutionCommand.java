@@ -21,8 +21,8 @@ public sealed interface WashExecutionCommand permits
 
   record DecideWashEntry(
       UUID washExecutionId,
-      boolean identityConfirmed,
-      boolean requirementsSatisfied,
+      Boolean identityConfirmed,
+      Boolean requirementsSatisfied,
       EntryDecision decision,
       String rejectionReason,
       UUID decidedByAccountId,

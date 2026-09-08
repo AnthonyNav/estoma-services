@@ -220,9 +220,28 @@ AUTHORIZED
 
 REJECTED
 → rejectionReason obligatorio
+→ checks ambos boolean para tráfico V1 clasificado, o ambos ausentes para rechazo no clasificado
 ```
 
 El método físico exacto mediante el cual el Supervisor valida identidad no forma parte del modelo V1 de Execution; el servicio conserva el resultado global.
+
+La aceptación de un rechazo no clasificado está protegida por
+`ESTOMA_UNCLASSIFIED_ENTRY_REJECTION_ENABLED`, cuyo valor por defecto es `false`. Con el flag
+apagado, el owner responde `UNCLASSIFIED_ENTRY_REJECTION_DISABLED` sin crear `EntryValidation`,
+sin cambiar `WashExecution` y sin emitir el evento semántico. Los Commands V1 que incluyen ambos
+booleanos conservan su comportamiento y fingerprint.
+
+Cuando el flag está habilitado, sólo `REJECTED` puede persistir ambos checks como `NULL` y publica
+`WashEntryRejected` V2 omitiendo ambas claves. Un rechazo con ambos booleanos sigue publicando el
+payload V1 exacto; `AUTHORIZED` exige `true/true` y siempre publica V1. Todos los Results continúan
+en V1.
+
+Orden de entrega: desplegar primero readers V2 compatibles en Appointments y BFF; después desplegar
+este owner con el flag apagado; por último habilitar el flag. Apagar el flag detiene nuevas
+emisiones V2, pero no elimina filas con checks nulos ni mensajes V2 ya persistidos o en vuelo. Una
+vez habilitada la función, hacer rollback a un binario anterior no es seguro: su lectura JDBC con
+`getBoolean` perdería la distinción entre `NULL` y `false`. Antes de rotar a un binario anterior se
+deben drenar los mensajes y reconciliar o migrar las validaciones no clasificadas.
 
 ---
 
@@ -459,12 +478,29 @@ IN_PROGRESS → EXIT_SUBMITTED
 
 `CompleteWashExecution`:
 
-- solo desde `EXIT_SUBMITTED`;
+- desde `EXIT_SUBMITTED`, conserva el flujo V1 de revisión del envío del Alumno;
+- desde `IN_PROGRESS`, permite el cierre directo del Supervisor únicamente cuando
+  `ESTOMA_DIRECT_SUPERVISOR_COMPLETION_ENABLED=true` (propiedad
+  `estoma.completion.direct-supervisor-enabled`, apagada por defecto);
 - permite al Supervisor confirmar o corregir los cuatro valores finales;
+- exige los cuatro valores finales enteros, no negativos y con al menos uno positivo;
+- exige actor Supervisor, coincidencia con `completedByAccountId`, `expectedVersion` vigente y
+  una asignación activa antes de mutar;
 - libera la asignación vigente;
 - cambia `WashExecution → COMPLETED`;
 - registra `WashExecutionCompleted` en Outbox;
 - crea `CleaningPeriod` cuando corresponde.
+
+El cierre directo no fabrica una entrega del Alumno: `exitSubmittedByAccountId` y
+`exitSubmittedAt` permanecen nulos. El cierre revisado conserva esa tupla y sólo sustituye los
+materiales por los valores finales del Supervisor. En ambos casos `completedByAccountId` y
+`completedAt` forman la auditoría del cierre; la presencia o ausencia de la tupla de envío permite
+distinguir internamente su origen.
+
+`WashExecutionCompleted` permanece en V1 y no añade indicadores de origen ni campos de envío. Un
+cierre directo tampoco publica `WashExitSubmitted`. Debe desplegarse la migración V5 y el owner con
+el flag apagado antes de habilitar callers; desactivar el flag impide nuevos cierres directos sin
+afectar el flujo `EXIT_SUBMITTED → COMPLETED`.
 
 ---
 
@@ -745,6 +781,7 @@ dos ejecuciones por último cupo del mismo Tank/slot
 assign vs DisableOperationalResource
 doble ResolvePendingReassignment
 doble CompleteWashExecution
+SubmitWashExit vs CompleteWashExecution directo con el mismo expectedVersion
 doble CancelWashExecutionByClinic
 una inhabilitación que afecta varias ejecuciones
 dos workers completando el mismo CleaningPeriod

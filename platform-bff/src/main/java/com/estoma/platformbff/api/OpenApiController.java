@@ -124,17 +124,32 @@ public class OpenApiController {
         operation.put("x-server-derived-actor-fields", admin.serverDerivedActorFields().stream().sorted().toList());
       }
     } else if (requestType != null) {
+      Map<String, Object> requestSchema = new LinkedHashMap<>(schemaFor(requestType));
+      if (handler.getMethod().getName().equals("decideEntry")) {
+        requestSchema.put("description", "AUTHORIZED requires true/true and no rejectionReason. "
+            + "REJECTED requires a nonblank rejectionReason and either two boolean checks or both "
+            + "checks omitted/null. Omitted/null checks are the gated unclassified-rejection capability.");
+      }
+      if (handler.getMethod().getName().equals("submitExit")
+          || handler.getMethod().getName().equals("completeWashExecution")) {
+        requestSchema.put("description", "All four material counters are required JSON int32 integers "
+            + "from 0 through 2147483647, and at least one counter must be positive.");
+      }
       operation.put("requestBody", Map.of("required", true, "content", Map.of(
-          MediaType.APPLICATION_JSON_VALUE, Map.of("schema", schemaFor(requestType)))));
+          MediaType.APPLICATION_JSON_VALUE, Map.of("schema", requestSchema))));
     }
     if (handler.getMethod().getName().equals("supervisorLookup")) {
       operation.put("description", "STUDENT_ENROLLMENT and QR lookups are implemented as side-effect-free "
           + "local reads. QR is disabled by default through BFF_WASH_QR_ENABLED and returns 503 until "
           + "the flag is enabled and recovery is READY for the service date; unknown or revoked QR values "
-          + "return 404.");
+          + "return 404. canComplete is true for EXIT_SUBMITTED with an active assignment, and for "
+          + "IN_PROGRESS with an active assignment only when direct supervisor completion is enabled.");
       operation.put("x-provider-ready", Map.of("STUDENT_ENROLLMENT", true, "QR", true));
       operation.put("x-provider-ready-by-default", Map.of("STUDENT_ENROLLMENT", true, "QR", false));
       operation.put("x-qr-feature-flag", "BFF_WASH_QR_ENABLED");
+      operation.put("x-direct-supervisor-completion-feature-flag",
+          "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED");
+      operation.put("x-direct-supervisor-completion-enabled-by-default", false);
     }
     if (handler.getMethod().getName().equals("reassignmentCandidates")) {
       operation.put("description", "Side-effect-free local read of an owner-ranked snapshot. "
@@ -142,6 +157,30 @@ public class OpenApiController {
           + "only an owner-proven empty snapshot returns 200 with candidates=[]. The rollout "
           + "feature is disabled by default until the Wash Execution Query owner is deployed.");
       operation.put("x-provider-ready-by-default", false);
+    }
+    if (handler.getMethod().getName().equals("supervisorExecution")) {
+      operation.put("description", "Side-effect-free exact local read of one current or historical "
+          + "Wash execution. The path identifier is the only selector; no current-service-date "
+          + "filter or fallback appointment is applied. canComplete follows the same active-assignment "
+          + "and rollout-flag rules as lookup and does not replace owner validation.");
+    }
+    if (handler.getMethod().getName().equals("completeWashExecution")) {
+      operation.put("description", "Queues the existing CompleteWashExecution owner command without "
+          + "gating on a possibly stale BFF projection. The owner remains authoritative. Direct "
+          + "IN_PROGRESS completion is rolled out owner-first, then advertised through "
+          + "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED; it is disabled by default.");
+      operation.put("x-direct-supervisor-completion-feature-flag",
+          "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED");
+      operation.put("x-direct-supervisor-completion-enabled-by-default", false);
+    }
+    if (handler.getMethod().getName().equals("decideEntry")) {
+      operation.put("description", "Classified entry decisions remain available. Unclassified "
+          + "REJECTED decisions are implemented but disabled by default; while disabled they return "
+          + "503 before creating an operation.");
+      operation.put("x-unclassified-rejection-provider-ready", true);
+      operation.put("x-unclassified-rejection-enabled-by-default", false);
+      operation.put("x-unclassified-rejection-feature-flag",
+          "BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED");
     }
     if (handler.getMethod().getName().equals("pendingReassignments")) {
       operation.put("description", "Every item in a 200 response has required execution, student, "
@@ -184,6 +223,17 @@ public class OpenApiController {
           "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
               Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
     }
+    if (handler.getMethod().getName().equals("supervisorExecution")) {
+      responses.put("400", problemResponse("Invalid Wash execution identifier"));
+      responses.put("401", problemResponse("Authentication is required"));
+      responses.put("403", problemResponse("Wash supervisor permission is required"));
+      responses.put("404", problemResponse("Wash execution was not found"));
+      responses.put("503", problemResponse("Required local projection is unavailable or incomplete"));
+    }
+    if (handler.getMethod().getName().equals("decideEntry")) {
+      responses.put("503", problemResponse(
+          "Unclassified entry rejection is disabled; no operation was created"));
+    }
     if (handler.getMethod().getName().equals("pendingReassignments")) {
       responses.put("503", Map.of("description", "Required local projection context is unavailable",
           "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
@@ -194,6 +244,12 @@ public class OpenApiController {
         Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
     operation.put("responses", responses);
     return operation;
+  }
+
+  private static Map<String, Object> problemResponse(String description) {
+    return Map.of("description", description,
+        "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+            Map.of("schema", Map.of("$ref", "#/components/schemas/Problem"))));
   }
 
   private static Type requestType(HandlerMethod handler) {

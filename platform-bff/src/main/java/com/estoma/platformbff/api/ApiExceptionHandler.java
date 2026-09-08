@@ -8,6 +8,8 @@ import com.estoma.platformbff.application.security.AuthenticationRequiredExcepti
 import com.estoma.platformbff.application.security.SecurityRpcUnavailableException;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService.LookupNotFoundException;
+import com.estoma.platformbff.application.wash.WashSupervisionQueryService.ExecutionNotFoundException;
+import com.estoma.platformbff.api.wash.WashController.UnclassifiedEntryRejectionUnavailableException;
 import java.util.UUID;
 import org.slf4j.MDC;
 import org.springframework.http.HttpHeaders;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -46,6 +49,13 @@ public class ApiExceptionHandler {
         "Service Unavailable", "The required local projection is temporarily unavailable.");
   }
 
+  @ExceptionHandler(UnclassifiedEntryRejectionUnavailableException.class)
+  ResponseEntity<ProblemResponse> unclassifiedEntryRejectionUnavailable() {
+    return problem(HttpStatus.SERVICE_UNAVAILABLE,
+        "BFF.WASH_UNCLASSIFIED_ENTRY_REJECTION_UNAVAILABLE", "Service Unavailable",
+        "Unclassified Wash entry rejection is temporarily unavailable.");
+  }
+
   @ExceptionHandler(AppointmentAvailabilityRefreshingException.class)
   ResponseEntity<ProblemResponse> availabilityRefreshing(
       AppointmentAvailabilityRefreshingException refreshing) {
@@ -64,6 +74,12 @@ public class ApiExceptionHandler {
         "No appointment was found for today.");
   }
 
+  @ExceptionHandler(ExecutionNotFoundException.class)
+  ResponseEntity<ProblemResponse> washExecutionNotFound() {
+    return problem(HttpStatus.NOT_FOUND, "BFF.WASH_EXECUTION_NOT_FOUND", "Not Found",
+        "The Wash execution was not found.");
+  }
+
   @ExceptionHandler(AuthorizationDeniedException.class)
   ResponseEntity<ProblemResponse> forbidden() {
     return problem(HttpStatus.FORBIDDEN, "BFF.ACCESS_DENIED", "Forbidden",
@@ -80,7 +96,8 @@ public class ApiExceptionHandler {
       IllegalArgumentException.class,
       MethodArgumentNotValidException.class,
       MissingRequestHeaderException.class,
-      HttpMessageNotReadableException.class
+      HttpMessageNotReadableException.class,
+      MethodArgumentTypeMismatchException.class
   })
   ResponseEntity<ProblemResponse> invalidRequest() {
     return problem(HttpStatus.BAD_REQUEST, "BFF.INVALID_REQUEST", "Bad Request",

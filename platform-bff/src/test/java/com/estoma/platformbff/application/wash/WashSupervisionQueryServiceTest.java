@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
 
 import com.estoma.platformbff.application.port.WashStudentQueryPort;
 import com.estoma.platformbff.application.port.WashSupervisionQueryPort;
@@ -26,8 +27,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -109,6 +110,37 @@ class WashSupervisionQueryServiceTest {
     assertAction("PENDING_REASSIGNMENT", NextAction.REASSIGNMENT);
     assertAction("IN_PROGRESS", NextAction.EXIT_REVIEW);
     assertAction("EXIT_SUBMITTED", NextAction.EXIT_REVIEW);
+  }
+
+  @Test
+  void lookupAdvertisesLegacyCompletionButKeepsDirectCompletionOffByDefault() {
+    when(studentProjections.findAccountIdByStudentEnrollment("201945678"))
+        .thenReturn(Optional.of(ACCOUNT_ID));
+    var inProgress = candidate("IN_PROGRESS", UUID.randomUUID(), "IN_PROGRESS", true, false);
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(inProgress));
+    assertThat(service.lookup(new SupervisorLookupRequest(
+        LookupType.STUDENT_ENROLLMENT, null, "201945678")).canComplete()).isFalse();
+
+    var submitted = candidate("IN_PROGRESS", UUID.randomUUID(), "EXIT_SUBMITTED", true, true);
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(submitted));
+    assertThat(service.lookup(new SupervisorLookupRequest(
+        LookupType.STUDENT_ENROLLMENT, null, "201945678")).canComplete()).isTrue();
+  }
+
+  @Test
+  void enabledDirectCompletionAdvertisesOnlyAnInProgressExecutionWithActiveAssignment() {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, false, true);
+    when(studentProjections.findAccountIdByStudentEnrollment("201945678"))
+        .thenReturn(Optional.of(ACCOUNT_ID));
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(
+        candidate("IN_PROGRESS", UUID.randomUUID(), "IN_PROGRESS", true, false)));
+
+    var response = service.lookup(
+        new SupervisorLookupRequest(LookupType.STUDENT_ENROLLMENT, null, "201945678"));
+
+    assertThat(response.nextAction()).isEqualTo(NextAction.EXIT_REVIEW);
+    assertThat(response.canComplete()).isTrue();
   }
 
   @Test
@@ -266,6 +298,146 @@ class WashSupervisionQueryServiceTest {
   }
 
   @Test
+  void exactHistoricalExecutionComposesCompletedMaterialsAndLastAssignment() {
+    UUID executionId = UUID.randomUUID();
+    when(projections.findExecution(executionId)).thenReturn(Optional.of(
+        executionDetail(executionId, "COMPLETED", "COMPLETED", false, true, true, true)));
+
+    var response = service.execution(executionId);
+
+    assertThat(response.serviceDate()).isEqualTo(SERVICE_DATE);
+    assertThat(response.student().displayName()).isEqualTo("Ana García Reyes");
+    assertThat(response.appointment().appointmentVersion()).isEqualTo(5L);
+    assertThat(response.washExecution().washExecutionId()).isEqualTo(executionId);
+    assertThat(response.washExecution().version()).isEqualTo(6L);
+    assertThat(response.washExecution().executionVersion()).isEqualTo(6L);
+    assertThat(response.washExecution().submittedExitMaterials().packageCount()).isEqualTo(1);
+    assertThat(response.washExecution().finalExitMaterials().witnessTapePortionCount()).isEqualTo(8);
+    assertThat(response.washExecution().activeResourceAssignment()).isNull();
+    assertThat(response.washExecution().lastResourceAssignment().cabin().code()).isEqualTo("CAB-1");
+    assertThat(response.canComplete()).isFalse();
+    verify(authorization).requireWashSupervisor();
+    verify(readiness).requireReady("wash-execution", "appointments", "academic", "person",
+        "wash-administration");
+  }
+
+  @Test
+  void exactReadUsesTheSameCompletionCapabilityRules() {
+    UUID inProgressId = UUID.randomUUID();
+    UUID submittedId = UUID.randomUUID();
+    when(projections.findExecution(inProgressId)).thenReturn(Optional.of(
+        executionDetail(inProgressId, "IN_PROGRESS", "IN_PROGRESS", true, false, false, false)));
+    when(projections.findExecution(submittedId)).thenReturn(Optional.of(
+        executionDetail(submittedId, "EXIT_SUBMITTED", "IN_PROGRESS", true, false, true, false)));
+
+    assertThat(service.execution(inProgressId).canComplete()).isFalse();
+    assertThat(service.execution(submittedId).canComplete()).isTrue();
+
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, false, true);
+    assertThat(service.execution(inProgressId).canComplete()).isTrue();
+  }
+
+  @Test
+  void exactDirectCompletionKeepsSubmittedValuesNullAndFinalValuesVisible() {
+    UUID executionId = UUID.randomUUID();
+    when(projections.findExecution(executionId)).thenReturn(Optional.of(
+        executionDetail(executionId, "COMPLETED", "COMPLETED", false, true, false, true)));
+
+    var execution = service.execution(executionId).washExecution();
+
+    assertThat(execution.exitSubmittedAt()).isNull();
+    assertThat(execution.submittedExitMaterials()).isNull();
+    assertThat(execution.completedAt()).isEqualTo(NOW);
+    assertThat(execution.finalExitMaterials().packageCount()).isEqualTo(5);
+    assertThat(execution.activeResourceAssignment()).isNull();
+    assertThat(execution.lastResourceAssignment()).isNotNull();
+  }
+
+  @Test
+  void exactExecutionAuthorizesAndChecksReadinessBeforeReportingNotFound() {
+    UUID executionId = UUID.randomUUID();
+    when(projections.findExecution(executionId)).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.execution(executionId))
+        .isInstanceOf(WashSupervisionQueryService.ExecutionNotFoundException.class);
+
+    var ordered = inOrder(authorization, readiness, projections);
+    ordered.verify(authorization).requireWashSupervisor();
+    ordered.verify(readiness).requireReady("wash-execution", "appointments", "academic", "person",
+        "wash-administration");
+    ordered.verify(projections).findExecution(executionId);
+  }
+
+  @Test
+  void exactExecutionAcceptsOwnerPendingStateWithItsStillActiveAssignment() {
+    UUID executionId = UUID.randomUUID();
+    when(projections.findExecution(executionId)).thenReturn(Optional.of(
+        executionDetail(executionId, "PENDING_REASSIGNMENT", "IN_PROGRESS",
+            true, false, false, false)));
+
+    var response = service.execution(executionId);
+
+    assertThat(response.washExecution().activeResourceAssignment()).isNotNull();
+    assertThat(response.washExecution().lastResourceAssignment()).isNull();
+  }
+
+  @Test
+  void exactExecutionFailsClosedForContradictoryOwnerState() {
+    UUID nullStatusId = UUID.randomUUID();
+    UUID cancelledId = UUID.randomUUID();
+    UUID rejectedWithoutReasonId = UUID.randomUUID();
+    UUID pendingWithAssignmentId = UUID.randomUUID();
+    UUID emptyMaterialsId = UUID.randomUUID();
+    var nullStatus = executionDetail(nullStatusId, "PENDING_ENTRY", "SCHEDULED",
+        false, false, false, false);
+    nullStatus = new WashSupervisionQueryPort.ExecutionDetail(
+        nullStatus.washExecutionId(), null, nullStatus.executionVersion(), nullStatus.arrivedAt(),
+        nullStatus.rejectionReason(), nullStatus.exitSubmittedAt(), nullStatus.completedAt(),
+        nullStatus.appointmentId(), nullStatus.appointmentVersion(), nullStatus.appointmentStatus(),
+        nullStatus.appointmentType(), nullStatus.instrumentCount(), nullStatus.pieceType(),
+        nullStatus.courseSectionId(), nullStatus.courseNrc(), nullStatus.courseName(),
+        nullStatus.appointmentTimeSlotId(), nullStatus.serviceDate(), nullStatus.slotStartsAt(),
+        nullStatus.slotEndsAt(), nullStatus.slotTimezone(), nullStatus.studentAccountId(),
+        nullStatus.personId(), nullStatus.firstName(), nullStatus.paternalSurname(),
+        nullStatus.maternalSurname(), nullStatus.studentNumber(), nullStatus.currentSemester(),
+        nullStatus.academicStatus(), nullStatus.activeAssignmentCount(),
+        nullStatus.activeResourceAssignmentId(), nullStatus.activeAssignmentType(),
+        nullStatus.activeCabinId(), nullStatus.activeCabinCode(), nullStatus.activeCabinName(),
+        nullStatus.activeTankId(), nullStatus.activeTankCode(), nullStatus.activeTankName(),
+        nullStatus.lastResourceAssignmentId(), nullStatus.lastAssignmentType(), nullStatus.lastCabinId(),
+        nullStatus.lastCabinCode(), nullStatus.lastCabinName(), nullStatus.lastTankId(),
+        nullStatus.lastTankCode(), nullStatus.lastTankName(), nullStatus.submittedPackageCount(),
+        nullStatus.submittedGreenPaperCassette8Count(), nullStatus.submittedGreenPaperCassette10Count(),
+        nullStatus.submittedWitnessTapePortionCount(), nullStatus.finalPackageCount(),
+        nullStatus.finalGreenPaperCassette8Count(), nullStatus.finalGreenPaperCassette10Count(),
+        nullStatus.finalWitnessTapePortionCount());
+    when(projections.findExecution(nullStatusId)).thenReturn(Optional.of(nullStatus));
+    when(projections.findExecution(cancelledId)).thenReturn(Optional.of(
+        executionDetail(cancelledId, "CANCELLED", "CANCELLED", true, false, false, false)));
+    when(projections.findExecution(rejectedWithoutReasonId)).thenReturn(Optional.of(
+        executionDetail(rejectedWithoutReasonId, "ENTRY_REJECTED", "ENTRY_REJECTED",
+            false, false, false, false)));
+    when(projections.findExecution(pendingWithAssignmentId)).thenReturn(Optional.of(
+        executionDetail(pendingWithAssignmentId, "PENDING_ENTRY", "SCHEDULED",
+            true, false, false, false)));
+    when(projections.findExecution(emptyMaterialsId)).thenReturn(Optional.of(
+        executionDetail(emptyMaterialsId, "EXIT_SUBMITTED", "IN_PROGRESS",
+            true, false, true, false, true)));
+
+    assertThatThrownBy(() -> service.execution(nullStatusId))
+        .isInstanceOf(ProjectionUnavailableException.class);
+    assertThatThrownBy(() -> service.execution(cancelledId))
+        .isInstanceOf(ProjectionUnavailableException.class);
+    assertThatThrownBy(() -> service.execution(rejectedWithoutReasonId))
+        .isInstanceOf(ProjectionUnavailableException.class);
+    assertThatThrownBy(() -> service.execution(pendingWithAssignmentId))
+        .isInstanceOf(ProjectionUnavailableException.class);
+    assertThatThrownBy(() -> service.execution(emptyMaterialsId))
+        .isInstanceOf(ProjectionUnavailableException.class);
+  }
+
+  @Test
   void pendingReassignmentAllowsLegitimateInitialAndOptionalContextToBeAbsent() {
     when(projections.findPendingReassignments()).thenReturn(List.of(pending(null)));
 
@@ -327,6 +499,35 @@ class WashSupervisionQueryServiceTest {
         materials ? 1 : null, materials ? 2 : null, materials ? 3 : null, materials ? 4 : null);
   }
 
+  private static WashSupervisionQueryPort.ExecutionDetail executionDetail(UUID executionId,
+      String executionStatus, String appointmentStatus, boolean active, boolean last,
+      boolean submitted, boolean completed) {
+    return executionDetail(executionId, executionStatus, appointmentStatus, active, last,
+        submitted, completed, false);
+  }
+
+  private static WashSupervisionQueryPort.ExecutionDetail executionDetail(UUID executionId,
+      String executionStatus, String appointmentStatus, boolean active, boolean last,
+      boolean submitted, boolean completed, boolean emptyMaterials) {
+    return new WashSupervisionQueryPort.ExecutionDetail(
+        executionId, executionStatus, 6L, NOW.minusSeconds(3600), null,
+        submitted ? NOW.minusSeconds(300) : null, completed ? NOW : null,
+        UUID.randomUUID(), 5L, appointmentStatus, "NORMAL", 15, "HIGH_SPEED",
+        UUID.randomUUID(), "12345", "Cirugía Bucal", UUID.randomUUID(), SERVICE_DATE,
+        NOW.minusSeconds(7200), NOW.plusSeconds(3600), "America/Mexico_City",
+        ACCOUNT_ID, UUID.randomUUID(), "Ana", "García", "Reyes", "201945678", 7, "ACTIVE",
+        active ? 1 : 0, active ? UUID.randomUUID() : null, active ? "INITIAL" : null,
+        active ? UUID.randomUUID() : null, active ? "CAB-1" : null,
+        active ? "Cabina 1" : null, active ? UUID.randomUUID() : null,
+        active ? "TANK-1" : null, active ? "Tanque 1" : null,
+        last ? UUID.randomUUID() : null, last ? "INITIAL" : null,
+        last ? UUID.randomUUID() : null, last ? "CAB-1" : null,
+        last ? "Cabina 1" : null, last ? UUID.randomUUID() : null,
+        last ? "TANK-1" : null, last ? "Tanque 1" : null,
+        submitted ? emptyMaterials ? 0 : 1 : null, submitted ? emptyMaterials ? 0 : 2 : null,
+        submitted ? emptyMaterials ? 0 : 3 : null, submitted ? emptyMaterials ? 0 : 4 : null,
+        completed ? 5 : null, completed ? 6 : null, completed ? 7 : null, completed ? 8 : null);
+  }
   private static WashSupervisionQueryPort.PendingReassignment pending(
       InvalidPendingContext invalid) {
     boolean assignment = invalid == InvalidPendingContext.PARTIAL_ASSIGNMENT

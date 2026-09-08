@@ -52,6 +52,26 @@ class WashExecutionDomainTest {
   }
 
   @Test
+  void directCompletionRequiresInProgressAndUsesStartAsItsTimeBoundary() {
+    UUID supervisor = UUID.randomUUID();
+    WashExecution execution = WashExecution.register(
+        UUID.randomUUID(), UUID.randomUUID(), AppointmentType.NORMAL, NOW, NOW);
+    assertThrows(DomainRuleViolationException.class,
+        () -> execution.completeDirectly(supervisor, new ExitMaterials(1, 0, 0, 0), NOW));
+
+    execution.start(NOW.plusSeconds(10));
+    assertThrows(DomainRuleViolationException.class,
+        () -> execution.completeDirectly(supervisor, new ExitMaterials(1, 0, 0, 0), NOW.plusSeconds(9)));
+    execution.completeDirectly(supervisor, new ExitMaterials(0, 1, 0, 0), NOW.plusSeconds(11));
+
+    assertEquals(WashExecutionStatus.COMPLETED, execution.status());
+    assertEquals(supervisor, execution.completedByAccountId());
+    assertNull(execution.exitSubmittedByAccountId());
+    assertNull(execution.exitSubmittedAt());
+    assertEquals(3, execution.version());
+  }
+
+  @Test
   void entryValidationEnforcesDecisionInvariants() {
     UUID executionId = UUID.randomUUID();
     assertThrows(DomainRuleViolationException.class, () -> new EntryValidation(UUID.randomUUID(), executionId,
@@ -60,6 +80,12 @@ class WashExecutionDomainTest {
         false, false, null, null, UUID.randomUUID(), NOW));
     new EntryValidation(UUID.randomUUID(), executionId, false, false, EntryDecision.REJECTED,
         "Identity mismatch", UUID.randomUUID(), NOW);
+    new EntryValidation(UUID.randomUUID(), executionId, null, null, EntryDecision.REJECTED,
+        "Unclassified operational reason", UUID.randomUUID(), NOW);
+    assertThrows(DomainRuleViolationException.class, () -> new EntryValidation(UUID.randomUUID(), executionId,
+        null, true, EntryDecision.REJECTED, "Partial checks", UUID.randomUUID(), NOW));
+    assertThrows(DomainRuleViolationException.class, () -> new EntryValidation(UUID.randomUUID(), executionId,
+        null, null, EntryDecision.AUTHORIZED, null, UUID.randomUUID(), NOW));
   }
 
   @Test

@@ -309,13 +309,15 @@ class WashStudentQueryServiceTest {
     when(projections.findStudent(ACCOUNT_ID)).thenReturn(Optional.of(student()));
     when(projections.findPrimaryAppointment(ACCOUNT_ID, java.time.LocalDate.of(2026, 8, 27)))
         .thenReturn(Optional.of(executionAppointment("IN_PROGRESS", "COMPLETED", 6L,
-            NOW.minusSeconds(60), NOW.minusSeconds(10), false, true)));
+            null, NOW.minusSeconds(10), false, true)));
 
     var response = service.home();
     var execution = response.appointment().washExecution();
 
     assertThat(response.appointment().appointmentStatus()).isEqualTo("IN_PROGRESS");
     assertThat(execution.completedAt()).isEqualTo(NOW.minusSeconds(10));
+    assertThat(execution.exitSubmittedAt()).isNull();
+    assertThat(execution.submittedExitMaterials()).isNull();
     assertThat(execution.finalExitMaterials().packageCount()).isEqualTo(5);
     assertThat(execution.activeResourceAssignment()).isNull();
     assertThat(execution.lastResourceAssignment().cabinCode()).isEqualTo("C-01");

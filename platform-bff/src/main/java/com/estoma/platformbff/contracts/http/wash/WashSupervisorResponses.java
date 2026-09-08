@@ -1,6 +1,7 @@
 package com.estoma.platformbff.contracts.http.wash;
 
 import com.estoma.platformbff.contracts.http.Required;
+import com.estoma.platformbff.contracts.http.RequiredNullable;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import java.time.Instant;
@@ -34,10 +35,50 @@ public final class WashSupervisorResponses {
   public record SupervisorLookupResponse(
       @Required LocalDate serviceDate,
       @Required NextAction nextAction,
+      @Required boolean canComplete,
       @Required SupervisorStudent student,
       @Required SupervisorAppointment appointment,
       SupervisorWashExecution washExecution,
       ActiveResourceAssignment activeResourceAssignment) {}
+
+  /** Exact, read-only supervisor view of one current or historical Wash execution. */
+  public record SupervisorExecutionDetailResponse(
+      @Required LocalDate serviceDate,
+      @Required boolean canComplete,
+      @Required SupervisorStudent student,
+      @Required SupervisorExecutionAppointment appointment,
+      @Required SupervisorExecution washExecution) {}
+
+  public record SupervisorExecutionAppointment(
+      @Required UUID appointmentId,
+      @Required Long appointmentVersion,
+      @Required @Pattern(regexp = "SCHEDULED|CANCELLED|MISSED|ENTRY_REJECTED|IN_PROGRESS|COMPLETED")
+      String appointmentStatus,
+      @Required @Pattern(regexp = "NORMAL|JOURNEY|IMMUNOCOMPROMISED") String appointmentType,
+      @RequiredNullable @Positive Integer instrumentCount,
+      @RequiredNullable @Pattern(regexp = "HIGH_SPEED|LOW_SPEED|CONTRA_ANGLE") String pieceType,
+      @RequiredNullable SupervisorExecutionCourseSection courseSectionReference,
+      @Required AppointmentTimeSlot appointmentTimeSlot) {}
+
+  public record SupervisorExecutionCourseSection(
+      @Required UUID courseSectionId,
+      @RequiredNullable String nrc,
+      @RequiredNullable String name) {}
+
+  public record SupervisorExecution(
+      @Required UUID washExecutionId,
+      @Required @Pattern(regexp = "PENDING_ENTRY|ENTRY_REJECTED|PENDING_REASSIGNMENT|IN_PROGRESS|EXIT_SUBMITTED|COMPLETED|CANCELLED")
+      String status,
+      @Required Long version,
+      @Required Long executionVersion,
+      @Required Instant arrivedAt,
+      @RequiredNullable String rejectionReason,
+      @RequiredNullable Instant exitSubmittedAt,
+      @RequiredNullable SubmittedExitMaterials submittedExitMaterials,
+      @RequiredNullable Instant completedAt,
+      @RequiredNullable SubmittedExitMaterials finalExitMaterials,
+      @RequiredNullable ActiveResourceAssignment activeResourceAssignment,
+      @RequiredNullable ActiveResourceAssignment lastResourceAssignment) {}
 
   public record SupervisorStudent(
       @Required UUID studentAccountId,

@@ -1,0 +1,158 @@
+{
+  "name": "platform-bff-wash-exit-completion-front-v1-example",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "loginIdentifier",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "password",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "runtimeAccessToken",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "supervisorLoginIdentifier",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "supervisorPassword",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "runtimeSupervisorAccessToken",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "fixtureStudentAccountId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "fixtureSupervisorAccountId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "runKey",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "fixtureCourseSectionId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "fixtureAppointmentTimeSlotId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "fixtureStudentEnrollment",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "maxPollAttempts",
+      "value": "30",
+      "enabled": true
+    },
+    {
+      "key": "maxReadAttempts",
+      "value": "20",
+      "enabled": true
+    },
+    {
+      "key": "fixtureCabinId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "fixtureTankId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "preExitVersion",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "exitVersion",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "completedVersion",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "resourceAssignmentId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "exitOperationId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "exitOperationIdPollPath",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "exitOperationIdSubmittedAt",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "staleCompleteOperationId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "staleCompleteOperationIdPollPath",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "staleCompleteOperationIdSubmittedAt",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "completeOperationId",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "completeOperationIdPollPath",
+      "value": "",
+      "enabled": true
+    },
+    {
+      "key": "completeOperationIdSubmittedAt",
+      "value": "",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "_postman_exported_at": "2026-09-05T00:00:00.000Z",
+  "_postman_exported_using": "Codex"
+}

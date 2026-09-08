@@ -57,6 +57,7 @@ class ProjectionQueriesPostgresIT {
   @Autowired JdbcProjectionReadModelRepository projections;
   @Autowired JdbcWashExitMaterialsProjectionRepository exitMaterials;
   @Autowired JdbcWashCompletionProjectionRepository completions;
+  @Autowired JdbcWashCancellationProjectionRepository cancellations;
   @Autowired JdbcWashSupervisionQueryRepository supervision;
   @Autowired JdbcWashStudentQueryRepository studentQueries;
   @Autowired JdbcAppointmentQrProjectionRepository appointmentQr;
@@ -224,9 +225,9 @@ class ProjectionQueriesPostgresIT {
     projections.upsert(execution(executionId, authorizedAt));
 
     exitMaterials.projectSubmittedExitMaterials(
-        executionId, 1, 2, 3, 4, 7, authorizedAt.plusSeconds(30));
+        executionId, 1, 2, 3, 4, authorizedAt.plusSeconds(25), 7, authorizedAt.plusSeconds(30));
     exitMaterials.projectSubmittedExitMaterials(
-        executionId, 9, 9, 9, 9, 6, authorizedAt.plusSeconds(20));
+        executionId, 9, 9, 9, 9, authorizedAt.plusSeconds(15), 6, authorizedAt.plusSeconds(20));
 
     var item = supervision.findPendingReassignments().getFirst();
     assertThat(item.washExecutionId()).isEqualTo(executionId);
@@ -319,6 +320,196 @@ class ProjectionQueriesPostgresIT {
     assertThat(home.lastResourceAssignmentId()).isNotNull();
     assertThat(home.lastCabinCode()).isEqualTo("C-01");
     assertThat(home.finalPackageCount()).isEqualTo(5);
+  }
+
+  @Test
+  void delayedAssignmentAfterCancellationIsBornReleasedAtTheOwnerTimestamp() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-01T11:00:00Z");
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "CANCELLED", null, null, null, null, null, cancelledAt,
+        "SUPERVISOR_DECISION", null, null, null, null, null, 6, cancelledAt));
+    cancellations.projectCancellation(executionId, 6, cancelledAt);
+
+    projections.upsert(new ProjectionReadModel.ResourceAssignment(
+        assignmentId, executionId, null, null, null, null,
+        "INITIAL", cancelledAt.minusSeconds(600), null, UUID.randomUUID(), 5,
+        cancelledAt.minusSeconds(600)));
+
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query().singleRow();
+    assertThat(((java.sql.Timestamp) assignment.get("released_at")).toInstant()).isEqualTo(cancelledAt);
+    assertThat(assignment.get("source_version")).isEqualTo(5L);
+  }
+
+  @Test
+  void staleCancellationCannotReleaseCurrentAssignmentAndPendingReassignmentRetainsIt() {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant updatedAt = Instant.parse("2026-08-01T11:00:00Z");
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "CANCELLED", null, null, null, null, null, updatedAt,
+        "SUPERVISOR_DECISION", null, null, null, null, null, 6, updatedAt));
+    jdbc.sql("""
+        INSERT INTO wash_resource_assignment_read_model (
+          resource_assignment_id, wash_execution_id, assignment_type, assigned_at,
+          source_message_id, source_version, updated_at)
+        VALUES (:assignmentId, :executionId, 'INITIAL', :assignedAt,
+          :messageId, 4, :assignedAt)
+        """).param("assignmentId", assignmentId).param("executionId", executionId)
+        .param("assignedAt", java.sql.Timestamp.from(updatedAt.minusSeconds(600)))
+        .param("messageId", UUID.randomUUID()).update();
+
+    cancellations.projectCancellation(executionId, 5, updatedAt.minusSeconds(30));
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "PENDING_REASSIGNMENT", null, updatedAt, null, null, null, null,
+        null, null, null, null, null, null, 7, updatedAt.plusSeconds(30)));
+
+    var assignment = jdbc.sql("""
+        SELECT released_at, source_version FROM wash_resource_assignment_read_model
+        WHERE resource_assignment_id = :assignmentId
+        """).param("assignmentId", assignmentId).query().singleRow();
+    assertThat(assignment.get("released_at")).isNull();
+    assertThat(assignment.get("source_version")).isEqualTo(4L);
+    assertThat(jdbc.sql("""
+        SELECT status FROM wash_execution_read_model WHERE wash_execution_id = :executionId
+        """).param("executionId", executionId).query(String.class).single())
+        .isEqualTo("PENDING_REASSIGNMENT");
+  }
+
+  @Test
+  void concurrentAssignmentCannotReactivateACancelledExecution() throws Exception {
+    UUID executionId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant cancelledAt = Instant.parse("2026-08-01T11:00:00Z");
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        executionId, null, "NORMAL", "IN_PROGRESS", null, null, cancelledAt.minusSeconds(900), null,
+        null, null, null, null, null, null, null, null, 5, cancelledAt.minusSeconds(900)));
+
+    jdbc.sql("""
+        CREATE FUNCTION block_test_cancel_assignment() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.wash_execution_id = '%s'::uuid THEN
+            PERFORM pg_advisory_xact_lock(918273646);
+          END IF;
+          RETURN NEW;
+        END
+        $$
+        """.formatted(executionId)).update();
+    jdbc.sql("""
+        CREATE TRIGGER block_test_cancel_assignment_before_insert
+        BEFORE INSERT ON wash_resource_assignment_read_model
+        FOR EACH ROW EXECUTE FUNCTION block_test_cancel_assignment()
+        """).update();
+
+    var executor = Executors.newFixedThreadPool(2);
+    try (var blocker = dataSource.getConnection()) {
+      blocker.setAutoCommit(false);
+      blocker.createStatement().execute("SELECT pg_advisory_xact_lock(918273646)");
+      CompletableFuture<Void> assignment = CompletableFuture.runAsync(() -> projections.upsert(
+          new ProjectionReadModel.ResourceAssignment(
+              assignmentId, executionId, null, null, null, null,
+              "INITIAL", cancelledAt.minusSeconds(600), null, UUID.randomUUID(), 4,
+              cancelledAt.minusSeconds(600))), executor);
+      awaitAdvisoryWaiters(1);
+
+      CompletableFuture<Void> cancellation = CompletableFuture.runAsync(() ->
+          new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            projections.upsert(new ProjectionReadModel.WashExecution(
+                executionId, null, "NORMAL", "CANCELLED", null, null, null, null, null,
+                cancelledAt, "SUPERVISOR_DECISION", null, null, null, null, null, 6, cancelledAt));
+            cancellations.projectCancellation(executionId, 6, cancelledAt);
+          }), executor);
+      awaitAdvisoryWaiters(2);
+
+      blocker.commit();
+      CompletableFuture.allOf(assignment, cancellation).get(10, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+      jdbc.sql("""
+          DROP TRIGGER IF EXISTS block_test_cancel_assignment_before_insert
+          ON wash_resource_assignment_read_model
+          """).update();
+      jdbc.sql("DROP FUNCTION IF EXISTS block_test_cancel_assignment()")
+          .update();
+    }
+
+    var result = jdbc.sql("""
+        SELECT e.status, ra.released_at
+        FROM wash_execution_read_model e
+        JOIN wash_resource_assignment_read_model ra
+          ON ra.wash_execution_id = e.wash_execution_id
+        WHERE e.wash_execution_id = :executionId
+        """).param("executionId", executionId).query().singleRow();
+    assertThat(result.get("status")).isEqualTo("CANCELLED");
+    assertThat(((java.sql.Timestamp) result.get("released_at")).toInstant()).isEqualTo(cancelledAt);
+
+    UUID inverseExecutionId = UUID.randomUUID();
+    UUID inverseAssignmentId = UUID.randomUUID();
+    projections.upsert(new ProjectionReadModel.WashExecution(
+        inverseExecutionId, null, "NORMAL", "IN_PROGRESS", null, null,
+        cancelledAt.minusSeconds(900), null, null, null, null, null, null, null, null, null, 5,
+        cancelledAt.minusSeconds(900)));
+    jdbc.sql("""
+        CREATE FUNCTION block_test_cancel_execution() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.wash_execution_id = '%s'::uuid AND NEW.status = 'CANCELLED' THEN
+            PERFORM pg_advisory_xact_lock(918273647);
+          END IF;
+          RETURN NEW;
+        END
+        $$
+        """.formatted(inverseExecutionId)).update();
+    jdbc.sql("""
+        CREATE TRIGGER block_test_cancel_execution_before_update
+        BEFORE UPDATE ON wash_execution_read_model
+        FOR EACH ROW EXECUTE FUNCTION block_test_cancel_execution()
+        """).update();
+
+    var inverseExecutor = Executors.newFixedThreadPool(2);
+    try (var blocker = dataSource.getConnection()) {
+      blocker.setAutoCommit(false);
+      blocker.createStatement().execute("SELECT pg_advisory_xact_lock(918273647)");
+      CompletableFuture<Void> cancellation = CompletableFuture.runAsync(() ->
+          new TransactionTemplate(transactionManager).executeWithoutResult(ignored -> {
+            projections.upsert(new ProjectionReadModel.WashExecution(
+                inverseExecutionId, null, "NORMAL", "CANCELLED", null, null, null, null, null,
+                cancelledAt, "SUPERVISOR_DECISION", null, null, null, null, null, 6, cancelledAt));
+            cancellations.projectCancellation(inverseExecutionId, 6, cancelledAt);
+          }), inverseExecutor);
+      awaitAdvisoryWaiters(1);
+      CompletableFuture<Void> assignment = CompletableFuture.runAsync(() -> projections.upsert(
+          new ProjectionReadModel.ResourceAssignment(
+              inverseAssignmentId, inverseExecutionId, null, null, null, null,
+              "INITIAL", cancelledAt.minusSeconds(600), null, UUID.randomUUID(), 4,
+              cancelledAt.minusSeconds(600))), inverseExecutor);
+      awaitAdvisoryWaiters(2);
+
+      blocker.commit();
+      CompletableFuture.allOf(cancellation, assignment).get(10, TimeUnit.SECONDS);
+    } finally {
+      inverseExecutor.shutdownNow();
+      jdbc.sql("""
+          DROP TRIGGER IF EXISTS block_test_cancel_execution_before_update
+          ON wash_execution_read_model
+          """).update();
+      jdbc.sql("DROP FUNCTION IF EXISTS block_test_cancel_execution()")
+          .update();
+    }
+
+    var inverseResult = jdbc.sql("""
+        SELECT e.status, ra.released_at
+        FROM wash_execution_read_model e
+        JOIN wash_resource_assignment_read_model ra
+          ON ra.wash_execution_id = e.wash_execution_id
+        WHERE e.wash_execution_id = :executionId
+        """).param("executionId", inverseExecutionId).query().singleRow();
+    assertThat(inverseResult.get("status")).isEqualTo("CANCELLED");
+    assertThat(((java.sql.Timestamp) inverseResult.get("released_at")).toInstant())
+        .isEqualTo(cancelledAt);
   }
 
   @Test
@@ -455,7 +646,8 @@ class ProjectionQueriesPostgresIT {
         WHERE appointment_id IN (:completed, :active)
         """).param("completed", completed).param("active", active).update();
     UUID executionId = insertExecution(active, "EXIT_SUBMITTED", latest.plusSeconds(60));
-    exitMaterials.projectSubmittedExitMaterials(executionId, 1, 2, 3, 4, 2, latest.plusSeconds(90));
+    exitMaterials.projectSubmittedExitMaterials(
+        executionId, 1, 2, 3, 4, latest.plusSeconds(60), 2, latest.plusSeconds(90));
 
     var candidates = supervision.findAppointments(accountId, java.time.LocalDate.of(2026, 8, 1));
 
@@ -470,6 +662,116 @@ class ProjectionQueriesPostgresIT {
     assertThat(supervision.findAppointment(active, java.time.LocalDate.of(2026, 8, 1)))
         .map(item -> item.appointmentId()).contains(active);
     assertThat(supervision.findAppointment(active, java.time.LocalDate.of(2026, 8, 2))).isEmpty();
+  }
+
+  @Test
+  void exactExecutionReadsHistoricalIdWithOriginalAndFinalMaterialsWithoutSelectingTodaysAppointment() {
+    UUID accountId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    UUID profileId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+    UUID appointmentId = UUID.randomUUID();
+    UUID executionId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    UUID assignmentId = UUID.randomUUID();
+    Instant startsAt = Instant.parse("2026-07-31T14:00:00Z");
+    Instant completedAt = Instant.parse("2026-07-31T14:45:00Z");
+    jdbc.sql("""
+        INSERT INTO person_presentation_read_model
+          (person_id, first_name, paternal_surname, status, source_version, updated_at)
+        VALUES (:personId, 'Ana', 'García', 'ACTIVE', 1, :updatedAt)
+        """).param("personId", personId).param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO student_academic_profile_read_model
+          (student_academic_profile_id, person_id, account_id, student_number, current_semester,
+           academic_status, source_version, updated_at)
+        VALUES (:profileId, :personId, :accountId, '201945678', 7, 'INACTIVE', 1, :updatedAt)
+        """).param("profileId", profileId).param("personId", personId).param("accountId", accountId)
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO appointment_time_slot_read_model
+          (appointment_time_slot_id, service_date, starts_at, ends_at, timezone, status, updated_at)
+        VALUES (:slotId, '2026-07-31', :startsAt, :endsAt, 'America/Mexico_City', 'ACTIVE', :updatedAt)
+        """).param("slotId", slotId).param("startsAt", java.sql.Timestamp.from(startsAt))
+        .param("endsAt", java.sql.Timestamp.from(startsAt.plusSeconds(3600)))
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO appointment_read_model
+          (appointment_id, appointment_time_slot_id, student_account_id, appointment_type,
+           instrument_count, piece_type, status, source_version, updated_at)
+        VALUES (:appointmentId, :slotId, :accountId, 'NORMAL', 4, 'LOW_SPEED',
+          'COMPLETED', 5, :updatedAt)
+        """).param("appointmentId", appointmentId).param("slotId", slotId)
+        .param("accountId", accountId).param("updatedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model
+          (wash_execution_id, appointment_id, appointment_type, status, arrived_at,
+           exit_submitted_at, completed_at, execution_version, updated_at,
+           submitted_package_count, submitted_green_paper_cassette_8_count,
+           submitted_green_paper_cassette_10_count, submitted_witness_tape_portion_count,
+           submitted_exit_version,
+           final_package_count, final_green_paper_cassette_8_count,
+           final_green_paper_cassette_10_count, final_witness_tape_portion_count, final_exit_version)
+        VALUES (:executionId, :appointmentId, 'NORMAL', 'COMPLETED', :arrivedAt,
+          :exitSubmittedAt, :completedAt, 6, :completedAt, 1, 2, 3, 4, 5, 5, 6, 7, 8, 6)
+        """).param("executionId", executionId).param("appointmentId", appointmentId)
+        .param("arrivedAt", java.sql.Timestamp.from(startsAt.minusSeconds(300)))
+        .param("exitSubmittedAt", java.sql.Timestamp.from(completedAt.minusSeconds(300)))
+        .param("completedAt", java.sql.Timestamp.from(completedAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_cabin_read_model(cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, 'CAB-1', 'Cabina 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", cabinId).param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_tank_read_model(tank_id, cabin_id, code, name, status, source_version, updated_at)
+        VALUES (:id, :cabinId, 'TANK-1', 'Tanque 1', 'ACTIVE', 1, :updatedAt)
+        """).param("id", tankId).param("cabinId", cabinId)
+        .param("updatedAt", java.sql.Timestamp.from(startsAt)).update();
+    jdbc.sql("""
+        INSERT INTO wash_resource_assignment_read_model
+          (resource_assignment_id, wash_execution_id, appointment_id, appointment_time_slot_id,
+           cabin_id, tank_id, assignment_type, assigned_at, released_at, source_message_id,
+           source_version, updated_at)
+        VALUES (:assignmentId, :executionId, :appointmentId, :slotId, :cabinId, :tankId,
+          'INITIAL', :assignedAt, :releasedAt, :messageId, 6, :releasedAt)
+        """).param("assignmentId", assignmentId).param("executionId", executionId)
+        .param("appointmentId", appointmentId).param("slotId", slotId).param("cabinId", cabinId)
+        .param("tankId", tankId).param("assignedAt", java.sql.Timestamp.from(startsAt))
+        .param("releasedAt", java.sql.Timestamp.from(completedAt)).param("messageId", UUID.randomUUID())
+        .update();
+    UUID todayAppointment = appointment(accountId, "SCHEDULED",
+        Instant.parse("2026-08-01T14:00:00Z"), java.time.LocalDate.of(2026, 8, 1));
+
+    var detail = supervision.findExecution(executionId).orElseThrow();
+
+    assertThat(detail.washExecutionId()).isEqualTo(executionId);
+    assertThat(detail.appointmentId()).isEqualTo(appointmentId).isNotEqualTo(todayAppointment);
+    assertThat(detail.serviceDate()).isEqualTo(java.time.LocalDate.of(2026, 7, 31));
+    assertThat(detail.academicStatus()).isEqualTo("INACTIVE");
+    assertThat(detail.activeAssignmentCount()).isZero();
+    assertThat(detail.lastResourceAssignmentId()).isEqualTo(assignmentId);
+    assertThat(detail.submittedPackageCount()).isEqualTo(1);
+    assertThat(detail.submittedWitnessTapePortionCount()).isEqualTo(4);
+    assertThat(detail.finalPackageCount()).isEqualTo(5);
+    assertThat(detail.finalWitnessTapePortionCount()).isEqualTo(8);
+    assertThat(supervision.findExecution(UUID.randomUUID())).isEmpty();
+  }
+
+  @Test
+  void exactExecutionKeepsExistingBaseRowWhenItsAppointmentJoinIsMissing() {
+    UUID executionId = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO wash_execution_read_model
+          (wash_execution_id, appointment_id, status, execution_version, updated_at)
+        VALUES (:executionId, :appointmentId, 'PENDING_ENTRY', 1, :updatedAt)
+        """).param("executionId", executionId).param("appointmentId", UUID.randomUUID())
+        .param("updatedAt", java.sql.Timestamp.from(Instant.parse("2026-08-01T10:00:00Z"))).update();
+
+    var incomplete = supervision.findExecution(executionId);
+
+    assertThat(incomplete).isPresent();
+    assertThat(incomplete.orElseThrow().appointmentId()).isNull();
   }
 
   @Test

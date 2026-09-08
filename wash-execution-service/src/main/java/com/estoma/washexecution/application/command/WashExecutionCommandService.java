@@ -57,6 +57,8 @@ public final class WashExecutionCommandService {
   private final CommandIdempotencyRepository idempotency;
   private final JsonCodec json;
   private final Clock clock;
+  private final boolean unclassifiedEntryRejectionEnabled;
+  private final boolean directSupervisorCompletionEnabled;
 
   public WashExecutionCommandService(
       WashExecutionRepository executions,
@@ -75,7 +77,9 @@ public final class WashExecutionCommandService {
       OutboxRepository outbox,
       CommandIdempotencyRepository idempotency,
       JsonCodec json,
-      Clock clock) {
+      Clock clock,
+      boolean unclassifiedEntryRejectionEnabled,
+      boolean directSupervisorCompletionEnabled) {
     this.executions = executions;
     this.validations = validations;
     this.assignments = assignments;
@@ -93,6 +97,8 @@ public final class WashExecutionCommandService {
     this.idempotency = idempotency;
     this.json = json;
     this.clock = clock;
+    this.unclassifiedEntryRejectionEnabled = unclassifiedEntryRejectionEnabled;
+    this.directSupervisorCompletionEnabled = directSupervisorCompletionEnabled;
   }
 
   public CommandOutcome dispatch(CommandRequest request) {
@@ -184,6 +190,12 @@ public final class WashExecutionCommandService {
         || validations.findByExecutionId(execution.washExecutionId()).isPresent()) {
       throw new CommandRejectedException("INVALID_ENTRY_STATE");
     }
+    boolean unclassifiedRejection = c.decision() == EntryDecision.REJECTED
+        && c.identityConfirmed() == null
+        && c.requirementsSatisfied() == null;
+    if (unclassifiedRejection && !unclassifiedEntryRejectionEnabled) {
+      throw new CommandRejectedException("UNCLASSIFIED_ENTRY_REJECTION_DISABLED");
+    }
 
     EntryValidation validation = new EntryValidation(
         UUID.randomUUID(), execution.washExecutionId(), c.identityConfirmed(), c.requirementsSatisfied(),
@@ -191,12 +203,13 @@ public final class WashExecutionCommandService {
 
     if (c.decision() == EntryDecision.REJECTED) {
       execution.rejectEntry();
-      validations.save(validation);
       executions.save(execution, c.expectedVersion());
+      validations.save(validation);
       Map<String, Object> payload = entryValidationPayload(execution, validation);
       payload.put("rejectionReason", validation.rejectionReason());
       return change(execution, data("status", execution.status().name()),
-          event("WashEntryRejected", execution, validation.decidedAt(), payload));
+          event("WashEntryRejected", unclassifiedRejection ? 2 : 1,
+              execution, validation.decidedAt(), payload));
     }
 
     requireAppointmentsReady();
@@ -212,8 +225,8 @@ public final class WashExecutionCommandService {
 
     if (candidate.isEmpty()) {
       execution.authorizeWithoutResource();
-      validations.save(validation);
       executions.save(execution, c.expectedVersion());
+      validations.save(validation);
       Map<String, Object> authorized = entryValidationPayload(execution, validation);
       Map<String, Object> pending = executionBase(execution);
       pending.put("appointmentType", execution.appointmentType().name());
@@ -228,8 +241,8 @@ public final class WashExecutionCommandService {
         candidate.get().cabinId(), candidate.get().tankId(), AssignmentType.INITIAL, null, c.decidedAt());
     execution.start(c.decidedAt());
 
-    validations.save(validation);
     executions.save(execution, c.expectedVersion());
+    validations.save(validation);
     assignments.save(assignment);
 
     Map<String, Object> authorized = entryValidationPayload(execution, validation);
@@ -420,7 +433,14 @@ public final class WashExecutionCommandService {
     ResourceAssignment assignment = assignments.findActiveByExecutionId(execution.washExecutionId())
         .orElseThrow(() -> new CommandRejectedException("ACTIVE_RESOURCE_ASSIGNMENT_NOT_FOUND"));
 
-    execution.complete(supervisorId, c.finalMaterials(), c.completedAt());
+    if (execution.status() == WashExecutionStatus.IN_PROGRESS) {
+      if (!directSupervisorCompletionEnabled) {
+        throw new CommandRejectedException("DIRECT_SUPERVISOR_COMPLETION_DISABLED");
+      }
+      execution.completeDirectly(supervisorId, c.finalMaterials(), c.completedAt());
+    } else {
+      execution.complete(supervisorId, c.finalMaterials(), c.completedAt());
+    }
     assignment.release(supervisorId, c.completedAt(), ReleaseReason.NORMAL_COMPLETION);
     CleaningPeriod cleaning = prepareCleaningIfNeeded(
         execution, assignment, execution.startedAt() != null,
@@ -585,7 +605,7 @@ public final class WashExecutionCommandService {
 
   private void appendEvent(CommandMetadata metadata, WashExecutionEvents.Event event) {
     outbox.append(new OutboxRepository.OutboxMessage(
-        UUID.randomUUID(), event.type(), 1, "EVENT", PRODUCER, event.type(), event.occurredAt(),
+        UUID.randomUUID(), event.type(), event.messageVersion(), "EVENT", PRODUCER, event.type(), event.occurredAt(),
         metadata.operationId(), metadata.idempotencyKey(), event.aggregateId(), event.aggregateVersion(),
         metadata.correlationId(), metadata.messageId(), json.write(metadata.actor()), json.write(event.payload())));
   }
@@ -621,8 +641,10 @@ public final class WashExecutionCommandService {
       WashExecution execution, EntryValidation validation) {
     Map<String, Object> payload = executionBase(execution);
     payload.put("entryValidationId", validation.entryValidationId());
-    payload.put("identityConfirmed", validation.identityConfirmed());
-    payload.put("requirementsSatisfied", validation.requirementsSatisfied());
+    if (validation.identityConfirmed() != null) {
+      payload.put("identityConfirmed", validation.identityConfirmed());
+      payload.put("requirementsSatisfied", validation.requirementsSatisfied());
+    }
     payload.put("decidedByAccountId", validation.decidedByAccountId());
     payload.put("decidedAt", validation.decidedAt());
     return payload;
@@ -752,6 +774,13 @@ public final class WashExecutionCommandService {
       String type, WashExecution execution, Instant occurredAt, Map<String, Object> payload) {
     return new WashExecutionEvents.Event(
         type, execution.washExecutionId(), execution.version(), occurredAt, payload);
+  }
+
+  private static WashExecutionEvents.Event event(
+      String type, int messageVersion, WashExecution execution, Instant occurredAt,
+      Map<String, Object> payload) {
+    return new WashExecutionEvents.Event(
+        type, messageVersion, execution.washExecutionId(), execution.version(), occurredAt, payload);
   }
 
   private static void addMaterials(

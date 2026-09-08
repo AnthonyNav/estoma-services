@@ -48,6 +48,10 @@ info:
     name: wash-execution-service
     version: 0.1.0
 estoma:
+  completion:
+    direct-supervisor-enabled: ${ESTOMA_DIRECT_SUPERVISOR_COMPLETION_ENABLED:false}
+  entry:
+    unclassified-rejection-enabled: ${ESTOMA_UNCLASSIFIED_ENTRY_REJECTION_ENABLED:false}
   messaging:
     publisher-confirm-timeout: 5s
     outbox-lease: 30s

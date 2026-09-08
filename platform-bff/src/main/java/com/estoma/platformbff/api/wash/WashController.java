@@ -29,12 +29,14 @@ import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.ScheduleAppoi
 import com.estoma.platformbff.contracts.http.wash.WashHttpRequests.SubmitExitRequest;
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorHomeResponse;
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorLookupResponse;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorExecutionDetailResponse;
 import jakarta.validation.Valid;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -56,11 +58,14 @@ public class WashController {
   private final AppointmentAvailabilityService appointmentAvailability;
   private final ReassignmentCandidatesService reassignmentCandidates;
   private final Clock clock;
+  private final boolean unclassifiedEntryRejectionEnabled;
 
   public WashController(PublicCommandAdapter commands, LocalAuthorizationService authorization,
       WashSupervisionQueryService supervision, WashStudentQueryService studentQueries,
       AppointmentAvailabilityService appointmentAvailability,
-      ReassignmentCandidatesService reassignmentCandidates, Clock clock) {
+      ReassignmentCandidatesService reassignmentCandidates, Clock clock,
+      @Value("${platform.wash.unclassified-entry-rejection-enabled:false}")
+          boolean unclassifiedEntryRejectionEnabled) {
     this.commands = commands;
     this.authorization = authorization;
     this.supervision = supervision;
@@ -68,6 +73,7 @@ public class WashController {
     this.appointmentAvailability = appointmentAvailability;
     this.reassignmentCandidates = reassignmentCandidates;
     this.clock = clock;
+    this.unclassifiedEntryRejectionEnabled = unclassifiedEntryRejectionEnabled;
   }
 
   @PostMapping("/appointments")
@@ -147,11 +153,17 @@ public class WashController {
       @RequestHeader("Idempotency-Key") String idempotencyKey,
       @Valid @RequestBody EntryDecisionRequest request) {
     UUID supervisorId = authorization.requireWashSupervisor();
+    if (request.isUnclassifiedRejection() && !unclassifiedEntryRejectionEnabled) {
+      throw new UnclassifiedEntryRejectionUnavailableException();
+    }
     Instant now = clock.instant();
     Map<String, Object> intent = payload("washExecutionId", washExecutionId,
-        "identityConfirmed", request.identityConfirmed(), "requirementsSatisfied", request.requirementsSatisfied(),
         "decision", request.decision(), "rejectionReason", request.rejectionReason(),
         "expectedVersion", request.expectedVersion());
+    if (request.identityConfirmed() != null) {
+      intent.put("identityConfirmed", request.identityConfirmed());
+      intent.put("requirementsSatisfied", request.requirementsSatisfied());
+    }
     Map<String, Object> owner = new LinkedHashMap<>(intent);
     owner.put("decidedByAccountId", supervisorId);
     owner.put("decidedAt", now);
@@ -288,6 +300,12 @@ public class WashController {
     return supervision.lookup(request);
   }
 
+  @GetMapping("/supervision/executions/{washExecutionId}")
+  public SupervisorExecutionDetailResponse supervisorExecution(
+      @PathVariable UUID washExecutionId) {
+    return supervision.execution(washExecutionId);
+  }
+
   @GetMapping("/student/home")
   public StudentHomeResponse studentHome() {
     return studentQueries.home();
@@ -329,4 +347,7 @@ public class WashController {
     }
     return payload;
   }
+
+  public static final class UnclassifiedEntryRejectionUnavailableException
+      extends RuntimeException {}
 }

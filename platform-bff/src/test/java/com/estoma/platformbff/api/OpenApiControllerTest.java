@@ -112,6 +112,55 @@ class OpenApiControllerTest {
         .containsExactlyInAnyOrder("registeredAppointments", "inProcessAppointments",
             "completedAppointments", "deniedAppointments", "cancelledAppointments");
 
+    Map<String, Object> exactExecution = operation(paths,
+        "/api/v1/wash/supervision/executions/{washExecutionId}", "get");
+    assertThat(exactExecution.get("description").toString())
+        .contains("exact local read").contains("no current-service-date filter");
+    assertThat((Map<String, Object>) exactExecution.get("responses"))
+        .containsKeys("200", "400", "401", "403", "404", "503");
+    assertThat((java.util.List<Map<String, Object>>) exactExecution.get("parameters"))
+        .singleElement().satisfies(parameter -> {
+          assertThat(parameter).containsEntry("name", "washExecutionId")
+              .containsEntry("in", "path").containsEntry("required", true);
+          assertThat((Map<String, Object>) parameter.get("schema"))
+              .containsEntry("type", "string").containsEntry("format", "uuid");
+        });
+    Map<String, Object> exactSchema = responseSchema(exactExecution, "200");
+    assertThat((java.util.List<String>) exactSchema.get("required"))
+        .containsExactlyInAnyOrder("serviceDate", "canComplete", "student", "appointment", "washExecution");
+    assertThat((Map<String, Object>) exactSchema.get("properties")).doesNotContainKey("nextAction");
+    Map<String, Object> exactWashExecution = (Map<String, Object>)
+        ((Map<String, Object>) exactSchema.get("properties")).get("washExecution");
+    assertThat((java.util.List<String>) exactWashExecution.get("required"))
+        .containsExactlyInAnyOrder("washExecutionId", "status", "version", "executionVersion",
+            "arrivedAt", "rejectionReason", "exitSubmittedAt", "submittedExitMaterials",
+            "completedAt", "finalExitMaterials", "activeResourceAssignment",
+            "lastResourceAssignment");
+
+    Map<String, Object> entryDecision = operation(paths,
+        "/api/v1/wash/executions/{washExecutionId}/entry-decision", "post");
+    assertThat(entryDecision).containsEntry("x-unclassified-rejection-provider-ready", true)
+        .containsEntry("x-unclassified-rejection-enabled-by-default", false)
+        .containsEntry("x-unclassified-rejection-feature-flag",
+            "BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED");
+    assertThat(entryDecision.get("description").toString())
+        .contains("Classified entry decisions remain available")
+        .contains("503 before creating an operation");
+    assertThat((Map<String, Object>) entryDecision.get("responses")).containsKey("503");
+    Map<String, Object> entryRequest = (Map<String, Object>) ((Map<String, Object>)
+        ((Map<String, Object>) ((Map<String, Object>) entryDecision.get("requestBody"))
+            .get("content")).get("application/json")).get("schema");
+    assertThat(entryRequest.get("description").toString())
+        .contains("AUTHORIZED requires true/true")
+        .contains("both checks omitted/null");
+    assertThat((java.util.List<String>) entryRequest.get("required"))
+        .containsExactlyInAnyOrder("decision", "expectedVersion");
+    Map<String, Object> entryProperties = (Map<String, Object>) entryRequest.get("properties");
+    assertThat((java.util.List<String>) ((Map<String, Object>) entryProperties
+        .get("identityConfirmed")).get("type")).containsExactly("boolean", "null");
+    assertThat((java.util.List<String>) ((Map<String, Object>) entryProperties
+        .get("requirementsSatisfied")).get("type")).containsExactly("boolean", "null");
+
     Map<String, Object> lookup = operation(paths, "/api/v1/wash/supervision/lookup", "post");
     assertThat(lookup).doesNotContainKey("parameters");
     Map<String, Object> lookupRequest = (Map<String, Object>) ((Map<String, Object>)
@@ -129,7 +178,10 @@ class OpenApiControllerTest {
     assertThat(lookup).containsEntry("x-qr-feature-flag", "BFF_WASH_QR_ENABLED");
     Map<String, Object> lookupSchema = responseSchema(lookup, "200");
     assertThat((java.util.List<String>) lookupSchema.get("required"))
-        .containsExactlyInAnyOrder("serviceDate", "nextAction", "student", "appointment");
+        .containsExactlyInAnyOrder("serviceDate", "nextAction", "canComplete", "student", "appointment");
+    assertThat(lookup).containsEntry("x-direct-supervisor-completion-feature-flag",
+        "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED")
+        .containsEntry("x-direct-supervisor-completion-enabled-by-default", false);
     Map<String, Object> nextAction = (Map<String, Object>)
         ((Map<String, Object>) lookupSchema.get("properties")).get("nextAction");
     assertThat((java.util.List<String>) nextAction.get("enum"))
@@ -139,6 +191,23 @@ class OpenApiControllerTest {
     assertThat((java.util.List<String>) supervisorAppointment.get("required"))
         .containsExactlyInAnyOrder("appointmentId", "appointmentStatus", "appointmentType",
             "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot");
+
+    Map<String, Object> complete = operation(paths,
+        "/api/v1/wash/executions/{washExecutionId}/complete", "post");
+    assertThat(complete).containsEntry("x-direct-supervisor-completion-feature-flag",
+        "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED")
+        .containsEntry("x-direct-supervisor-completion-enabled-by-default", false);
+    Map<String, Object> completeRequest = (Map<String, Object>) ((Map<String, Object>)
+        ((Map<String, Object>) ((Map<String, Object>) complete.get("requestBody")).get("content"))
+            .get("application/json")).get("schema");
+    Map<String, Object> finalMaterials = (Map<String, Object>)
+        ((Map<String, Object>) completeRequest.get("properties")).get("finalMaterials");
+    assertThat((java.util.List<String>) finalMaterials.get("required")).containsExactlyInAnyOrder(
+        "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count",
+        "witnessTapePortionCount");
+    assertThat((Map<String, Object>) ((Map<String, Object>) finalMaterials.get("properties"))
+        .get("packageCount")).containsEntry("minimum", 0)
+        .containsEntry("maximum", (long) Integer.MAX_VALUE);
 
     Map<String, Object> reassignmentCandidates = operation(paths,
         "/api/v1/wash/supervision/pending-reassignments/{washExecutionId}/candidates", "get");
