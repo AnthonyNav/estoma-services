@@ -278,20 +278,27 @@ the subscription and migrate the persisted wildcard, then rerun and require zero
 new retry/DLQ messages. Reassignment, exit/completion and email flows are not
 certified by this increment.
 
-## Wash exit and completion — static contract only
+## Wash exit and completion — isolated runner
 
 `wash-exit-completion-front-v1.postman_collection.json` extends the generated authorized-entry
 contract with student exit and supervisor completion. The public example environment contains empty
 placeholders only. The exact supervisor read is terminal authority; Student Home is supporting
 evidence only when it still selects the same appointment.
 
-This collection has no runner and is not authorized for live or manual execution. Terminal cleanup
-is not implemented. Static checks execute representative assertions against valid and altered
-identity, materials, version, assignment, deduplication and conflict responses:
+Do not run the collection manually. The supported wrapper is
+`../../runner/run-wash-exit-completion.mjs`, which requires the isolated SQL executor and protected
+synthetic identity credentials. It composes the existing fixtures, audits the exact terminal history
+and uses an opt-in terminal cleanup manifest. The original authorized-entry cleanup behavior remains
+unchanged when that manifest is absent.
+
+If Newman or the terminal audit fails, the wrapper preserves manifests, database state and the last
+runtime Postman state for reconciliation. It never cleans an ambiguous terminal run or generates a
+replacement idempotency key. Static checks execute representative assertions against valid and
+altered identity, materials, version, assignment, deduplication and conflict responses:
 
 ```sh
 node ../../scripts/generate-wash-exit-completion-workflow.mjs --check
 node ../../scripts/validate-wash-exit-completion-workflow.mjs
 ```
 
-Passing these checks is not live certification.
+Passing these checks is not live certification and does not prove provisioned identities.

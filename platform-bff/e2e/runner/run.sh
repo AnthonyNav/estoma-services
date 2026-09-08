@@ -72,6 +72,23 @@ case "${E2E_SUITE:-smoke}" in
       --bail --reporters cli,junit \
       --reporter-junit-export "/reports/junit-${E2E_SUITE}-${E2E_PHASE}.xml"
     ;;
+  wash-exit-completion)
+    : "${E2E_ALLOW_MUTATIONS:?E2E_ALLOW_MUTATIONS is required for the wash-exit-completion suite}"
+    [ "$E2E_ALLOW_MUTATIONS" = isolated-wash-exit-completion-fixture ] || {
+      echo "E2E_ALLOW_MUTATIONS does not authorize the isolated exit/completion workflow" >&2
+      exit 2
+    }
+    : "${E2E_POSTMAN_ENVIRONMENT:?runtime-only environment is required}"
+    : "${E2E_POSTMAN_STATE:?ephemeral exported environment is required}"
+    umask 077
+    exec newman run /opt/e2e/wash-exit-completion.json \
+      --folder 'Exit and completion contract (live runner gated)' \
+      --environment "$E2E_POSTMAN_ENVIRONMENT" \
+      --export-environment "$E2E_POSTMAN_STATE" \
+      --delay-request "${E2E_DELAY_MILLIS:-1000}" \
+      --bail --reporters cli,junit \
+      --reporter-junit-export /reports/junit-wash-exit-completion.xml
+    ;;
   *)
     echo "unsupported E2E_SUITE: $E2E_SUITE" >&2
     exit 2

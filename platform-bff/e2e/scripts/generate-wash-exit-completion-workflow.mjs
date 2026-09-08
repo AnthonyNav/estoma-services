@@ -109,4 +109,4 @@ for(const [file,value] of [['wash-exit-completion-front-v1.postman_collection.js
   if(process.argv.includes('--check')) assert.equal(readFileSync(target,'utf8'),output);
   else writeFileSync(target,output);
 }
-console.log('Exit/completion collection is current. Live execution remains gated on terminal cleanup.');
+console.log('Exit/completion collection is current. Execution requires the reconciled isolated runner.');
