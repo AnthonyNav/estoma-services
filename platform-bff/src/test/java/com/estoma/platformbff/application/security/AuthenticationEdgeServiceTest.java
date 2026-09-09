@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.json.JsonMapper;
 
 class AuthenticationEdgeServiceTest {
@@ -46,6 +47,39 @@ class AuthenticationEdgeServiceTest {
       }
     };
     service = new AuthenticationEdgeService(rpc, singleFlight, commands, principal, serializer);
+  }
+
+  @Test
+  void setTemporaryPasswordUsesTheOwnersGlobalAdministratorScope() {
+    assertTemporaryPasswordScope("SetTemporaryPassword");
+  }
+
+  @Test
+  void regenerateTemporaryPasswordUsesTheOwnersGlobalAdministratorScope() {
+    assertTemporaryPasswordScope("RegenerateTemporaryPassword");
+  }
+
+  private void assertTemporaryPasswordScope(String operation) {
+    UUID administrator = UUID.randomUUID();
+    UUID target = UUID.randomUUID();
+    String key = UUID.randomUUID().toString();
+    var actor = ActorContext.account(administrator, "GLOBAL", null);
+    when(rpc.call(eq(operation), eq(actor), eq(target), eq(key), anyString()))
+        .thenReturn(new SecurityRpcPort.RpcCallResult("SUCCEEDED",
+            "{\"temporaryPassword\":\"synthetic-test-secret\",\"expiresAt\":\"2026-09-10T00:00:00Z\"}", null));
+
+    var result = "SetTemporaryPassword".equals(operation)
+        ? service.setTemporaryPassword(administrator, target, key)
+        : service.regenerateTemporaryPassword(administrator, target, key);
+
+    assertThat(result.temporaryPassword()).isEqualTo("synthetic-test-secret");
+    var payload = ArgumentCaptor.forClass(String.class);
+    verify(rpc).call(eq(operation), eq(actor), eq(target), eq(key), payload.capture());
+    var body = JsonMapper.builder().build().readTree(payload.getValue());
+    assertThat(body.path("accountId").asString()).isEqualTo(target.toString());
+    assertThat(body.path("requestedByAccountId").asString()).isEqualTo(administrator.toString());
+    assertThat(body.path("idempotencyKey").asString()).isEqualTo(key);
+    verifyNoInteractions(commands);
   }
 
   @Test
