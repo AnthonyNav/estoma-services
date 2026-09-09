@@ -151,7 +151,7 @@ public class JdbcWashStudentQueryRepository implements WashStudentQueryPort {
         JOIN course_section_read_model c ON c.course_section_id = e.course_section_id
         WHERE e.account_id = :accountId
           AND sp.academic_status = 'ACTIVE'
-          AND e.status = 'ACTIVE'
+          AND e.status IN ('ENROLLED', 'ACTIVE')
           AND p.status = 'ACTIVE'
           AND c.status = 'ACTIVE'
         ORDER BY c.nrc ASC, c.course_section_id ASC
