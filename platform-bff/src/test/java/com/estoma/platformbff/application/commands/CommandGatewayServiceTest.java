@@ -105,7 +105,7 @@ class CommandGatewayServiceTest {
   }
 
   @Test
-  void authorizationCommandsPublishExactOwnerActorWhileFingerprintsRetainGlobalScope() {
+  void strictOwnerCommandsPublishExactAccountActorWhileFingerprintsRetainGlobalScope() {
     UUID accountId = UUID.randomUUID();
     when(idempotency.findByLogicalScope(any(), any(), any())).thenReturn(Optional.empty());
     when(idempotency.insertIfAbsent(any())).thenReturn(true);
@@ -120,9 +120,15 @@ class CommandGatewayServiceTest {
     realSerializerGateway.submit(new CommandSubmission(
         "admin.authorization.grant-system-access", "GrantSystemAccess", "{}",
         UUID.randomUUID().toString(), accountId, globalActor, UUID.randomUUID(), null));
+    realSerializerGateway.submit(new CommandSubmission(
+        "admin.wash.calendars.create", "CreateServiceCalendar", "{}",
+        UUID.randomUUID().toString(), accountId, globalActor, UUID.randomUUID(), null));
+    realSerializerGateway.submit(new CommandSubmission(
+        "admin.wash.time-slots.create", "CreateAppointmentTimeSlot", "{}",
+        UUID.randomUUID().toString(), accountId, globalActor, UUID.randomUUID(), null));
 
     var messages = ArgumentCaptor.forClass(OutboxMessage.class);
-    verify(outbox, times(2)).insert(messages.capture());
+    verify(outbox, times(4)).insert(messages.capture());
     assertThat(messages.getAllValues()).allSatisfy(message -> {
       JsonNode actor = codec.read(message.actorJson(), JsonNode.class);
       assertThat(actor.size()).isEqualTo(2);
@@ -131,7 +137,7 @@ class CommandGatewayServiceTest {
       assertThat(actor.has("scope")).isFalse();
     });
     var fingerprintActors = ArgumentCaptor.forClass(ActorContext.class);
-    verify(fingerprints, times(4)).normalize(
+    verify(fingerprints, times(8)).normalize(
         any(), any(), any(), any(), any(), fingerprintActors.capture());
     assertThat(fingerprintActors.getAllValues()).containsOnly(globalActor);
   }

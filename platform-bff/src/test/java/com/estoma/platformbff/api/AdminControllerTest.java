@@ -130,15 +130,74 @@ class AdminControllerTest {
 
     verify(commands).submitEnriched(any(), eq("admin.wash.calendars.create"),
         eq("CreateServiceCalendar"), anyMap(), anyMap(), eq("key-1"),
-        isNull(), isNull(), isNull(), isNull());
+        eq(UUID.fromString("00000000-0000-0000-0000-000000000001")), isNull(), isNull(), isNull());
     verify(authorization).requireWashAdministrator();
+  }
+
+  @Test
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  void washFoundationRoutesPassCanonicalAggregateMetadata() throws Exception {
+    UUID calendarId = UUID.randomUUID();
+    UUID scheduleId = UUID.randomUUID();
+    UUID cabinId = UUID.randomUUID();
+    UUID tankId = UUID.randomUUID();
+    UUID slotId = UUID.randomUUID();
+
+    mvc.perform(post("/api/v1/admin/wash/calendars/{id}/schedules", calendarId)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"scheduleId\":\"" + scheduleId + "\",\"dayOfWeek\":1,\"openingTime\":\"06:00\",\"closingTime\":\"23:00\",\"slotDurationMinutes\":30}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/wash/calendars/{id}/activate", calendarId)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/wash/cabins").header("Idempotency-Key", UUID.randomUUID())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"cabinId\":\"" + cabinId
+                + "\",\"code\":\"DEMO-01\",\"name\":\"Demo 01\",\"cabinType\":\"NORMAL\"}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/wash/cabins/{id}/activate", cabinId)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/wash/cabins/{id}/tanks", cabinId)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"tankId\":\"" + tankId
+                + "\",\"code\":\"TANK-01\",\"name\":\"Tank 01\",\"configuredCapacity\":2}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/wash/tanks/{id}/activate", tankId)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/wash/time-slots").header("Idempotency-Key", UUID.randomUUID())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"slotId\":\"" + slotId
+                + "\",\"sourceScheduleId\":\"" + scheduleId + "\",\"serviceDate\":\"2026-09-09\""
+                + ",\"startsAt\":\"2026-09-09T15:00:00Z\",\"endsAt\":\"2026-09-09T15:30:00Z\""
+                + ",\"timezone\":\"America/Mexico_City\",\"bookingDeadlineAt\":\"2026-09-09T14:50:00Z\""
+                + ",\"cancellationDeadlineAt\":\"2026-09-09T14:40:00Z\",\"arrivalToleranceUntil\":\"2026-09-09T15:10:00Z\"}"))
+        .andExpect(status().isAccepted());
+
+    ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<Map> payloads = ArgumentCaptor.forClass(Map.class);
+    ArgumentCaptor<UUID> aggregateIds = ArgumentCaptor.forClass(UUID.class);
+    ArgumentCaptor<Integer> aggregateVersions = ArgumentCaptor.forClass(Integer.class);
+    verify(commands, times(7)).submitEnriched(any(), any(), types.capture(), payloads.capture(),
+        anyMap(), any(), aggregateIds.capture(), aggregateVersions.capture(), isNull(), isNull());
+    assertThat(types.getAllValues()).containsExactly("ConfigureServiceSchedule", "ActivateServiceCalendar",
+        "RegisterCabin", "ActivateCabin", "RegisterTank", "ActivateTank", "CreateAppointmentTimeSlot");
+    assertThat(aggregateIds.getAllValues()).containsExactly(
+        scheduleId, calendarId, cabinId, cabinId, tankId, tankId, slotId);
+    assertThat(aggregateVersions.getAllValues()).containsExactly(null, 1, null, 1, null, 1, null);
+    assertThat(payloads.getAllValues().getLast()).doesNotContainValue(null)
+        .containsEntry("slotId", slotId.toString())
+        .containsEntry("timezone", "America/Mexico_City");
+    verify(authorization, times(7)).requireWashAdministrator();
   }
 
   @Test
   void everyDocumentedRouteMapsToOneAllowlistedCommandAndItsDeclaredOwner() {
     var registry = new CommandRegistry();
 
-    assertThat(AdminController.routeMatrix()).hasSize(51);
+    assertThat(AdminController.routeMatrix()).hasSize(52);
     AdminController.routeMatrix().forEach((key, route) -> {
       assertThat(route.publicOperation()).startsWith("admin.");
       assertThat(registry.require(route.messageType()).logicalComponentId()).isEqualTo(route.owner());
@@ -192,8 +251,10 @@ class AdminControllerTest {
     ArgumentCaptor<String> messageTypes = ArgumentCaptor.forClass(String.class);
     ArgumentCaptor<Map> ownerPayloads = ArgumentCaptor.forClass(Map.class);
     ArgumentCaptor<Map> idempotencyPayloads = ArgumentCaptor.forClass(Map.class);
+    ArgumentCaptor<UUID> aggregateIds = ArgumentCaptor.forClass(UUID.class);
     verify(commands, times(8)).submitEnriched(eq(SUPER_ADMIN), any(), messageTypes.capture(),
-        ownerPayloads.capture(), idempotencyPayloads.capture(), any(), isNull(), isNull(), isNull(), isNull());
+        ownerPayloads.capture(), idempotencyPayloads.capture(), any(), aggregateIds.capture(),
+        isNull(), isNull(), isNull());
 
     Map<String, String> expectedActorFields = Map.of(
         "CorrectStudentNumber", "correctedByAccountId",
@@ -215,6 +276,8 @@ class AdminControllerTest {
       assertThat(payloads.getFirst()).containsEntry(actorField, SUPER_ADMIN);
       assertThat(payloads.get(1)).doesNotContainKey(actorField);
     });
+    assertThat(aggregateIds.getAllValues()).containsExactly(
+        null, periodId, null, null, null, null, importId, importId);
   }
 
   @Test

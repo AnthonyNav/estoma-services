@@ -28,6 +28,9 @@ class CommandRegistryTest {
     assertThat(registry.require("ScheduleAppointment").resultMessageVersions())
         .containsEntry("ScheduleAppointmentSucceeded", 1)
         .containsEntry("ScheduleAppointmentRejected", 1);
+    assertThat(registry.require("CreateAppointmentTimeSlot").resultMessageVersions())
+        .containsEntry("CreateAppointmentTimeSlotSucceeded", 1)
+        .containsEntry("CreateAppointmentTimeSlotRejected", 1);
     assertThat(registry.require("RegisterWashArrival").resultMessageVersions())
         .containsEntry("RegisterWashArrivalSucceeded", 1)
         .containsEntry("RegisterWashArrivalRejected", 1);

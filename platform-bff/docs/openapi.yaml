@@ -3786,6 +3786,95 @@
         "summary" : "admin.wash.tanks.retire"
       }
     },
+    "/api/v1/admin/wash/time-slots" : {
+      "post" : {
+        "description" : "Owner: appointments; owner operation: CreateAppointmentTimeSlot.",
+        "operationId" : "AdminController_post_post__api_v1_admin_wash_time_slots",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "arrivalToleranceUntil" : {
+                    "format" : "date-time",
+                    "type" : "string"
+                  },
+                  "bookingDeadlineAt" : {
+                    "format" : "date-time",
+                    "type" : "string"
+                  },
+                  "cancellationDeadlineAt" : {
+                    "format" : "date-time",
+                    "type" : "string"
+                  },
+                  "endsAt" : {
+                    "format" : "date-time",
+                    "type" : "string"
+                  },
+                  "serviceDate" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "slotId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "sourceScheduleId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  },
+                  "startsAt" : {
+                    "format" : "date-time",
+                    "type" : "string"
+                  },
+                  "timezone" : {
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "arrivalToleranceUntil", "bookingDeadlineAt", "cancellationDeadlineAt", "endsAt", "serviceDate", "slotId", "sourceScheduleId", "startsAt", "timezone" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.wash.time-slots.create"
+      }
+    },
     "/api/v1/auth/login" : {
       "post" : {
         "operationId" : "AuthenticationController_login_post__api_v1_auth_login",

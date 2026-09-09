@@ -105,6 +105,8 @@ public class CommandRegistry {
       route("CancelExceptionalAppointmentAuthorization", "appointments", ActorMode.ACCOUNT,
           "CancelExceptionalAppointmentAuthorizationSucceeded",
           "CancelExceptionalAppointmentAuthorizationRejected"),
+      route("CreateAppointmentTimeSlot", "appointments", ActorMode.ACCOUNT,
+          "CreateAppointmentTimeSlotSucceeded", "CreateAppointmentTimeSlotRejected"),
 
       route("RegisterWashArrival", "wash-execution", ActorMode.ACCOUNT,
           "RegisterWashArrivalSucceeded", "RegisterWashArrivalRejected"),

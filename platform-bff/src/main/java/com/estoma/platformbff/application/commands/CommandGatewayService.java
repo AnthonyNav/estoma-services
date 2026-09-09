@@ -17,6 +17,7 @@ import com.estoma.platformbff.domain.operation.OperationStatus;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,6 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class CommandGatewayService {
   private static final String COMMANDS_EXCHANGE = "platform.commands";
+  private static final Set<String> EXACT_ACCOUNT_ACTOR_OWNERS =
+      Set.of("authorization", "wash-administration", "appointments");
 
   private final CommandRegistry registry;
   private final ClientOperationRepository operations;
@@ -137,7 +140,8 @@ public class CommandGatewayService {
   }
 
   private String ownerActorJson(OwnerRoute route, ActorContext actor) {
-    if ("authorization".equals(route.logicalComponentId()) && "ACCOUNT".equals(actor.type())) {
+    if (EXACT_ACCOUNT_ACTOR_OWNERS.contains(route.logicalComponentId())
+        && "ACCOUNT".equals(actor.type())) {
       return serializer.write(Map.of("type", actor.type(), "accountId", actor.accountId()));
     }
     return serializer.write(actor);

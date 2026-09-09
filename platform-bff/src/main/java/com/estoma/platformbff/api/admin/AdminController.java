@@ -58,7 +58,18 @@ public class AdminController {
       Map.entry("SuspendSystemAccess", "systemAccessId"),
       Map.entry("RevokeSystemAccess", "systemAccessId"),
       Map.entry("RestoreSystemAccess", "systemAccessId"),
-      Map.entry("CreateStudentAcademicProfile", "studentAcademicProfileId"));
+      Map.entry("CreateStudentAcademicProfile", "studentAcademicProfileId"),
+      Map.entry("CreateAndActivateAcademicPeriod", "academicPeriodId"),
+      Map.entry("StartStudentImport", "importId"),
+      Map.entry("ResumeStudentImport", "importId"),
+      Map.entry("CreateServiceCalendar", "calendarId"),
+      Map.entry("ActivateServiceCalendar", "calendarId"),
+      Map.entry("ConfigureServiceSchedule", "scheduleId"),
+      Map.entry("RegisterCabin", "cabinId"),
+      Map.entry("ActivateCabin", "cabinId"),
+      Map.entry("RegisterTank", "tankId"),
+      Map.entry("ActivateTank", "tankId"),
+      Map.entry("CreateAppointmentTimeSlot", "slotId"));
   private static final Map<String, RouteContract> ROUTES = Map.ofEntries(
       route("POST", "/api/v1/admin/people", "admin.people.create", "CreatePerson", of(
           required("personId", UUID), required("firstName", STRING), required("paternalSurname", STRING),
@@ -165,7 +176,13 @@ public class AdminController {
           required("name", STRING), positive("configuredCapacity"), positive("expectedVersion"))),
       route("POST", "/api/v1/admin/wash/tanks/{tankId}/activate", "admin.wash.tanks.activate", "ActivateTank", EXPECTED),
       route("POST", "/api/v1/admin/wash/tanks/{tankId}/deactivate", "admin.wash.tanks.deactivate", "DeactivateTank", of(required("reason", STRING), positive("expectedVersion"))),
-      route("POST", "/api/v1/admin/wash/tanks/{tankId}/retire", "admin.wash.tanks.retire", "RetireTank", of(required("reason", STRING), positive("expectedVersion"))));
+      route("POST", "/api/v1/admin/wash/tanks/{tankId}/retire", "admin.wash.tanks.retire", "RetireTank", of(required("reason", STRING), positive("expectedVersion"))),
+      routeToOwner("POST", "/api/v1/admin/wash/time-slots", "admin.wash.time-slots.create",
+          "CreateAppointmentTimeSlot", "appointments", of(
+              required("slotId", UUID), required("sourceScheduleId", UUID), required("serviceDate", DATE),
+              required("startsAt", DATE_TIME), required("endsAt", DATE_TIME), required("timezone", STRING),
+              required("bookingDeadlineAt", DATE_TIME), required("cancellationDeadlineAt", DATE_TIME),
+              required("arrivalToleranceUntil", DATE_TIME))));
 
   private final PublicCommandAdapter commands;
   private final LocalAuthorizationService authorization;
@@ -193,7 +210,8 @@ public class AdminController {
       "/wash/calendars/{serviceCalendarId}/schedules", "/wash/schedules/{serviceScheduleId}/deactivate",
       "/wash/administrative-closures", "/wash/administrative-closures/{administrativeClosureId}/cancel",
       "/wash/cabins", "/wash/cabins/{cabinId}/activate", "/wash/cabins/{cabinId}/deactivate", "/wash/cabins/{cabinId}/retire",
-      "/wash/cabins/{cabinId}/tanks", "/wash/tanks/{tankId}/activate", "/wash/tanks/{tankId}/deactivate", "/wash/tanks/{tankId}/retire"})
+      "/wash/cabins/{cabinId}/tanks", "/wash/tanks/{tankId}/activate", "/wash/tanks/{tankId}/deactivate", "/wash/tanks/{tankId}/retire",
+      "/wash/time-slots"})
   public ResponseEntity<AcceptedOperationResponse> post(
       @RequestHeader("Idempotency-Key") String idempotencyKey, @RequestBody Map<String, Object> body,
       @PathVariable Map<String, String> pathVariables, HttpServletRequest request) {
@@ -295,8 +313,20 @@ public class AdminController {
   private static Map.Entry<String, RouteContract> route(String method, String path, String publicOperation,
       String messageType, AdminRequestSchema schema, Map<String, String> pathBindings,
       Set<String> serverDerivedActorFields) {
+    return routeToOwner(method, path, publicOperation, messageType, ownerFor(path), schema,
+        pathBindings, serverDerivedActorFields);
+  }
+
+  private static Map.Entry<String, RouteContract> routeToOwner(String method, String path,
+      String publicOperation, String messageType, String owner, AdminRequestSchema schema) {
+    return routeToOwner(method, path, publicOperation, messageType, owner, schema, Map.of(), Set.of());
+  }
+
+  private static Map.Entry<String, RouteContract> routeToOwner(String method, String path,
+      String publicOperation, String messageType, String owner, AdminRequestSchema schema,
+      Map<String, String> pathBindings, Set<String> serverDerivedActorFields) {
     return Map.entry(key(method, path), new RouteContract(method, path, publicOperation, messageType,
-        ownerFor(path), path.startsWith("/api/v1/admin/wash/"), schema, Map.copyOf(pathBindings),
+        owner, path.startsWith("/api/v1/admin/wash/"), schema, Map.copyOf(pathBindings),
         Set.copyOf(serverDerivedActorFields)));
   }
 
