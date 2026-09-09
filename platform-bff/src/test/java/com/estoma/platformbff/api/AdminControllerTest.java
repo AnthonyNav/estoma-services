@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
@@ -48,11 +49,8 @@ class AdminControllerTest {
   void setUp() {
     when(authorization.requireSuperAdministrator()).thenReturn(SUPER_ADMIN);
     when(authorization.requireWashAdministrator()).thenReturn(UUID.randomUUID());
-    when(commands.submit(any(), any(), any(), anyMap(), any(), isNull(), isNull()))
-        .thenReturn(new AcceptedOperationResponse(UUID.randomUUID(), "PENDING", "/api/v1/operations/x",
-            Instant.parse("2026-08-27T12:00:00Z")));
-    when(commands.submitEnriched(any(), any(), any(), anyMap(), anyMap(), any(), isNull(), isNull(),
-        isNull(), isNull())).thenReturn(new AcceptedOperationResponse(UUID.randomUUID(), "PENDING",
+    when(commands.submitEnriched(any(), any(), any(), anyMap(), anyMap(), any(), nullable(UUID.class),
+        nullable(Integer.class), isNull(), isNull())).thenReturn(new AcceptedOperationResponse(UUID.randomUUID(), "PENDING",
             "/api/v1/operations/x", Instant.parse("2026-08-27T12:00:00Z")));
     mvc = MockMvcBuilders.standaloneSetup(new AdminController(commands, authorization, authentication))
         .setControllerAdvice(new ApiExceptionHandler())
@@ -67,9 +65,59 @@ class AdminControllerTest {
             .content("{\"expectedVersion\":1}"))
         .andExpect(status().isAccepted());
 
-    verify(commands).submit(any(), eq("admin.people.activate"), eq("ActivatePerson"), anyMap(),
-        eq("key-1"), isNull(), isNull());
+    verify(commands).submitEnriched(any(), eq("admin.people.activate"), eq("ActivatePerson"),
+        anyMap(), anyMap(), eq("key-1"),
+        eq(UUID.fromString("00000000-0000-0000-0000-000000000001")), eq(1), isNull(), isNull());
     verify(authorization).requireSuperAdministrator();
+  }
+
+  @Test
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  void provisioningRoutesPassOwnerAggregateMetadataButKeepLegacyIdempotencyMetadata() throws Exception {
+    UUID personId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID accessId = UUID.randomUUID();
+    UUID profileId = UUID.randomUUID();
+
+    mvc.perform(post("/api/v1/admin/people").header("Idempotency-Key", UUID.randomUUID())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"personId\":\"" + personId
+                + "\",\"firstName\":\"Ada\",\"paternalSurname\":\"Lovelace\",\"institutionalEmail\":\"ada@example.edu\"}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/people/{id}/activate", personId).header("Idempotency-Key", UUID.randomUUID())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/accounts").header("Idempotency-Key", UUID.randomUUID())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"accountId\":\"" + accountId
+                + "\",\"personId\":\"" + personId + "\",\"loginType\":\"MATRICULA\",\"loginIdentifier\":\"99009101\"}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/accounts/{id}/activate", accountId).header("Idempotency-Key", UUID.randomUUID())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"expectedVersion\":1}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/authorization/accounts/{id}/role", accountId)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"roleCode\":\"ALUMNO\"}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/authorization/accounts/{id}/system-accesses", accountId)
+            .header("Idempotency-Key", UUID.randomUUID()).contentType(MediaType.APPLICATION_JSON)
+            .content("{\"systemAccessId\":\"" + accessId + "\",\"systemCode\":\"LAVADO_ULTRASONICO\"}"))
+        .andExpect(status().isAccepted());
+    mvc.perform(post("/api/v1/admin/academic/students").header("Idempotency-Key", UUID.randomUUID())
+            .contentType(MediaType.APPLICATION_JSON).content("{\"studentAcademicProfileId\":\"" + profileId
+                + "\",\"personId\":\"" + personId + "\",\"accountId\":\"" + accountId
+                + "\",\"studentNumber\":\"99009101\",\"currentSemester\":1,\"academicStatus\":\"ACTIVE\"}"))
+        .andExpect(status().isAccepted());
+
+    ArgumentCaptor<String> types = ArgumentCaptor.forClass(String.class);
+    ArgumentCaptor<UUID> aggregateIds = ArgumentCaptor.forClass(UUID.class);
+    ArgumentCaptor<Integer> aggregateVersions = ArgumentCaptor.forClass(Integer.class);
+    verify(commands, times(7)).submitEnriched(eq(SUPER_ADMIN), any(), types.capture(), anyMap(),
+        anyMap(), any(), aggregateIds.capture(), aggregateVersions.capture(), isNull(), isNull());
+    assertThat(types.getAllValues()).containsExactly(
+        "CreatePerson", "ActivatePerson", "CreateAccount", "ActivateAccount",
+        "AssignAccountRole", "GrantSystemAccess", "CreateStudentAcademicProfile");
+    assertThat(aggregateIds.getAllValues()).containsExactly(
+        personId, personId, accountId, accountId, accountId, accessId, profileId);
+    assertThat(aggregateVersions.getAllValues()).containsExactly(null, 1, null, 1, null, null, null);
   }
 
   @Test
@@ -80,8 +128,9 @@ class AdminControllerTest {
             .content("{\"calendarId\":\"00000000-0000-0000-0000-000000000001\",\"code\":\"2026-A\",\"name\":\"2026 A\",\"timezone\":\"America/Mexico_City\",\"effectiveFrom\":\"2026-01-01\"}"))
         .andExpect(status().isAccepted());
 
-    verify(commands).submit(any(), eq("admin.wash.calendars.create"),
-        eq("CreateServiceCalendar"), anyMap(), eq("key-1"), isNull(), isNull());
+    verify(commands).submitEnriched(any(), eq("admin.wash.calendars.create"),
+        eq("CreateServiceCalendar"), anyMap(), anyMap(), eq("key-1"),
+        isNull(), isNull(), isNull(), isNull());
     verify(authorization).requireWashAdministrator();
   }
 

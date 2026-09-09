@@ -42,6 +42,23 @@ import org.springframework.web.servlet.HandlerMapping;
 @RequestMapping("/api/v1/admin")
 public class AdminController {
   private static final AdminRequestSchema EXPECTED = of(positive("expectedVersion"));
+  private static final Map<String, String> AGGREGATE_ID_FIELDS = Map.ofEntries(
+      Map.entry("CreatePerson", "personId"),
+      Map.entry("UpdatePerson", "personId"),
+      Map.entry("ActivatePerson", "personId"),
+      Map.entry("DeactivatePerson", "personId"),
+      Map.entry("CreateAccount", "accountId"),
+      Map.entry("ActivateAccount", "accountId"),
+      Map.entry("DeactivateAccount", "accountId"),
+      Map.entry("ChangeLoginIdentifier", "accountId"),
+      Map.entry("RevokeAllAccountSessions", "accountId"),
+      Map.entry("AssignAccountRole", "accountId"),
+      Map.entry("ChangeAccountRole", "accountId"),
+      Map.entry("GrantSystemAccess", "systemAccessId"),
+      Map.entry("SuspendSystemAccess", "systemAccessId"),
+      Map.entry("RevokeSystemAccess", "systemAccessId"),
+      Map.entry("RestoreSystemAccess", "systemAccessId"),
+      Map.entry("CreateStudentAcademicProfile", "studentAcademicProfileId"));
   private static final Map<String, RouteContract> ROUTES = Map.ofEntries(
       route("POST", "/api/v1/admin/people", "admin.people.create", "CreatePerson", of(
           required("personId", UUID), required("firstName", STRING), required("paternalSurname", STRING),
@@ -225,17 +242,30 @@ public class AdminController {
     pathVariables.forEach((name, value) -> idempotencyPayload.put(
         route.pathBindings().getOrDefault(name, name), value));
     Map<String, Object> payload = new LinkedHashMap<>(idempotencyPayload);
+    java.util.UUID aggregateId = aggregateId(route, payload);
+    Integer aggregateVersion = AGGREGATE_ID_FIELDS.containsKey(route.messageType())
+        ? integer(payload.get("expectedVersion")) : null;
     java.util.UUID actorAccountId = route.washScoped()
         ? authorization.requireWashAdministrator() : authorization.requireSuperAdministrator();
     route.serverDerivedActorFields().forEach(field -> payload.put(field, actorAccountId));
-    if (!route.serverDerivedActorFields().isEmpty()) {
-      AcceptedOperationResponse accepted = commands.submitEnriched(actorAccountId, route.publicOperation(),
-          route.messageType(), payload, idempotencyPayload, idempotencyKey, null, null, null, null);
-      return ResponseEntity.status(HttpStatus.ACCEPTED).body(accepted);
-    }
-    AcceptedOperationResponse accepted = commands.submit(actorAccountId, route.publicOperation(),
-        route.messageType(), payload, idempotencyKey, null, null);
+    AcceptedOperationResponse accepted = commands.submitEnriched(actorAccountId, route.publicOperation(),
+        route.messageType(), payload, idempotencyPayload, idempotencyKey, aggregateId,
+        aggregateVersion, null, null);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(accepted);
+  }
+
+  private static java.util.UUID aggregateId(RouteContract route, Map<String, Object> payload) {
+    String field = AGGREGATE_ID_FIELDS.get(route.messageType());
+    if (field == null) return null;
+    Object value = payload.get(field);
+    if (value == null) return null;
+    if (value instanceof java.util.UUID id) return id;
+    return java.util.UUID.fromString(value.toString());
+  }
+
+  private static Integer integer(Object value) {
+    if (value == null) return null;
+    return Integer.valueOf(value.toString());
   }
 
   private static ResponseEntity<TemporaryPasswordResponse> secret(TemporaryPasswordResponse response) {
