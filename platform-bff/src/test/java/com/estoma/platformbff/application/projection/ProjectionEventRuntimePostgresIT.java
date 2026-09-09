@@ -8,6 +8,7 @@ import com.estoma.platformbff.contracts.messaging.ActorContext;
 import com.estoma.platformbff.contracts.messaging.EventEnvelope;
 import com.estoma.platformbff.contracts.messaging.MessageKind;
 import com.estoma.platformbff.infrastructure.messaging.ProjectionEventDispatcher;
+import com.estoma.platformbff.infrastructure.persistence.JdbcWashStudentQueryRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -57,6 +58,7 @@ class ProjectionEventRuntimePostgresIT {
   @Autowired ProjectionEventDispatcher dispatcher;
   @Autowired ProjectionEventQuarantineService quarantine;
   @Autowired JdbcClient jdbc;
+  @Autowired JdbcWashStudentQueryRepository studentQueries;
 
   @BeforeEach
   void clear() {
@@ -66,8 +68,53 @@ class ProjectionEventRuntimePostgresIT {
           authorization_role_projection, authorization_access_projection,
           mailbox_messages_read_model, mailbox_visits_read_model,
           appointment_qr_projection,
+          student_enrollment_read_model, course_section_read_model,
+          student_academic_profile_read_model, academic_period_read_model,
           wash_execution_read_model, wash_resource_assignment_read_model CASCADE
         """).update();
+  }
+
+  @Test
+  void canonicalEnrolledEventAndLegacyActiveSnapshotAreBothAvailableToStudentForm() {
+    UUID accountId = UUID.randomUUID();
+    UUID profileId = UUID.randomUUID();
+    UUID personId = UUID.randomUUID();
+    UUID periodId = UUID.randomUUID();
+    UUID canonicalSectionId = UUID.randomUUID();
+    UUID legacySectionId = UUID.randomUUID();
+
+    assertThat(runtime.dispatch(event("AcademicPeriodActivated", "academic", UUID.randomUUID(),
+        periodId, 1, Map.of("academicPeriodId", periodId.toString(), "code", "DEMO",
+            "name", "Demo", "startDate", "2026-01-01", "endDate", "2099-12-31",
+            "status", "ACTIVE", "academicDataStatus", "READY", "activatedAt", now()))))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(event("StudentAcademicProfileCreated", "academic", UUID.randomUUID(),
+        profileId, 1, Map.of("studentAcademicProfileId", profileId.toString(),
+            "personId", personId.toString(), "accountId", accountId.toString(),
+            "studentNumber", "99009101", "currentSemester", 8,
+            "academicStatus", "ACTIVE", "createdAt", now()))))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    dispatchActiveSection(canonicalSectionId, periodId, "DEMO-LAVADO-01");
+    dispatchActiveSection(legacySectionId, periodId, "DEMO-LAVADO-02");
+
+    assertThat(runtime.dispatch(event("StudentEnrolledInCourseSection", "academic", UUID.randomUUID(),
+        profileId, 1, Map.of("studentAcademicProfileId", profileId.toString(),
+            "accountId", accountId.toString(), "courseSectionId", canonicalSectionId.toString(),
+            "academicPeriodId", periodId.toString(), "nrc", "DEMO-LAVADO-01",
+            "enrolledAt", now()))))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(event("StudentEnrolledInCourseSection", "academic", UUID.randomUUID(),
+        profileId, 1, Map.of("studentAcademicProfileId", profileId.toString(),
+            "accountId", accountId.toString(), "courseSectionId", legacySectionId.toString(),
+            "academicPeriodId", periodId.toString(), "nrc", "DEMO-LAVADO-02",
+            "status", "ACTIVE", "enrolledAt", now()))))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+
+    assertThat(jdbc.sql("SELECT status FROM student_enrollment_read_model ORDER BY nrc")
+        .query(String.class).list()).containsExactly("ENROLLED", "ACTIVE");
+    assertThat(studentQueries.findAvailableCourseSections(accountId))
+        .extracting(section -> section.nrc())
+        .containsExactly("DEMO-LAVADO-01", "DEMO-LAVADO-02");
   }
 
   @Test
@@ -1097,6 +1144,14 @@ class ProjectionEventRuntimePostgresIT {
     return event("PersonCreated", "users", messageId, personId, version,
         Map.of("personId", personId.toString(), "firstName", "Ada", "paternalSurname", "Nav",
             "institutionalEmail", "ada@example.invalid", "status", status, "createdAt", now()));
+  }
+
+  private void dispatchActiveSection(UUID sectionId, UUID periodId, String nrc) {
+    assertThat(runtime.dispatch(event("CourseSectionRegistered", "academic", UUID.randomUUID(),
+        sectionId, 1, Map.of("courseSectionId", sectionId.toString(),
+            "academicPeriodId", periodId.toString(), "nrc", nrc, "name", nrc,
+            "status", "ACTIVE", "registeredAt", now()))))
+        .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
   }
 
   private static ProjectionEvent appointmentEvent(String type, UUID messageId, UUID appointmentId,
