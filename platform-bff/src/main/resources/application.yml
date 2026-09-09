@@ -97,6 +97,15 @@ platform:
       snapshot-ttl: ${BFF_APPOINTMENT_AVAILABILITY_SNAPSHOT_TTL:30s}
       refresh-retry-after: ${BFF_APPOINTMENT_AVAILABILITY_REFRESH_RETRY_AFTER:30s}
       client-retry-after-seconds: ${BFF_APPOINTMENT_AVAILABILITY_CLIENT_RETRY_AFTER_SECONDS:1}
+  student-import:
+    upload:
+      enabled: ${BFF_STUDENT_IMPORT_UPLOAD_ENABLED:false}
+      max-object-bytes: ${BFF_STUDENT_IMPORT_UPLOAD_MAX_OBJECT_BYTES:20971520}
+      storage:
+        bucket: ${BFF_STUDENT_IMPORT_UPLOAD_BUCKET:}
+        prefix: ${BFF_STUDENT_IMPORT_UPLOAD_PREFIX:student-imports}
+        region: ${BFF_STUDENT_IMPORT_UPLOAD_REGION:}
+        endpoint: ${BFF_STUDENT_IMPORT_UPLOAD_ENDPOINT:}
   wash:
     # HTTP producer gate; enable only after owner support and all V2 readers are deployed.
     unclassified-entry-rejection-enabled: ${BFF_WASH_UNCLASSIFIED_ENTRY_REJECTION_ENABLED:false}
