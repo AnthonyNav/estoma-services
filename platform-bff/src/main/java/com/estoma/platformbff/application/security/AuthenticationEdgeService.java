@@ -176,7 +176,7 @@ public class AuthenticationEdgeService {
       throw new IllegalArgumentException("administrator, account and Idempotency-Key are required");
     }
     TemporaryPassword response = requireSuccess(operation,
-        rpc.call(operation, ActorContext.account(administratorAccountId, "ADMIN", null), accountId,
+        rpc.call(operation, ActorContext.account(administratorAccountId, "GLOBAL", null), accountId,
             idempotencyKey, serializer.write(new TemporaryPasswordRequest(accountId, administratorAccountId,
                 idempotencyKey))), TemporaryPassword.class);
     if (blank(response.temporaryPassword()) || response.expiresAt() == null) {
