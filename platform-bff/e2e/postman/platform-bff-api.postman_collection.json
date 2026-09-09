@@ -11276,6 +11276,209 @@
                               ]
                             }
                           ]
+                        },
+                        {
+                          "name": "admin.wash.time-slots.create",
+                          "request": {
+                            "name": "admin.wash.time-slots.create",
+                            "description": {
+                              "content": "Owner: appointments; owner operation: CreateAppointmentTimeSlot.",
+                              "type": "text/plain"
+                            },
+                            "url": {
+                              "path": [
+                                "api",
+                                "v1",
+                                "admin",
+                                "wash",
+                                "time-slots"
+                              ],
+                              "host": [
+                                "{{baseUrl}}"
+                              ],
+                              "query": [],
+                              "variable": []
+                            },
+                            "header": [
+                              {
+                                "disabled": false,
+                                "description": {
+                                  "content": "(Required) ",
+                                  "type": "text/plain"
+                                },
+                                "key": "Idempotency-Key",
+                                "value": "{{idempotencyKey}}"
+                              },
+                              {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                              },
+                              {
+                                "key": "Accept",
+                                "value": "application/json"
+                              }
+                            ],
+                            "method": "POST",
+                            "body": {
+                              "mode": "raw",
+                              "raw": "{\n  \"slotId\": \"<uuid>\",\n  \"sourceScheduleId\": \"<uuid>\",\n  \"serviceDate\": \"<date>\",\n  \"startsAt\": \"<dateTime>\",\n  \"endsAt\": \"<dateTime>\",\n  \"timezone\": \"America/Mexico_City\",\n  \"bookingDeadlineAt\": \"<dateTime>\",\n  \"cancellationDeadlineAt\": \"<dateTime>\",\n  \"arrivalToleranceUntil\": \"<dateTime>\"\n}",
+                              "options": {
+                                "raw": {
+                                  "headerFamily": "json",
+                                  "language": "json"
+                                }
+                              }
+                            },
+                            "auth": {
+                              "type": "bearer",
+                              "bearer": [
+                                {
+                                  "key": "token",
+                                  "value": "{{bearerToken}}"
+                                }
+                              ]
+                            }
+                          },
+                          "response": [
+                            {
+                              "name": "Accepted",
+                              "originalRequest": {
+                                "url": {
+                                  "path": [
+                                    "api",
+                                    "v1",
+                                    "admin",
+                                    "wash",
+                                    "time-slots"
+                                  ],
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "query": [],
+                                  "variable": []
+                                },
+                                "header": [
+                                  {
+                                    "disabled": false,
+                                    "description": {
+                                      "content": "(Required) ",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Idempotency-Key",
+                                    "value": "{{idempotencyKey}}"
+                                  },
+                                  {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                  },
+                                  {
+                                    "key": "Accept",
+                                    "value": "application/json"
+                                  },
+                                  {
+                                    "description": {
+                                      "content": "Added as a part of security scheme: bearer",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "method": "POST",
+                                "body": {
+                                  "mode": "raw",
+                                  "raw": "{\n  \"slotId\": \"<uuid>\",\n  \"sourceScheduleId\": \"<uuid>\",\n  \"serviceDate\": \"<date>\",\n  \"startsAt\": \"<dateTime>\",\n  \"endsAt\": \"<dateTime>\",\n  \"timezone\": \"America/Mexico_City\",\n  \"bookingDeadlineAt\": \"<dateTime>\",\n  \"cancellationDeadlineAt\": \"<dateTime>\",\n  \"arrivalToleranceUntil\": \"<dateTime>\"\n}",
+                                  "options": {
+                                    "raw": {
+                                      "headerFamily": "json",
+                                      "language": "json"
+                                    }
+                                  }
+                                }
+                              },
+                              "status": "Accepted",
+                              "code": 202,
+                              "header": [
+                                {
+                                  "key": "Content-Type",
+                                  "value": "application/json"
+                                }
+                              ],
+                              "body": "{\n  \"operationId\": \"<uuid>\",\n  \"status\": \"<string>\",\n  \"pollPath\": \"<string>\",\n  \"submittedAt\": \"<dateTime>\"\n}",
+                              "cookie": [],
+                              "_postman_previewlanguage": "json"
+                            },
+                            {
+                              "name": "Problem response",
+                              "originalRequest": {
+                                "url": {
+                                  "path": [
+                                    "api",
+                                    "v1",
+                                    "admin",
+                                    "wash",
+                                    "time-slots"
+                                  ],
+                                  "host": [
+                                    "{{baseUrl}}"
+                                  ],
+                                  "query": [],
+                                  "variable": []
+                                },
+                                "header": [
+                                  {
+                                    "disabled": false,
+                                    "description": {
+                                      "content": "(Required) ",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Idempotency-Key",
+                                    "value": "{{idempotencyKey}}"
+                                  },
+                                  {
+                                    "key": "Content-Type",
+                                    "value": "application/json"
+                                  },
+                                  {
+                                    "key": "Accept",
+                                    "value": "application/problem+json"
+                                  },
+                                  {
+                                    "description": {
+                                      "content": "Added as a part of security scheme: bearer",
+                                      "type": "text/plain"
+                                    },
+                                    "key": "Authorization",
+                                    "value": "Bearer <token>"
+                                  }
+                                ],
+                                "method": "POST",
+                                "body": {
+                                  "mode": "raw",
+                                  "raw": "{\n  \"slotId\": \"<uuid>\",\n  \"sourceScheduleId\": \"<uuid>\",\n  \"serviceDate\": \"<date>\",\n  \"startsAt\": \"<dateTime>\",\n  \"endsAt\": \"<dateTime>\",\n  \"timezone\": \"America/Mexico_City\",\n  \"bookingDeadlineAt\": \"<dateTime>\",\n  \"cancellationDeadlineAt\": \"<dateTime>\",\n  \"arrivalToleranceUntil\": \"<dateTime>\"\n}",
+                                  "options": {
+                                    "raw": {
+                                      "headerFamily": "json",
+                                      "language": "json"
+                                    }
+                                  }
+                                }
+                              },
+                              "header": [
+                                {
+                                  "key": "Content-Type",
+                                  "value": "application/problem+json"
+                                }
+                              ],
+                              "body": "{\n  \"type\": \"<string>\",\n  \"title\": \"<string>\",\n  \"status\": \"<integer>\",\n  \"code\": \"<string>\",\n  \"detail\": \"<string>\",\n  \"traceId\": \"<string>\"\n}",
+                              "cookie": [],
+                              "_postman_previewlanguage": "json"
+                            }
+                          ],
+                          "event": [],
+                          "protocolProfileBehavior": {
+                            "disableBodyPruning": true
+                          }
                         }
                       ]
                     },
@@ -19279,7 +19482,7 @@
     }
   ],
   "info": {
-    "name": "Estoma Platform BFF — Client API",
+    "name": "Estoma Platform BFF \u2014 Client API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "description": {
       "type": "text/plain",
