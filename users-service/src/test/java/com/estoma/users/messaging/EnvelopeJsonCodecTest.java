@@ -6,6 +6,8 @@ import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.event.PersonCreatedPayload;
+import com.estoma.users.contract.event.PersonDeactivatedPayload;
+import com.estoma.users.contract.event.PersonUpdatedPayload;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.UUID;
@@ -132,18 +134,29 @@ class EnvelopeJsonCodecTest {
   }
 
   @Test
-  void nullMaternalSurnameAndPhoneRoundTripAsNullNotAbsent() {
+  void nullOptionalPersonEventFieldsAreOmittedAndDeserializeAsNull() {
+    UUID personId = UUID.randomUUID();
+    Instant occurredAt = Instant.now();
     PersonCreatedPayload payload =
         new PersonCreatedPayload(
-            UUID.randomUUID(), "Ada", "Lovelace", null, "ada@example.edu", null, "ACTIVE", 1, Instant.now());
+            personId, "Ada", "Lovelace", null, "ada@example.edu", null, "ACTIVE", 1, occurredAt);
 
     var node = codec.toJsonNode(payload);
     PersonCreatedPayload roundTripped =
         new tools.jackson.databind.json.JsonMapper()
             .treeToValue(node, PersonCreatedPayload.class);
 
+    assertThat(node.has("maternalSurname")).isFalse();
+    assertThat(node.has("phone")).isFalse();
     assertThat(roundTripped.maternalSurname()).isNull();
     assertThat(roundTripped.phone()).isNull();
+    var updated = codec.toJsonNode(new PersonUpdatedPayload(
+        personId, "Ada", "Lovelace", null, "ada@example.edu", null, 2, occurredAt));
+    assertThat(updated.has("maternalSurname")).isFalse();
+    assertThat(updated.has("phone")).isFalse();
+    var deactivated = codec.toJsonNode(new PersonDeactivatedPayload(
+        personId, "INACTIVE", 2, occurredAt, "DUPLICATE", null));
+    assertThat(deactivated.has("reasonDetail")).isFalse();
   }
 
   private MessageEnvelope minimalCommandEnvelope() {
