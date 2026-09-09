@@ -499,6 +499,132 @@
         "x-server-derived-actor-fields" : [ "requestedByAccountId" ]
       }
     },
+    "/api/v1/admin/academic/import-files/{fileReference}" : {
+      "put" : {
+        "description" : "Uploads one immutable XLSX object and returns its frozen UUID reference and authoritative lowercase SHA-256 checksum.",
+        "operationId" : "AcademicImportFileController_upload_put__api_v1_admin_academic_import_files_fileReference_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "Content-Length",
+          "required" : false,
+          "schema" : {
+            "type" : "integer"
+          }
+        }, {
+          "in" : "path",
+          "name" : "fileReference",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : {
+              "schema" : {
+                "format" : "binary",
+                "type" : "string"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "fileChecksum" : {
+                      "maxLength" : 64,
+                      "minLength" : 64,
+                      "type" : "string"
+                    },
+                    "fileReference" : {
+                      "format" : "uuid",
+                      "type" : "string"
+                    },
+                    "replayed" : {
+                      "type" : "boolean"
+                    },
+                    "sizeBytes" : {
+                      "exclusiveMinimum" : 0,
+                      "type" : "integer"
+                    }
+                  },
+                  "required" : [ "fileReference", "fileChecksum", "sizeBytes", "replayed" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Invalid reference, idempotency key, or empty object"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "The immutable reference contains different bytes"
+          },
+          "413" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "The XLSX exceeds the configured object-size limit"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Student-import object storage is disabled or unavailable"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ],
+        "summary" : "admin.academic.import-files.upload"
+      }
+    },
     "/api/v1/admin/academic/imports" : {
       "post" : {
         "description" : "Owner: academic; owner operation: StartStudentImport.",

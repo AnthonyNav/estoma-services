@@ -125,6 +125,14 @@ public class OpenApiController {
       if (!admin.serverDerivedActorFields().isEmpty()) {
         operation.put("x-server-derived-actor-fields", admin.serverDerivedActorFields().stream().sorted().toList());
       }
+    } else if (path.equals("/api/v1/admin/academic/import-files/{fileReference}")
+        && method == RequestMethod.PUT) {
+      operation.put("summary", "admin.academic.import-files.upload");
+      operation.put("description", "Uploads one immutable XLSX object and returns its frozen UUID "
+          + "reference and authoritative lowercase SHA-256 checksum.");
+      operation.put("requestBody", Map.of("required", true, "content", Map.of(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          Map.of("schema", Map.of("type", "string", "format", "binary")))));
     } else if (requestType != null) {
       Map<String, Object> requestSchema = new LinkedHashMap<>(schemaFor(requestType));
       if (handler.getMethod().getName().equals("decideEntry")) {
@@ -198,7 +206,8 @@ public class OpenApiController {
     while (matcher.find()) {
       String name = matcher.group(1);
       parameters.add(Map.of("name", name, "in", "path", "required", true,
-          "schema", name.endsWith("Id") ? Map.of("type", "string", "format", "uuid")
+          "schema", name.endsWith("Id") || name.equals("fileReference")
+              ? Map.of("type", "string", "format", "uuid")
               : Map.of("type", "string")));
     }
     if (!parameters.isEmpty()) operation.put("parameters", List.copyOf(parameters));
@@ -240,6 +249,13 @@ public class OpenApiController {
       responses.put("503", Map.of("description", "Required local projection context is unavailable",
           "content", Map.of(MediaType.APPLICATION_PROBLEM_JSON_VALUE,
               Map.of("schema", Map.of("$ref", "#/components/schemas/Problem")))));
+    }
+    if (path.equals("/api/v1/admin/academic/import-files/{fileReference}")
+        && method == RequestMethod.PUT) {
+      responses.put("400", problemResponse("Invalid reference, idempotency key, or empty object"));
+      responses.put("409", problemResponse("The immutable reference contains different bytes"));
+      responses.put("413", problemResponse("The XLSX exceeds the configured object-size limit"));
+      responses.put("503", problemResponse("Student-import object storage is disabled or unavailable"));
     }
     if (path.equals("/api/v1/operations/{operationId}") && method == RequestMethod.GET) {
       operation.put("description", "Returns only an operation visible to the current actor. "

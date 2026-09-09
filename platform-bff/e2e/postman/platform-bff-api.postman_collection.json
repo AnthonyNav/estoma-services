@@ -17,6 +17,70 @@
                   "description": "",
                   "item": [
                     {
+                      "name": "admin.academic.import-files.upload",
+                      "request": {
+                        "name": "admin.academic.import-files.upload",
+                        "description": {
+                          "content": "Uploads one immutable XLSX object and returns its frozen reference and SHA-256 checksum.",
+                          "type": "text/plain"
+                        },
+                        "url": {
+                          "path": [
+                            "api",
+                            "v1",
+                            "admin",
+                            "academic",
+                            "import-files",
+                            ":fileReference"
+                          ],
+                          "host": [
+                            "{{baseUrl}}"
+                          ],
+                          "query": [],
+                          "variable": [
+                            {
+                              "key": "fileReference",
+                              "value": "{{studentImportFileReference}}",
+                              "type": "any"
+                            }
+                          ]
+                        },
+                        "header": [
+                          {
+                            "key": "Idempotency-Key",
+                            "value": "{{idempotencyKey}}",
+                            "disabled": false
+                          },
+                          {
+                            "key": "Content-Type",
+                            "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                          },
+                          {
+                            "key": "Accept",
+                            "value": "application/json"
+                          }
+                        ],
+                        "method": "PUT",
+                        "body": {
+                          "mode": "file",
+                          "file": {
+                            "src": "{{studentImportWorkbook}}"
+                          }
+                        },
+                        "auth": {
+                          "type": "bearer",
+                          "bearer": [
+                            {
+                              "key": "token",
+                              "value": "{{bearerToken}}",
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      },
+                      "response": []
+                    },
+                    {
                       "name": "course-sections",
                       "description": "",
                       "item": [
@@ -19479,6 +19543,16 @@
       "key": "operationId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "studentImportFileReference",
+      "value": "14557249-bd65-58f7-a672-dc2a2d462c95",
+      "type": "string"
+    },
+    {
+      "key": "studentImportWorkbook",
+      "value": "",
+      "type": "string"
     }
   ],
   "info": {
@@ -19486,7 +19560,7 @@
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "description": {
       "type": "text/plain",
-      "content": "Manual client collection generated from platform-bff/docs/openapi.yaml. It covers every public BFF operation (88). Set baseUrl and the test credentials in the companion environment. Send Login first: it stores bearerToken, refreshToken, sessionId and accountId for subsequent requests. Each state-changing request receives a stable Idempotency-Key that is reused if the same Postman request is retried; clear its generated collection variable only when intentionally starting a new logical operation. Populate the remaining IDs and body placeholders with fixture data from the E2E environment; no development credentials or production values are included. Password-recovery and email-delivery operations are present because they are BFF contracts, but require their external email preconditions."
+      "content": "Manual client collection generated from platform-bff/docs/openapi.yaml. It covers every public BFF operation (90). Set baseUrl and the test credentials in the companion environment. Send Login first: it stores bearerToken, refreshToken, sessionId and accountId for subsequent requests. Each state-changing request receives a stable Idempotency-Key that is reused if the same Postman request is retried; clear its generated collection variable only when intentionally starting a new logical operation. Populate the remaining IDs and body placeholders with fixture data from the E2E environment; no development credentials or production values are included. Password-recovery and email-delivery operations are present because they are BFF contracts, but require their external email preconditions."
     }
   }
 }
