@@ -23,6 +23,7 @@ import com.estoma.users.contract.Actor;
 import com.estoma.users.contract.MessageEnvelope;
 import com.estoma.users.contract.MessageKind;
 import com.estoma.users.contract.MessageTypes;
+import com.estoma.users.contract.event.PersonCreatedPayload;
 import com.estoma.users.contract.event.PersonUpdatedPayload;
 import com.estoma.users.contract.result.ResultPayload;
 import com.estoma.users.contract.result.ResultStatus;
@@ -112,6 +113,32 @@ class PersonCommandDispatcherTest {
     SucceededPayload data = codec.readValue(codec.writeValueAsString(payload.data()), SucceededPayload.class);
     assertThat(data.personId()).isEqualTo(personId);
     assertThat(data.version()).isEqualTo(2);
+  }
+
+  @Test
+  void personCreatedOutboxPayloadOmitsNullOptionalFields() {
+    UUID personId = UUID.randomUUID();
+    when(createHandler.handle(any())).thenReturn(new HandlerResult(
+        personId,
+        1,
+        new PersonCreatedPayload(
+            personId, "Ada", "Lovelace", null, "ada@example.edu", null, "ACTIVE", 1, Instant.now()),
+        MessageTypes.PERSON_CREATED));
+
+    CommandOutcome outcome = dispatcher.dispatch(
+        createEnvelope(personId, "ada@example.edu", UUID.randomUUID().toString()));
+
+    assertThat(outcome).isEqualTo(new CommandOutcome.Succeeded(1));
+    ArgumentCaptor<OutboxAppendRequest> appended = ArgumentCaptor.forClass(OutboxAppendRequest.class);
+    verify(outbox, times(2)).append(appended.capture());
+    OutboxAppendRequest event = appended.getAllValues().stream()
+        .filter(row -> row.messageKind().equals(MessageKind.EVENT.name()))
+        .findFirst()
+        .orElseThrow();
+    var payload = codec.parseJson(event.payloadJson());
+    assertThat(payload.path("personId").asString()).isEqualTo(personId.toString());
+    assertThat(payload.has("maternalSurname")).isFalse();
+    assertThat(payload.has("phone")).isFalse();
   }
 
   @Test
