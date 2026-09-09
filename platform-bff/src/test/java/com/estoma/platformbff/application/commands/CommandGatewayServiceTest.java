@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -17,6 +18,7 @@ import com.estoma.platformbff.contracts.messaging.CommandSubmission;
 import com.estoma.platformbff.domain.idempotency.IdempotencyRecord;
 import com.estoma.platformbff.domain.messaging.OutboxMessage;
 import com.estoma.platformbff.domain.operation.ClientOperation;
+import com.estoma.platformbff.infrastructure.messaging.MessageEnvelopeCodec;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,6 +28,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 
 @ExtendWith(MockitoExtension.class)
 class CommandGatewayServiceTest {
@@ -98,6 +102,92 @@ class CommandGatewayServiceTest {
     verify(outbox).insert(message.capture());
     assertThat(message.getValue().aggregateId()).isEqualTo(generatedAggregateId);
     assertThat(message.getValue().payloadJson()).isEqualTo("{\"appointmentId\":\"server-generated\"}");
+  }
+
+  @Test
+  void authorizationCommandsPublishExactOwnerActorWhileFingerprintsRetainGlobalScope() {
+    UUID accountId = UUID.randomUUID();
+    when(idempotency.findByLogicalScope(any(), any(), any())).thenReturn(Optional.empty());
+    when(idempotency.insertIfAbsent(any())).thenReturn(true);
+    var codec = new MessageEnvelopeCodec(JsonMapper.builder().build());
+    var realSerializerGateway = new CommandGatewayService(
+        new CommandRegistry(), operations, idempotency, outbox, codec, fingerprints);
+    ActorContext globalActor = ActorContext.account(accountId, "GLOBAL", null);
+
+    realSerializerGateway.submit(new CommandSubmission(
+        "admin.authorization.assign-role", "AssignAccountRole", "{}", UUID.randomUUID().toString(),
+        accountId, globalActor, accountId, null));
+    realSerializerGateway.submit(new CommandSubmission(
+        "admin.authorization.grant-system-access", "GrantSystemAccess", "{}",
+        UUID.randomUUID().toString(), accountId, globalActor, UUID.randomUUID(), null));
+
+    var messages = ArgumentCaptor.forClass(OutboxMessage.class);
+    verify(outbox, times(2)).insert(messages.capture());
+    assertThat(messages.getAllValues()).allSatisfy(message -> {
+      JsonNode actor = codec.read(message.actorJson(), JsonNode.class);
+      assertThat(actor.size()).isEqualTo(2);
+      assertThat(actor.path("type").asString()).isEqualTo("ACCOUNT");
+      assertThat(actor.path("accountId").asString()).isEqualTo(accountId.toString());
+      assertThat(actor.has("scope")).isFalse();
+    });
+    var fingerprintActors = ArgumentCaptor.forClass(ActorContext.class);
+    verify(fingerprints, times(4)).normalize(
+        any(), any(), any(), any(), any(), fingerprintActors.capture());
+    assertThat(fingerprintActors.getAllValues()).containsOnly(globalActor);
+  }
+
+  @Test
+  void authorizationRetryStillFingerprintsTheGlobalActorAndDoesNotRepublish() {
+    UUID accountId = UUID.randomUUID();
+    UUID operationId = UUID.randomUUID();
+    var existing = new IdempotencyRecord(
+        "scope", accountId, "admin.authorization.assign-role", UUID.randomUUID().toString(),
+        "fingerprint", operationId, Instant.now(), null);
+    var operation = new ClientOperation(
+        operationId, accountId, "admin.authorization.assign-role", "AssignAccountRole",
+        "authorization", "authorization", UUID.randomUUID(), existing.idempotencyKey(),
+        com.estoma.platformbff.domain.operation.OperationStatus.PENDING,
+        null, null, null, Instant.now(), Instant.now(), null, null);
+    when(idempotency.findByLogicalScope(
+        accountId, existing.publicOperation(), existing.idempotencyKey())).thenReturn(Optional.of(existing));
+    when(operations.findById(operationId)).thenReturn(Optional.of(operation));
+    var codec = new MessageEnvelopeCodec(JsonMapper.builder().build());
+    var realSerializerGateway = new CommandGatewayService(
+        new CommandRegistry(), operations, idempotency, outbox, codec, fingerprints);
+    ActorContext globalActor = ActorContext.account(accountId, "GLOBAL", null);
+
+    var result = realSerializerGateway.submit(new CommandSubmission(
+        existing.publicOperation(), "AssignAccountRole", "{}", existing.idempotencyKey(),
+        accountId, globalActor, accountId, null));
+
+    assertThat(result.operationId()).isEqualTo(operationId);
+    assertThat(result.reused()).isTrue();
+    var fingerprintActors = ArgumentCaptor.forClass(ActorContext.class);
+    verify(fingerprints, times(2)).normalize(
+        any(), any(), any(), any(), any(), fingerprintActors.capture());
+    assertThat(fingerprintActors.getAllValues()).containsOnly(globalActor);
+    verify(outbox, never()).insert(any());
+  }
+
+  @Test
+  void authenticationCommandKeepsGlobalScopeInThePublishedActor() {
+    UUID accountId = UUID.randomUUID();
+    when(idempotency.findByLogicalScope(any(), any(), any())).thenReturn(Optional.empty());
+    when(idempotency.insertIfAbsent(any())).thenReturn(true);
+    var codec = new MessageEnvelopeCodec(JsonMapper.builder().build());
+    var realSerializerGateway = new CommandGatewayService(
+        new CommandRegistry(), operations, idempotency, outbox, codec, fingerprints);
+
+    realSerializerGateway.submit(new CommandSubmission(
+        "admin.accounts.create", "CreateAccount", "{}", UUID.randomUUID().toString(),
+        accountId, ActorContext.account(accountId, "GLOBAL", null), accountId, null));
+
+    var message = ArgumentCaptor.forClass(OutboxMessage.class);
+    verify(outbox).insert(message.capture());
+    JsonNode actor = codec.read(message.getValue().actorJson(), JsonNode.class);
+    assertThat(actor.path("type").asString()).isEqualTo("ACCOUNT");
+    assertThat(actor.path("accountId").asString()).isEqualTo(accountId.toString());
+    assertThat(actor.path("scope").asString()).isEqualTo("GLOBAL");
   }
 
   @Test

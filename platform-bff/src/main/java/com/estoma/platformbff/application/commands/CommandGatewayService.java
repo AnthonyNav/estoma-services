@@ -16,6 +16,7 @@ import com.estoma.platformbff.domain.operation.ClientOperation;
 import com.estoma.platformbff.domain.operation.OperationStatus;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -119,7 +120,7 @@ public class CommandGatewayService {
         submission.aggregateId(),
         submission.aggregateVersion(),
         submission.idempotencyKey(),
-        serializer.write(actor),
+        ownerActorJson(route, actor),
         ownerPayload.canonicalPayloadJson(),
         OutboxStatus.PENDING,
         null,
@@ -133,6 +134,13 @@ public class CommandGatewayService {
 
     return new CommandSubmissionResult(
         operationId, OperationStatus.PENDING.name(), "/api/v1/operations/" + operationId, now, false);
+  }
+
+  private String ownerActorJson(OwnerRoute route, ActorContext actor) {
+    if ("authorization".equals(route.logicalComponentId()) && "ACCOUNT".equals(actor.type())) {
+      return serializer.write(Map.of("type", actor.type(), "accountId", actor.accountId()));
+    }
+    return serializer.write(actor);
   }
 
   private CommandSubmissionResult resolveExisting(IdempotencyRecord record, String fingerprint) {
