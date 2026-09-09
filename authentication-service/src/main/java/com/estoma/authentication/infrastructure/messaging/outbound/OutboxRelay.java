@@ -1,5 +1,6 @@
 package com.estoma.authentication.infrastructure.messaging.outbound;
 
+import com.estoma.authentication.contracts.Actor;
 import com.estoma.authentication.contracts.MessageEnvelope;
 import com.estoma.authentication.contracts.MessageKind;
 import com.estoma.authentication.infrastructure.messaging.AmqpNames;
@@ -136,7 +137,19 @@ public class OutboxRelay {
         record.idempotencyKey(),
         record.aggregateId(),
         record.aggregateVersion(),
-        record.actor(),
+        wireActor(kind, record.actor()),
         codec.readTree(record.payloadJson()));
+  }
+
+  /**
+   * Durable command and RPC actors carry authorization context such as {@code scope} and
+   * {@code systemId}. Those fields remain in the Outbox audit row, but an Event's ACCOUNT actor
+   * has the canonical shared-contract shape {@code {type, accountId}} on the wire.
+   */
+  static Actor wireActor(MessageKind kind, Actor actor) {
+    if (kind == MessageKind.EVENT && actor != null && "ACCOUNT".equals(actor.type())) {
+      return new Actor(actor.accountId());
+    }
+    return actor;
   }
 }
