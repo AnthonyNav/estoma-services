@@ -27,7 +27,29 @@ public final class ProjectionRecoveryCoordinator {
       ensureBootstrapProjection("wash-administration",null);
       ensureBootstrapProjection("authorization",null);
       if(!jobs.hasCompletedFull("appointments",serviceDate)&&jobs.findActiveFull("appointments",serviceDate).isEmpty()) startFullLocked("appointments",serviceDate);
+      recoverMissingAppointmentSlots();
     });
+  }
+  private void recoverMissingAppointmentSlots() {
+    // Daily snapshots contain booked contexts only. A later scheduling event can therefore
+    // reference a slot removed by the rebuild, even when its inbox record is already APPLIED.
+    var missing = jdbc.queryForList("""
+        SELECT a.appointment_id FROM appointment_projection a
+        WHERE a.appointment_status='SCHEDULED'
+          AND NOT EXISTS (SELECT 1 FROM appointment_time_slot_projection s
+            WHERE s.appointment_time_slot_id=a.appointment_time_slot_id)
+          AND NOT EXISTS (SELECT 1 FROM projection_recovery_jobs f
+            WHERE f.projection_name='appointments' AND f.scope='FULL'
+              AND f.status IN ('PENDING','WAITING_RESULT'))
+          AND NOT EXISTS (SELECT 1 FROM projection_recovery_jobs e
+            WHERE e.projection_name='appointments' AND e.scope='ENTITY'
+              AND e.entity_key='appointment:' || a.appointment_id::text
+              AND (e.status IN ('PENDING','WAITING_RESULT') OR e.updated_at>=a.updated_at))
+        ORDER BY a.updated_at,a.appointment_id
+        LIMIT 10
+        FOR UPDATE OF a SKIP LOCKED
+        """, UUID.class);
+    for (UUID appointmentId : missing) ensureAppointmentEntity(appointmentId);
   }
   private void ensureBootstrapProjection(String projection,LocalDate serviceDate){
     var current=state.find(projection);
