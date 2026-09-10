@@ -121,7 +121,7 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
 
     List<Appointment> studentAppointments = appointments.findForStudentAndDate(
         command.studentAccountId(), slot.serviceDate());
-    if (studentAppointments.stream().anyMatch(Appointment::isActive)) {
+    if (appointments.hasActiveForStudent(command.studentAccountId())) {
       return ApplicationResult.rejected("ACTIVE_APPOINTMENT_EXISTS", "student already has an active appointment");
     }
     if (!DailyPenaltyPolicy.maySchedule(studentAppointments)) {
@@ -162,7 +162,9 @@ public class ScheduleAppointmentHandler implements ScheduleAppointmentUseCase {
     Appointment appointment = Appointment.scheduled(command.appointmentId(), slot.appointmentTimeSlotId(),
         command.studentAccountId(), command.courseSectionId(), command.appointmentType(),
         command.instrumentCount(), command.pieceType(), authorizationId, command.now());
-    appointments.save(appointment);
+    if (!appointments.saveScheduledUnlessStudentActive(appointment)) {
+      return ApplicationResult.rejected("ACTIVE_APPOINTMENT_EXISTS", "student already has an active appointment");
+    }
     String qrRepresentation = qrIssuer.enabled() ? qrIssuer.issue(appointment.appointmentId()) : null;
     ApplicationSupport.appendEvent(outbox, command.metadata(), "AppointmentScheduled",
         appointment.appointmentId(), appointment.version(),

@@ -10,6 +10,9 @@ import java.util.UUID;
 
 public interface AppointmentRepository {
   Appointment save(Appointment appointment);
+  /** Atomically retains the one-active-appointment invariant without aborting the transaction. */
+  boolean saveScheduledUnlessStudentActive(Appointment appointment);
+  boolean hasActiveForStudent(UUID studentAccountId);
   Optional<Appointment> findById(UUID id);
   Optional<Appointment> findByIdForUpdate(UUID id);
   boolean updateIfVersion(Appointment appointment, long expectedVersion);

@@ -53,7 +53,7 @@ public final class GetAppointmentAvailabilityHandler implements GetAppointmentAv
         .filter(appointment -> "COMPLETED".equals(appointment.status().name())).count());
 
     List<String> blockers = new ArrayList<>();
-    if (studentAppointments.stream().anyMatch(Appointment::isActive)) {
+    if (appointments.hasActiveForStudent(request.studentAccountId())) {
       blockers.add("ACTIVE_APPOINTMENT_EXISTS");
     }
     if (penaltyPoints >= DailyPenaltyPolicy.MAX_POINTS) blockers.add("STUDENT_BLOCKED");

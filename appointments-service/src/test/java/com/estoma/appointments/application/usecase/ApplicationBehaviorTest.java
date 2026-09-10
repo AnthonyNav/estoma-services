@@ -145,6 +145,11 @@ class ApplicationBehaviorTest {
     final Map<UUID, Appointment> values = new HashMap<>();
     Appointment get(UUID id) { return values.get(id); }
     @Override public Appointment save(Appointment value) { values.put(value.appointmentId(), value); return value; }
+    @Override public boolean hasActiveForStudent(UUID student) { return values.values().stream().anyMatch(a -> a.studentAccountId().equals(student) && a.isActive()); }
+    @Override public boolean saveScheduledUnlessStudentActive(Appointment value) {
+      if (hasActiveForStudent(value.studentAccountId())) return false;
+      save(value); return true;
+    }
     @Override public Optional<Appointment> findById(UUID id) { return Optional.ofNullable(values.get(id)); }
     @Override public Optional<Appointment> findByIdForUpdate(UUID id) { return findById(id); }
     @Override public boolean updateIfVersion(Appointment value, long expectedVersion) {
