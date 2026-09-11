@@ -132,13 +132,7 @@ public class ProjectionRecoveryWorker {
   }
 
   private static String jsonString(String json, String field) {
-    String marker = "\"" + field + "\":\"";
-    int start = json.indexOf(marker);
-    if (start < 0) throw new IllegalArgumentException("missing recovery context field " + field);
-    start += marker.length();
-    int end = json.indexOf('"', start);
-    if (end < 0) throw new IllegalArgumentException("invalid recovery context");
-    return json.substring(start, end);
+    return RecoveryContextJson.requiredText(json, field);
   }
 
   private record QuerySeed(String phase, String messageType, String payloadJson, String contextJson) {}

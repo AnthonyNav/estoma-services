@@ -286,5 +286,5 @@ public class ProjectionRecoveryResultProcessor {
   private static Instant instant(JsonNode n,String f){ Instant v=optionalInstant(n,f); if(v==null)throw new IllegalArgumentException(f+" is required"); return v; }
   private static Instant optionalInstant(JsonNode n,String f){ String v=optionalText(n,f); if(v==null)return null; return Instant.parse(v); }
   private static LocalDate optionalDate(JsonNode n,String f){ String v=optionalText(n,f); return v==null?null:LocalDate.parse(v); }
-  private static String contextString(String json,String field){ String m="\""+field+"\":\""; int s=json.indexOf(m); if(s<0)throw new IllegalArgumentException("missing context "+field); s+=m.length(); int e=json.indexOf('"',s); if(e<0)throw new IllegalArgumentException("invalid context"); return json.substring(s,e); }
+  private static String contextString(String json,String field){ return RecoveryContextJson.requiredText(json,field); }
 }
