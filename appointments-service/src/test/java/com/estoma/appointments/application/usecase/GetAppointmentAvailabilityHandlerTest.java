@@ -159,6 +159,7 @@ class GetAppointmentAvailabilityHandlerTest {
 
   @Test
   void authorizationIsEvaluatedForStudentIdentityAndBlockersAreStableAndUnique() {
+    when(appointments.hasActiveForStudent(studentId)).thenReturn(true);
     when(authorization.reliable()).thenReturn(false);
     when(academic.reliable()).thenReturn(false);
     AppointmentTimeSlot slot = slot(NOW.plusSeconds(600), NOW.plusSeconds(4200));

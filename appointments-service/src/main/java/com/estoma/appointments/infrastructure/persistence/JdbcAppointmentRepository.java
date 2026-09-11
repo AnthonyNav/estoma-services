@@ -25,7 +25,22 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
   public JdbcAppointmentRepository(JdbcClient jdbc) { this.jdbc = jdbc; }
 
   @Override public Appointment save(Appointment a) {
-    jdbc.sql("""
+    insert(a, false);
+    return a;
+  }
+
+  @Override public boolean saveScheduledUnlessStudentActive(Appointment a) {
+    if (a.status() != AppointmentStatus.SCHEDULED) throw new IllegalArgumentException("scheduled appointment required");
+    return insert(a, true) == 1;
+  }
+
+  @Override public boolean hasActiveForStudent(UUID studentAccountId) {
+    return jdbc.sql("SELECT EXISTS (SELECT 1 FROM appointments WHERE student_account_id=:student AND status IN ('SCHEDULED','IN_PROGRESS'))")
+        .param("student", studentAccountId).query(Boolean.class).single();
+  }
+
+  private int insert(Appointment a, boolean rejectActiveConflict) {
+    return jdbc.sql("""
       INSERT INTO appointments
         (appointment_id,appointment_time_slot_id,student_account_id,course_section_id,appointment_type,
          instrument_count,piece_type,status,entry_authorized_at,exceptional_authorization_id,
@@ -37,7 +52,7 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
          :cancelType,:cancelSubreason,:cancelReason,:cancelledBy,:cancelledAt,
          :rejectionReason,:rejectedBy,:rejectedAt,:missedAt,:startedAt,
          :completedBy,:completedAt,:created,:updated,:version)
-      """)
+      """ + (rejectActiveConflict ? " ON CONFLICT (student_account_id) WHERE status IN ('SCHEDULED','IN_PROGRESS') DO NOTHING" : ""))
       .param("id", a.appointmentId()).param("slot", a.appointmentTimeSlotId())
       .param("student", a.studentAccountId()).param("course", a.courseSectionId())
       .param("type", a.appointmentType().name()).param("count", a.instrumentCount())
@@ -53,7 +68,6 @@ public class JdbcAppointmentRepository implements AppointmentRepository {
       .param("completedBy", a.completedByAccountId()).param("completedAt", Timestamps.toTimestamp(a.completedAt()))
       .param("created", Timestamps.toTimestamp(a.createdAt())).param("updated", Timestamps.toTimestamp(a.updatedAt()))
       .param("version", a.version()).update();
-    return a;
   }
 
   @Override public Optional<Appointment> findById(UUID id) { return find("appointment_id=:id", "id", id, false); }
