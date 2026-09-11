@@ -105,9 +105,13 @@ public final class OutboxRelay {
     JsonNode payload = codec.readTree(message.payloadJson());
     String idempotencyKey = kind == MessageKind.COMMAND
         ? commandIdempotencyKey(message.messageType(), payload, message.messageId()) : null;
+    // Recovery Queries also require an operationId at their owner. Older durable
+    // rows lack one; the message identity gives retries the same operationId.
+    UUID operationId = message.operationId();
+    if (kind == MessageKind.QUERY && operationId == null) operationId = message.messageId();
     MessageEnvelope envelope = new MessageEnvelope(message.messageId(), message.messageType(),
         message.messageVersion(), kind, MessagingNames.LOGICAL_COMPONENT_ID, message.occurredAt(),
-        message.correlationId(), message.causationId(), message.operationId(), idempotencyKey,
+        message.correlationId(), message.causationId(), operationId, idempotencyKey,
         message.aggregateId(), envelopeAggregateVersion(kind, message.aggregateVersion()),
         new WireActor("SYSTEM", null, MessagingNames.LOGICAL_COMPONENT_ID), payload);
     Message wire = new Message(codec.encode(envelope), wireProperties);
