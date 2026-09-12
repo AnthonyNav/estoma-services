@@ -1,6 +1,8 @@
 package com.estoma.platformbff.application.projection;
 
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -17,6 +19,8 @@ public record ProjectionEvent(
     Integer aggregateVersion,
     Map<String, Object> payload) {
   public ProjectionEvent {
-    payload = payload == null ? Map.of() : Map.copyOf(payload);
+    payload = payload == null
+        ? Map.of()
+        : Collections.unmodifiableMap(new LinkedHashMap<>(payload));
   }
 }
