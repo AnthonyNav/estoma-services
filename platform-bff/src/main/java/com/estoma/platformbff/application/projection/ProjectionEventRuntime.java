@@ -247,11 +247,11 @@ public class ProjectionEventRuntime {
     }
     for (String type : Set.of("CabinRegistered", "CabinUpdated", "CabinActivated", "CabinDeactivated", "CabinRetired")) {
       register(entries, "wash-administration", type, Set.of("cabinId"),
-          Set.of("cabinId", "code", "name", "cabinType", "status", "occurredAt"), true);
+          Set.of("cabinId", "code", "name", "cabinType", "status", "version", "occurredAt"), true);
     }
     for (String type : Set.of("TankRegistered", "TankUpdated", "TankActivated", "TankDeactivated", "TankRetired")) {
       register(entries, "wash-administration", type, Set.of("tankId"),
-          Set.of("tankId", "cabinId", "code", "name", "configuredCapacity", "status", "occurredAt"), true);
+          Set.of("tankId", "cabinId", "code", "name", "configuredCapacity", "status", "version", "occurredAt"), true);
     }
   }
 
