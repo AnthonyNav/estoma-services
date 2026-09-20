@@ -123,7 +123,18 @@ public class CommandRegistry {
       route("CompleteWashExecution", "wash-execution", ActorMode.ACCOUNT,
           "CompleteWashExecutionSucceeded", "CompleteWashExecutionRejected"),
       route("CancelWashExecutionByClinic", "wash-execution", ActorMode.ACCOUNT,
-          "CancelWashExecutionByClinicSucceeded", "CancelWashExecutionByClinicRejected"));
+          "CancelWashExecutionByClinicSucceeded", "CancelWashExecutionByClinicRejected"),
+
+      route("PublicarJornada", "jornadas", ActorMode.ACCOUNT, "PublicarJornadaResult"),
+      route("EditarJornada", "jornadas", ActorMode.ACCOUNT, "EditarJornadaResult"),
+      route("CancelarJornada", "jornadas", ActorMode.ACCOUNT, "CancelarJornadaResult"),
+      route("ConfigurarTipoJornada", "jornadas", ActorMode.ACCOUNT, "ConfigurarTipoJornadaResult"),
+
+      route("CrearRegistro", "registros", ActorMode.ACCOUNT, "CrearRegistroResult"),
+      route("ConfirmarRegistro", "registros", ActorMode.ACCOUNT, "ConfirmarRegistroResult"),
+      route("RechazarRegistro", "registros", ActorMode.ACCOUNT, "RechazarRegistroResult"),
+      route("CancelarRegistroPorAlumno", "registros", ActorMode.ACCOUNT,
+          "CancelarRegistroPorAlumnoResult"));
 
   public OwnerRoute require(String messageType) {
     OwnerRoute route = ROUTES.get(messageType);

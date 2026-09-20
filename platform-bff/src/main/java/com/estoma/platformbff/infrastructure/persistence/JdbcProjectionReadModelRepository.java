@@ -58,6 +58,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
       case ProjectionReadModel.ResourceUnavailability value -> unavailability(value);
       case ProjectionReadModel.CleaningPeriod value -> cleaning(value);
       case ProjectionReadModel.Jornada value -> jornada(value);
+      case ProjectionReadModel.Registro value -> registro(value);
     }
   }
 
@@ -854,5 +855,76 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
             rs.getString("descripcion"), rs.getString("estado"), rs.getLong("source_version"),
             instant(rs, "updated_at")))
         .list();
+  }
+
+  private void registro(ProjectionReadModel.Registro v) {
+    jdbc.sql("""
+        INSERT INTO registro_read_model
+          (registro_id, jornada_id, alumno_account_id, estado, motivo_rechazo, source_version, updated_at)
+        VALUES (:id, :jornadaId, :alumnoAccountId, :estado, :motivoRechazo, :version, :updatedAt)
+        ON CONFLICT (registro_id) DO UPDATE SET
+          jornada_id = COALESCE(EXCLUDED.jornada_id, registro_read_model.jornada_id),
+          alumno_account_id = COALESCE(EXCLUDED.alumno_account_id, registro_read_model.alumno_account_id),
+          estado = EXCLUDED.estado,
+          motivo_rechazo = COALESCE(EXCLUDED.motivo_rechazo, registro_read_model.motivo_rechazo),
+          source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
+        WHERE registro_read_model.source_version <= EXCLUDED.source_version
+        """)
+        .param("id", v.registroId()).param("jornadaId", v.jornadaId())
+        .param("alumnoAccountId", v.alumnoAccountId()).param("estado", v.estado())
+        .param("motivoRechazo", v.motivoRechazo()).param("version", v.sourceVersion())
+        .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  @Override
+  public List<ProjectionReadModel.Registro> findRegistrosByAlumno(UUID alumnoAccountId) {
+    return jdbc.sql("""
+        SELECT registro_id, jornada_id, alumno_account_id, estado, motivo_rechazo, source_version, updated_at
+        FROM registro_read_model
+        WHERE alumno_account_id = :alumnoAccountId
+        ORDER BY updated_at DESC
+        """)
+        .param("alumnoAccountId", alumnoAccountId)
+        .query((rs, rowNum) -> mapRegistro(rs))
+        .list();
+  }
+
+  @Override
+  public List<ProjectionReadModel.Registro> findRegistrosByJornada(UUID jornadaId) {
+    return jdbc.sql("""
+        SELECT registro_id, jornada_id, alumno_account_id, estado, motivo_rechazo, source_version, updated_at
+        FROM registro_read_model
+        WHERE jornada_id = :jornadaId
+        ORDER BY updated_at ASC
+        """)
+        .param("jornadaId", jornadaId)
+        .query((rs, rowNum) -> mapRegistro(rs))
+        .list();
+  }
+
+  @Override
+  public Optional<UUID> findRegistroAlumnoAccountId(UUID registroId) {
+    return jdbc.sql("SELECT alumno_account_id FROM registro_read_model WHERE registro_id = :registroId")
+        .param("registroId", registroId)
+        .query(UUID.class)
+        .optional();
+  }
+
+  @Override
+  public Optional<Integer> findCurrentSemester(UUID accountId) {
+    return jdbc.sql("""
+        SELECT current_semester FROM student_academic_profile_read_model
+        WHERE account_id = :accountId
+        """)
+        .param("accountId", accountId)
+        .query(Integer.class)
+        .optional();
+  }
+
+  private static ProjectionReadModel.Registro mapRegistro(ResultSet rs) throws SQLException {
+    return new ProjectionReadModel.Registro(
+        uuid(rs, "registro_id"), uuid(rs, "jornada_id"), uuid(rs, "alumno_account_id"),
+        rs.getString("estado"), rs.getString("motivo_rechazo"), rs.getLong("source_version"),
+        instant(rs, "updated_at"));
   }
 }

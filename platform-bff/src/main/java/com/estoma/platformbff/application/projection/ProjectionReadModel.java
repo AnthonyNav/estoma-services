@@ -33,7 +33,8 @@ public sealed interface ProjectionReadModel permits
     ProjectionReadModel.ResourceAssignment,
     ProjectionReadModel.ResourceUnavailability,
     ProjectionReadModel.CleaningPeriod,
-    ProjectionReadModel.Jornada {
+    ProjectionReadModel.Jornada,
+    ProjectionReadModel.Registro {
 
   record Person(
       UUID personId,
@@ -362,6 +363,16 @@ public sealed interface ProjectionReadModel permits
       LocalDate fechaLimiteDocumentos,
       String descripcion,
       String estado,
+      long sourceVersion,
+      Instant updatedAt) implements ProjectionReadModel {}
+
+  /** Prácticas Profesionales — Registros, projected read-only from registros-service. */
+  record Registro(
+      UUID registroId,
+      UUID jornadaId,
+      UUID alumnoAccountId,
+      String estado,
+      String motivoRechazo,
       long sourceVersion,
       Instant updatedAt) implements ProjectionReadModel {}
 }

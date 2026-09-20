@@ -16,6 +16,7 @@ public class LocalAuthorizationService {
   public static final String STUDENT_ROLE = "ALUMNO";
   public static final String WASH_SUPERVISOR_ROLE = "SUPERVISOR_LAVADO";
   public static final String WASH_ADMINISTRATOR_ROLE = "ADMINISTRADOR_LAVADO";
+  public static final String PRACTICES_ADMINISTRATOR_ROLE = "ADMINISTRADOR_PRACTICAS";
   public static final String SUPERADMIN_ROLE = "SUPERADMIN";
 
   private final CurrentActor currentActor;
@@ -47,6 +48,32 @@ public class LocalAuthorizationService {
     return accountId;
   }
 
+  /** Prácticas Profesionales, Alumno-facing commands (pre-registro, cancelación propia). */
+  public UUID requirePracticesStudent() {
+    UUID accountId = requireAuthenticatedAccount();
+    readiness.requireAuthorizationReady();
+    boolean roleMatches = projections.findRoleCode(accountId).filter(STUDENT_ROLE::equals).isPresent();
+    if (!roleMatches) {
+      throw new AuthorizationDeniedException();
+    }
+    effectiveSystems.requireEffectiveSystem(accountId, EffectiveSystemService.PRACTICES_SYSTEM_CODE);
+    return accountId;
+  }
+
+  /** Prácticas Profesionales staff (alta/edición/cancelación de Jornadas, validación de Registros). */
+  public UUID requirePracticesAdministrator() {
+    UUID accountId = requireAuthenticatedAccount();
+    readiness.requireAuthorizationReady();
+    boolean roleMatches = projections.findRoleCode(accountId)
+        .filter(role -> PRACTICES_ADMINISTRATOR_ROLE.equals(role) || SUPERADMIN_ROLE.equals(role))
+        .isPresent();
+    if (!roleMatches) {
+      throw new AuthorizationDeniedException();
+    }
+    effectiveSystems.requireEffectiveSystem(accountId, EffectiveSystemService.PRACTICES_SYSTEM_CODE);
+    return accountId;
+  }
+
   /** Global administrative commands have no system-local scope in the V1 contract. */
   public UUID requireSuperAdministrator() {
     UUID accountId = requireAuthenticatedAccount();
@@ -69,6 +96,18 @@ public class LocalAuthorizationService {
     }
     effectiveSystems.requireEffectiveSystem(accountId, WASH_SYSTEM_CODE);
     return accountId;
+  }
+
+  /**
+   * "registros" is not part of the genesis/readiness pipeline yet — same V1 simplification as
+   * "jornadas" (see {@code JornadasController} javadoc). Ownership is checked directly against
+   * the local projection, fail-closed only on a missing row, not on projection staleness.
+   */
+  public void requirePracticesStudentOwnsRegistro(UUID registroId) {
+    UUID accountId = requirePracticesStudent();
+    if (!projections.findRegistroAlumnoAccountId(registroId).filter(accountId::equals).isPresent()) {
+      throw new AuthorizationDeniedException();
+    }
   }
 
   public void requireStudentOwnsAppointment(UUID appointmentId) {

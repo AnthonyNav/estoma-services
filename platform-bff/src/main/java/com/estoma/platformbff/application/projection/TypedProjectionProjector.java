@@ -53,6 +53,7 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
       case "wash-execution" -> projectWashExecution(event);
       case "authentication" -> projectAuthentication(event);
       case "jornadas" -> projectJornadas(event);
+      case "registros" -> projectRegistros(event);
       default -> throw new IllegalArgumentException("projection producer is not registered");
     }
   }
@@ -408,6 +409,31 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
           id, null, null, null, null, null, null, null, null, null, "FINALIZADA", version,
           event.occurredAt()));
       default -> throw new IllegalArgumentException("jornadas Event is not registered");
+    }
+  }
+
+  private void projectRegistros(ProjectionEvent event) {
+    Map<String, Object> p = event.payload();
+    long version = aggregateVersion(event);
+    UUID id = uuid(p, "registroId");
+    aggregate(event, id);
+    switch (event.messageType()) {
+      case "RegistroCreado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), optionalUuid(p, "alumnoId"), "PENDIENTE_VALIDACION", null,
+          version, event.occurredAt()));
+      case "RegistroConfirmado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), optionalUuid(p, "alumnoId"), "CONFIRMADO", null,
+          version, event.occurredAt()));
+      case "RegistroRechazado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, null, null, "RECHAZADO", optionalText(p, "motivo"), version, event.occurredAt()));
+      case "RegistroCanceladoPorAlumno" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, null, null, "CANCELADO_ALUMNO", null, version, event.occurredAt()));
+      case "RegistroCanceladoPorJornadaCancelada" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), null, "CANCELADO_JORNADA_CANCELADA", null,
+          version, event.occurredAt()));
+      case "RegistroCompletado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), null, "COMPLETADO", null, version, event.occurredAt()));
+      default -> throw new IllegalArgumentException("registros Event is not registered");
     }
   }
 
