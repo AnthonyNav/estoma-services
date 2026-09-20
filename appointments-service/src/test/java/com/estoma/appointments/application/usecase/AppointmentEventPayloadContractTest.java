@@ -88,6 +88,11 @@ class AppointmentEventPayloadContractTest {
     assertThat(grant.path("authorizationDate").asString()).isEqualTo("2026-08-25");
     assertThat(grant.path("authorizedByAccountId").asString()).isEqualTo(supervisor.toString());
     assertThat(grant.path("reason").asString()).isEqualTo("second appointment");
+    assertThat(grant.path("policyContextKnown").asBoolean()).isTrue();
+    assertThat(grant.path("expiresAt").asString()).isEqualTo(START.plusSeconds(7200).toString());
+    var successor = mapper.readTree(AppointmentEventPayloads.authorizationGranted(granted, java.util.List.of(granted)));
+    assertThat(successor.path("supersededAuthorizationIds").get(0).asString())
+        .isEqualTo(granted.exceptionalAuthorizationId().toString());
 
     var cancelled = granted.cancel(supervisor, "no longer needed", START.plusSeconds(30));
     var cancellation = mapper.readTree(AppointmentEventPayloads.authorizationCancelled(cancelled));

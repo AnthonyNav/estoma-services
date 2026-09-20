@@ -82,7 +82,8 @@ public class GrantExceptionalAppointmentAuthorizationHandler
           supersede(eligibility.consumedAuthorizations(), authorization, now);
           ApplicationSupport.appendEvent(outbox, command.metadata(),
               "ExceptionalAppointmentAuthorizationGranted", authorization.exceptionalAuthorizationId(),
-              authorization.version(), AppointmentEventPayloads.authorizationGranted(authorization), now);
+              authorization.version(), AppointmentEventPayloads.authorizationGranted(
+                  authorization, eligibility.consumedAuthorizations()), now);
           result = ApplicationResult.applied(authorization.exceptionalAuthorizationId(),
               authorization.version(), "exceptional authorization granted");
         }

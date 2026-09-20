@@ -126,6 +126,11 @@ final class AppointmentEventPayloads {
   }
 
   static String authorizationGranted(ExceptionalAppointmentAuthorization authorization) {
+    return authorizationGranted(authorization, java.util.List.of());
+  }
+
+  static String authorizationGranted(ExceptionalAppointmentAuthorization authorization,
+      java.util.List<ExceptionalAppointmentAuthorization> superseded) {
     Map<String, Object> fields = new LinkedHashMap<>();
     fields.put("authorizationId", authorization.exceptionalAuthorizationId());
     fields.put("studentAccountId", authorization.studentAccountId());
@@ -133,6 +138,10 @@ final class AppointmentEventPayloads {
     fields.put("authorizedByAccountId", authorization.authorizedByAccountId());
     fields.put("reason", authorization.reason());
     fields.put("grantedAt", authorization.grantedAt());
+    fields.put("policyContextKnown", true);
+    fields.put("expiresAt", authorization.expiresAt());
+    fields.put("supersededAuthorizationIds", superseded.stream()
+        .map(ExceptionalAppointmentAuthorization::exceptionalAuthorizationId).toList());
     return object(fields);
   }
 
@@ -198,6 +207,8 @@ final class AppointmentEventPayloads {
   }
 
   private static String value(Object value) {
+    if (value instanceof java.util.List<?> list) return list.stream()
+        .map(AppointmentEventPayloads::value).collect(java.util.stream.Collectors.joining(",", "[", "]"));
     if (value instanceof Number || value instanceof Boolean) return String.valueOf(value);
     return quote(String.valueOf(value));
   }
