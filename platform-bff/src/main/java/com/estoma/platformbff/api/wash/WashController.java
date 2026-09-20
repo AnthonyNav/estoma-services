@@ -300,6 +300,15 @@ public class WashController {
     return supervision.lookup(request);
   }
 
+  @GetMapping("/supervision/appointments")
+  public com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorDirectoryResponse directory(
+      @RequestParam(defaultValue = "") String query,
+      @RequestParam(defaultValue = "ALL") String status,
+      @RequestParam(defaultValue = "0") int offset,
+      @RequestParam(defaultValue = "25") int limit) {
+    return supervision.directory(query, status, offset, limit);
+  }
+
   @GetMapping("/supervision/executions/{washExecutionId}")
   public SupervisorExecutionDetailResponse supervisorExecution(
       @PathVariable UUID washExecutionId) {

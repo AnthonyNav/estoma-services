@@ -39,7 +39,14 @@ public final class WashSupervisorResponses {
       @Required SupervisorStudent student,
       @Required SupervisorAppointment appointment,
       SupervisorWashExecution washExecution,
-      ActiveResourceAssignment activeResourceAssignment) {}
+      ActiveResourceAssignment activeResourceAssignment,
+      @Required ArrivalEligibility arrivalEligibility) {}
+
+  public record ArrivalEligibility(@Required String status, @Required Instant checkedAt,
+      @RequiredNullable Instant opensAt, @RequiredNullable Instant closesAt) {}
+
+  public record SupervisorDirectoryResponse(@Required LocalDate serviceDate,
+      @Required java.util.List<SupervisorLookupResponse> items, @RequiredNullable Integer nextOffset) {}
 
   /** Exact, read-only supervisor view of one current or historical Wash execution. */
   public record SupervisorExecutionDetailResponse(

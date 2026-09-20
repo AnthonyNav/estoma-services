@@ -48,6 +48,9 @@ class WashSupervisionQueryServiceTest {
 
   @BeforeEach
   void setUp() {
+    org.mockito.Mockito.lenient().when(projections.arrivalWindow(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(Optional.of(new WashSupervisionQueryPort.ArrivalWindow(SERVICE_DATE,
+            NOW.minusSeconds(900), NOW.plusSeconds(600), "ACTIVE")));
     service = new WashSupervisionQueryService(authorization, readiness, projections,
         studentProjections, Clock.fixed(NOW, ZoneOffset.UTC));
   }
@@ -260,6 +263,57 @@ class WashSupervisionQueryServiceTest {
 
     assertThatThrownBy(() -> service.lookup(
         new SupervisorLookupRequest(LookupType.QR, "opaque", null)))
+        .isInstanceOf(WashSupervisionQueryService.LookupNotFoundException.class);
+  }
+
+  @ParameterizedTest
+  @ValueSource(longs = {-901, -900, 0, 600, 601})
+  void arrivalWindowUsesInclusiveServerTimeBoundaries(long seconds) {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW.plusSeconds(seconds), ZoneOffset.UTC));
+    var active = candidate("SCHEDULED", null, null, false, false);
+    when(studentProjections.findAccountIdByStudentEnrollment("201945678")).thenReturn(Optional.of(ACCOUNT_ID));
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(active));
+    var response = service.lookup(new SupervisorLookupRequest(LookupType.STUDENT_ENROLLMENT, null, "201945678"));
+    assertThat(response.arrivalEligibility().status()).isEqualTo(seconds < -900 ? "TOO_EARLY" : seconds > 600 ? "EXPIRED" : "OPEN");
+    assertThat(response.arrivalEligibility().checkedAt()).isEqualTo(NOW.plusSeconds(seconds));
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {-1, 1})
+  void authenticQrFromAnotherDateIsRejectedWithoutReturningIdentity(int dayOffset) {
+    service = new WashSupervisionQueryService(authorization, readiness, projections,
+        studentProjections, Clock.fixed(NOW, ZoneOffset.UTC), appointmentQr, qrRecovery, true);
+    var id = UUID.randomUUID();
+    when(qrRecovery.isReady(SERVICE_DATE)).thenReturn(true);
+    when(appointmentQr.findByExactRepresentation("owned")).thenReturn(Optional.of(new AppointmentQrReadPort.Mapping(id, 1, "owned")));
+    when(projections.arrivalWindow(id)).thenReturn(Optional.of(new WashSupervisionQueryPort.ArrivalWindow(
+        SERVICE_DATE.plusDays(dayOffset), NOW, NOW.plusSeconds(600), "ACTIVE")));
+    assertThatThrownBy(() -> service.lookup(new SupervisorLookupRequest(LookupType.QR, "owned", null)))
+        .isInstanceOf(WashSupervisionQueryService.QrWrongDateException.class);
+    org.mockito.Mockito.verify(projections, org.mockito.Mockito.never()).findAppointment(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void directoryIsBoundedAndRequiresSupervisorReadiness() {
+    var active = candidate("SCHEDULED", null, null, false, false);
+    when(projections.directory(SERVICE_DATE, "Ana", "ALL", 0, 2)).thenReturn(List.of(active, active));
+    var page = service.directory(" Ana ", "ALL", 0, 1);
+    assertThat(page.items()).hasSize(1);
+    assertThat(page.nextOffset()).isEqualTo(1);
+    verify(authorization).requireWashSupervisor();
+    verify(readiness).requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
+    assertThatThrownBy(() -> service.directory("", "ALL", 0, 51))
+        .isInstanceOf(WashSupervisionQueryService.InvalidDirectoryException.class);
+  }
+
+  @Test
+  void missingArrivalWindowFailsClosed() {
+    var active = candidate("SCHEDULED", null, null, false, false);
+    when(studentProjections.findAccountIdByStudentEnrollment("201945678")).thenReturn(Optional.of(ACCOUNT_ID));
+    when(projections.findAppointments(ACCOUNT_ID, SERVICE_DATE)).thenReturn(List.of(active));
+    when(projections.arrivalWindow(active.appointmentId())).thenReturn(Optional.empty());
+    assertThatThrownBy(() -> service.lookup(new SupervisorLookupRequest(LookupType.STUDENT_ENROLLMENT, null, "201945678")))
         .isInstanceOf(ProjectionUnavailableException.class);
   }
 

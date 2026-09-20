@@ -14,6 +14,12 @@ public interface WashSupervisionQueryPort {
 
   Optional<LookupCandidate> findAppointment(UUID appointmentId, LocalDate serviceDate);
 
+  List<LookupCandidate> directory(LocalDate serviceDate, String query, String status, int offset, int limit);
+
+  Optional<ArrivalWindow> arrivalWindow(UUID appointmentId);
+
+  record ArrivalWindow(LocalDate serviceDate, Instant opensAt, Instant closesAt, String slotStatus) {}
+
   Optional<ExecutionDetail> findExecution(UUID washExecutionId);
 
   List<PendingReassignment> findPendingReassignments();

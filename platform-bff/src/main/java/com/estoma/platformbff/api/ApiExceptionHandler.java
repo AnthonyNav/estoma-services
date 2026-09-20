@@ -8,6 +8,7 @@ import com.estoma.platformbff.application.security.AuthenticationRequiredExcepti
 import com.estoma.platformbff.application.security.SecurityRpcUnavailableException;
 import com.estoma.platformbff.application.wash.AppointmentAvailabilityService.AppointmentAvailabilityRefreshingException;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService.LookupNotFoundException;
+import com.estoma.platformbff.application.wash.WashSupervisionQueryService;
 import com.estoma.platformbff.application.wash.WashSupervisionQueryService.ExecutionNotFoundException;
 import com.estoma.platformbff.api.wash.WashController.UnclassifiedEntryRejectionUnavailableException;
 import java.util.UUID;
@@ -25,6 +26,16 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+  @ExceptionHandler(WashSupervisionQueryService.QrWrongDateException.class)
+  ResponseEntity<ProblemResponse> qrWrongDate() {
+    return problem(HttpStatus.CONFLICT, "BFF.WASH_QR_WRONG_DATE", "Conflict",
+        "This QR does not correspond to an appointment for today.");
+  }
+
+  @ExceptionHandler(WashSupervisionQueryService.InvalidDirectoryException.class)
+  ResponseEntity<ProblemResponse> invalidDirectory() {
+    return problem(HttpStatus.BAD_REQUEST, "BFF.INVALID_REQUEST", "Bad Request", "Invalid directory parameters.");
+  }
   @ExceptionHandler(AuthenticationRejectedException.class)
   ResponseEntity<ProblemResponse> rejected() {
     return problem(HttpStatus.UNAUTHORIZED, "BFF.AUTHENTICATION_INVALID", "Unauthorized",

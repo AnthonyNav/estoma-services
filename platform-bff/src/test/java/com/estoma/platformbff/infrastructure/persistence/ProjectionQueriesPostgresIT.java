@@ -662,6 +662,27 @@ class ProjectionQueriesPostgresIT {
     assertThat(supervision.findAppointment(active, java.time.LocalDate.of(2026, 8, 1)))
         .map(item -> item.appointmentId()).contains(active);
     assertThat(supervision.findAppointment(active, java.time.LocalDate.of(2026, 8, 2))).isEmpty();
+    var date = java.time.LocalDate.of(2026, 8, 1);
+    assertThat(supervision.directory(date, "ana", "ALL", 0, 25))
+        .extracting(item -> item.appointmentId()).containsExactly(active);
+    assertThat(supervision.directory(date, "201945678", "IN_PROGRESS", 0, 25)).hasSize(1);
+    assertThat(supervision.directory(date, "' OR 1=1 --", "ALL", 0, 25)).isEmpty();
+    assertThat(supervision.directory(date, "%", "ALL", 0, 25)).isEmpty();
+    assertThat(supervision.directory(date, "", "SCHEDULED", 0, 25)).isEmpty();
+    assertThat(supervision.directory(date, "", "ALL", 1, 25)).isEmpty();
+    assertThat(supervision.directory(date.plusDays(1), "", "ALL", 0, 25)).isEmpty();
+    jdbc.sql("""
+        UPDATE appointment_time_slot_read_model SET starts_at = :start,
+          arrival_tolerance_until = :close, status = 'ACTIVE'
+        WHERE appointment_time_slot_id = (SELECT appointment_time_slot_id
+          FROM appointment_read_model WHERE appointment_id = :id)
+        """).param("start", java.sql.Timestamp.from(latest))
+        .param("close", java.sql.Timestamp.from(latest.plusSeconds(600))).param("id", active).update();
+    var window = supervision.arrivalWindow(active).orElseThrow();
+    assertThat(window.serviceDate()).isEqualTo(date);
+    assertThat(window.opensAt()).isEqualTo(latest.minusSeconds(900));
+    assertThat(window.closesAt()).isEqualTo(latest.plusSeconds(600));
+    assertThat(window.slotStatus()).isEqualTo("ACTIVE");
   }
 
   @Test

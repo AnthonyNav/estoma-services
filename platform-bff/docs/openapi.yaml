@@ -6290,6 +6290,346 @@
         } ]
       }
     },
+    "/api/v1/wash/supervision/appointments" : {
+      "get" : {
+        "operationId" : "WashController_directory_get__api_v1_wash_supervision_appointments",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "query",
+          "required" : false,
+          "schema" : {
+            "default" : "",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "default" : "ALL",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "offset",
+          "required" : false,
+          "schema" : {
+            "default" : 0,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 25,
+            "type" : "integer"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "items" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "activeResourceAssignment" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "assignmentType" : {
+                                "type" : "string"
+                              },
+                              "cabin" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "code" : {
+                                    "type" : "string"
+                                  },
+                                  "name" : {
+                                    "type" : "string"
+                                  },
+                                  "resourceId" : {
+                                    "format" : "uuid",
+                                    "type" : "string"
+                                  }
+                                },
+                                "required" : [ "resourceId", "code", "name" ],
+                                "type" : "object"
+                              },
+                              "resourceAssignmentId" : {
+                                "format" : "uuid",
+                                "type" : "string"
+                              },
+                              "tank" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "code" : {
+                                    "type" : "string"
+                                  },
+                                  "name" : {
+                                    "type" : "string"
+                                  },
+                                  "resourceId" : {
+                                    "format" : "uuid",
+                                    "type" : "string"
+                                  }
+                                },
+                                "required" : [ "resourceId", "code", "name" ],
+                                "type" : "object"
+                              }
+                            },
+                            "required" : [ "resourceAssignmentId", "assignmentType", "cabin", "tank" ],
+                            "type" : [ "object", "null" ]
+                          },
+                          "appointment" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "appointmentId" : {
+                                "format" : "uuid",
+                                "type" : "string"
+                              },
+                              "appointmentStatus" : {
+                                "enum" : [ "SCHEDULED", "CANCELLED", "MISSED", "ENTRY_REJECTED", "IN_PROGRESS", "COMPLETED" ],
+                                "type" : "string"
+                              },
+                              "appointmentTimeSlot" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "appointmentTimeSlotId" : {
+                                    "format" : "uuid",
+                                    "type" : "string"
+                                  },
+                                  "endsAt" : {
+                                    "format" : "date-time",
+                                    "type" : "string"
+                                  },
+                                  "startsAt" : {
+                                    "format" : "date-time",
+                                    "type" : "string"
+                                  },
+                                  "timezone" : {
+                                    "type" : "string"
+                                  }
+                                },
+                                "required" : [ "appointmentTimeSlotId", "startsAt", "endsAt", "timezone" ],
+                                "type" : "object"
+                              },
+                              "appointmentType" : {
+                                "enum" : [ "NORMAL", "JOURNEY", "IMMUNOCOMPROMISED" ],
+                                "type" : "string"
+                              },
+                              "courseSectionReference" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "courseSectionId" : {
+                                    "format" : "uuid",
+                                    "type" : "string"
+                                  },
+                                  "name" : {
+                                    "type" : "string"
+                                  },
+                                  "nrc" : {
+                                    "type" : "string"
+                                  }
+                                },
+                                "required" : [ "courseSectionId", "nrc", "name" ],
+                                "type" : "object"
+                              },
+                              "instrumentCount" : {
+                                "exclusiveMinimum" : 0,
+                                "type" : "integer"
+                              },
+                              "pieceType" : {
+                                "enum" : [ "HIGH_SPEED", "LOW_SPEED", "CONTRA_ANGLE" ],
+                                "type" : "string"
+                              }
+                            },
+                            "required" : [ "appointmentId", "appointmentStatus", "appointmentType", "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot" ],
+                            "type" : "object"
+                          },
+                          "arrivalEligibility" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "checkedAt" : {
+                                "format" : "date-time",
+                                "type" : "string"
+                              },
+                              "closesAt" : {
+                                "format" : "date-time",
+                                "type" : [ "string", "null" ]
+                              },
+                              "opensAt" : {
+                                "format" : "date-time",
+                                "type" : [ "string", "null" ]
+                              },
+                              "status" : {
+                                "type" : "string"
+                              }
+                            },
+                            "required" : [ "status", "checkedAt", "opensAt", "closesAt" ],
+                            "type" : "object"
+                          },
+                          "canComplete" : {
+                            "type" : "boolean"
+                          },
+                          "nextAction" : {
+                            "enum" : [ "ENTRY", "ENTRY_DECISION", "REASSIGNMENT", "EXIT_REVIEW", "NONE" ],
+                            "type" : "string"
+                          },
+                          "serviceDate" : {
+                            "format" : "date",
+                            "type" : "string"
+                          },
+                          "student" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "currentSemester" : {
+                                "exclusiveMinimum" : 0,
+                                "type" : "integer"
+                              },
+                              "displayName" : {
+                                "type" : "string"
+                              },
+                              "studentAccountId" : {
+                                "format" : "uuid",
+                                "type" : "string"
+                              },
+                              "studentEnrollment" : {
+                                "type" : "string"
+                              }
+                            },
+                            "required" : [ "studentAccountId", "displayName", "studentEnrollment", "currentSemester" ],
+                            "type" : "object"
+                          },
+                          "washExecution" : {
+                            "additionalProperties" : false,
+                            "properties" : {
+                              "arrivedAt" : {
+                                "format" : "date-time",
+                                "type" : "string"
+                              },
+                              "executionVersion" : {
+                                "type" : "integer"
+                              },
+                              "exitSubmittedAt" : {
+                                "format" : "date-time",
+                                "type" : [ "string", "null" ]
+                              },
+                              "rejectionReason" : {
+                                "type" : [ "string", "null" ]
+                              },
+                              "status" : {
+                                "enum" : [ "PENDING_ENTRY", "ENTRY_REJECTED", "PENDING_REASSIGNMENT", "IN_PROGRESS", "EXIT_SUBMITTED", "COMPLETED", "CANCELLED" ],
+                                "type" : "string"
+                              },
+                              "submittedExitMaterials" : {
+                                "additionalProperties" : false,
+                                "properties" : {
+                                  "greenPaperCassette10Count" : {
+                                    "type" : "integer"
+                                  },
+                                  "greenPaperCassette8Count" : {
+                                    "type" : "integer"
+                                  },
+                                  "packageCount" : {
+                                    "type" : "integer"
+                                  },
+                                  "witnessTapePortionCount" : {
+                                    "type" : "integer"
+                                  }
+                                },
+                                "required" : [ "packageCount", "greenPaperCassette8Count", "greenPaperCassette10Count", "witnessTapePortionCount" ],
+                                "type" : [ "object", "null" ]
+                              },
+                              "washExecutionId" : {
+                                "format" : "uuid",
+                                "type" : "string"
+                              }
+                            },
+                            "required" : [ "washExecutionId", "status", "executionVersion", "arrivedAt" ],
+                            "type" : [ "object", "null" ]
+                          }
+                        },
+                        "required" : [ "serviceDate", "nextAction", "canComplete", "student", "appointment", "arrivalEligibility" ],
+                        "type" : "object"
+                      },
+                      "type" : "array"
+                    },
+                    "nextOffset" : {
+                      "type" : [ "integer", "null" ]
+                    },
+                    "serviceDate" : {
+                      "format" : "date",
+                      "type" : "string"
+                    }
+                  },
+                  "required" : [ "serviceDate", "items", "nextOffset" ],
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Invalid lookup or directory parameters"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Authentication is required"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Wash supervisor permission is required"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Required local projection or QR recovery is unavailable"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
     "/api/v1/wash/supervision/executions/{washExecutionId}" : {
       "get" : {
         "description" : "Side-effect-free exact local read of one current or historical Wash execution. The path identifier is the only selector; no current-service-date filter or fallback appointment is applied. canComplete follows the same active-assignment and rollout-flag rules as lookup and does not replace owner validation.",
@@ -6865,6 +7205,28 @@
                       "required" : [ "appointmentId", "appointmentStatus", "appointmentType", "instrumentCount", "pieceType", "courseSectionReference", "appointmentTimeSlot" ],
                       "type" : "object"
                     },
+                    "arrivalEligibility" : {
+                      "additionalProperties" : false,
+                      "properties" : {
+                        "checkedAt" : {
+                          "format" : "date-time",
+                          "type" : "string"
+                        },
+                        "closesAt" : {
+                          "format" : "date-time",
+                          "type" : [ "string", "null" ]
+                        },
+                        "opensAt" : {
+                          "format" : "date-time",
+                          "type" : [ "string", "null" ]
+                        },
+                        "status" : {
+                          "type" : "string"
+                        }
+                      },
+                      "required" : [ "status", "checkedAt", "opensAt", "closesAt" ],
+                      "type" : "object"
+                    },
                     "canComplete" : {
                       "type" : "boolean"
                     },
@@ -6946,12 +7308,72 @@
                       "type" : [ "object", "null" ]
                     }
                   },
-                  "required" : [ "serviceDate", "nextAction", "canComplete", "student", "appointment" ],
+                  "required" : [ "serviceDate", "nextAction", "canComplete", "student", "appointment", "arrivalEligibility" ],
                   "type" : "object"
                 }
               }
             },
             "description" : "Successful response"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Invalid lookup or directory parameters"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Authentication is required"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Wash supervisor permission is required"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Unknown, altered or inactive QR; or no appointment for enrollment today"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "BFF.WASH_QR_WRONG_DATE: recognized QR belongs to another service date"
+          },
+          "503" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Required local projection or QR recovery is unavailable"
           },
           "default" : {
             "content" : {

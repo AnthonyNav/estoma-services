@@ -219,6 +219,16 @@ public class OpenApiController {
     Map<String, Object> responses = new LinkedHashMap<>();
     responses.put(success, Map.of("description", accepted ? "Accepted" : "Successful response",
         "content", Map.of(MediaType.APPLICATION_JSON_VALUE, Map.of("schema", successSchema))));
+    if (path.equals("/api/v1/wash/supervision/lookup") || path.equals("/api/v1/wash/supervision/appointments")) {
+      responses.put("400", problemResponse("Invalid lookup or directory parameters"));
+      responses.put("401", problemResponse("Authentication is required"));
+      responses.put("403", problemResponse("Wash supervisor permission is required"));
+      responses.put("503", problemResponse("Required local projection or QR recovery is unavailable"));
+      if (path.endsWith("/lookup")) {
+        responses.put("404", problemResponse("Unknown, altered or inactive QR; or no appointment for enrollment today"));
+        responses.put("409", problemResponse("BFF.WASH_QR_WRONG_DATE: recognized QR belongs to another service date"));
+      }
+    }
     if (handler.getMethod().getName().equals("appointmentAvailability")) {
       operation.put("description", "Owner-derived cache-aside snapshot. A miss or stale snapshot "
           + "returns 503 with Retry-After after durably scheduling an asynchronous refresh.");
