@@ -281,7 +281,8 @@ public class ProjectionEventRuntime {
           appointmentFields, true);
     }
     register(entries, "appointments", "ExceptionalAppointmentAuthorizationGranted", Set.of("authorizationId", "studentAccountId", "authorizationDate", "grantedAt"),
-        Set.of("authorizationId", "studentAccountId", "authorizationDate", "authorizedByAccountId", "reason", "grantedAt"), true);
+        Set.of("authorizationId", "studentAccountId", "authorizationDate", "authorizedByAccountId", "reason", "grantedAt",
+            "expiresAt", "policyContextKnown", "supersededAuthorizationIds"), true);
     register(entries, "appointments", "ExceptionalAppointmentAuthorizationCancelled", Set.of("authorizationId", "studentAccountId", "authorizationDate", "cancelledAt"),
         Set.of("authorizationId", "studentAccountId", "authorizationDate", "cancellationReason", "cancelledByAccountId", "cancelledAt"), true);
   }

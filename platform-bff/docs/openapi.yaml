@@ -5262,6 +5262,71 @@
       }
     },
     "/api/v1/wash/exceptional-authorizations" : {
+      "get" : {
+        "operationId" : "ExceptionalAuthorizationQueryController_list_get__api_v1_wash_exceptional_authorizations",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "studentAccountId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "serviceDate",
+          "required" : true,
+          "schema" : {
+            "format" : "date",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "authorizationId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      },
+                      "canCancel" : {
+                        "type" : "boolean"
+                      },
+                      "reason" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "status" : {
+                        "type" : [ "string", "null" ]
+                      }
+                    },
+                    "required" : [ "canCancel" ],
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      },
       "post" : {
         "operationId" : "WashController_grantExceptionalAuthorization_post__api_v1_wash_exceptional_authorizations",
         "parameters" : [ {
@@ -5313,6 +5378,60 @@
               }
             },
             "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/exceptional-authorizations/students" : {
+      "get" : {
+        "operationId" : "ExceptionalAuthorizationQueryController_search_get__api_v1_wash_exceptional_authorizations_students",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "accountId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      },
+                      "enrollment" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "fullName" : {
+                        "type" : [ "string", "null" ]
+                      }
+                    },
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Successful response"
           },
           "default" : {
             "content" : {
@@ -5860,6 +5979,84 @@
               }
             },
             "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/wash/operational-resources" : {
+      "get" : {
+        "operationId" : "OperationalResourcesController_resources_get__api_v1_wash_operational_resources",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "additionalProperties" : false,
+                  "properties" : {
+                    "resources" : {
+                      "items" : {
+                        "additionalProperties" : false,
+                        "properties" : {
+                          "administrativeStatus" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "code" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "name" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "resourceId" : {
+                            "format" : "uuid",
+                            "type" : [ "string", "null" ]
+                          },
+                          "resourceType" : {
+                            "type" : [ "string", "null" ]
+                          },
+                          "unavailabilities" : {
+                            "items" : {
+                              "additionalProperties" : false,
+                              "properties" : {
+                                "expectedVersion" : {
+                                  "type" : "integer"
+                                },
+                                "reason" : {
+                                  "type" : [ "string", "null" ]
+                                },
+                                "resourceUnavailabilityId" : {
+                                  "format" : "uuid",
+                                  "type" : [ "string", "null" ]
+                                }
+                              },
+                              "required" : [ "expectedVersion" ],
+                              "type" : "object"
+                            },
+                            "type" : [ "array", "null" ]
+                          }
+                        },
+                        "type" : "object"
+                      },
+                      "type" : [ "array", "null" ]
+                    }
+                  },
+                  "type" : "object"
+                }
+              }
+            },
+            "description" : "Successful response"
           },
           "default" : {
             "content" : {

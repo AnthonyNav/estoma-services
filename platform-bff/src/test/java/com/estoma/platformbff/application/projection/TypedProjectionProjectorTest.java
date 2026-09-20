@@ -18,6 +18,30 @@ import org.junit.jupiter.api.Test;
 class TypedProjectionProjectorTest {
 
   @Test
+  void exceptionalGrantAcceptsOldAndExtendedEventsAndKeepsUnknownLegacyContext() {
+    List<ProjectionReadModel> projected = new ArrayList<>();
+    var runtime = new ProjectionEventRuntime(message -> true, new TypedProjectionProjector(projected::add, null));
+    UUID id = UUID.randomUUID(), old = UUID.randomUUID();
+    var now = Instant.parse("2026-09-19T16:00:00Z");
+    Map<String, Object> payload = new HashMap<>(Map.of("authorizationId", id.toString(),
+        "studentAccountId", UUID.randomUUID().toString(), "authorizationDate", "2026-09-19", "grantedAt", now.toString()));
+    assertEquals(ProjectionEventRuntime.DispatchOutcome.APPLIED, runtime.dispatch(new ProjectionEvent(
+        UUID.randomUUID(), "ExceptionalAppointmentAuthorizationGranted", 1, "appointments", now,
+        UUID.randomUUID(), UUID.randomUUID(), id, 1, payload)));
+    assertFalse(((ProjectionReadModel.ExceptionalAuthorization) projected.getFirst()).policyContextKnown());
+    payload.put("policyContextKnown", true);
+    payload.put("expiresAt", now.plusSeconds(600).toString());
+    payload.put("supersededAuthorizationIds", List.of(old.toString()));
+    assertEquals(ProjectionEventRuntime.DispatchOutcome.APPLIED, runtime.dispatch(new ProjectionEvent(
+        UUID.randomUUID(), "ExceptionalAppointmentAuthorizationGranted", 1, "appointments", now,
+        UUID.randomUUID(), UUID.randomUUID(), id, 1, payload)));
+    var enriched = (ProjectionReadModel.ExceptionalAuthorization) projected.getLast();
+    assertEquals(true, enriched.policyContextKnown());
+    assertEquals(now.plusSeconds(600), enriched.expiresAt());
+    assertEquals(List.of(old), enriched.supersededAuthorizationIds());
+  }
+
+  @Test
   void washResourceReassignedReleasesPreviousAssignmentAndKeepsNewAssignmentActive() {
     List<ProjectionReadModel> projected = new ArrayList<>();
     ProjectionReadModelPort readModels = projected::add;

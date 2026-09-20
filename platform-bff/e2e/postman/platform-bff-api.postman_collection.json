@@ -1,6 +1,30 @@
 {
   "item": [
     {
+      "name": "Supervisor operational resources",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/wash/operational-resources",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{bearerToken}}", "type": "string" }] }
+      }
+    },
+    {
+      "name": "Supervisor exceptional authorization students",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/wash/exceptional-authorizations/students?query={{studentEnrollment}}",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{bearerToken}}", "type": "string" }] }
+      }
+    },
+    {
+      "name": "Supervisor exceptional authorizations",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/wash/exceptional-authorizations?studentAccountId={{studentAccountId}}&serviceDate={{serviceDate}}",
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{bearerToken}}", "type": "string" }] }
+      }
+    },
+    {
       "name": "Supervisor appointments directory",
       "request": {
         "method": "GET",
