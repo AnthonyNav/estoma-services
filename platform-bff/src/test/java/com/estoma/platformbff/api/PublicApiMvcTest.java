@@ -119,7 +119,9 @@ class PublicApiMvcTest {
             new AppointmentTimeSlot(UUID.fromString("00000000-0000-0000-0000-000000000013"),
                 Instant.parse("2026-08-01T10:00:00Z"), Instant.parse("2026-08-01T11:00:00Z"),
                 "America/Mexico_City")),
-        null, null));
+        null, null, new com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.ArrivalEligibility(
+            "OPEN", Instant.parse("2026-08-01T10:00:00Z"), Instant.parse("2026-08-01T09:45:00Z"),
+            Instant.parse("2026-08-01T10:10:00Z"))));
     UUID exactExecutionId = UUID.fromString("00000000-0000-0000-0000-000000000020");
     when(supervision.execution(exactExecutionId)).thenReturn(new SupervisorExecutionDetailResponse(
         LocalDate.of(2026, 7, 31), false,

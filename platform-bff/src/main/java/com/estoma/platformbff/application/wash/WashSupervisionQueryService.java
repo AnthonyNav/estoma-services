@@ -34,6 +34,8 @@ import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.Superv
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorStudent;
 import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorWashExecution;
 import java.time.Clock;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.ArrivalEligibility;
+import com.estoma.platformbff.contracts.http.wash.WashSupervisorResponses.SupervisorDirectoryResponse;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
@@ -143,21 +145,42 @@ public class WashSupervisionQueryService {
     return composeLookup(serviceDate, selected);
   }
 
+  public SupervisorDirectoryResponse directory(String query, String status, int offset, int limit) {
+    authorization.requireWashSupervisor();
+    if (query == null || query.length() > 120 || !Set.of("ALL", "SCHEDULED", "IN_PROGRESS").contains(status)
+        || offset < 0 || offset > 100000 || limit < 1 || limit > 50) {
+      throw new InvalidDirectoryException();
+    }
+    readiness.requireReady("person", "academic", "appointments", "wash-execution", "wash-administration");
+    LocalDate date = serviceDate();
+    var rows = projections.directory(date, query.trim(), status, offset, limit + 1);
+    return new SupervisorDirectoryResponse(date,
+        rows.stream().limit(limit).map(value -> composeLookup(date, value)).toList(),
+        rows.size() > limit ? offset + limit : null);
+  }
+
   private SupervisorLookupResponse lookupQr(String representation, LocalDate serviceDate) {
+    if (representation == null || representation.isBlank() || representation.length() > 2000) {
+      throw new LookupNotFoundException();
+    }
     if (!qrEnabled || !qrRecovery.isReady(serviceDate)) {
       throw new ProjectionUnavailableException("appointment QR lookup is not ready for the service date");
     }
     AppointmentQrReadPort.Mapping mapping = appointmentQr.findByExactRepresentation(representation)
         .orElseThrow(LookupNotFoundException::new);
+    var window = projections.arrivalWindow(mapping.appointmentId())
+        .orElseThrow(() -> new ProjectionUnavailableException("appointment QR context is missing"));
+    if (window.serviceDate() == null) throw new ProjectionUnavailableException("appointment date is missing");
+    if (!serviceDate.equals(window.serviceDate())) throw new QrWrongDateException();
     WashSupervisionQueryPort.LookupCandidate candidate =
         projections.findAppointment(mapping.appointmentId(), serviceDate)
             .orElseThrow(() -> new ProjectionUnavailableException(
                 "appointment QR projection has no matching Appointment view"));
     if (candidate.appointmentVersion() == null
-        || mapping.appointmentVersion() > candidate.appointmentVersion()
-        || !isActive(candidate)) {
+        || mapping.appointmentVersion() > candidate.appointmentVersion()) {
       throw new ProjectionUnavailableException("appointment QR projection contradicts Appointment state");
     }
+    if (!isActive(candidate)) throw new LookupNotFoundException();
     return composeLookup(serviceDate, candidate);
   }
 
@@ -356,8 +379,32 @@ public class WashSupervisionQueryService {
     SupervisorStudent student = new SupervisorStudent(value.studentAccountId(), displayName(value),
         value.studentNumber(), value.currentSemester());
     return new SupervisorLookupResponse(serviceDate, action,
-        canComplete(value.executionStatus(), assignment), student, appointment, execution, assignment);
+        canComplete(value.executionStatus(), assignment), student, appointment, execution, assignment,
+        arrivalEligibility(serviceDate, value, action));
   }
+
+  private ArrivalEligibility arrivalEligibility(LocalDate date,
+      WashSupervisionQueryPort.LookupCandidate value, NextAction action) {
+    var now = clock.instant();
+    if (action != NextAction.ENTRY) {
+      return new ArrivalEligibility(action == NextAction.ENTRY_DECISION ? "ALREADY_REGISTERED" : "NOT_APPLICABLE",
+          now, null, null);
+    }
+    var window = projections.arrivalWindow(value.appointmentId())
+        .orElseThrow(() -> new ProjectionUnavailableException("arrival window is missing"));
+    if (window.opensAt() == null || window.closesAt() == null || window.serviceDate() == null
+        || window.slotStatus() == null || window.closesAt().isBefore(window.opensAt())) {
+      throw new ProjectionUnavailableException("arrival window is incomplete");
+    }
+    String status = !date.equals(window.serviceDate()) ? "WRONG_DATE"
+        : !"ACTIVE".equals(window.slotStatus()) ? "SLOT_INACTIVE"
+        : now.isBefore(window.opensAt()) ? "TOO_EARLY"
+        : now.isAfter(window.closesAt()) ? "EXPIRED" : "OPEN";
+    return new ArrivalEligibility(status, now, window.opensAt(), window.closesAt());
+  }
+
+  public static class QrWrongDateException extends RuntimeException {}
+  public static class InvalidDirectoryException extends RuntimeException {}
 
   private boolean canComplete(String executionStatus, ActiveResourceAssignment activeAssignment) {
     if (activeAssignment == null) return false;

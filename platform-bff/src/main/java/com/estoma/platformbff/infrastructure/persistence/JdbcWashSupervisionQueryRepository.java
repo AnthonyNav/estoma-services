@@ -133,6 +133,30 @@ public class JdbcWashSupervisionQueryRepository implements WashSupervisionQueryP
 
   private List<LookupCandidate> findAppointments(UUID studentAccountId, UUID appointmentId,
       LocalDate serviceDate) {
+    return findAppointments(studentAccountId, appointmentId, serviceDate, "", "ALL", 0, Integer.MAX_VALUE, false);
+  }
+
+  @Override
+  public List<LookupCandidate> directory(LocalDate date, String query, String status, int offset, int limit) {
+    return findAppointments(null, null, date, query, status, offset, limit, true);
+  }
+
+  @Override
+  public Optional<ArrivalWindow> arrivalWindow(UUID appointmentId) {
+    return jdbc.sql("""
+        SELECT s.service_date, s.starts_at - interval '15 minutes' AS opens_at,
+               s.arrival_tolerance_until, s.status
+        FROM appointment_read_model a
+        JOIN appointment_time_slot_read_model s USING (appointment_time_slot_id)
+        WHERE a.appointment_id = :id
+        """).param("id", appointmentId)
+        .query((rs, n) -> new ArrivalWindow(rs.getObject("service_date", LocalDate.class),
+            JdbcTimes.instant(rs, "opens_at"), JdbcTimes.instant(rs, "arrival_tolerance_until"), rs.getString("status")))
+        .optional();
+  }
+
+  private List<LookupCandidate> findAppointments(UUID studentAccountId, UUID appointmentId,
+      LocalDate serviceDate, String query, String status, int offset, int limit, boolean directory) {
     return jdbc.sql("""
         SELECT a.student_account_id, sp.person_id, p.first_name, p.paternal_surname,
                p.maternal_surname, sp.student_number, sp.current_semester, sp.academic_status,
@@ -186,13 +210,20 @@ public class JdbcWashSupervisionQueryRepository implements WashSupervisionQueryP
         WHERE ats.service_date = :serviceDate
           AND (:byStudent = FALSE OR a.student_account_id = :studentAccountId)
           AND (:byAppointment = FALSE OR a.appointment_id = :appointmentId)
-        ORDER BY a.updated_at DESC, a.appointment_id ASC
+          AND (:directory = FALSE OR a.status IN ('SCHEDULED', 'IN_PROGRESS'))
+          AND (:status = 'ALL' OR a.status = :status)
+          AND (:query = '' OR position(lower(:query) in lower(concat_ws(' ', p.first_name,
+              p.paternal_surname, p.maternal_surname, sp.student_number))) > 0)
+        ORDER BY CASE WHEN :directory THEN ats.starts_at END ASC, a.updated_at DESC, a.appointment_id ASC
+        LIMIT :limit OFFSET :offset
         """)
         .param("byStudent", studentAccountId != null)
         .param("studentAccountId", studentAccountId == null ? new UUID(0, 0) : studentAccountId)
         .param("byAppointment", appointmentId != null)
         .param("appointmentId", appointmentId == null ? new UUID(0, 0) : appointmentId)
         .param("serviceDate", serviceDate)
+        .param("directory", directory).param("status", status).param("query", query)
+        .param("limit", limit).param("offset", offset)
         .query((rs, rowNum) -> lookupRow(rs))
         .list();
   }

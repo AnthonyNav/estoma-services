@@ -195,7 +195,7 @@ class OpenApiControllerTest {
     assertThat(lookup).containsEntry("x-qr-feature-flag", "BFF_WASH_QR_ENABLED");
     Map<String, Object> lookupSchema = responseSchema(lookup, "200");
     assertThat((java.util.List<String>) lookupSchema.get("required"))
-        .containsExactlyInAnyOrder("serviceDate", "nextAction", "canComplete", "student", "appointment");
+        .containsExactlyInAnyOrder("serviceDate", "nextAction", "canComplete", "student", "appointment", "arrivalEligibility");
     assertThat(lookup).containsEntry("x-direct-supervisor-completion-feature-flag",
         "BFF_WASH_DIRECT_SUPERVISOR_COMPLETION_ENABLED")
         .containsEntry("x-direct-supervisor-completion-enabled-by-default", false);

@@ -1,6 +1,15 @@
 {
   "item": [
     {
+      "name": "Supervisor appointments directory",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/v1/wash/supervision/appointments?query=&status=ALL&offset=0&limit=25",
+        "header": [{ "key": "Accept", "value": "application/json" }],
+        "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{bearerToken}}", "type": "string" }] }
+      }
+    },
+    {
       "name": "api",
       "description": "",
       "item": [
