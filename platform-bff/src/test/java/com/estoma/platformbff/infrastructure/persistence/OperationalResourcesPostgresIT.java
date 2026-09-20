@@ -7,6 +7,10 @@ import com.estoma.platformbff.application.projection.ProjectionReadinessService;
 import com.estoma.platformbff.application.projection.ProjectionUnavailableException;
 import com.estoma.platformbff.application.security.LocalAuthorizationService;
 import java.util.UUID;
+import java.util.Map;
+import java.time.Instant;
+import com.estoma.platformbff.application.projection.ProjectionEvent;
+import com.estoma.platformbff.application.projection.ProjectionEventRuntime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -37,6 +41,7 @@ class OperationalResourcesPostgresIT {
   }
   @Autowired JdbcClient jdbc;
   @Autowired ProjectionReadinessService readiness;
+  @Autowired ProjectionEventRuntime runtime;
   private OperationalResourcesController controller;
   private LocalAuthorizationService authorization;
   @BeforeEach void setup() {
@@ -65,6 +70,47 @@ class OperationalResourcesPostgresIT {
     assertThat(resources.get(3).administrativeStatus()).isEqualTo("INACTIVE");
     assertThat(resources.get(3).unavailabilities()).isEmpty();
     verify(authorization).requireWashSupervisor();
+  }
+  @Test void canonicalOwnerResourceEventsPopulateInventoryAndRemainIdempotent() {
+    UUID cabinId = UUID.randomUUID(), tankId = UUID.randomUUID();
+    Instant now = Instant.now();
+    var cabin = new ProjectionEvent(UUID.randomUUID(), "CabinRegistered", 1, "wash-administration",
+        now, UUID.randomUUID(), null, cabinId, 1,
+        Map.of("cabinId", cabinId.toString(), "code", "C1", "name", "Cabina", "cabinType", "NORMAL",
+            "status", "ACTIVE", "version", 1, "occurredAt", now.toString()));
+    var tank = new ProjectionEvent(UUID.randomUUID(), "TankRegistered", 1, "wash-administration",
+        now, UUID.randomUUID(), null, tankId, 1,
+        Map.of("tankId", tankId.toString(), "cabinId", cabinId.toString(), "code", "T1", "name", "Tina",
+            "configuredCapacity", 2, "status", "ACTIVE", "version", 1, "occurredAt", now.toString()));
+    assertThat(runtime.dispatch(cabin)).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(tank)).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(runtime.dispatch(cabin)).isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+    assertThat(controller.resources().resources()).extracting(OperationalResourcesController.Resource::resourceId)
+        .containsExactly(cabinId, tankId);
+    for (String kind : new String[] {"Cabin", "Tank"}) {
+      UUID id = kind.equals("Cabin") ? cabinId : tankId;
+      String idField = kind.equals("Cabin") ? "cabinId" : "tankId";
+      int version = 1;
+      for (String change : new String[] {"Updated", "Deactivated", "Activated", "Retired"}) {
+        var payload = new java.util.HashMap<String, Object>();
+        payload.put(idField, id.toString());
+        payload.put("version", ++version);
+        payload.put("occurredAt", now.toString());
+        payload.put("status", change.equals("Retired") ? "RETIRED" : change.equals("Deactivated") ? "INACTIVE" : "ACTIVE");
+        if (change.equals("Updated")) {
+          payload.put("name", kind + " updated");
+          if (kind.equals("Cabin")) payload.put("cabinType", "NORMAL");
+          else { payload.put("cabinId", cabinId.toString()); payload.put("configuredCapacity", 3); }
+        }
+        assertThat(runtime.dispatch(new ProjectionEvent(UUID.randomUUID(), kind + change, 1,
+            "wash-administration", now, UUID.randomUUID(), null, id, version, payload)))
+            .isEqualTo(ProjectionEventRuntime.DispatchOutcome.APPLIED);
+      }
+    }
+    assertThat(controller.resources().resources()).extracting(OperationalResourcesController.Resource::administrativeStatus)
+        .containsExactly("RETIRED", "RETIRED");
+    assertThat(jdbc.sql("SELECT configured_capacity FROM wash_tank_read_model WHERE tank_id = :id")
+        .param("id", tankId).query(Integer.class).single()).isEqualTo(3);
   }
   @Test void realProjectionReadinessFailsClosed() {
     jdbc.sql("UPDATE projection_status SET status = 'REBUILDING' WHERE projection_name = 'wash-execution'").update();
