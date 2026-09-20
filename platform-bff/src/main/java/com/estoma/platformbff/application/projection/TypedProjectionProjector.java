@@ -320,7 +320,10 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
         readModels.upsert(new ProjectionReadModel.ExceptionalAuthorization(
             id, uuid(p, "studentAccountId"), optionalDate(p, "authorizationDate"),
             event.messageType().endsWith("Granted") ? "AUTHORIZED" : "CANCELLED",
-            optionalUuid(p, "authorizedByAccountId"), optionalText(p, "reason"), version, event.occurredAt()));
+            optionalUuid(p, "authorizedByAccountId"), optionalText(p, "reason"), version, event.occurredAt(),
+            optionalInstant(p, "expiresAt"), Boolean.TRUE.equals(p.get("policyContextKnown")),
+            p.get("supersededAuthorizationIds") instanceof java.util.List<?> ids
+                ? ids.stream().map(value -> UUID.fromString(value.toString())).toList() : java.util.List.of()));
       }
       default -> throw new IllegalArgumentException("appointments Event is not registered");
     }

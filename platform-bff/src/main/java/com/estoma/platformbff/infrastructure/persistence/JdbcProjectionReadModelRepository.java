@@ -731,12 +731,27 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   }
 
   private void exceptional(ProjectionReadModel.ExceptionalAuthorization v) {
+    for (UUID predecessor : v.supersededAuthorizationIds()) {
+      jdbc.sql("""
+          INSERT INTO exceptional_authorization_supersession_read_model(authorization_id, successor_authorization_id)
+          VALUES (:id, :successor) ON CONFLICT (authorization_id) DO NOTHING
+          """).param("id", predecessor).param("successor", v.authorizationId()).update();
+    }
     jdbc.sql("""
-        INSERT INTO exceptional_appointment_authorization_read_model(authorization_id, student_account_id, service_date, status, authorized_by_account_id, reason, source_version, updated_at)
-        VALUES (:id, :accountId, :serviceDate, :status, :authorizedBy, :reason, :version, :updatedAt)
+        INSERT INTO exceptional_appointment_authorization_read_model(authorization_id, student_account_id, service_date, status, authorized_by_account_id, reason, source_version, updated_at, expires_at, policy_context_known)
+        VALUES (:id, :accountId, :serviceDate, :status, :authorizedBy, :reason, :version, :updatedAt, :expiresAt, :known)
         ON CONFLICT (authorization_id) DO UPDATE SET student_account_id = EXCLUDED.student_account_id, service_date = COALESCE(EXCLUDED.service_date, exceptional_appointment_authorization_read_model.service_date), status = EXCLUDED.status, authorized_by_account_id = COALESCE(EXCLUDED.authorized_by_account_id, exceptional_appointment_authorization_read_model.authorized_by_account_id), reason = COALESCE(EXCLUDED.reason, exceptional_appointment_authorization_read_model.reason), source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
         WHERE exceptional_appointment_authorization_read_model.source_version <= EXCLUDED.source_version
-        """).param("id", v.authorizationId()).param("accountId", v.studentAccountId()).param("serviceDate", v.serviceDate()).param("status", v.status()).param("authorizedBy", v.authorizedByAccountId()).param("reason", v.reason()).param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+        """).param("id", v.authorizationId()).param("accountId", v.studentAccountId()).param("serviceDate", v.serviceDate()).param("status", v.status()).param("authorizedBy", v.authorizedByAccountId()).param("reason", v.reason()).param("version", v.sourceVersion()).param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).param("expiresAt", JdbcTimes.timestamp(v.expiresAt())).param("known", v.policyContextKnown()).update();
+    // A replayed grant can enrich a cancellation-first row without reverting its newer status.
+    if (v.policyContextKnown()) jdbc.sql("""
+        UPDATE exceptional_appointment_authorization_read_model
+        SET expires_at = :expiresAt, policy_context_known = TRUE,
+            authorized_by_account_id = COALESCE(authorized_by_account_id, :authorizedBy),
+            reason = COALESCE(reason, :reason)
+        WHERE authorization_id = :id
+        """).param("id", v.authorizationId()).param("expiresAt", JdbcTimes.timestamp(v.expiresAt()))
+        .param("authorizedBy", v.authorizedByAccountId()).param("reason", v.reason()).update();
   }
 
   private void execution(ProjectionReadModel.WashExecution v) {

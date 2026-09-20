@@ -282,7 +282,16 @@ public sealed interface ProjectionReadModel permits
       UUID authorizedByAccountId,
       String reason,
       long sourceVersion,
-      Instant updatedAt) implements ProjectionReadModel {}
+      Instant updatedAt,
+      Instant expiresAt,
+      boolean policyContextKnown,
+      java.util.List<UUID> supersededAuthorizationIds) implements ProjectionReadModel {
+    public ExceptionalAuthorization(UUID authorizationId, UUID studentAccountId, LocalDate serviceDate,
+        String status, UUID authorizedByAccountId, String reason, long sourceVersion, Instant updatedAt) {
+      this(authorizationId, studentAccountId, serviceDate, status, authorizedByAccountId, reason,
+          sourceVersion, updatedAt, null, false, java.util.List.of());
+    }
+  }
 
   record WashExecution(
       UUID washExecutionId,

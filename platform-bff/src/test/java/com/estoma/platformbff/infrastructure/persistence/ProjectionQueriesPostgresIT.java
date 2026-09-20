@@ -60,6 +60,7 @@ class ProjectionQueriesPostgresIT {
   @Autowired JdbcWashCancellationProjectionRepository cancellations;
   @Autowired JdbcWashSupervisionQueryRepository supervision;
   @Autowired JdbcWashStudentQueryRepository studentQueries;
+  @Autowired JdbcExceptionalAuthorizationQueryRepository exceptionalQueries;
   @Autowired JdbcAppointmentQrProjectionRepository appointmentQr;
   @Autowired DataSource dataSource;
   @Autowired PlatformTransactionManager transactionManager;
@@ -72,11 +73,40 @@ class ProjectionQueriesPostgresIT {
           wash_resource_assignment_read_model, wash_execution_read_model,
           appointment_read_model, appointment_time_slot_read_model,
           exceptional_appointment_authorization_read_model,
+          exceptional_authorization_supersession_read_model,
           wash_cabin_read_model, wash_tank_read_model,
           course_section_read_model, student_academic_profile_read_model,
           person_presentation_read_model
         CASCADE
         """).update();
+  }
+
+  @Test
+  void exceptionalSupersessionSurvivesOutOfOrderGrantAndConsumptionRestoresOnlyForClinicCancellation() {
+    UUID student = UUID.randomUUID(), oldId = UUID.randomUUID(), nextId = UUID.randomUUID();
+    var now = Instant.parse("2026-09-19T16:00:00Z");
+    var date = java.time.LocalDate.of(2026, 9, 19);
+    projections.upsert(new ProjectionReadModel.ExceptionalAuthorization(nextId, student, date,
+        "AUTHORIZED", UUID.randomUUID(), "next", 1, now, null, true, java.util.List.of(oldId)));
+    projections.upsert(new ProjectionReadModel.ExceptionalAuthorization(oldId, student, date,
+        "AUTHORIZED", UUID.randomUUID(), "old", 1, now.minusSeconds(10), null, true, java.util.List.of()));
+    assertThat(exceptionalQueries.list(student, date)).filteredOn(a -> a.authorizationId().equals(oldId))
+        .allMatch(a -> a.superseded() && a.policyContextKnown());
+    UUID appointment = UUID.randomUUID();
+    jdbc.sql("""
+        INSERT INTO appointment_read_model(appointment_id, appointment_time_slot_id, student_account_id, exceptional_authorization_id,
+          status, source_version, updated_at) VALUES (:id, :slot, :student, :authorization, 'SCHEDULED', 1, now())
+        """).param("id", appointment).param("slot", UUID.randomUUID()).param("student", student).param("authorization", nextId).update();
+    assertThat(exceptionalQueries.list(student, date)).filteredOn(a -> a.authorizationId().equals(nextId))
+        .allMatch(a -> a.consumed());
+    jdbc.sql("UPDATE appointment_read_model SET status='CANCELLED', cancellation_type='STUDENT' WHERE appointment_id=:id")
+        .param("id", appointment).update();
+    assertThat(exceptionalQueries.list(student, date)).filteredOn(a -> a.authorizationId().equals(nextId))
+        .allMatch(a -> a.consumed());
+    jdbc.sql("UPDATE appointment_read_model SET cancellation_type='CLINIC' WHERE appointment_id=:id")
+        .param("id", appointment).update();
+    assertThat(exceptionalQueries.list(student, date)).filteredOn(a -> a.authorizationId().equals(nextId))
+        .allMatch(a -> !a.consumed());
   }
 
   @Test
