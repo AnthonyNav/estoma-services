@@ -58,6 +58,8 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
       case ProjectionReadModel.ResourceUnavailability value -> unavailability(value);
       case ProjectionReadModel.CleaningPeriod value -> cleaning(value);
       case ProjectionReadModel.Jornada value -> jornada(value);
+      case ProjectionReadModel.Registro value -> registro(value);
+      case ProjectionReadModel.TipoJornada value -> tipoJornada(value);
     }
   }
 
@@ -814,9 +816,9 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
     jdbc.sql("""
         INSERT INTO jornada_read_model
           (jornada_id, tipo_jornada_id, nombre, fecha, hora_inicio, hora_fin, lugar, cupo_total,
-           fecha_limite_documentos, descripcion, estado, source_version, updated_at)
+           fecha_limite_documentos, descripcion, estado, motivo_cancelacion, source_version, updated_at)
         VALUES (:id, :tipoJornadaId, :nombre, :fecha, :horaInicio, :horaFin, :lugar, :cupoTotal,
-          :fechaLimite, :descripcion, :estado, :version, :updatedAt)
+          :fechaLimite, :descripcion, :estado, :motivoCancelacion, :version, :updatedAt)
         ON CONFLICT (jornada_id) DO UPDATE SET
           tipo_jornada_id = COALESCE(EXCLUDED.tipo_jornada_id, jornada_read_model.tipo_jornada_id),
           nombre = COALESCE(EXCLUDED.nombre, jornada_read_model.nombre),
@@ -827,13 +829,15 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
           cupo_total = COALESCE(EXCLUDED.cupo_total, jornada_read_model.cupo_total),
           fecha_limite_documentos = COALESCE(EXCLUDED.fecha_limite_documentos, jornada_read_model.fecha_limite_documentos),
           descripcion = COALESCE(EXCLUDED.descripcion, jornada_read_model.descripcion),
+          motivo_cancelacion = COALESCE(EXCLUDED.motivo_cancelacion, jornada_read_model.motivo_cancelacion),
           estado = EXCLUDED.estado, source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
         WHERE jornada_read_model.source_version <= EXCLUDED.source_version
         """)
         .param("id", v.jornadaId()).param("tipoJornadaId", v.tipoJornadaId()).param("nombre", v.nombre())
         .param("fecha", v.fecha()).param("horaInicio", v.horaInicio()).param("horaFin", v.horaFin())
         .param("lugar", v.lugar()).param("cupoTotal", v.cupoTotal()).param("fechaLimite", v.fechaLimiteDocumentos())
-        .param("descripcion", v.descripcion()).param("estado", v.estado()).param("version", v.sourceVersion())
+        .param("descripcion", v.descripcion()).param("estado", v.estado())
+        .param("motivoCancelacion", v.motivoCancelacion()).param("version", v.sourceVersion())
         .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
   }
 
@@ -841,7 +845,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   public List<ProjectionReadModel.Jornada> findJornadas() {
     return jdbc.sql("""
         SELECT jornada_id, tipo_jornada_id, nombre, fecha, hora_inicio, hora_fin, lugar, cupo_total,
-               fecha_limite_documentos, descripcion, estado, source_version, updated_at
+               fecha_limite_documentos, descripcion, estado, motivo_cancelacion, source_version, updated_at
         FROM jornada_read_model
         WHERE estado = 'PUBLICADA'
         ORDER BY fecha ASC, jornada_id ASC
@@ -851,8 +855,120 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
             rs.getObject("fecha", java.time.LocalDate.class), rs.getObject("hora_inicio", java.time.LocalTime.class),
             rs.getObject("hora_fin", java.time.LocalTime.class), rs.getString("lugar"),
             integer(rs, "cupo_total"), rs.getObject("fecha_limite_documentos", java.time.LocalDate.class),
-            rs.getString("descripcion"), rs.getString("estado"), rs.getLong("source_version"),
+            rs.getString("descripcion"), rs.getString("estado"), rs.getString("motivo_cancelacion"),
+            rs.getLong("source_version"), instant(rs, "updated_at")))
+        .list();
+  }
+
+  private void registro(ProjectionReadModel.Registro v) {
+    jdbc.sql("""
+        INSERT INTO registro_read_model
+          (registro_id, jornada_id, alumno_account_id, estado, motivo_rechazo, source_version, updated_at)
+        VALUES (:id, :jornadaId, :alumnoAccountId, :estado, :motivoRechazo, :version, :updatedAt)
+        ON CONFLICT (registro_id) DO UPDATE SET
+          jornada_id = COALESCE(EXCLUDED.jornada_id, registro_read_model.jornada_id),
+          alumno_account_id = COALESCE(EXCLUDED.alumno_account_id, registro_read_model.alumno_account_id),
+          estado = EXCLUDED.estado,
+          motivo_rechazo = COALESCE(EXCLUDED.motivo_rechazo, registro_read_model.motivo_rechazo),
+          source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
+        WHERE registro_read_model.source_version <= EXCLUDED.source_version
+        """)
+        .param("id", v.registroId()).param("jornadaId", v.jornadaId())
+        .param("alumnoAccountId", v.alumnoAccountId()).param("estado", v.estado())
+        .param("motivoRechazo", v.motivoRechazo()).param("version", v.sourceVersion())
+        .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  @Override
+  public List<ProjectionReadModel.Registro> findRegistrosByAlumno(UUID alumnoAccountId) {
+    return jdbc.sql("""
+        SELECT registro_id, jornada_id, alumno_account_id, estado, motivo_rechazo, source_version, updated_at
+        FROM registro_read_model
+        WHERE alumno_account_id = :alumnoAccountId
+        ORDER BY updated_at DESC
+        """)
+        .param("alumnoAccountId", alumnoAccountId)
+        .query((rs, rowNum) -> mapRegistro(rs))
+        .list();
+  }
+
+  @Override
+  public List<ProjectionReadModel.Registro> findRegistrosByJornada(UUID jornadaId) {
+    return jdbc.sql("""
+        SELECT registro_id, jornada_id, alumno_account_id, estado, motivo_rechazo, source_version, updated_at
+        FROM registro_read_model
+        WHERE jornada_id = :jornadaId
+        ORDER BY updated_at ASC
+        """)
+        .param("jornadaId", jornadaId)
+        .query((rs, rowNum) -> mapRegistro(rs))
+        .list();
+  }
+
+  @Override
+  public Optional<UUID> findRegistroAlumnoAccountId(UUID registroId) {
+    return jdbc.sql("SELECT alumno_account_id FROM registro_read_model WHERE registro_id = :registroId")
+        .param("registroId", registroId)
+        .query(UUID.class)
+        .optional();
+  }
+
+  @Override
+  public Optional<Integer> findCurrentSemester(UUID accountId) {
+    return jdbc.sql("""
+        SELECT current_semester FROM student_academic_profile_read_model
+        WHERE account_id = :accountId
+        """)
+        .param("accountId", accountId)
+        .query(Integer.class)
+        .optional();
+  }
+
+  private static ProjectionReadModel.Registro mapRegistro(ResultSet rs) throws SQLException {
+    return new ProjectionReadModel.Registro(
+        uuid(rs, "registro_id"), uuid(rs, "jornada_id"), uuid(rs, "alumno_account_id"),
+        rs.getString("estado"), rs.getString("motivo_rechazo"), rs.getLong("source_version"),
+        instant(rs, "updated_at"));
+  }
+
+  private void tipoJornada(ProjectionReadModel.TipoJornada v) {
+    jdbc.sql("""
+        INSERT INTO tipo_jornada_read_model
+          (tipo_jornada_id, nombre, semestres_permitidos, source_version, updated_at)
+        VALUES (:id, :nombre, CAST(:semestres AS jsonb), :version, :updatedAt)
+        ON CONFLICT (tipo_jornada_id) DO UPDATE SET
+          nombre = COALESCE(EXCLUDED.nombre, tipo_jornada_read_model.nombre),
+          semestres_permitidos = COALESCE(EXCLUDED.semestres_permitidos, tipo_jornada_read_model.semestres_permitidos),
+          source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
+        WHERE tipo_jornada_read_model.source_version <= EXCLUDED.source_version
+        """)
+        .param("id", v.tipoJornadaId()).param("nombre", v.nombre())
+        .param("semestres", writeIntArray(v.semestresPermitidos())).param("version", v.sourceVersion())
+        .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  @Override
+  public List<ProjectionReadModel.TipoJornada> findTiposJornada() {
+    return jdbc.sql("""
+        SELECT tipo_jornada_id, nombre, semestres_permitidos, source_version, updated_at
+        FROM tipo_jornada_read_model
+        ORDER BY nombre ASC
+        """)
+        .query((rs, rowNum) -> new ProjectionReadModel.TipoJornada(
+            uuid(rs, "tipo_jornada_id"), rs.getString("nombre"),
+            readIntArray(rs.getString("semestres_permitidos")), rs.getLong("source_version"),
             instant(rs, "updated_at")))
         .list();
+  }
+
+  private static String writeIntArray(List<Integer> values) {
+    return values.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",", "[", "]"));
+  }
+
+  private static List<Integer> readIntArray(String json) {
+    String trimmed = json.strip().replaceAll("^\\[|]$", "");
+    if (trimmed.isBlank()) return List.of();
+    return java.util.Arrays.stream(trimmed.split(","))
+        .map(String::trim).map(Integer::parseInt).toList();
   }
 }

@@ -34,6 +34,10 @@ class CommandRegistryTest {
     assertThat(registry.require("RegisterWashArrival").resultMessageVersions())
         .containsEntry("RegisterWashArrivalSucceeded", 1)
         .containsEntry("RegisterWashArrivalRejected", 1);
+    assertThat(registry.require("PublicarJornada").resultMessageVersions())
+        .containsExactlyEntriesOf(java.util.Map.of("PublicarJornadaResult", 1));
+    assertThat(registry.require("CrearRegistro").resultMessageVersions())
+        .containsExactlyEntriesOf(java.util.Map.of("CrearRegistroResult", 1));
   }
 
   @Test

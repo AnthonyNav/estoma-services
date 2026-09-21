@@ -4397,6 +4397,9 @@
                       "lugar" : {
                         "type" : [ "string", "null" ]
                       },
+                      "motivoCancelacion" : {
+                        "type" : [ "string", "null" ]
+                      },
                       "nombre" : {
                         "type" : [ "string", "null" ]
                       },
@@ -4424,6 +4427,362 @@
             "description" : "Problem response"
           }
         }
+      },
+      "post" : {
+        "operationId" : "JornadasController_publicar_post__api_v1_jornadas",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cupoTotal" : {
+                    "minimum" : 0,
+                    "type" : "integer"
+                  },
+                  "descripcion" : {
+                    "maxLength" : 2000,
+                    "type" : [ "string", "null" ]
+                  },
+                  "fecha" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "fechaLimiteDocumentos" : {
+                    "format" : "date",
+                    "type" : "string"
+                  },
+                  "horaFin" : {
+                    "type" : "object"
+                  },
+                  "horaInicio" : {
+                    "type" : "object"
+                  },
+                  "lugar" : {
+                    "maxLength" : 200,
+                    "minLength" : 1,
+                    "type" : "string"
+                  },
+                  "nombre" : {
+                    "maxLength" : 160,
+                    "minLength" : 1,
+                    "type" : "string"
+                  },
+                  "tipoJornadaId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "tipoJornadaId", "nombre", "fecha", "horaInicio", "horaFin", "lugar", "cupoTotal", "fechaLimiteDocumentos" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        }
+      }
+    },
+    "/api/v1/jornadas/tipos" : {
+      "get" : {
+        "operationId" : "JornadasController_listTipos_get__api_v1_jornadas_tipos",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "nombre" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "semestresPermitidos" : {
+                        "items" : {
+                          "type" : "integer"
+                        },
+                        "type" : [ "array", "null" ]
+                      },
+                      "tipoJornadaId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      }
+                    },
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      },
+      "post" : {
+        "operationId" : "JornadasController_configurarTipo_post__api_v1_jornadas_tipos",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "nombre" : {
+                    "maxLength" : 120,
+                    "minLength" : 1,
+                    "type" : "string"
+                  },
+                  "semestresPermitidos" : {
+                    "items" : {
+                      "type" : "integer"
+                    },
+                    "type" : "array"
+                  },
+                  "tipoJornadaId" : {
+                    "format" : "uuid",
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "required" : [ "nombre", "semestresPermitidos" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/jornadas/{jornadaId}" : {
+      "put" : {
+        "operationId" : "JornadasController_editar_put__api_v1_jornadas_jornadaId_",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "jornadaId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "cupoTotal" : {
+                    "minimum" : 0,
+                    "type" : [ "integer", "null" ]
+                  },
+                  "descripcion" : {
+                    "maxLength" : 2000,
+                    "type" : [ "string", "null" ]
+                  },
+                  "expectedVersion" : {
+                    "exclusiveMinimum" : 0,
+                    "type" : "integer"
+                  },
+                  "fecha" : {
+                    "format" : "date",
+                    "type" : [ "string", "null" ]
+                  },
+                  "fechaLimiteDocumentos" : {
+                    "format" : "date",
+                    "type" : [ "string", "null" ]
+                  },
+                  "horaFin" : {
+                    "type" : [ "object", "null" ]
+                  },
+                  "horaInicio" : {
+                    "type" : [ "object", "null" ]
+                  },
+                  "lugar" : {
+                    "maxLength" : 200,
+                    "type" : [ "string", "null" ]
+                  },
+                  "nombre" : {
+                    "maxLength" : 160,
+                    "type" : [ "string", "null" ]
+                  }
+                },
+                "required" : [ "expectedVersion" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/jornadas/{jornadaId}/cancelar" : {
+      "post" : {
+        "operationId" : "JornadasController_cancelar_post__api_v1_jornadas_jornadaId_cancelar",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "jornadaId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "motivo" : {
+                    "maxLength" : 500,
+                    "minLength" : 1,
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "motivo" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
       }
     },
     "/api/v1/mailbox/messages" : {
@@ -4898,6 +5257,336 @@
         "security" : [ {
           "bearerAuth" : [ ]
         }, { } ]
+      }
+    },
+    "/api/v1/registros" : {
+      "post" : {
+        "operationId" : "RegistrosController_crear_post__api_v1_registros",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "jornadaId" : {
+                    "format" : "uuid",
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "jornadaId" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/registros/jornada/{jornadaId}" : {
+      "get" : {
+        "operationId" : "RegistrosController_registrosDeJornada_get__api_v1_registros_jornada_jornadaId_",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "jornadaId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "alumnoAccountId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      },
+                      "estado" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "jornadaId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      },
+                      "motivoRechazo" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "registroId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      }
+                    },
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/registros/mios" : {
+      "get" : {
+        "operationId" : "RegistrosController_misRegistros_get__api_v1_registros_mios",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "alumnoAccountId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      },
+                      "estado" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "jornadaId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      },
+                      "motivoRechazo" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "registroId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      }
+                    },
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/registros/{registroId}/cancelar" : {
+      "post" : {
+        "operationId" : "RegistrosController_cancelar_post__api_v1_registros_registroId_cancelar",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "registroId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/registros/{registroId}/confirmar" : {
+      "post" : {
+        "operationId" : "RegistrosController_confirmar_post__api_v1_registros_registroId_confirmar",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "registroId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      }
+    },
+    "/api/v1/registros/{registroId}/rechazar" : {
+      "post" : {
+        "operationId" : "RegistrosController_rechazar_post__api_v1_registros_registroId_rechazar",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "registroId",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "additionalProperties" : false,
+                "properties" : {
+                  "motivo" : {
+                    "maxLength" : 500,
+                    "minLength" : 1,
+                    "type" : "string"
+                  }
+                },
+                "required" : [ "motivo" ],
+                "type" : "object"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AcceptedOperation"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
       }
     },
     "/api/v1/wash/appointments" : {

@@ -38,6 +38,20 @@ public interface ProjectionQueryPort {
   /** Publicly visible Jornadas catalog (Prácticas Profesionales) — no per-account scoping. */
   List<ProjectionReadModel.Jornada> findJornadas();
 
+  /** A given Alumno's own Registros (Prácticas Profesionales), most recently updated first. */
+  List<ProjectionReadModel.Registro> findRegistrosByAlumno(UUID alumnoAccountId);
+
+  /** All Registros for a Jornada, in registration order — the Pasante's validation queue. */
+  List<ProjectionReadModel.Registro> findRegistrosByJornada(UUID jornadaId);
+
+  Optional<UUID> findRegistroAlumnoAccountId(UUID registroId);
+
+  /** The Alumno's own current semester (academic-service, projected) — never client-supplied. */
+  Optional<Integer> findCurrentSemester(UUID accountId);
+
+  /** Publicly visible Tipos de Jornada catalog — no per-account scoping. */
+  List<ProjectionReadModel.TipoJornada> findTiposJornada();
+
   record MailboxMessage(
       UUID inboxMessageId,
       UUID communicationId,

@@ -15,4 +15,5 @@ public record JornadaResponse(
     Integer cupoTotal,
     LocalDate fechaLimiteDocumentos,
     String descripcion,
-    String estado) {}
+    String estado,
+    String motivoCancelacion) {}

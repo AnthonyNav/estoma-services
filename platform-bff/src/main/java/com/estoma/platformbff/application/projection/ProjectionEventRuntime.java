@@ -216,6 +216,7 @@ public class ProjectionEventRuntime {
     registerAppointments(entries);
     registerWashExecution(entries);
     registerJornadas(entries);
+    registerRegistros(entries);
     return Map.copyOf(entries);
   }
 
@@ -230,6 +231,24 @@ public class ProjectionEventRuntime {
         Set.of("jornadaId", "motivo"), true);
     register(entries, "jornadas", "JornadaFinalizada", Set.of("jornadaId"),
         Set.of("jornadaId"), true);
+    register(entries, "jornadas", "TipoJornadaConfigurado",
+        Set.of("tipoJornadaId", "nombre", "semestresPermitidos"),
+        Set.of("tipoJornadaId", "nombre", "semestresPermitidos"), true);
+  }
+
+  private static void registerRegistros(Map<EventKey, Contract> entries) {
+    register(entries, "registros", "RegistroCreado",
+        Set.of("registroId", "jornadaId", "alumnoId"), Set.of("registroId", "jornadaId", "alumnoId"), true);
+    register(entries, "registros", "RegistroConfirmado",
+        Set.of("registroId", "jornadaId", "alumnoId"), Set.of("registroId", "jornadaId", "alumnoId"), true);
+    register(entries, "registros", "RegistroRechazado",
+        Set.of("registroId", "motivo"), Set.of("registroId", "motivo"), true);
+    register(entries, "registros", "RegistroCanceladoPorAlumno",
+        Set.of("registroId"), Set.of("registroId"), true);
+    register(entries, "registros", "RegistroCanceladoPorJornadaCancelada",
+        Set.of("registroId", "jornadaId"), Set.of("registroId", "jornadaId"), true);
+    register(entries, "registros", "RegistroCompletado",
+        Set.of("registroId", "jornadaId"), Set.of("registroId", "jornadaId"), true);
   }
 
   private static void registerWashAdministration(Map<EventKey, Contract> entries) {

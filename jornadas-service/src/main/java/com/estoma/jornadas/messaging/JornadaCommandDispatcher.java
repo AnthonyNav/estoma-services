@@ -175,7 +175,19 @@ public class JornadaCommandDispatcher {
     data.put("tipoJornadaId", saved.tipoJornadaId().toString());
     data.put("version", saved.version());
     publisher.publishSucceededResult(resultType, envelope, data, saved.tipoJornadaId(), saved.version());
-    // No hay evento de dominio publicado para ConfigurarTipoJornada — ver jornadas/events.md §2.
+
+    Map<String, Object> eventPayload = new LinkedHashMap<>();
+    eventPayload.put("tipoJornadaId", saved.tipoJornadaId().toString());
+    eventPayload.put("nombre", nombre);
+    eventPayload.put("semestresPermitidos", semestresPermitidos);
+    publisher.publishEvent(
+        "TipoJornadaConfigurado",
+        AmqpNames.ROUTING_KEY_TIPO_JORNADA_CONFIGURADO,
+        envelope.correlationId(),
+        envelope.messageId(),
+        saved.tipoJornadaId(),
+        saved.version(),
+        eventPayload);
   }
 
   private static Map<String, Object> resultData(Jornada jornada) {

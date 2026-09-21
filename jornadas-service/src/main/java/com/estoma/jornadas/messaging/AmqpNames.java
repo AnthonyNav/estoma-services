@@ -25,4 +25,6 @@ public final class AmqpNames {
   public static final String ROUTING_KEY_JORNADA_EDITADA = "jornadas.jornada.editada";
   public static final String ROUTING_KEY_JORNADA_CANCELADA = "jornadas.jornada.cancelada";
   public static final String ROUTING_KEY_JORNADA_FINALIZADA = "jornadas.jornada.finalizada";
+  public static final String ROUTING_KEY_TIPO_JORNADA_CONFIGURADO =
+      "jornadas.tipo-jornada.configurado";
 }

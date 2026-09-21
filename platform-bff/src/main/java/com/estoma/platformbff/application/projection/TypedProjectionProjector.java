@@ -53,6 +53,7 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
       case "wash-execution" -> projectWashExecution(event);
       case "authentication" -> projectAuthentication(event);
       case "jornadas" -> projectJornadas(event);
+      case "registros" -> projectRegistros(event);
       default -> throw new IllegalArgumentException("projection producer is not registered");
     }
   }
@@ -393,6 +394,16 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
   private void projectJornadas(ProjectionEvent event) {
     Map<String, Object> p = event.payload();
     long version = aggregateVersion(event);
+    if ("TipoJornadaConfigurado".equals(event.messageType())) {
+      UUID tipoId = uuid(p, "tipoJornadaId");
+      aggregate(event, tipoId);
+      @SuppressWarnings("unchecked")
+      List<Integer> semestres = ((List<?>) p.get("semestresPermitidos")).stream()
+          .map(value -> ((Number) value).intValue()).toList();
+      readModels.upsert(new ProjectionReadModel.TipoJornada(
+          tipoId, optionalText(p, "nombre"), semestres, version, event.occurredAt()));
+      return;
+    }
     UUID id = uuid(p, "jornadaId");
     aggregate(event, id);
     switch (event.messageType()) {
@@ -400,14 +411,39 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
           id, optionalUuid(p, "tipoJornadaId"), optionalText(p, "nombre"), optionalDate(p, "fecha"),
           optionalTime(p, "horaInicio"), optionalTime(p, "horaFin"), optionalText(p, "lugar"),
           optionalInteger(p, "cupoTotal"), optionalDate(p, "fechaLimiteDocumentos"),
-          optionalText(p, "descripcion"), "PUBLICADA", version, event.occurredAt()));
+          optionalText(p, "descripcion"), "PUBLICADA", null, version, event.occurredAt()));
       case "JornadaCancelada" -> readModels.upsert(new ProjectionReadModel.Jornada(
-          id, null, null, null, null, null, null, null, null, null, "CANCELADA", version,
-          event.occurredAt()));
+          id, null, null, null, null, null, null, null, null, null, "CANCELADA",
+          optionalText(p, "motivo"), version, event.occurredAt()));
       case "JornadaFinalizada" -> readModels.upsert(new ProjectionReadModel.Jornada(
-          id, null, null, null, null, null, null, null, null, null, "FINALIZADA", version,
+          id, null, null, null, null, null, null, null, null, null, "FINALIZADA", null, version,
           event.occurredAt()));
       default -> throw new IllegalArgumentException("jornadas Event is not registered");
+    }
+  }
+
+  private void projectRegistros(ProjectionEvent event) {
+    Map<String, Object> p = event.payload();
+    long version = aggregateVersion(event);
+    UUID id = uuid(p, "registroId");
+    aggregate(event, id);
+    switch (event.messageType()) {
+      case "RegistroCreado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), optionalUuid(p, "alumnoId"), "PENDIENTE_VALIDACION", null,
+          version, event.occurredAt()));
+      case "RegistroConfirmado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), optionalUuid(p, "alumnoId"), "CONFIRMADO", null,
+          version, event.occurredAt()));
+      case "RegistroRechazado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, null, null, "RECHAZADO", optionalText(p, "motivo"), version, event.occurredAt()));
+      case "RegistroCanceladoPorAlumno" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, null, null, "CANCELADO_ALUMNO", null, version, event.occurredAt()));
+      case "RegistroCanceladoPorJornadaCancelada" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), null, "CANCELADO_JORNADA_CANCELADA", null,
+          version, event.occurredAt()));
+      case "RegistroCompletado" -> readModels.upsert(new ProjectionReadModel.Registro(
+          id, optionalUuid(p, "jornadaId"), null, "COMPLETADO", null, version, event.occurredAt()));
+      default -> throw new IllegalArgumentException("registros Event is not registered");
     }
   }
 
