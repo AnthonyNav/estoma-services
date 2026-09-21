@@ -4397,6 +4397,9 @@
                       "lugar" : {
                         "type" : [ "string", "null" ]
                       },
+                      "motivoCancelacion" : {
+                        "type" : [ "string", "null" ]
+                      },
                       "nombre" : {
                         "type" : [ "string", "null" ]
                       },

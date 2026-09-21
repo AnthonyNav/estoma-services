@@ -816,9 +816,9 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
     jdbc.sql("""
         INSERT INTO jornada_read_model
           (jornada_id, tipo_jornada_id, nombre, fecha, hora_inicio, hora_fin, lugar, cupo_total,
-           fecha_limite_documentos, descripcion, estado, source_version, updated_at)
+           fecha_limite_documentos, descripcion, estado, motivo_cancelacion, source_version, updated_at)
         VALUES (:id, :tipoJornadaId, :nombre, :fecha, :horaInicio, :horaFin, :lugar, :cupoTotal,
-          :fechaLimite, :descripcion, :estado, :version, :updatedAt)
+          :fechaLimite, :descripcion, :estado, :motivoCancelacion, :version, :updatedAt)
         ON CONFLICT (jornada_id) DO UPDATE SET
           tipo_jornada_id = COALESCE(EXCLUDED.tipo_jornada_id, jornada_read_model.tipo_jornada_id),
           nombre = COALESCE(EXCLUDED.nombre, jornada_read_model.nombre),
@@ -829,13 +829,15 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
           cupo_total = COALESCE(EXCLUDED.cupo_total, jornada_read_model.cupo_total),
           fecha_limite_documentos = COALESCE(EXCLUDED.fecha_limite_documentos, jornada_read_model.fecha_limite_documentos),
           descripcion = COALESCE(EXCLUDED.descripcion, jornada_read_model.descripcion),
+          motivo_cancelacion = COALESCE(EXCLUDED.motivo_cancelacion, jornada_read_model.motivo_cancelacion),
           estado = EXCLUDED.estado, source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
         WHERE jornada_read_model.source_version <= EXCLUDED.source_version
         """)
         .param("id", v.jornadaId()).param("tipoJornadaId", v.tipoJornadaId()).param("nombre", v.nombre())
         .param("fecha", v.fecha()).param("horaInicio", v.horaInicio()).param("horaFin", v.horaFin())
         .param("lugar", v.lugar()).param("cupoTotal", v.cupoTotal()).param("fechaLimite", v.fechaLimiteDocumentos())
-        .param("descripcion", v.descripcion()).param("estado", v.estado()).param("version", v.sourceVersion())
+        .param("descripcion", v.descripcion()).param("estado", v.estado())
+        .param("motivoCancelacion", v.motivoCancelacion()).param("version", v.sourceVersion())
         .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
   }
 
@@ -843,7 +845,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
   public List<ProjectionReadModel.Jornada> findJornadas() {
     return jdbc.sql("""
         SELECT jornada_id, tipo_jornada_id, nombre, fecha, hora_inicio, hora_fin, lugar, cupo_total,
-               fecha_limite_documentos, descripcion, estado, source_version, updated_at
+               fecha_limite_documentos, descripcion, estado, motivo_cancelacion, source_version, updated_at
         FROM jornada_read_model
         WHERE estado = 'PUBLICADA'
         ORDER BY fecha ASC, jornada_id ASC
@@ -853,8 +855,8 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
             rs.getObject("fecha", java.time.LocalDate.class), rs.getObject("hora_inicio", java.time.LocalTime.class),
             rs.getObject("hora_fin", java.time.LocalTime.class), rs.getString("lugar"),
             integer(rs, "cupo_total"), rs.getObject("fecha_limite_documentos", java.time.LocalDate.class),
-            rs.getString("descripcion"), rs.getString("estado"), rs.getLong("source_version"),
-            instant(rs, "updated_at")))
+            rs.getString("descripcion"), rs.getString("estado"), rs.getString("motivo_cancelacion"),
+            rs.getLong("source_version"), instant(rs, "updated_at")))
         .list();
   }
 

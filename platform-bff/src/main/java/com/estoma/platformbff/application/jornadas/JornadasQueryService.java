@@ -18,7 +18,7 @@ public class JornadasQueryService {
     return projections.findJornadas().stream()
         .map(j -> new JornadaResponse(j.jornadaId(), j.tipoJornadaId(), j.nombre(), j.fecha(),
             j.horaInicio(), j.horaFin(), j.lugar(), j.cupoTotal(), j.fechaLimiteDocumentos(),
-            j.descripcion(), j.estado()))
+            j.descripcion(), j.estado(), j.motivoCancelacion()))
         .toList();
   }
 

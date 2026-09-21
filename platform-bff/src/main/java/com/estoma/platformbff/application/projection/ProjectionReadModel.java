@@ -365,6 +365,7 @@ public sealed interface ProjectionReadModel permits
       LocalDate fechaLimiteDocumentos,
       String descripcion,
       String estado,
+      String motivoCancelacion,
       long sourceVersion,
       Instant updatedAt) implements ProjectionReadModel {}
 
