@@ -9,6 +9,7 @@ import com.estoma.platformbff.contracts.http.jornadas.JornadaHttpRequests.Config
 import com.estoma.platformbff.contracts.http.jornadas.JornadaHttpRequests.EditarJornadaRequest;
 import com.estoma.platformbff.contracts.http.jornadas.JornadaHttpRequests.PublicarJornadaRequest;
 import com.estoma.platformbff.contracts.http.jornadas.JornadaResponse;
+import com.estoma.platformbff.contracts.http.jornadas.TipoJornadaResponse;
 import jakarta.validation.Valid;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,10 +27,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Public surface for the Jornadas catalog (Prácticas Profesionales). Listing is read-only and
- * requires no authentication — same trust boundary as other public catalog data; the published
- * Jornada listing carries no personal data. Writes require an authenticated {@code
- * ADMINISTRADOR_PRACTICAS} (or {@code SUPERADMIN}) account with active access to the {@code
+ * Public surface for the Jornadas catalog (Prácticas Profesionales). {@code GET /jornadas} is
+ * read-only and requires no authentication (see {@code SecurityConfig}) — same trust boundary as
+ * other public catalog data; the published Jornada listing carries no personal data. Every other
+ * endpoint here requires an authenticated session; writes additionally require {@code
+ * ADMINISTRADOR_PRACTICAS} (or {@code SUPERADMIN}) with active access to the {@code
  * PRACTICAS_PROFESIONALES} system — see {@code LocalAuthorizationService.requirePracticesAdministrator}.
  */
 @RestController
@@ -49,6 +51,11 @@ public class JornadasController {
   @GetMapping
   public List<JornadaResponse> list() {
     return jornadas.listJornadas();
+  }
+
+  @GetMapping("/tipos")
+  public List<TipoJornadaResponse> listTipos() {
+    return jornadas.listTipos();
   }
 
   @PostMapping

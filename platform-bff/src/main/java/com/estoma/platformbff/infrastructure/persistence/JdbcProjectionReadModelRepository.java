@@ -59,6 +59,7 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
       case ProjectionReadModel.CleaningPeriod value -> cleaning(value);
       case ProjectionReadModel.Jornada value -> jornada(value);
       case ProjectionReadModel.Registro value -> registro(value);
+      case ProjectionReadModel.TipoJornada value -> tipoJornada(value);
     }
   }
 
@@ -926,5 +927,46 @@ public class JdbcProjectionReadModelRepository implements ProjectionReadModelPor
         uuid(rs, "registro_id"), uuid(rs, "jornada_id"), uuid(rs, "alumno_account_id"),
         rs.getString("estado"), rs.getString("motivo_rechazo"), rs.getLong("source_version"),
         instant(rs, "updated_at"));
+  }
+
+  private void tipoJornada(ProjectionReadModel.TipoJornada v) {
+    jdbc.sql("""
+        INSERT INTO tipo_jornada_read_model
+          (tipo_jornada_id, nombre, semestres_permitidos, source_version, updated_at)
+        VALUES (:id, :nombre, CAST(:semestres AS jsonb), :version, :updatedAt)
+        ON CONFLICT (tipo_jornada_id) DO UPDATE SET
+          nombre = COALESCE(EXCLUDED.nombre, tipo_jornada_read_model.nombre),
+          semestres_permitidos = COALESCE(EXCLUDED.semestres_permitidos, tipo_jornada_read_model.semestres_permitidos),
+          source_version = EXCLUDED.source_version, updated_at = EXCLUDED.updated_at
+        WHERE tipo_jornada_read_model.source_version <= EXCLUDED.source_version
+        """)
+        .param("id", v.tipoJornadaId()).param("nombre", v.nombre())
+        .param("semestres", writeIntArray(v.semestresPermitidos())).param("version", v.sourceVersion())
+        .param("updatedAt", JdbcTimes.timestamp(v.updatedAt())).update();
+  }
+
+  @Override
+  public List<ProjectionReadModel.TipoJornada> findTiposJornada() {
+    return jdbc.sql("""
+        SELECT tipo_jornada_id, nombre, semestres_permitidos, source_version, updated_at
+        FROM tipo_jornada_read_model
+        ORDER BY nombre ASC
+        """)
+        .query((rs, rowNum) -> new ProjectionReadModel.TipoJornada(
+            uuid(rs, "tipo_jornada_id"), rs.getString("nombre"),
+            readIntArray(rs.getString("semestres_permitidos")), rs.getLong("source_version"),
+            instant(rs, "updated_at")))
+        .list();
+  }
+
+  private static String writeIntArray(List<Integer> values) {
+    return values.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(",", "[", "]"));
+  }
+
+  private static List<Integer> readIntArray(String json) {
+    String trimmed = json.strip().replaceAll("^\\[|]$", "");
+    if (trimmed.isBlank()) return List.of();
+    return java.util.Arrays.stream(trimmed.split(","))
+        .map(String::trim).map(Integer::parseInt).toList();
   }
 }

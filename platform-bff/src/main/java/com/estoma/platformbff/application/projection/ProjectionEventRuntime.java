@@ -231,6 +231,9 @@ public class ProjectionEventRuntime {
         Set.of("jornadaId", "motivo"), true);
     register(entries, "jornadas", "JornadaFinalizada", Set.of("jornadaId"),
         Set.of("jornadaId"), true);
+    register(entries, "jornadas", "TipoJornadaConfigurado",
+        Set.of("tipoJornadaId", "nombre", "semestresPermitidos"),
+        Set.of("tipoJornadaId", "nombre", "semestresPermitidos"), true);
   }
 
   private static void registerRegistros(Map<EventKey, Contract> entries) {

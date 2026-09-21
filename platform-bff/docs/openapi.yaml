@@ -4510,6 +4510,53 @@
       }
     },
     "/api/v1/jornadas/tipos" : {
+      "get" : {
+        "operationId" : "JornadasController_listTipos_get__api_v1_jornadas_tipos",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "items" : {
+                    "additionalProperties" : false,
+                    "properties" : {
+                      "nombre" : {
+                        "type" : [ "string", "null" ]
+                      },
+                      "semestresPermitidos" : {
+                        "items" : {
+                          "type" : "integer"
+                        },
+                        "type" : [ "array", "null" ]
+                      },
+                      "tipoJornadaId" : {
+                        "format" : "uuid",
+                        "type" : [ "string", "null" ]
+                      }
+                    },
+                    "type" : "object"
+                  },
+                  "type" : "array"
+                }
+              }
+            },
+            "description" : "Successful response"
+          },
+          "default" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description" : "Problem response"
+          }
+        },
+        "security" : [ {
+          "bearerAuth" : [ ]
+        } ]
+      },
       "post" : {
         "operationId" : "JornadasController_configurarTipo_post__api_v1_jornadas_tipos",
         "parameters" : [ {

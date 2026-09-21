@@ -3,6 +3,7 @@ package com.estoma.platformbff.application.projection;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 import java.util.UUID;
 
 /** Typed values accepted by the read-model port. */
@@ -34,7 +35,8 @@ public sealed interface ProjectionReadModel permits
     ProjectionReadModel.ResourceUnavailability,
     ProjectionReadModel.CleaningPeriod,
     ProjectionReadModel.Jornada,
-    ProjectionReadModel.Registro {
+    ProjectionReadModel.Registro,
+    ProjectionReadModel.TipoJornada {
 
   record Person(
       UUID personId,
@@ -373,6 +375,14 @@ public sealed interface ProjectionReadModel permits
       UUID alumnoAccountId,
       String estado,
       String motivoRechazo,
+      long sourceVersion,
+      Instant updatedAt) implements ProjectionReadModel {}
+
+  /** Prácticas Profesionales — Tipos de Jornada catalog, projected from jornadas-service. */
+  record TipoJornada(
+      UUID tipoJornadaId,
+      String nombre,
+      List<Integer> semestresPermitidos,
       long sourceVersion,
       Instant updatedAt) implements ProjectionReadModel {}
 }

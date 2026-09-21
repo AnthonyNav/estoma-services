@@ -394,6 +394,16 @@ public class TypedProjectionProjector implements ProjectionEventProjector {
   private void projectJornadas(ProjectionEvent event) {
     Map<String, Object> p = event.payload();
     long version = aggregateVersion(event);
+    if ("TipoJornadaConfigurado".equals(event.messageType())) {
+      UUID tipoId = uuid(p, "tipoJornadaId");
+      aggregate(event, tipoId);
+      @SuppressWarnings("unchecked")
+      List<Integer> semestres = ((List<?>) p.get("semestresPermitidos")).stream()
+          .map(value -> ((Number) value).intValue()).toList();
+      readModels.upsert(new ProjectionReadModel.TipoJornada(
+          tipoId, optionalText(p, "nombre"), semestres, version, event.occurredAt()));
+      return;
+    }
     UUID id = uuid(p, "jornadaId");
     aggregate(event, id);
     switch (event.messageType()) {

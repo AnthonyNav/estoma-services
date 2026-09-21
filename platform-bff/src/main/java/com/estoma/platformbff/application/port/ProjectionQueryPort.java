@@ -49,6 +49,9 @@ public interface ProjectionQueryPort {
   /** The Alumno's own current semester (academic-service, projected) — never client-supplied. */
   Optional<Integer> findCurrentSemester(UUID accountId);
 
+  /** Publicly visible Tipos de Jornada catalog — no per-account scoping. */
+  List<ProjectionReadModel.TipoJornada> findTiposJornada();
+
   record MailboxMessage(
       UUID inboxMessageId,
       UUID communicationId,
